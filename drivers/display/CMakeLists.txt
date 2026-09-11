@@ -1,2 +1,3 @@
 zephyr_library()
 zephyr_library_sources_ifdef(CONFIG_ELCO5300 display_elco5300.c)
+zephyr_library_sources_ifdef(CONFIG_HX8394_LCD5 display_hx8394_lcd5.c)

@@ -1,0 +1,11 @@
+# Copyright (c) 2026 Hongquan Li
+# SPDX-License-Identifier: Apache-2.0
+
+config HX8394_LCD5
+	bool "Waveshare HX8394 MIPI DSI panel"
+	default y
+	depends on DT_HAS_WAVESHARE_HX8394_ENABLED
+	depends on MIPI_DSI
+	help
+	  Enable support for the HX8394 driving the Waveshare 5" 720x1280
+	  MIPI DSI module.

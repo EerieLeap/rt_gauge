@@ -1,5 +1,6 @@
 menu "Drivers"
 rsource "mspi/Kconfig.esp32"
 rsource "display/Kconfig.elco5300"
+rsource "display/Kconfig.hx8394_lcd5"
 rsource "input/Kconfig.cst92xx"
 endmenu

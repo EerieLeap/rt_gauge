@@ -1,0 +1,23 @@
+#
+# Copyright (c) 2026 Hongquan Li
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+
+description: |
+  Himax HX8394 driving the Waveshare 5" 720x1280 MIPI DSI module.
+
+  Same controller as himax,hx8394, but the power, VCOM, GIP and gamma
+  registers are properties of the glass rather than of the controller, so this
+  panel carries the bring-up sequence published by Waveshare for it.
+
+compatible: "waveshare,hx8394"
+
+include: [mipi-dsi-device.yaml, display-controller.yaml]
+
+properties:
+  reset-gpios:
+    type: phandle-array
+    description: |
+      Panel reset line. This panel resets on a high level, so the pin is
+      described as active high.
