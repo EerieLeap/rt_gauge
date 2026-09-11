@@ -29,6 +29,17 @@
             }
         },
         {
+            "label": "Build P4 LCD5",
+            "type": "shell",
+            "command": "west build --build-dir ./build -p auto -b esp32p4_wifi6_touch_lcd_5/esp32p4/hpcore ./app -- -DOPENOCD=/home/ubuntu/zephyr/workspace/utilities/openocd-esp32/bin/openocd -DOPENOCD_DEFAULT_PATH=/home/ubuntu/zephyr/workspace/utilities/openocd-esp32/share/openocd/scripts",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": ["$gcc"],
+            "detail": "Build the Zephyr project for the Waveshare ESP32-P4-WIFI6-Touch-LCD-5"
+        },
+        {
             "label": "Build NativeSim",
             "type": "shell",
             "command": "west build -p auto -b native_sim ./app",

@@ -26,5 +26,6 @@ manifest:
           - littlefs        # littleFS lightweight filesystem
           - mbedtls         # BLE/WiFi
           - tf-psa-crypto   # BLE/WiFi
+          - nanopb          # esp-hosted-mcu transport (ESP32-C6 BLE/WiFi)
           - picolibc        # picolibc
           - lvgl            # LVGL

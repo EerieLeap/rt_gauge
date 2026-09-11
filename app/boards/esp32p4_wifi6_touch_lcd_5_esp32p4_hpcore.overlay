@@ -1,0 +1,58 @@
+/*
+ * Waveshare ESP32-P4-WIFI6-Touch-LCD-5 application overlay.
+ *
+ * The board devicetree already describes the panel, touch controller,
+ * backlight and the ESP32-C6 coprocessor; what is added here is the storage
+ * the application needs and the digital input it reads.
+ */
+
+/ {
+	aliases {
+		intfs0 = &intfs0;
+		gpioc = &gpioc;
+	};
+
+	fstab {
+		compatible = "zephyr,fstab";
+
+		intfs0: intfs0 {
+			compatible = "zephyr,fstab,littlefs";
+			read-size = <16>;
+			prog-size = <256>;
+			cache-size = <256>;
+			lookahead-size = <32>;
+			block-cycles = <512>;
+			partition = <&intfs0_partition>;
+			mount-point = "/intfs0";
+			automount;
+		};
+	};
+
+	gpioc: gpioc {
+		compatible = "gpio-keys";
+
+		/* 40-pin header GP2 (GPIO4). */
+		di_0: di_0 {
+			gpios = <&gpio0 4 GPIO_PULL_UP>;
+			zephyr,code = <INPUT_BTN_0>;
+		};
+	};
+};
+
+&flash0 {
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		/* Nothing swaps into the second MCUboot slot in this build, so
+		 * its 15.75 MB are reused for the LittleFS volume.
+		 */
+		/delete-node/ partition@fe0000;
+
+		intfs0_partition: partition@fe0000 {
+			label = "intfs0_storage";
+			reg = <0xfe0000 DT_SIZE_M(8)>;
+		};
+	};
+};
