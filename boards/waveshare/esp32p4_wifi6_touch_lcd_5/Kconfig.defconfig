@@ -1,0 +1,16 @@
+# Copyright (c) 2026 Hongquan Li
+# SPDX-License-Identifier: Apache-2.0
+
+if BOARD_ESP32P4_WIFI6_TOUCH_LCD_5_ESP32P4_HPCORE
+
+# The 720x1280 panel needs 1.76 MB per RGB565 framebuffer and the driver keeps
+# two of them for tear-free updates, so the stock SPIRAM heap does not fit them.
+configdefault ESP_SPIRAM_HEAP_SIZE
+	default 8388608 if DISPLAY_ESP32_DSI
+
+# GT911 INT only reaches GPIO2 through the unpopulated R108, so the controller
+# is polled. Enabling INPUT_GT911_INTERRUPT waits for an edge that never comes.
+configdefault INPUT_GT911_INTERRUPT
+	default n
+
+endif # BOARD_ESP32P4_WIFI6_TOUCH_LCD_5_ESP32P4_HPCORE
