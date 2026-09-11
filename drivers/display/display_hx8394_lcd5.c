@@ -21,9 +21,8 @@ LOG_MODULE_REGISTER(hx8394_lcd5, CONFIG_DISPLAY_LOG_LEVEL);
 #define HX8394_CMD_COLMOD     0x3A
 #define HX8394_CMD_SETMIPI    0xBA
 
-#define HX8394_MADCTL_BGR     BIT(3)
-#define HX8394_MADCTL_FLIP_X  BIT(1)
-#define HX8394_MADCTL_FLIP_Y  BIT(0)
+#define HX8394_MADCTL_MIRROR_Y BIT(7)
+#define HX8394_MADCTL_MIRROR_X BIT(6)
 
 #define HX8394_SETMIPI_1_LANE 0x60
 #define HX8394_SETMIPI_2_LANE 0x61
@@ -165,29 +164,21 @@ static int hx8394_lcd5_write(const struct device *dev, const uint16_t x, const u
 	return -ENOTSUP;
 }
 
+/* MADCTL reverses the scan direction, it does not exchange rows and columns:
+ * transposing needs frame memory, which a video mode panel does not have.
+ */
 static int hx8394_lcd5_set_orientation(const struct device *dev,
 				       const enum display_orientation orientation)
 {
-	uint8_t madctl;
-
 	switch (orientation) {
 	case DISPLAY_ORIENTATION_NORMAL:
-		madctl = 0;
-		break;
-	case DISPLAY_ORIENTATION_ROTATED_90:
-		madctl = HX8394_MADCTL_FLIP_Y;
-		break;
+		return hx8394_lcd5_dcs(dev, HX8394_CMD_MADCTL, 0);
 	case DISPLAY_ORIENTATION_ROTATED_180:
-		madctl = HX8394_MADCTL_FLIP_X | HX8394_MADCTL_FLIP_Y;
-		break;
-	case DISPLAY_ORIENTATION_ROTATED_270:
-		madctl = HX8394_MADCTL_FLIP_X;
-		break;
+		return hx8394_lcd5_dcs(dev, HX8394_CMD_MADCTL,
+				       HX8394_MADCTL_MIRROR_X | HX8394_MADCTL_MIRROR_Y);
 	default:
 		return -ENOTSUP;
 	}
-
-	return hx8394_lcd5_dcs(dev, HX8394_CMD_MADCTL, madctl);
 }
 
 static void hx8394_lcd5_get_capabilities(const struct device *dev,

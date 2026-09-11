@@ -5,6 +5,33 @@ source "Kconfig.zephyr"
 		int "UI renderer thread stack size"
 		default 8192
 
+	choice EERIE_LEAP_UI_ROTATION_CHOICE
+		prompt "UI rotation"
+		default EERIE_LEAP_UI_ROTATION_NONE
+		help
+		  Rotation applied to the LVGL display. LVGL's software renderer
+		  cannot rotate, so anything other than none replaces the flush
+		  callback with one that rotates each rendered area on its way to the
+		  panel, and needs LV_Z_FLUSH_THREAD disabled because that thread
+		  drives the callback being replaced.
+
+		config EERIE_LEAP_UI_ROTATION_NONE
+			bool "No rotation"
+		config EERIE_LEAP_UI_ROTATION_90
+			bool "Rotated 90 degrees"
+		config EERIE_LEAP_UI_ROTATION_180
+			bool "Rotated 180 degrees"
+		config EERIE_LEAP_UI_ROTATION_270
+			bool "Rotated 270 degrees"
+	endchoice
+
+	config EERIE_LEAP_UI_ROTATION
+		int
+		default 0 if EERIE_LEAP_UI_ROTATION_NONE
+		default 90 if EERIE_LEAP_UI_ROTATION_90
+		default 180 if EERIE_LEAP_UI_ROTATION_180
+		default 270 if EERIE_LEAP_UI_ROTATION_270
+
 	config EERIE_LEAP_FLOAT_SIGNIFICANT_DIGITS
 		int "Floating point significant digits"
 		default 4
