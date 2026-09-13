@@ -124,7 +124,7 @@
 	 * actually driven at 60 MHz.
 	 */
 	phy-clock = <700000000>;
-	dpi-clock-frequency = <58000000>;
+	dpi-clock-frequency = <30000000>;
 
 	hx8394: panel-controller@0 {
 		compatible = "waveshare,hx8394";
@@ -135,6 +135,11 @@
 		height = <1280>;
 		/* The panel resets on a high level, not the usual low one. */
 		reset-gpios = <&gpio0 27 GPIO_ACTIVE_HIGH>;
+
+		/* The AP3032 LED driver dims from the averaged PWM level, so the
+		 * panel stays dark until a duty cycle is programmed.
+		 */
+		pwms = <&ledc0 0 PWM_HZ(5000) PWM_POLARITY_NORMAL>;
 
 		display-timings {
 			compatible = "zephyr,panel-timing";

@@ -9,10 +9,11 @@
 #include <zephyr/drivers/display.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/mipi_dsi.h>
+#include <zephyr/drivers/pwm.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
-LOG_MODULE_REGISTER(hx8394_lcd5, CONFIG_DISPLAY_LOG_LEVEL);
+LOG_MODULE_REGISTER(waveshare_hx8394, CONFIG_DISPLAY_LOG_LEVEL);
 
 #define HX8394_CMD_SLPOUT     0x11
 #define HX8394_CMD_DISPOFF    0x28
@@ -29,9 +30,10 @@ LOG_MODULE_REGISTER(hx8394_lcd5, CONFIG_DISPLAY_LOG_LEVEL);
 #define HX8394_SETMIPI_3_LANE 0x62
 #define HX8394_SETMIPI_4_LANE 0x63
 
-struct hx8394_lcd5_config {
+struct waveshare_hx8394_config {
 	const struct device *mipi_dsi;
 	const struct gpio_dt_spec reset_gpio;
+	struct pwm_dt_spec backlight;
 	struct mipi_dsi_timings timings;
 	uint8_t num_of_lanes;
 	uint8_t pixel_format;
@@ -40,7 +42,7 @@ struct hx8394_lcd5_config {
 	uint8_t channel;
 };
 
-struct hx8394_lcd5_cmd {
+struct waveshare_hx8394_cmd {
 	const uint8_t *data;
 	uint8_t len;
 	uint16_t delay_ms;
@@ -58,7 +60,7 @@ struct hx8394_lcd5_cmd {
  * here are properties of this glass, not of the HX8394 itself, which is why the
  * in-tree himax,hx8394 values (a Rocktech panel) leave this one dark.
  */
-static const struct hx8394_lcd5_cmd hx8394_lcd5_init_cmds[] = {
+static const struct waveshare_hx8394_cmd waveshare_hx8394_init_cmds[] = {
 	HX8394_CMD(0, 0xB9, 0xFF, 0x83, 0x94),
 	HX8394_CMD(0, 0xB1, 0x48, 0x0A, 0x6A, 0x09, 0x33, 0x54, 0x71, 0x71, 0x2E, 0x45),
 	HX8394_CMD(0, 0xBA, 0x61, 0x03, 0x68, 0x6B, 0xB2, 0xC0),
@@ -96,9 +98,9 @@ static const struct hx8394_lcd5_cmd hx8394_lcd5_init_cmds[] = {
 	HX8394_CMD(80, HX8394_CMD_DISPON),
 };
 
-static int hx8394_lcd5_tx(const struct device *dev, const uint8_t *buf, size_t len)
+static int waveshare_hx8394_tx(const struct device *dev, const uint8_t *buf, size_t len)
 {
-	const struct hx8394_lcd5_config *config = dev->config;
+	const struct waveshare_hx8394_config *config = dev->config;
 	struct mipi_dsi_msg msg = {
 		.cmd = buf[0],
 		.tx_buf = &buf[1],
@@ -128,31 +130,51 @@ static int hx8394_lcd5_tx(const struct device *dev, const uint8_t *buf, size_t l
 	return 0;
 }
 
-static int hx8394_lcd5_dcs(const struct device *dev, uint8_t cmd, uint8_t param)
+static int waveshare_hx8394_dcs(const struct device *dev, uint8_t cmd, uint8_t param)
 {
 	const uint8_t buf[] = {cmd, param};
 
-	return hx8394_lcd5_tx(dev, buf, sizeof(buf));
+	return waveshare_hx8394_tx(dev, buf, sizeof(buf));
 }
 
-static int hx8394_lcd5_blanking_on(const struct device *dev)
+static int waveshare_hx8394_blanking_on(const struct device *dev)
 {
 	const uint8_t cmd = HX8394_CMD_DISPOFF;
 
-	return hx8394_lcd5_tx(dev, &cmd, sizeof(cmd));
+	return waveshare_hx8394_tx(dev, &cmd, sizeof(cmd));
 }
 
-static int hx8394_lcd5_blanking_off(const struct device *dev)
+static int waveshare_hx8394_blanking_off(const struct device *dev)
 {
 	const uint8_t cmd = HX8394_CMD_DISPON;
 
-	return hx8394_lcd5_tx(dev, &cmd, sizeof(cmd));
+	return waveshare_hx8394_tx(dev, &cmd, sizeof(cmd));
+}
+
+/* The controller has no brightness command: the module dims from its own LED
+ * driver, which takes its level from the averaged backlight PWM.
+ */
+static int waveshare_hx8394_set_brightness(const struct device *dev, const uint8_t brightness)
+{
+	const struct waveshare_hx8394_config *config = dev->config;
+
+	if (config->backlight.dev == NULL) {
+		return -ENOSYS;
+	}
+
+	if (!pwm_is_ready_dt(&config->backlight)) {
+		return -ENODEV;
+	}
+
+	return pwm_set_pulse_dt(&config->backlight,
+				(uint32_t)((uint64_t)config->backlight.period * brightness /
+					   UINT8_MAX));
 }
 
 /* The DSI bridge owns the framebuffer and is the device zephyr,display points
  * at, so pixels never arrive here.
  */
-static int hx8394_lcd5_write(const struct device *dev, const uint16_t x, const uint16_t y,
+static int waveshare_hx8394_write(const struct device *dev, const uint16_t x, const uint16_t y,
 			     const struct display_buffer_descriptor *desc, const void *buf)
 {
 	ARG_UNUSED(dev);
@@ -167,24 +189,24 @@ static int hx8394_lcd5_write(const struct device *dev, const uint16_t x, const u
 /* MADCTL reverses the scan direction, it does not exchange rows and columns:
  * transposing needs frame memory, which a video mode panel does not have.
  */
-static int hx8394_lcd5_set_orientation(const struct device *dev,
+static int waveshare_hx8394_set_orientation(const struct device *dev,
 				       const enum display_orientation orientation)
 {
 	switch (orientation) {
 	case DISPLAY_ORIENTATION_NORMAL:
-		return hx8394_lcd5_dcs(dev, HX8394_CMD_MADCTL, 0);
+		return waveshare_hx8394_dcs(dev, HX8394_CMD_MADCTL, 0);
 	case DISPLAY_ORIENTATION_ROTATED_180:
-		return hx8394_lcd5_dcs(dev, HX8394_CMD_MADCTL,
+		return waveshare_hx8394_dcs(dev, HX8394_CMD_MADCTL,
 				       HX8394_MADCTL_MIRROR_X | HX8394_MADCTL_MIRROR_Y);
 	default:
 		return -ENOTSUP;
 	}
 }
 
-static void hx8394_lcd5_get_capabilities(const struct device *dev,
+static void waveshare_hx8394_get_capabilities(const struct device *dev,
 					 struct display_capabilities *capabilities)
 {
-	const struct hx8394_lcd5_config *config = dev->config;
+	const struct waveshare_hx8394_config *config = dev->config;
 
 	memset(capabilities, 0, sizeof(struct display_capabilities));
 	capabilities->x_resolution = config->panel_width;
@@ -194,17 +216,18 @@ static void hx8394_lcd5_get_capabilities(const struct device *dev,
 	capabilities->current_orientation = DISPLAY_ORIENTATION_NORMAL;
 }
 
-static DEVICE_API(display, hx8394_lcd5_api) = {
-	.blanking_on = hx8394_lcd5_blanking_on,
-	.blanking_off = hx8394_lcd5_blanking_off,
-	.write = hx8394_lcd5_write,
-	.get_capabilities = hx8394_lcd5_get_capabilities,
-	.set_orientation = hx8394_lcd5_set_orientation,
+static DEVICE_API(display, waveshare_hx8394_api) = {
+	.blanking_on = waveshare_hx8394_blanking_on,
+	.blanking_off = waveshare_hx8394_blanking_off,
+	.write = waveshare_hx8394_write,
+	.get_capabilities = waveshare_hx8394_get_capabilities,
+	.set_brightness = waveshare_hx8394_set_brightness,
+	.set_orientation = waveshare_hx8394_set_orientation,
 };
 
-static int hx8394_lcd5_init(const struct device *dev)
+static int waveshare_hx8394_init(const struct device *dev)
 {
-	const struct hx8394_lcd5_config *config = dev->config;
+	const struct waveshare_hx8394_config *config = dev->config;
 	struct mipi_dsi_device mdev = {
 		.data_lanes = config->num_of_lanes,
 		.pixfmt = config->pixel_format,
@@ -274,60 +297,70 @@ static int hx8394_lcd5_init(const struct device *dev)
 		k_sleep(K_MSEC(10));
 	}
 
-	ret = hx8394_lcd5_tx(dev, (const uint8_t[]){HX8394_CMD_SLPOUT}, 1);
+	ret = waveshare_hx8394_tx(dev, (const uint8_t[]){HX8394_CMD_SLPOUT}, 1);
 	if (ret < 0) {
 		return ret;
 	}
 	k_sleep(K_MSEC(120));
 
-	ret = hx8394_lcd5_dcs(dev, HX8394_CMD_MADCTL, 0);
+	ret = waveshare_hx8394_dcs(dev, HX8394_CMD_MADCTL, 0);
 	if (ret < 0) {
 		return ret;
 	}
 
-	ret = hx8394_lcd5_dcs(dev, HX8394_CMD_COLMOD, colmod);
+	ret = waveshare_hx8394_dcs(dev, HX8394_CMD_COLMOD, colmod);
 	if (ret < 0) {
 		return ret;
 	}
 
-	ret = hx8394_lcd5_dcs(dev, HX8394_CMD_SETMIPI, lanes);
+	ret = waveshare_hx8394_dcs(dev, HX8394_CMD_SETMIPI, lanes);
 	if (ret < 0) {
 		return ret;
 	}
 
-	for (size_t i = 0; i < ARRAY_SIZE(hx8394_lcd5_init_cmds); i++) {
-		ret = hx8394_lcd5_tx(dev, hx8394_lcd5_init_cmds[i].data,
-				     hx8394_lcd5_init_cmds[i].len);
+	for (size_t i = 0; i < ARRAY_SIZE(waveshare_hx8394_init_cmds); i++) {
+		ret = waveshare_hx8394_tx(dev, waveshare_hx8394_init_cmds[i].data,
+				     waveshare_hx8394_init_cmds[i].len);
 		if (ret < 0) {
 			return ret;
 		}
 
-		if (hx8394_lcd5_init_cmds[i].delay_ms != 0) {
-			k_sleep(K_MSEC(hx8394_lcd5_init_cmds[i].delay_ms));
+		if (waveshare_hx8394_init_cmds[i].delay_ms != 0) {
+			k_sleep(K_MSEC(waveshare_hx8394_init_cmds[i].delay_ms));
 		}
 	}
 
 	LOG_INF("HX8394 panel initialized: %ux%u, %u lanes", config->panel_width,
 		config->panel_height, config->num_of_lanes);
 
+	/* The first frame is already on its way out of the bridge, so the panel
+	 * is only dark for as long as the backlight is unprogrammed.
+	 */
+	ret = waveshare_hx8394_set_brightness(dev, UINT8_MAX);
+	if (ret < 0 && ret != -ENOSYS) {
+		LOG_ERR("Could not turn the backlight on (%d)", ret);
+		return ret;
+	}
+
 	return 0;
 }
 
-#define HX8394_LCD5_TIMING_NODE(id) DT_INST_CHILD(id, display_timings)
+#define waveshare_hx8394_TIMING_NODE(id) DT_INST_CHILD(id, display_timings)
 
-#define HX8394_LCD5_PANEL(id)                                                                      \
-	static const struct hx8394_lcd5_config hx8394_lcd5_config_##id = {                         \
+#define waveshare_hx8394_PANEL(id)                                                                      \
+	static const struct waveshare_hx8394_config waveshare_hx8394_config_##id = {                         \
 		.mipi_dsi = DEVICE_DT_GET(DT_INST_BUS(id)),                                        \
 		.reset_gpio = GPIO_DT_SPEC_INST_GET_OR(id, reset_gpios, {0}),                      \
+		.backlight = PWM_DT_SPEC_INST_GET_OR(id, {0}),                                     \
 		.timings = {                                                                       \
 			.hactive = DT_INST_PROP(id, width),                                        \
-			.hfp = DT_PROP(HX8394_LCD5_TIMING_NODE(id), hfront_porch),                 \
-			.hbp = DT_PROP(HX8394_LCD5_TIMING_NODE(id), hback_porch),                  \
-			.hsync = DT_PROP(HX8394_LCD5_TIMING_NODE(id), hsync_len),                  \
+			.hfp = DT_PROP(waveshare_hx8394_TIMING_NODE(id), hfront_porch),                 \
+			.hbp = DT_PROP(waveshare_hx8394_TIMING_NODE(id), hback_porch),                  \
+			.hsync = DT_PROP(waveshare_hx8394_TIMING_NODE(id), hsync_len),                  \
 			.vactive = DT_INST_PROP(id, height),                                       \
-			.vfp = DT_PROP(HX8394_LCD5_TIMING_NODE(id), vfront_porch),                 \
-			.vbp = DT_PROP(HX8394_LCD5_TIMING_NODE(id), vback_porch),                  \
-			.vsync = DT_PROP(HX8394_LCD5_TIMING_NODE(id), vsync_len),                  \
+			.vfp = DT_PROP(waveshare_hx8394_TIMING_NODE(id), vfront_porch),                 \
+			.vbp = DT_PROP(waveshare_hx8394_TIMING_NODE(id), vback_porch),                  \
+			.vsync = DT_PROP(waveshare_hx8394_TIMING_NODE(id), vsync_len),                  \
 		},                                                                                 \
 		.num_of_lanes = DT_INST_PROP_BY_IDX(id, data_lanes, 0),                            \
 		.pixel_format = DT_INST_PROP(id, pixel_format),                                    \
@@ -335,7 +368,7 @@ static int hx8394_lcd5_init(const struct device *dev)
 		.panel_height = DT_INST_PROP(id, height),                                          \
 		.channel = DT_INST_REG_ADDR(id),                                                   \
 	};                                                                                         \
-	DEVICE_DT_INST_DEFINE(id, &hx8394_lcd5_init, NULL, NULL, &hx8394_lcd5_config_##id,         \
-			      POST_KERNEL, CONFIG_APPLICATION_INIT_PRIORITY, &hx8394_lcd5_api);
+	DEVICE_DT_INST_DEFINE(id, &waveshare_hx8394_init, NULL, NULL, &waveshare_hx8394_config_##id,         \
+			      POST_KERNEL, CONFIG_APPLICATION_INIT_PRIORITY, &waveshare_hx8394_api);
 
-DT_INST_FOREACH_STATUS_OKAY(HX8394_LCD5_PANEL)
+DT_INST_FOREACH_STATUS_OKAY(waveshare_hx8394_PANEL)

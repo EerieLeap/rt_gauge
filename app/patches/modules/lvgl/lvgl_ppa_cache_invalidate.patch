@@ -1,0 +1,25 @@
+diff --git a/src/draw/espressif/ppa/lv_draw_ppa_buf.c b/src/draw/espressif/ppa/lv_draw_ppa_buf.c
+index 049bf6ba9..12d61f059 100644
+--- a/src/draw/espressif/ppa/lv_draw_ppa_buf.c
++++ b/src/draw/espressif/ppa/lv_draw_ppa_buf.c
+@@ -41,6 +41,19 @@ void lv_draw_buf_ppa_init_handlers(void)
+ 
+ static void invalidate_cache(const lv_draw_buf_t * draw_buf, const lv_area_t * area)
+ {
+-    esp_cache_msync(draw_buf->data, draw_buf->data_size, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_TYPE_DATA);
++    LV_UNUSED(area);
++
++    /* Writing back alone leaves every line the engine filled over 2D-DMA stale
++     * in the cache. The software renderer goes on to dirty lines that share
++     * their last bytes with those, so writing one of them back puts the stale
++     * half back over what the engine wrote. Drop them once they are in memory.
++     * M2C refuses a range that is not whole cache lines, and the buffer starts
++     * on one, so only the size has to be rounded out.
++     */
++    size_t line = CONFIG_LV_DRAW_BUF_ALIGN;
++    size_t size = (draw_buf->data_size + line - 1) & ~(line - 1);
++
++    esp_cache_msync(draw_buf->data, size, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_TYPE_DATA);
++    esp_cache_msync(draw_buf->data, size, ESP_CACHE_MSYNC_FLAG_DIR_M2C | ESP_CACHE_MSYNC_FLAG_TYPE_DATA);
+ }
+ #endif /* LV_USE_PPA */

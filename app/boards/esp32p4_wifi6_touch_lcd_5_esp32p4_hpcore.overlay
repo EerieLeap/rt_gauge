@@ -56,12 +56,3 @@
 		};
 	};
 };
-
-/* The UI is rotated 90 degrees in the flush path, so the controller has to
- * report its points in the space LVGL hands to the widgets rather than the
- * panel's native one.
- */
-&gt911 {
-	swapped-x-y;
-	inverted-y;
-};
