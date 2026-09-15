@@ -18,6 +18,8 @@ private:
 public:
     explicit LabelIcon(std::shared_ptr<Frame> parent);
 
+    static void RegisterProperties(WidgetPropertyStore& store);
+
     int ApplyTheme(const ITheme& theme) override;
     int DoRender() override;
     void Configure(std::shared_ptr<WidgetPropertyStore> properties) override;

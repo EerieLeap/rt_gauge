@@ -23,6 +23,9 @@ public:
     explicit IconBase(std::shared_ptr<Frame> parent);
     virtual ~IconBase() = default;
 
+    // Factory metadata: declarations must be available without creating LVGL objects.
+    static void RegisterProperties(WidgetPropertyStore&) {}
+
     void SetAssetsManager(std::shared_ptr<AssetsManager> ui_assets_manager) override;
 
     void SetIsActive(bool is_active) override;

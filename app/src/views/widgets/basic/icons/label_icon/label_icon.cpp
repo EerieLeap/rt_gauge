@@ -11,6 +11,11 @@ using namespace eerie_leap::views::themes;
 
 LabelIcon::LabelIcon(std::shared_ptr<Frame> parent) : IconBase(std::move(parent)) { }
 
+void LabelIcon::RegisterProperties(WidgetPropertyStore& store) {
+    IconBase::RegisterProperties(store);
+    store.Register(WidgetPropertyType::LABEL, ConfigValue { std::pmr::string { } }, PropertyChangeEffect::Rebuild);
+}
+
 int LabelIcon::ApplyTheme(const ITheme& theme) {
     if(is_active_) {
         lv_obj_set_style_bg_color(container_->GetObject(), theme.GetAccentColor().ToLvColor(), LV_PART_MAIN | LV_STATE_DEFAULT);

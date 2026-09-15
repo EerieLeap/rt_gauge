@@ -19,6 +19,7 @@
 #include "views/widgets/basic/arc_icon_widget/arc_icon_widget.h"
 #include "views/widgets/basic/icon_widget/icon_widget.h"
 #include "views/widgets/basic/icons/icon_factory.h"
+#include "views/widgets/basic/icons/shape_icon/polygon_icon_base.h"
 #include "views/widgets/indicators/bar_indicator/bar_indicator.h"
 
 #include "views_test_support.h"
@@ -65,10 +66,13 @@ std::shared_ptr<WidgetConfiguration> Configuration(
     configuration->properties["ICON_TYPE"] = static_cast<int>(type);
     configuration->properties["WIDTH_PX"] = width_px;
     configuration->properties["HEIGHT_PX"] = height_px;
-    configuration->properties["FILL_MODE"] = static_cast<int>(fill);
-    configuration->properties["CORNER_RAD_PX"] = radius_px;
     configuration->properties["STROKE_PX"] = stroke_px;
-    configuration->properties["DIRECTION"] = static_cast<int>(direction);
+    if(type == IconType::Line)
+        configuration->properties["DIRECTION"] = static_cast<int>(direction);
+    else
+        configuration->properties["FILL_MODE"] = static_cast<int>(fill);
+    if(type == IconType::Rectangle || type == IconType::TriangleIsosceles || type == IconType::TriangleRight)
+        configuration->properties["CORNER_RAD_PX"] = radius_px;
     return configuration;
 }
 
@@ -100,6 +104,36 @@ uint8_t Alpha(const IconWidget& widget, int x, int y) {
 std::vector<uint8_t> Pixels(const IconWidget& widget) {
     const auto& image = Mask(widget);
     return { image.data, image.data + image.data_size };
+}
+
+std::vector<uint8_t> PolygonPixels(std::vector<lv_fpoint_t> vertices,
+    WidgetFillMode fill = WidgetFillMode::Filled, int radius = 0, int stroke = 4) {
+    // A test-only shape demonstrates reuse without adding a new public icon type.
+    class TestPolygonIcon : public PolygonIconBase {
+        Polygon vertices_;
+        Polygon GetVertices(float, float) const override { return vertices_; }
+
+    public:
+        TestPolygonIcon(std::shared_ptr<Frame> parent, Polygon vertices)
+            : PolygonIconBase(std::move(parent)), vertices_(std::move(vertices)) {}
+        IconType GetIconType() const override { return IconType::None; }
+    };
+    TestPolygonIcon icon(MakeRoot(), std::move(vertices));
+    auto properties = std::make_shared<WidgetPropertyStore>();
+    TestPolygonIcon::RegisterProperties(*properties);
+    properties->Set(WidgetPropertyType::WIDTH_PX, 64);
+    properties->Set(WidgetPropertyType::HEIGHT_PX, 64);
+    properties->Set(WidgetPropertyType::FILL_MODE, static_cast<int>(fill));
+    properties->Set(WidgetPropertyType::CORNER_RAD_PX, radius);
+    properties->Set(WidgetPropertyType::STROKE_PX, stroke);
+    icon.Configure(properties);
+    zassert_equal(icon.Render(), 0);
+    auto image = static_cast<const lv_image_dsc_t*>(lv_image_get_src(icon.GetContainer()->GetObject()));
+    zassert_not_null(image);
+    std::vector<uint8_t> pixels(64 * 64);
+    for(int y = 0; y < 64; ++y)
+        std::copy_n(image->data + y * image->header.stride, 64, pixels.data() + y * 64);
+    return pixels;
 }
 
 void SavePreview(const lv_draw_buf_t& snapshot, const char* name, int variant) {
@@ -181,10 +215,57 @@ ZTEST(shape_icons, test_factory_registers_all_shapes_and_widgets_report_their_pr
         zassert_equal(Mask(*widget).header.h, 48);
         auto supported = widget->GetSupportedProperties();
         for(auto property : { WidgetPropertyType::WIDTH_PX, WidgetPropertyType::HEIGHT_PX,
-                              WidgetPropertyType::STROKE_PX, WidgetPropertyType::CORNER_RAD_PX,
-                              WidgetPropertyType::FILL_MODE, WidgetPropertyType::DIRECTION })
+                              WidgetPropertyType::STROKE_PX })
             zassert_true(std::find(supported.begin(), supported.end(), property) != supported.end());
+        auto supports = [&](WidgetPropertyType property) {
+            return std::find(supported.begin(), supported.end(), property) != supported.end();
+        };
+        zassert_equal(supports(WidgetPropertyType::FILL_MODE), type != IconType::Line);
+        zassert_equal(supports(WidgetPropertyType::DIRECTION), type == IconType::Line);
+        zassert_equal(supports(WidgetPropertyType::CORNER_RAD_PX), type != IconType::Line && type != IconType::Oval);
+        zassert_false(supports(WidgetPropertyType::LABEL));
+        zassert_false(supports(WidgetPropertyType::FILE_PATH));
+        zassert_false(supports(WidgetPropertyType::IMG_WIDTH));
     }
+}
+
+ZTEST(shape_icons, test_icon_metadata_is_specific_before_rendering) {
+    auto root = MakeRoot();
+    auto before = lv_obj_get_child_count(root->GetObject());
+    for(auto type : IconFactory::GetInstance().GetAvailableTypes()) {
+        WidgetPropertyStore store;
+        IconFactory::GetInstance().RegisterProperties(type, store);
+        zassert_equal(lv_obj_get_child_count(root->GetObject()), before);
+        zassert_equal(store.IsRegistered(WidgetPropertyType::LABEL), type == IconType::Label);
+        zassert_equal(store.IsRegistered(WidgetPropertyType::FILE_PATH), type == IconType::Image);
+        zassert_equal(store.IsRegistered(WidgetPropertyType::WIDTH_PX),
+            std::find(shape_types.begin(), shape_types.end(), type) != shape_types.end());
+    }
+    IconWidget line(1, root, WidgetContext {}, IconType::Line);
+    auto line_properties = line.GetSupportedProperties();
+    zassert_true(std::find(line_properties.begin(), line_properties.end(), WidgetPropertyType::DIRECTION)
+        != line_properties.end());
+    zassert_true(std::find(line_properties.begin(), line_properties.end(), WidgetPropertyType::FILL_MODE)
+        == line_properties.end());
+}
+
+ZTEST(shape_icons, test_irrelevant_bindings_do_not_reconfigure_a_shape) {
+    auto configuration = Configuration(IconType::Oval);
+    Bind(*configuration, WidgetPropertyType::CORNER_RAD_PX);
+    Bind(*configuration, WidgetPropertyType::DIRECTION);
+    auto widget = MakeWidget(configuration);
+    auto before = Pixels(*widget);
+    const auto* data = Mask(*widget).data;
+    Publish(12);
+    zassert_equal(Mask(*widget).data, data);
+    zassert_true(Pixels(*widget) == before);
+    auto configuration_for_line = Configuration(IconType::Line);
+    Bind(*configuration_for_line, WidgetPropertyType::FILL_MODE);
+    Bind(*configuration_for_line, WidgetPropertyType::CORNER_RAD_PX);
+    auto line = MakeWidget(configuration_for_line);
+    auto line_before = Pixels(*line);
+    Publish(1);
+    zassert_true(Pixels(*line) == line_before);
 }
 
 ZTEST(shape_icons, test_default_shapes_have_visible_geometry) {
@@ -234,6 +315,53 @@ ZTEST(shape_icons, test_triangles_have_distinct_geometry_and_rounded_outline_cor
         zassert_within(Alpha(*filled, 24, 32), 255, 1);
         zassert_equal(Alpha(*outline, 24, 32), 0);
         zassert_within(Alpha(*outline, 32, 46), 255, 1);
+    }
+}
+
+ZTEST(shape_icons, test_polygon_base_supports_rounded_pentagons_in_both_windings) {
+    std::vector<lv_fpoint_t> vertices { { 32, 0 }, { 64, 24 }, { 52, 64 }, { 12, 64 }, { 0, 24 } };
+    for(auto fill : { WidgetFillMode::Filled, WidgetFillMode::Outline }) {
+        for(int radius : { 0, 8, 999 }) {
+            auto pixels = PolygonPixels(vertices, fill, radius);
+            auto reversed = vertices;
+            std::reverse(reversed.begin(), reversed.end());
+            zassert_true(pixels == PolygonPixels(reversed, fill, radius));
+            zassert_equal(pixels[0], 0);
+            zassert_within(pixels[32 * 64 + 32], fill == WidgetFillMode::Filled ? 255 : 0, 1);
+            zassert_within(pixels[62 * 64 + 32], 255, 1);
+        }
+    }
+    auto sharp = PolygonPixels(vertices);
+    auto rounded = PolygonPixels(vertices, WidgetFillMode::Filled, 8);
+    zassert_true(sharp[1 * 64 + 32] > 0);
+    zassert_equal(rounded[1 * 64 + 32], 0);
+}
+
+ZTEST(shape_icons, test_polygon_outline_keeps_uniform_inset_when_a_short_edge_disappears) {
+    // The diagonal cut at the top right disappears from the inner contour at
+    // this stroke width. The remaining hole is the square [16,48] x [16,48].
+    std::vector<lv_fpoint_t> vertices { { 0, 0 }, { 56, 0 }, { 64, 8 }, { 64, 64 }, { 0, 64 } };
+    auto pixels = PolygonPixels(vertices, WidgetFillMode::Outline, 0, 16);
+    for(int y = 12; y < 52; ++y) {
+        for(int x = 12; x < 52; ++x) {
+            bool hole = x >= 16 && x < 48 && y >= 16 && y < 48;
+            zassert_within(pixels[y * 64 + x], hole ? 0 : 255, 1, "Unexpected inset at %d,%d", x, y);
+        }
+    }
+    auto filled = PolygonPixels(vertices);
+    for(int stroke : { 32, 999 })
+        zassert_true(filled == PolygonPixels(vertices, WidgetFillMode::Outline, 0, stroke));
+}
+
+ZTEST(shape_icons, test_polygon_base_rejects_degenerate_and_nonconvex_geometry) {
+    for(const std::vector<lv_fpoint_t>& vertices : {
+            std::vector<lv_fpoint_t> {},
+            { { 0, 0 }, { 64, 0 } },
+            { { 0, 0 }, { 32, 32 }, { 64, 64 } },
+            { { 0, 0 }, { 64, 0 }, { 32, 16 }, { 64, 64 }, { 0, 64 } },
+            { { 0, 0 }, { 64, 64 }, { 0, 64 }, { 64, 0 } } }) {
+        auto pixels = PolygonPixels(vertices, WidgetFillMode::Outline, 8);
+        zassert_true(std::all_of(pixels.begin(), pixels.end(), [](uint8_t alpha) { return alpha == 0; }));
     }
 }
 

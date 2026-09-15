@@ -30,6 +30,8 @@ public:
     explicit ImageIcon(std::shared_ptr<Frame> parent);
     virtual ~ImageIcon() = default;
 
+    static void RegisterProperties(WidgetPropertyStore& store);
+
     int ApplyTheme(const ITheme& theme) override;
     int DoRender() override;
     void Configure(std::shared_ptr<WidgetPropertyStore> properties) override;

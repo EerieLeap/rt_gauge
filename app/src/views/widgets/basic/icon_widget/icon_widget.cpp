@@ -1,12 +1,9 @@
 #include "domain/ui_domain/models/widget_property.h"
-#include "domain/ui_domain/models/widget_direction.h"
-#include "domain/ui_domain/models/widget_fill_mode.h"
 
 #include "views/utilitites/positioning_helpers.h"
 #include "views/themes/theme_manager.h"
 
 #include "views/widgets/basic/icons/icon_factory.h"
-#include "views/widgets/basic/icons/image_icon/image_icon.h"
 
 #include "icon_widget.h"
 
@@ -70,22 +67,15 @@ void IconWidget::RegisterProperties(WidgetPropertyStore& store) const {
     store.Register(WidgetPropertyType::POSITION_Y, ConfigValue { 0 }, PropertyChangeEffect::Relayout);
     store.Register(WidgetPropertyType::IS_ACTIVE, ConfigValue { true }, PropertyChangeEffect::Repaint);
 
-    // Consumed by the IIcon this widget builds in DoRender. Declared here because the icon is
-    // chosen by ICON_TYPE, so which of these apply is not known until the replay has run.
-    store.Register(WidgetPropertyType::LABEL, ConfigValue { std::pmr::string { } }, PropertyChangeEffect::Rebuild);
-    store.Register(WidgetPropertyType::FILE_PATH, ConfigValue { std::pmr::string { } }, PropertyChangeEffect::Rebuild);
-    store.Register(WidgetPropertyType::IMG_WIDTH, ConfigValue { 0 }, PropertyChangeEffect::Rebuild);
-    store.Register(WidgetPropertyType::IMG_HEIGHT, ConfigValue { 0 }, PropertyChangeEffect::Rebuild);
-    store.Register(WidgetPropertyType::PIVOT_X, ConfigValue { ImageIcon::pivot_centered }, PropertyChangeEffect::Rebuild);
-    store.Register(WidgetPropertyType::PIVOT_Y, ConfigValue { 0 }, PropertyChangeEffect::Rebuild);
-    store.Register(WidgetPropertyType::WIDTH_PX, ConfigValue { 32 }, PropertyChangeEffect::Relayout);
-    store.Register(WidgetPropertyType::HEIGHT_PX, ConfigValue { 32 }, PropertyChangeEffect::Relayout);
-    store.Register(WidgetPropertyType::STROKE_PX, ConfigValue { 2 }, PropertyChangeEffect::Relayout);
-    store.Register(WidgetPropertyType::CORNER_RAD_PX, ConfigValue { 0 }, PropertyChangeEffect::Repaint);
-    store.Register(WidgetPropertyType::FILL_MODE,
-        ConfigValue { static_cast<int>(WidgetFillMode::Filled) }, PropertyChangeEffect::Repaint);
-    store.Register(WidgetPropertyType::DIRECTION,
-        ConfigValue { static_cast<int>(WidgetDirection::LeftToRight) }, PropertyChangeEffect::Relayout);
+    // ICON_TYPE is seeded after registration, so resolve it from configuration
+    // here. A constructor-fixed icon (for example a dial's image needle) wins.
+    auto type = icon_type_;
+    if(type == IconType::None && configuration_ != nullptr) {
+        auto it = configuration_->properties.find(WidgetProperty::GetTypeName(WidgetPropertyType::ICON_TYPE));
+        if(it != configuration_->properties.end())
+            type = static_cast<IconType>(ConfigValueAs<int>(it->second, 0));
+    }
+    IconFactory::GetInstance().RegisterProperties(type, store);
 }
 
 void IconWidget::OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) {

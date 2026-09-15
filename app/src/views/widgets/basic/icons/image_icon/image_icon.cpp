@@ -14,6 +14,15 @@ using namespace eerie_leap::views::themes;
 ImageIcon::ImageIcon(std::shared_ptr<Frame> parent)
     : IconBase(std::move(parent)) {}
 
+void ImageIcon::RegisterProperties(WidgetPropertyStore& store) {
+    IconBase::RegisterProperties(store);
+    store.Register(WidgetPropertyType::FILE_PATH, ConfigValue { std::pmr::string { } }, PropertyChangeEffect::Rebuild);
+    store.Register(WidgetPropertyType::IMG_WIDTH, ConfigValue { 0 }, PropertyChangeEffect::Rebuild);
+    store.Register(WidgetPropertyType::IMG_HEIGHT, ConfigValue { 0 }, PropertyChangeEffect::Rebuild);
+    store.Register(WidgetPropertyType::PIVOT_X, ConfigValue { pivot_centered }, PropertyChangeEffect::Rebuild);
+    store.Register(WidgetPropertyType::PIVOT_Y, ConfigValue { 0 }, PropertyChangeEffect::Rebuild);
+}
+
 int ImageIcon::ApplyTheme(const ITheme& theme) {
     lv_obj_set_style_opa(
         container_->GetObject(),

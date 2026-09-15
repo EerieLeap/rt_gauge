@@ -9,19 +9,28 @@ bottom left. An oval with equal width and height is a circle.
 
 ## Properties
 
-| Property | Type | Default | Meaning |
-| --- | --- | --- | --- |
-| `WIDTH_PX` | Integer | 32 | Width of the icon's bounding box in pixels |
-| `HEIGHT_PX` | Integer | 32 | Height of the icon's bounding box in pixels |
-| `STROKE_PX` | Integer | 2 | Outline or line thickness |
-| `CORNER_RAD_PX` | Integer | 0 | Corner radius for rectangles and both triangles |
-| `FILL_MODE` | `WidgetFillMode` as integer | `Filled` (0) | `Filled` (0) or `Outline` (1) |
-| `DIRECTION` | `WidgetDirection` as integer | `LeftToRight` (1) | Line orientation and endpoint order |
+| Property | Type | Default | Applies to | Meaning |
+| --- | --- | --- | --- | --- |
+| `WIDTH_PX` | Integer | 32 | All shapes | Width of the icon's bounding box in pixels |
+| `HEIGHT_PX` | Integer | 32 | All shapes | Height of the icon's bounding box in pixels |
+| `STROKE_PX` | Integer | 2 | All shapes | Outline or line thickness |
+| `CORNER_RAD_PX` | Integer | 0 | Rectangle and triangles | Corner radius |
+| `FILL_MODE` | `WidgetFillMode` as integer | `Filled` (0) | Rectangle, triangles and oval | `Filled` (0) or `Outline` (1) |
+| `DIRECTION` | `WidgetDirection` as integer | `LeftToRight` (1) | Line | Orientation and endpoint order |
 
 These dimensions are independent of the owning widget's grid size and the
 `IMG_WIDTH` / `IMG_HEIGHT` properties used by image icons. Shape properties are
-registered by `IconWidget` and support the existing event bindings. Changes
+declared by each icon and registered through `IconFactory` for the selected
+`ICON_TYPE`. `IconWidget` adds the shared position and active-state properties.
+Ovals do not expose corner radius or direction; lines do not expose fill mode
+or corner radius. Image and label icons likewise expose only their own properties.
+Properties support the existing event bindings. Changes
 while a widget is inactive are applied when it is activated again.
+
+`GetSupportedProperties()` reports the selected icon's properties after
+configuration, or before configuration when the constructor fixes the icon type.
+Property discovery does not create LVGL objects. Without a selected type, only
+the common widget/icon properties are reported. Unsupported bindings are ignored.
 
 Filled shapes ignore thickness. Outline interiors are transparent, so content
 behind the icon remains visible. Corner radius is clamped to fit: half the
@@ -74,6 +83,23 @@ direction enum.
 
 ## Rendering and limits
 
+`RectangleIcon`, `IsoscelesTriangleIcon`, `RightTriangleIcon`, `OvalIcon`, and
+`LineIcon` live in subdirectories of `icons/shape_icon/`. Rectangles and both
+triangles inherit `PolygonIconBase` and supply only their vertices. The polygon
+base registers corner radius and shares rounding and outline construction for
+convex polygons with any number of vertices, in either winding. It clamps arcs
+to fit adjacent edges and creates a uniform inset by clipping against shifted
+edges, including when a short edge disappears or the interior collapses.
+New convex shapes can reuse this base by overriding `GetVertices`; vertices must
+follow the perimeter without repeated or collinear corners. Degenerate,
+concave, and self-intersecting polygons are rejected. `ClosedShapeIconBase`
+adds fill-mode handling, while `ShapeIconBase` owns dimensions, stroke width,
+the cached image, and tiled rasterization. There is no shape-type switch in the
+shared renderer.
+
+Polygon corners use circular arcs. Rounded rectangles therefore have slightly
+different corner pixels from LVGL's rectangle-specific cubic approximation.
+
 LVGL's vector API and its bundled ThorVG renderer generate an antialiased alpha
 mask. Geometry is rasterized in 32-by-32 pixel tiles with a two-pixel halo. The
 temporary ARGB buffer is approximately 5–7 KiB, depending on board alignment,
@@ -100,6 +126,15 @@ does not enlarge that worker's stack. The unpatched rasterizer needs about
 18 KiB for one function and corrupts the app's smaller worker stacks, sometimes
 crashing another thread later when an overlay opens.
 
+`lvgl_thorvg_optional_loaders.patch` also leaves SVG/Lottie loader feature macros
+undefined when `LV_USE_LOTTIE=0`. ThorVG checks those macros with `#ifdef`, so
+defining them as zero still enables the loaders and brings in their file I/O.
+The CMake source list excludes disabled loaders, and the raw image loader no
+longer includes `<fstream>`, avoiding unused iostream initialization.
+On ESP32-S3 this caused unresolved `open`, `close`, `read`, `write`, `lseek`, and
+`fstat` symbols. Shape rendering works with `CONFIG_POSIX_API` disabled on both
+ESP32-S3 and ESP32-P4; it does not require these document loaders.
+
 Existing property, icon, and direction identifiers retain their
 numeric values; the CBOR schema is unchanged.
 
@@ -113,6 +148,7 @@ west twister -c --disable-warnings-as-errors -j 4 -p qemu_cortex_a9 \
   -O ./twister-out-shapes-qemu -T ./tests/functional/views
 west build -b native_sim -d build-shapes-native ./app
 west build -b esp32p4_wifi6_touch_lcd_5/esp32p4/hpcore -d build-shapes-p4 ./app
+west build -b esp32s3_touch_amoled_1_75/esp32s3/procpu -d build-shapes-s3 ./app
 ```
 
 The view tests cover rasterized geometry, transparent outlines, tile boundaries,
@@ -124,5 +160,6 @@ To export individual rendered previews from the
 native view-test executable, create a directory and set `SHAPE_ICON_PREVIEW_DIR`
 to it when running the `shape_icons` suite. The previews are PPM files.
 
-The simulator and P4 firmware builds have been checked. Physical display
-rendering and hardware performance have not been tested.
+The simulator, P4, and S3 firmware builds have been checked. Shape rendering and
+the overlay stack fix have also been confirmed on physical P4 hardware. The S3
+hardware path remains untested.
