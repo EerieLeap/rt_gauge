@@ -21,3 +21,10 @@ properties:
     description: |
       Panel reset line. This panel resets on a high level, so the pin is
       described as active high.
+
+  pwms:
+    type: phandle-array
+    description: |
+      Backlight output driving the module's LED driver. The controller has no
+      brightness command of its own, so display_set_brightness() is this duty
+      cycle. Without it the panel stays dark however the sequence above went.
