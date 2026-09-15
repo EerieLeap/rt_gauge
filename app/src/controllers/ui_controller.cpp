@@ -28,7 +28,8 @@
 #include "domain/ui_domain/models/widget_type.h"
 #include "domain/ui_domain/models/widget_property.h"
 #include "domain/ui_domain/models/icon_type.h"
-#include "domain/ui_domain/models/indicator_direction.h"
+#include "domain/ui_domain/models/widget_direction.h"
+#include "domain/ui_domain/models/widget_fill_mode.h"
 #include "domain/settings_domain/models/setting_id.h"
 
 #include "event_bus/event_channel_id.h"
@@ -689,7 +690,7 @@ void UiController::SetupTestConfiguration() {
     widget11->size_grid.width = 40;
     widget11->size_grid.height = 466;
     widget11->z_index = 0;
-    widget11->properties[WidgetProperty::GetTypeName(WidgetPropertyType::DIRECTION)] = static_cast<int>(InidicatorDirection::TopToBottom);
+    widget11->properties[WidgetProperty::GetTypeName(WidgetPropertyType::DIRECTION)] = static_cast<int>(WidgetDirection::TopToBottom);
     widget11->properties[WidgetProperty::GetTypeName(WidgetPropertyType::IS_SMOOTHED)] = true;
     widget11->properties[WidgetProperty::GetTypeName(WidgetPropertyType::MIN_VALUE)] = 0;
     widget11->properties[WidgetProperty::GetTypeName(WidgetPropertyType::MAX_VALUE)] = 100;
@@ -724,6 +725,23 @@ void UiController::SetupTestConfiguration() {
     widget1_0->bindings.push_back(SensorBinding("sensor_1"));
     // widget1_0->properties[WidgetProperty::GetTypeName(WidgetPropertyType::VALUE_PRECISION)] = 2;
     screen_configuration_1->AddWidget(std::move(widget1_0));
+
+    // Widget 1_1: IconType::TriangleIsosceles
+    auto widget1_1 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
+    widget1_1->type = WidgetType::BasicIcon;
+    widget1_1->id = 2;
+    widget1_1->position_grid.x = 0;
+    widget1_1->position_grid.y = 0;
+    widget1_1->size_grid.width = 466;
+    widget1_1->size_grid.height = 466;
+    widget1_1->z_index = 0;
+    widget1_1->properties[WidgetProperty::GetTypeName(WidgetPropertyType::ICON_TYPE)] = static_cast<int>(IconType::TriangleIsosceles);
+    widget1_1->properties[WidgetProperty::GetTypeName(WidgetPropertyType::WIDTH_PX)] = 400;
+    widget1_1->properties[WidgetProperty::GetTypeName(WidgetPropertyType::HEIGHT_PX)] = 200;
+    widget1_1->properties[WidgetProperty::GetTypeName(WidgetPropertyType::CORNER_RAD_PX)] = 10;
+    widget1_1->properties[WidgetProperty::GetTypeName(WidgetPropertyType::FILL_MODE)] = static_cast<int>(WidgetFillMode::Outline);
+    widget1_1->properties[WidgetProperty::GetTypeName(WidgetPropertyType::STROKE_PX)] = 6;
+    screen_configuration_1->AddWidget(std::move(widget1_1));
 
     ui_configuration->screen_configurations.push_back(std::move(screen_configuration_1));
 

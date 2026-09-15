@@ -5,6 +5,9 @@
 #include <zephyr/ztest.h>
 
 #include "domain/ui_domain/models/widget_property.h"
+#include "domain/ui_domain/models/widget_direction.h"
+#include "domain/ui_domain/models/widget_fill_mode.h"
+#include "domain/ui_domain/models/icon_type.h"
 
 using namespace eerie_leap::domain::ui_domain::models;
 
@@ -41,10 +44,29 @@ constexpr std::array all_types = {
     WidgetPropertyType::TARGET_SCREEN_GROUP,
     WidgetPropertyType::IS_VISIBLE,
     WidgetPropertyType::VALUE,
-    WidgetPropertyType::NAVIGATION_INTENT
+    WidgetPropertyType::NAVIGATION_INTENT,
+    WidgetPropertyType::WIDTH_PX,
+    WidgetPropertyType::HEIGHT_PX,
+    WidgetPropertyType::STROKE_PX,
+    WidgetPropertyType::CORNER_RAD_PX,
+    WidgetPropertyType::FILL_MODE
 };
 
 } // namespace
+
+ZTEST(widget_property, test_shape_additions_preserve_persisted_values) {
+    zassert_equal(static_cast<int>(IconType::Image), 3);
+    zassert_equal(static_cast<int>(IconType::Svg), 4);
+    zassert_equal(static_cast<int>(WidgetPropertyType::NAVIGATION_INTENT), 28);
+    zassert_equal(static_cast<int>(WidgetPropertyType::DIRECTION), 21);
+    zassert_equal(static_cast<int>(WidgetDirection::None), 0);
+    zassert_equal(static_cast<int>(WidgetDirection::LeftToRight), 1);
+    zassert_equal(static_cast<int>(WidgetDirection::RightToLeft), 2);
+    zassert_equal(static_cast<int>(WidgetDirection::TopToBottom), 3);
+    zassert_equal(static_cast<int>(WidgetDirection::BottomToTop), 4);
+    zassert_equal(static_cast<int>(WidgetFillMode::Filled), 0);
+    zassert_equal(static_cast<int>(WidgetFillMode::Outline), 1);
+}
 
 // The enum and the name table are positional; a name added out of order silently
 // re-keys every persisted property after it.

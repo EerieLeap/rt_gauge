@@ -11,6 +11,7 @@
 #include "domain/ui_domain/models/ui_configuration.h"
 #include "domain/ui_domain/models/widget_type.h"
 #include "domain/ui_domain/models/widget_property.h"
+#include "domain/ui_domain/models/widget_fill_mode.h"
 #include "domain/ui_domain/models/property_binding.h"
 #include "domain/ui_domain/configuration/parsers/ui_configuration_validator.h"
 
@@ -88,6 +89,23 @@ void AddBinding(UiConfiguration& configuration, PropertyBinding binding) {
 
 ZTEST(ui_configuration_validator, test_valid_configuration) {
     zassert_true(Validates(*MakeConfiguration()));
+}
+
+ZTEST(ui_configuration_validator, test_fill_mode_accepts_only_known_numeric_modes) {
+    auto configuration = MakeConfiguration();
+    auto& properties = configuration->screen_configurations[0]->widget_configurations[0]->properties;
+    for(auto mode : { WidgetFillMode::Filled, WidgetFillMode::Outline }) {
+        properties["FILL_MODE"] = static_cast<int>(mode);
+        zassert_true(Validates(*configuration));
+    }
+    for(auto value : { -1.0, 2.0, 0.5 }) {
+        properties["FILL_MODE"] = value;
+        zassert_false(Validates(*configuration));
+    }
+    properties["FILL_MODE"] = true;
+    zassert_false(Validates(*configuration));
+    properties["FILL_MODE"] = "Outline";
+    zassert_false(Validates(*configuration));
 }
 
 ZTEST(ui_configuration_validator, test_empty_configuration_is_valid) {

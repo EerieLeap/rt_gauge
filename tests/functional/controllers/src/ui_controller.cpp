@@ -150,6 +150,23 @@ ZTEST(ui_controller, test_showing_a_configured_overlay_keeps_it_active) {
     zassert_true(Navigation().IsOverlayActive(), "Expected the overlay to have been pushed.");
 }
 
+ZTEST(ui_controller, test_overlay_can_reopen_above_the_shape_screen) {
+    // Group 1 contains the large rounded shape. Its initial render runs on the
+    // UI work queue; opening the overlay then allocates and redraws above it.
+    zassert_equal(Navigation().GoToGroup(1), 0);
+    k_msleep(SETTLE_MS);
+
+    for(int i = 0; i < 3; ++i) {
+        zassert_equal(Navigation().ShowOverlay(DEMO_OVERLAY_SCREEN_ID), 0);
+        k_msleep(SETTLE_MS);
+        zassert_true(Navigation().IsOverlayActive());
+        zassert_equal(Navigation().CloseOverlay(), 0);
+        k_msleep(SETTLE_MS);
+        zassert_false(Navigation().IsOverlayActive());
+        zassert_equal(*Navigation().GetActiveGroupId(), 1);
+    }
+}
+
 // An overlay is built long after Configure() broadcast the settings state, so the
 // bindings its widgets just resolved have to be seeded again or they keep their defaults.
 ZTEST(ui_controller, test_showing_an_overlay_asks_settings_owners_to_republish) {

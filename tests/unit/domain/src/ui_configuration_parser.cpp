@@ -10,6 +10,9 @@
 #include "domain/ui_domain/models/ui_configuration.h"
 #include "domain/ui_domain/models/widget_type.h"
 #include "domain/ui_domain/models/widget_property.h"
+#include "domain/ui_domain/models/icon_type.h"
+#include "domain/ui_domain/models/widget_direction.h"
+#include "domain/ui_domain/models/widget_fill_mode.h"
 #include "domain/ui_domain/configuration/parsers/ui_configuration_cbor_parser.h"
 
 #include "views/widgets/indicators/horizontal_chart_indicator/horizontal_chart_indicator.h"
@@ -178,6 +181,27 @@ ZTEST(ui_configuration_parser, test_CborSerializeDeserialize) {
 
     ui_configuration_parser_CompareUiConfigurations(
         *ui_configuration, *deserialized_ui_configuration);
+}
+
+ZTEST(ui_configuration_parser, test_shape_properties_and_bindings_round_trip) {
+    auto configuration = ui_configuration_parser_GetTestUiConfiguration();
+    auto& widget = *configuration->screen_configurations[0]->widget_configurations[0];
+    widget.type = WidgetType::BasicIcon;
+    widget.properties.clear();
+    widget.properties["ICON_TYPE"] = static_cast<int>(IconType::TriangleRight);
+    widget.properties["WIDTH_PX"] = 80;
+    widget.properties["HEIGHT_PX"] = 40;
+    widget.properties["STROKE_PX"] = 3;
+    widget.properties["CORNER_RAD_PX"] = 8;
+    widget.properties["FILL_MODE"] = static_cast<int>(WidgetFillMode::Outline);
+    widget.properties["DIRECTION"] = static_cast<int>(WidgetDirection::TopToBottom);
+    widget.bindings[0].target = WidgetPropertyType::WIDTH_PX;
+    widget.bindings[1].target = WidgetPropertyType::FILL_MODE;
+
+    UiConfigurationCborParser parser;
+    auto serialized = parser.Serialize(*configuration);
+    auto deserialized = parser.Deserialize(Mrm::GetDefaultPmr(), *serialized);
+    ui_configuration_parser_CompareUiConfigurations(*configuration, *deserialized);
 }
 
 ZTEST(ui_configuration_parser, test_CborRoundTripKeepsBindingDetail) {

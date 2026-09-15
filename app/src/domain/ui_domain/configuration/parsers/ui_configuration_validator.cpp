@@ -1,8 +1,11 @@
+#include <cmath>
 #include <stdexcept>
 #include <string>
 #include <unordered_set>
 #include <variant>
 
+#include "domain/ui_domain/models/widget_direction.h"
+#include "domain/ui_domain/models/widget_fill_mode.h"
 #include "domain/ui_domain/models/widget_property.h"
 
 #include "ui_configuration_validator.h"
@@ -52,6 +55,20 @@ static bool HoldsPropertyValueKind(const ConfigValue& value, PropertyValueKind k
     }
 
     return false;
+}
+
+static bool IsValidFillMode(const ConfigValue& value) {
+    if(!std::holds_alternative<int>(value) && !std::holds_alternative<double>(value))
+        return false;
+    double val = std::holds_alternative<int>(value) ? std::get<int>(value) : std::get<double>(value);
+    return val == static_cast<double>(WidgetFillMode::Filled) || val == static_cast<double>(WidgetFillMode::Outline);
+}
+
+static bool IsValidDirection(const ConfigValue& value) {
+    if(!std::holds_alternative<int>(value) && !std::holds_alternative<double>(value))
+        return false;
+    double val = std::holds_alternative<int>(value) ? std::get<int>(value) : std::get<double>(value);
+    return val >= 1.0 && val <= 4.0 && val == std::floor(val);
 }
 
 static bool IsValidEventChannelId(EventChannelId channel) {
@@ -306,6 +323,20 @@ void UiConfigurationValidator::ValidateWidgetProperties(const ScreenConfiguratio
                     screen_configuration.id,
                     widget_configuration->id,
                     "Invalid value type for widget property '" + std::string(key.data(), key.size()) + "'."
+                );
+
+            if(property_type == WidgetPropertyType::FILL_MODE && !IsValidFillMode(value))
+                InvalidWidgetConfiguration(
+                    screen_configuration.id,
+                    widget_configuration->id,
+                    "Invalid value for widget property 'FILL_MODE'."
+                );
+
+            if(property_type == WidgetPropertyType::DIRECTION && !IsValidDirection(value))
+                InvalidWidgetConfiguration(
+                    screen_configuration.id,
+                    widget_configuration->id,
+                    "Invalid value for widget property 'DIRECTION'."
                 );
         }
     }

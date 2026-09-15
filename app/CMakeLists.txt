@@ -27,7 +27,7 @@ function(apply_patches patch_dir target_dir)
     endforeach()
 endfunction()
 
-# apply_patches("patches/zephyr" $ENV{ZEPHYR_BASE})
+apply_patches("patches/zephyr" $ENV{ZEPHYR_BASE})
 apply_patches("patches/modules/lvgl" $ENV{ZEPHYR_BASE}/../modules/lib/gui/lvgl)
 
 # ZCBOR code generation function
@@ -97,6 +97,8 @@ set(EXTRA_ZEPHYR_MODULES
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(eerie_leap_round_gauge)
+
+include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/lvgl_vector.cmake)
 
 # Enable compile_commands.json
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)

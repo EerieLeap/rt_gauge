@@ -53,17 +53,17 @@ lv_obj_t* BarIndicator::Create(lv_obj_t* parent, int32_t range_start, int32_t ra
     return lv_bar_;
 }
 
-void BarIndicator::UpdateDirection(lv_obj_t* lv_bar, InidicatorDirection direction, int32_t range_start, int32_t range_end) {
-    if(direction == InidicatorDirection::LeftToRight || direction == InidicatorDirection::RightToLeft)
+void BarIndicator::UpdateDirection(lv_obj_t* lv_bar, WidgetDirection direction, int32_t range_start, int32_t range_end) {
+    if(direction == WidgetDirection::LeftToRight || direction == WidgetDirection::RightToLeft)
         lv_bar_set_orientation(lv_bar, LV_BAR_ORIENTATION_HORIZONTAL);
     else
         lv_bar_set_orientation(lv_bar, LV_BAR_ORIENTATION_VERTICAL);
 
     lv_bar_set_range(lv_bar, range_start, range_end);
 
-    if(direction == InidicatorDirection::RightToLeft)
+    if(direction == WidgetDirection::RightToLeft)
         lv_obj_set_style_base_dir(lv_bar, LV_BASE_DIR_RTL, 0);
-    else if(direction == InidicatorDirection::TopToBottom)
+    else if(direction == WidgetDirection::TopToBottom)
         lv_bar_set_range(lv_bar, range_end, range_start);
 }
 
@@ -76,14 +76,14 @@ void BarIndicator::RegisterProperties(WidgetPropertyStore& store) const {
 
     store.Register(
         WidgetPropertyType::DIRECTION,
-        ConfigValue { static_cast<int>(InidicatorDirection::LeftToRight) },
+        ConfigValue { static_cast<int>(WidgetDirection::LeftToRight) },
         PropertyChangeEffect::Repaint);
 }
 
 void BarIndicator::OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) {
     if(type == WidgetPropertyType::DIRECTION) {
-        direction_ = static_cast<InidicatorDirection>(
-            ConfigValueAs<int>(value, static_cast<int>(InidicatorDirection::LeftToRight)));
+        direction_ = static_cast<WidgetDirection>(
+            ConfigValueAs<int>(value, static_cast<int>(WidgetDirection::LeftToRight)));
 
         return;
     }

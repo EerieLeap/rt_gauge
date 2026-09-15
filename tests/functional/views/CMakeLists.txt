@@ -8,6 +8,8 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/../../rt_gauge_test.cmake)
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(functional_views)
 
+include(${RT_GAUGE_DIR}/cmake/lvgl_vector.cmake)
+
 include_directories(${APP_SRC_DIR})
 
 set(APP_SRC_CONFIGURATION_DIR ${APP_SRC_DIR}/configuration)

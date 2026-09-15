@@ -1,0 +1,44 @@
+--- a/src/libs/thorvg/tvgSwRle.cpp
++++ b/src/libs/thorvg/tvgSwRle.cpp
+@@ -194,6 +194,7 @@
+ #include <setjmp.h>
+ #include <limits.h>
+ #include <memory.h>
++#include <memory>
+ #include "tvgSwCommon.h"
+ 
+ /************************************************************************/
+@@ -858,9 +859,21 @@
+     constexpr auto RENDER_POOL_SIZE = 16384L;
+     constexpr auto BAND_SIZE = 40;
+ 
+-    //TODO: We can preserve several static workers in advance
+-    RleWorker rw;
+-    Cell buffer[RENDER_POOL_SIZE / sizeof(Cell)];
++    // Vector drawing runs on the caller when LV_USE_OS is disabled. Keep the
++    // raster workspace off the small embedded UI/event worker stacks.
++    struct Workspace {
++        RleWorker worker;
++        Cell buffer[RENDER_POOL_SIZE / sizeof(Cell)];
++        Band bands[BAND_SIZE];
++    };
++    std::unique_ptr<Workspace, decltype(&lv_free)> workspace(
++        static_cast<Workspace*>(lv_malloc(sizeof(Workspace))), lv_free);
++    if (!workspace) {
++        rleFree(rle);
++        return nullptr;
++    }
++    auto& rw = workspace->worker;
++    auto& buffer = workspace->buffer;
+ 
+     //Init Cells
+     rw.buffer = buffer;
+@@ -888,7 +901,7 @@
+     else rw.rle = rle;
+ 
+     //Generate RLE
+-    Band bands[BAND_SIZE];
++    auto& bands = workspace->bands;
+     Band* band;
+ 
+     /* set up vertical bands */

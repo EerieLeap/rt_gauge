@@ -1,0 +1,28 @@
+--- a/src/libs/thorvg/config.h
++++ b/src/libs/thorvg/config.h
+@@ -10,9 +10,12 @@
+ 
+ #define THORVG_SW_RASTER_SUPPORT 1
+ 
+-#define THORVG_SVG_LOADER_SUPPORT LV_USE_LOTTIE
+-
+-#define THORVG_LOTTIE_LOADER_SUPPORT LV_USE_LOTTIE
++// ThorVG tests these feature macros with #ifdef, so disabled loaders must
++// leave them undefined. Defining them as zero still links their file I/O.
++#if LV_USE_LOTTIE
++#define THORVG_SVG_LOADER_SUPPORT 1
++#define THORVG_LOTTIE_LOADER_SUPPORT 1
++#endif
+ 
+ #define THORVG_VERSION_STRING "0.15.3"
+ 
+--- a/src/libs/thorvg/tvgRawLoader.cpp
++++ b/src/libs/thorvg/tvgRawLoader.cpp
+@@ -23,7 +23,6 @@
+ #include "../../lvgl_public.h"
+ #if LV_USE_THORVG_INTERNAL
+ 
+-#include <fstream>
+ #include <string.h>
+ #include "tvgLoader.h"
+ #include "tvgRawLoader.h"

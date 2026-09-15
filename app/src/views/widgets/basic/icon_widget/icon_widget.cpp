@@ -1,4 +1,6 @@
 #include "domain/ui_domain/models/widget_property.h"
+#include "domain/ui_domain/models/widget_direction.h"
+#include "domain/ui_domain/models/widget_fill_mode.h"
 
 #include "views/utilitites/positioning_helpers.h"
 #include "views/themes/theme_manager.h"
@@ -19,14 +21,17 @@ using namespace eerie_leap::views::widgets::basic::icons;
 IconWidget::IconWidget(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context, IconType icon_type)
     : WidgetBase(id, std::move(parent), std::move(context)), icon_type_(icon_type) {}
 
+IconWidget::~IconWidget() {
+    DetachDispatch();
+    container_->SetChild(nullptr);
+}
+
 int IconWidget::DoRender() {
     auto lv_obj = Create();
     if(lv_obj == nullptr)
         return -1;
 
-    auto child = std::make_shared<Frame>(
-        Frame::Create(lv_obj).Build());
-    container_->SetChild(child);
+    container_->SetChild(icon_->GetContainer());
 
     return 0;
 }
@@ -73,6 +78,14 @@ void IconWidget::RegisterProperties(WidgetPropertyStore& store) const {
     store.Register(WidgetPropertyType::IMG_HEIGHT, ConfigValue { 0 }, PropertyChangeEffect::Rebuild);
     store.Register(WidgetPropertyType::PIVOT_X, ConfigValue { ImageIcon::pivot_centered }, PropertyChangeEffect::Rebuild);
     store.Register(WidgetPropertyType::PIVOT_Y, ConfigValue { 0 }, PropertyChangeEffect::Rebuild);
+    store.Register(WidgetPropertyType::WIDTH_PX, ConfigValue { 32 }, PropertyChangeEffect::Relayout);
+    store.Register(WidgetPropertyType::HEIGHT_PX, ConfigValue { 32 }, PropertyChangeEffect::Relayout);
+    store.Register(WidgetPropertyType::STROKE_PX, ConfigValue { 2 }, PropertyChangeEffect::Relayout);
+    store.Register(WidgetPropertyType::CORNER_RAD_PX, ConfigValue { 0 }, PropertyChangeEffect::Repaint);
+    store.Register(WidgetPropertyType::FILL_MODE,
+        ConfigValue { static_cast<int>(WidgetFillMode::Filled) }, PropertyChangeEffect::Repaint);
+    store.Register(WidgetPropertyType::DIRECTION,
+        ConfigValue { static_cast<int>(WidgetDirection::LeftToRight) }, PropertyChangeEffect::Relayout);
 }
 
 void IconWidget::OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) {
@@ -85,14 +98,34 @@ void IconWidget::OnPropertyChanged(WidgetPropertyType type, const ConfigValue& v
 
         case WidgetPropertyType::POSITION_X:
             position_x_ = ConfigValueAs<int>(value, 0);
+            if(icon_ != nullptr && icon_->IsReady()) {
+                lv_obj_set_x(icon_->GetContainer()->GetObject(), position_x_);
+                ApplyTheme(ThemeManager::GetInstance().GetCurrentTheme());
+            }
             break;
 
         case WidgetPropertyType::POSITION_Y:
             position_y_ = ConfigValueAs<int>(value, 0);
+            if(icon_ != nullptr && icon_->IsReady()) {
+                lv_obj_set_y(icon_->GetContainer()->GetObject(), position_y_);
+                ApplyTheme(ThemeManager::GetInstance().GetCurrentTheme());
+            }
             break;
 
         case WidgetPropertyType::IS_ACTIVE:
             SetIsActive(ConfigValueAs<bool>(value, false));
+            break;
+
+        case WidgetPropertyType::WIDTH_PX:
+        case WidgetPropertyType::HEIGHT_PX:
+        case WidgetPropertyType::STROKE_PX:
+        case WidgetPropertyType::CORNER_RAD_PX:
+        case WidgetPropertyType::FILL_MODE:
+        case WidgetPropertyType::DIRECTION:
+            if(icon_ != nullptr && icon_->IsReady()) {
+                icon_->Configure(properties_);
+                ApplyTheme(ThemeManager::GetInstance().GetCurrentTheme());
+            }
             break;
 
         default:

@@ -1,6 +1,7 @@
 #include "views/widgets/basic/icons/dot_icon/dot_icon.h"
 #include "views/widgets/basic/icons/label_icon/label_icon.h"
 #include "views/widgets/basic/icons/image_icon/image_icon.h"
+#include "views/widgets/basic/icons/shape_icon/shape_icon.h"
 
 #include "icon_factory.h"
 
@@ -53,6 +54,12 @@ void IconFactory::RegisterTypes() {
     Register<DotIcon>(IconType::Dot);
     Register<LabelIcon>(IconType::Label);
     Register<ImageIcon>(IconType::Image);
+
+    for(auto type : { IconType::Rectangle, IconType::TriangleIsosceles, IconType::TriangleRight, IconType::Oval, IconType::Line }) {
+        Register(type, [type](std::shared_ptr<Frame> parent) {
+            return std::make_unique<ShapeIcon>(std::move(parent), type);
+        });
+    }
 }
 
 } // namespace eerie_leap::views::widgets

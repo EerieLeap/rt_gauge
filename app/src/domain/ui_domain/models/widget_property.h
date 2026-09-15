@@ -37,10 +37,15 @@ enum class WidgetPropertyType : std::uint16_t {
     SETTING_ID,             // string
     STEP,                   // double
     UNIT,                   // string
-    TARGET_SCREEN_GROUP,           // int (a screen group, or a screen for ShowOverlay)
+    TARGET_SCREEN_GROUP,    // int (a screen group, or a screen for ShowOverlay)
     IS_VISIBLE,             // bool
     VALUE,                  // double
     NAVIGATION_INTENT,      // int (NavigationIntent)
+    WIDTH_PX,               // int
+    HEIGHT_PX,              // int
+    STROKE_PX,              // int
+    CORNER_RAD_PX,          // int
+    FILL_MODE,              // int (WidgetFillMode)
 };
 
 class WidgetProperty {
@@ -75,12 +80,17 @@ private:
         "IS_VISIBLE"sv,
         "VALUE"sv,
         "NAVIGATION_INTENT"sv,
+        "WIDTH_PX"sv,
+        "HEIGHT_PX"sv,
+        "STROKE_PX"sv,
+        "CORNER_RAD_PX"sv,
+        "FILL_MODE"sv,
     };
 
 public:
     static const char* GetTypeName(WidgetPropertyType type) {
         int index = static_cast<int>(type);
-        if(WidgetPropertyTypeNames.size() <= index)
+        if(index < 0 || static_cast<size_t>(index) >= WidgetPropertyTypeNames.size())
             throw std::runtime_error("Invalid WidgetPropertyType name conversion.");
 
         return WidgetPropertyTypeNames[index].data();
