@@ -65,15 +65,16 @@ icon transparent, and `IS_VISIBLE` continues to control the owning widget.
 ```cpp
 #include "domain/ui_domain/models/icon_type.h"
 #include "domain/ui_domain/models/widget_fill_mode.h"
+#include "domain/ui_domain/models/widget_property.h"
 
 // Using the existing WidgetConfiguration allocated for this widget:
 widget->type = WidgetType::BasicIcon;
-widget->properties["ICON_TYPE"] = static_cast<int>(IconType::TriangleRight);
-widget->properties["WIDTH_PX"] = 80;
-widget->properties["HEIGHT_PX"] = 48;
-widget->properties["STROKE_PX"] = 3;
-widget->properties["CORNER_RAD_PX"] = 8;
-widget->properties["FILL_MODE"] = static_cast<int>(WidgetFillMode::Outline);
+widget->properties[WidgetPropertyType::ICON_TYPE] = static_cast<int>(IconType::TriangleRight);
+widget->properties[WidgetPropertyType::WIDTH_PX] = 80;
+widget->properties[WidgetPropertyType::HEIGHT_PX] = 48;
+widget->properties[WidgetPropertyType::STROKE_PX] = 3;
+widget->properties[WidgetPropertyType::CORNER_RAD_PX] = 8;
+widget->properties[WidgetPropertyType::FILL_MODE] = static_cast<int>(WidgetFillMode::Outline);
 ```
 
 For a vertical line, set `ICON_TYPE` to `IconType::Line`, `DIRECTION` to
@@ -135,8 +136,10 @@ On ESP32-S3 this caused unresolved `open`, `close`, `read`, `write`, `lseek`, an
 `fstat` symbols. Shape rendering works with `CONFIG_POSIX_API` disabled on both
 ESP32-S3 and ESP32-P4; it does not require these document loaders.
 
-Existing property, icon, and direction identifiers retain their
-numeric values; the CBOR schema is unchanged.
+Existing property, icon, and direction identifiers retain their numeric values.
+UI configuration version 2 stores property keys as unsigned IDs in CBOR:
+`UiPropertyType` for the UI and `WidgetPropertyType` for widgets. No UI properties
+are defined yet. Older configurations are rejected and replaced with defaults.
 
 ## Verification
 

@@ -62,7 +62,7 @@ static bool encode_repeated_CborPropertiesConfig_CborPropertyValueType_m(
 {
 	zcbor_log("%s\r\n", __func__);
 
-	bool res = ((((zcbor_tstr_encode(state, (&(*input).CborPropertyValueType_m_key))))
+	bool res = ((((zcbor_uint32_encode(state, (&(*input).CborPropertyValueType_m_key))))
 	&& (encode_CborPropertyValueType(state, (&(*input).CborPropertyValueType_m)))));
 
 	log_result(state, res, __func__);

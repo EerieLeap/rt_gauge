@@ -191,16 +191,16 @@ void WidgetBase::ResolveBindings() {
 
     for(const auto& binding : configuration_->bindings) {
         if(!properties_->IsRegistered(binding.target)) {
-            LOG_WRN("Widget %u binds unsupported property '%s'.",
-                id_, WidgetProperty::GetTypeName(binding.target));
+            LOG_WRN("Widget %u binds unsupported property %u.",
+                id_, static_cast<unsigned>(binding.target));
 
             continue;
         }
 
         auto* channel = registry.Find(binding.channel);
         if(channel == nullptr) {
-            LOG_WRN("Widget %u binds property '%s' to an unregistered channel.",
-                id_, WidgetProperty::GetTypeName(binding.target));
+            LOG_WRN("Widget %u binds property %u to an unregistered channel.",
+                id_, static_cast<unsigned>(binding.target));
 
             continue;
         }
@@ -299,16 +299,10 @@ void WidgetBase::ApplyConfiguration(std::shared_ptr<WidgetConfiguration> configu
     // absent from this one.
     auto supported = is_owner ? GetSupportedProperties() : std::vector<WidgetPropertyType> { };
 
-    for(const auto& [key, value] : configuration_->properties) {
-        try {
-            auto type = WidgetProperty::GetType(key);
-
-            if(!properties_->Set(type, value) && is_owner
-                && std::find(supported.begin(), supported.end(), type) == supported.end())
-                LOG_WRN("Widget %u does not support property '%s'.", id_, key.c_str());
-        } catch(const std::exception&) {
-            LOG_WRN("Widget %u carries unknown property '%s'.", id_, key.c_str());
-        }
+    for(const auto& [type, value] : configuration_->properties) {
+        if(!properties_->Set(type, value) && is_owner
+            && std::find(supported.begin(), supported.end(), type) == supported.end())
+            LOG_WRN("Widget %u does not support property %u.", id_, static_cast<unsigned>(type));
     }
 
     ReplayProperties();

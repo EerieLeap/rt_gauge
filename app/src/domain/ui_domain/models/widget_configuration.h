@@ -1,7 +1,6 @@
 #pragma once
 
 #include <memory_resource>
-#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -9,6 +8,7 @@
 
 #include "property_binding.h"
 #include "widget_type.h"
+#include "widget_property.h"
 #include "widget_position.h"
 #include "widget_size.h"
 
@@ -24,7 +24,7 @@ struct WidgetConfiguration {
     WidgetPosition position_grid;
     WidgetSize size_grid;
     int32_t z_index = 0;
-    std::pmr::unordered_map<std::pmr::string, ConfigValue> properties;
+    std::pmr::unordered_map<WidgetPropertyType, ConfigValue> properties;
     std::pmr::vector<PropertyBinding> bindings;
 
     WidgetConfiguration(std::allocator_arg_t, allocator_type alloc)

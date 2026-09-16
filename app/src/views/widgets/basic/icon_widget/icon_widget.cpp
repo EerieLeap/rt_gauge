@@ -71,7 +71,7 @@ void IconWidget::RegisterProperties(WidgetPropertyStore& store) const {
     // here. A constructor-fixed icon (for example a dial's image needle) wins.
     auto type = icon_type_;
     if(type == IconType::None && configuration_ != nullptr) {
-        auto it = configuration_->properties.find(WidgetProperty::GetTypeName(WidgetPropertyType::ICON_TYPE));
+        auto it = configuration_->properties.find(WidgetPropertyType::ICON_TYPE);
         if(it != configuration_->properties.end())
             type = static_cast<IconType>(ConfigValueAs<int>(it->second, 0));
     }

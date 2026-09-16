@@ -502,12 +502,12 @@ void UiController::SetupTestConfiguration() {
     widget0->size_grid.width = 466;
     widget0->size_grid.height = 466;
     widget0->z_index = 0;
-    widget0->properties[WidgetProperty::GetTypeName(WidgetPropertyType::ICON_TYPE)] = static_cast<int>(IconType::Image);
-    widget0->properties[WidgetProperty::GetTypeName(WidgetPropertyType::FILE_PATH)] = "ui_img_norma_al88.bin";
-    widget0->properties[WidgetProperty::GetTypeName(WidgetPropertyType::IMG_WIDTH)] = 466;
-    widget0->properties[WidgetProperty::GetTypeName(WidgetPropertyType::IMG_HEIGHT)] = 466;
-    widget0->properties[WidgetProperty::GetTypeName(WidgetPropertyType::POSITION_X)] = 0;
-    widget0->properties[WidgetProperty::GetTypeName(WidgetPropertyType::POSITION_Y)] = 0;
+    widget0->properties[WidgetPropertyType::ICON_TYPE] = static_cast<int>(IconType::Image);
+    widget0->properties[WidgetPropertyType::FILE_PATH] = "ui_img_norma_al88.bin";
+    widget0->properties[WidgetPropertyType::IMG_WIDTH] = 466;
+    widget0->properties[WidgetPropertyType::IMG_HEIGHT] = 466;
+    widget0->properties[WidgetPropertyType::POSITION_X] = 0;
+    widget0->properties[WidgetPropertyType::POSITION_Y] = 0;
     screen_configuration->AddWidget(std::move(widget0));
 
     // Widget 1: IndicatorDigital
@@ -519,11 +519,11 @@ void UiController::SetupTestConfiguration() {
     widget1->size_grid.width = 200;
     widget1->size_grid.height = 100;
     widget1->z_index = 0;
-    widget1->properties[WidgetProperty::GetTypeName(WidgetPropertyType::IS_SMOOTHED)] = true;
-    widget1->properties[WidgetProperty::GetTypeName(WidgetPropertyType::MIN_VALUE)] = 0;
-    widget1->properties[WidgetProperty::GetTypeName(WidgetPropertyType::MAX_VALUE)] = 100;
+    widget1->properties[WidgetPropertyType::IS_SMOOTHED] = true;
+    widget1->properties[WidgetPropertyType::MIN_VALUE] = 0;
+    widget1->properties[WidgetPropertyType::MAX_VALUE] = 100;
     widget1->bindings.push_back(SensorBinding("sensor_1"));
-    // widget1->properties[WidgetProperty::GetTypeName(WidgetPropertyType::VALUE_PRECISION)] = 2;
+    // widget1->properties[WidgetPropertyType::VALUE_PRECISION] = 2;
     // screen_configuration->AddWidget(std::move(widget1));
 
     // Widget 2: IndicatorHorizontalChart (Bar)
@@ -535,12 +535,12 @@ void UiController::SetupTestConfiguration() {
     widget2->size_grid.width = 466;
     widget2->size_grid.height = 160;
     widget2->z_index = 0;
-    widget2->properties[WidgetProperty::GetTypeName(WidgetPropertyType::IS_SMOOTHED)] = false;
-    widget2->properties[WidgetProperty::GetTypeName(WidgetPropertyType::MIN_VALUE)] = 0;
-    widget2->properties[WidgetProperty::GetTypeName(WidgetPropertyType::MAX_VALUE)] = 100;
+    widget2->properties[WidgetPropertyType::IS_SMOOTHED] = false;
+    widget2->properties[WidgetPropertyType::MIN_VALUE] = 0;
+    widget2->properties[WidgetPropertyType::MAX_VALUE] = 100;
     widget2->bindings.push_back(SensorBinding("sensor_1"));
-    widget2->properties[WidgetProperty::GetTypeName(WidgetPropertyType::CHART_POINT_COUNT)] = 35;
-    widget2->properties[WidgetProperty::GetTypeName(WidgetPropertyType::CHART_TYPE)] = static_cast<int>(HorizontalChartIndicatorType::Bar);
+    widget2->properties[WidgetPropertyType::CHART_POINT_COUNT] = 35;
+    widget2->properties[WidgetPropertyType::CHART_TYPE] = static_cast<int>(HorizontalChartIndicatorType::Bar);
     screen_configuration->AddWidget(std::move(widget2));
 
     // Widget 3: IndicatorHorizontalChart (Line)
@@ -552,11 +552,11 @@ void UiController::SetupTestConfiguration() {
     widget3->size_grid.width = 466;
     widget3->size_grid.height = 200;
     widget3->z_index = 0;
-    widget3->properties[WidgetProperty::GetTypeName(WidgetPropertyType::IS_SMOOTHED)] = true;
-    widget3->properties[WidgetProperty::GetTypeName(WidgetPropertyType::MIN_VALUE)] = 0;
-    widget3->properties[WidgetProperty::GetTypeName(WidgetPropertyType::MAX_VALUE)] = 100;
+    widget3->properties[WidgetPropertyType::IS_SMOOTHED] = true;
+    widget3->properties[WidgetPropertyType::MIN_VALUE] = 0;
+    widget3->properties[WidgetPropertyType::MAX_VALUE] = 100;
     widget3->bindings.push_back(SensorBinding("sensor_1"));
-    widget3->properties[WidgetProperty::GetTypeName(WidgetPropertyType::CHART_TYPE)] = static_cast<int>(HorizontalChartIndicatorType::Line);
+    widget3->properties[WidgetPropertyType::CHART_TYPE] = static_cast<int>(HorizontalChartIndicatorType::Line);
     screen_configuration->AddWidget(std::move(widget3));
 
     auto widget4 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
@@ -567,9 +567,9 @@ void UiController::SetupTestConfiguration() {
     widget4->size_grid.width = 466;
     widget4->size_grid.height = 160;
     widget4->z_index = 0;
-    widget4->properties[WidgetProperty::GetTypeName(WidgetPropertyType::IS_SMOOTHED)] = true;
-    widget4->properties[WidgetProperty::GetTypeName(WidgetPropertyType::MIN_VALUE)] = 0;
-    widget4->properties[WidgetProperty::GetTypeName(WidgetPropertyType::MAX_VALUE)] = 100;
+    widget4->properties[WidgetPropertyType::IS_SMOOTHED] = true;
+    widget4->properties[WidgetPropertyType::MIN_VALUE] = 0;
+    widget4->properties[WidgetPropertyType::MAX_VALUE] = 100;
     widget4->bindings.push_back(SensorBinding("sensor_1"));
     // screen_configuration->AddWidget(std::move(widget4));
 
@@ -582,12 +582,12 @@ void UiController::SetupTestConfiguration() {
     widget5->size_grid.width = 466;
     widget5->size_grid.height = 466;
     widget5->z_index = 0;
-    widget5->properties[WidgetProperty::GetTypeName(WidgetPropertyType::IS_SMOOTHED)] = true;
-    widget5->properties[WidgetProperty::GetTypeName(WidgetPropertyType::MIN_VALUE)] = 0;
-    widget5->properties[WidgetProperty::GetTypeName(WidgetPropertyType::MAX_VALUE)] = 100;
+    widget5->properties[WidgetPropertyType::IS_SMOOTHED] = true;
+    widget5->properties[WidgetPropertyType::MIN_VALUE] = 0;
+    widget5->properties[WidgetPropertyType::MAX_VALUE] = 100;
     widget5->bindings.push_back(SensorBinding("sensor_1"));
-    // widget5->properties[WidgetProperty::GetTypeName(WidgetPropertyType::START_ANGLE)] = 0;
-    // widget5->properties[WidgetProperty::GetTypeName(WidgetPropertyType::END_ANGLE)] = 360;
+    // widget5->properties[WidgetPropertyType::START_ANGLE] = 0;
+    // widget5->properties[WidgetPropertyType::END_ANGLE] = 360;
     // screen_configuration->AddWidget(std::move(widget5));
 
     // auto widget6 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
@@ -598,12 +598,12 @@ void UiController::SetupTestConfiguration() {
     // widget6->size_grid.width = 466;
     // widget6->size_grid.height = 466;
     // widget6->z_index = 0;
-    // widget6->properties[WidgetProperty::GetTypeName(WidgetPropertyType::IS_SMOOTHED)] = true;
-    // widget6->properties[WidgetProperty::GetTypeName(WidgetPropertyType::MIN_VALUE)] = 0;
-    // widget6->properties[WidgetProperty::GetTypeName(WidgetPropertyType::MAX_VALUE)] = 100;
+    // widget6->properties[WidgetPropertyType::IS_SMOOTHED] = true;
+    // widget6->properties[WidgetPropertyType::MIN_VALUE] = 0;
+    // widget6->properties[WidgetPropertyType::MAX_VALUE] = 100;
     // widget6->bindings.push_back(SensorBinding("sensor_1"));
-    // // widget6->properties[WidgetProperty::GetTypeName(WidgetPropertyType::START_ANGLE)] = 0;
-    // // widget6->properties[WidgetProperty::GetTypeName(WidgetPropertyType::END_ANGLE)] = 360;
+    // // widget6->properties[WidgetPropertyType::START_ANGLE] = 0;
+    // // widget6->properties[WidgetPropertyType::END_ANGLE] = 360;
     // screen_configuration->AddWidget(std::move(widget6));
 
     // Widget: BasicArcIcon
@@ -615,12 +615,12 @@ void UiController::SetupTestConfiguration() {
     widget7->size_grid.width = 466;
     widget7->size_grid.height = 466;
     widget7->z_index = 0;
-    widget7->properties[WidgetProperty::GetTypeName(WidgetPropertyType::ICON_TYPE)] = static_cast<int>(IconType::Dot);
-    widget7->properties[WidgetProperty::GetTypeName(WidgetPropertyType::IS_ACTIVE)] = false;
-    widget7->properties[WidgetProperty::GetTypeName(WidgetPropertyType::POSITION_X)] = 0;
-    widget7->properties[WidgetProperty::GetTypeName(WidgetPropertyType::POSITION_Y)] = 0;
-    widget7->properties[WidgetProperty::GetTypeName(WidgetPropertyType::POSITION_ANGLE)] = 180.0F;
-    widget7->properties[WidgetProperty::GetTypeName(WidgetPropertyType::EDGE_OFFSET)] = 6;
+    widget7->properties[WidgetPropertyType::ICON_TYPE] = static_cast<int>(IconType::Dot);
+    widget7->properties[WidgetPropertyType::IS_ACTIVE] = false;
+    widget7->properties[WidgetPropertyType::POSITION_X] = 0;
+    widget7->properties[WidgetPropertyType::POSITION_Y] = 0;
+    widget7->properties[WidgetPropertyType::POSITION_ANGLE] = 180.0F;
+    widget7->properties[WidgetPropertyType::EDGE_OFFSET] = 6;
     widget7->bindings.push_back(LoggingBinding(WidgetPropertyType::IS_ACTIVE));
     screen_configuration->AddWidget(std::move(widget7));
 
@@ -632,13 +632,13 @@ void UiController::SetupTestConfiguration() {
     // widget8->size_grid.width = 3;
     // widget8->size_grid.height = 3;
     // widget8->z_index = 0;
-    // widget8->properties[WidgetProperty::GetTypeName(WidgetPropertyType::ICON_TYPE)] = static_cast<int>(IconType::Label);
-    // widget8->properties[WidgetProperty::GetTypeName(WidgetPropertyType::IS_ACTIVE)] = false;
-    // widget8->properties[WidgetProperty::GetTypeName(WidgetPropertyType::POSITION_X)] = 0;
-    // widget8->properties[WidgetProperty::GetTypeName(WidgetPropertyType::POSITION_Y)] = 0;
-    // widget8->properties[WidgetProperty::GetTypeName(WidgetPropertyType::POSITION_ANGLE)] = -56.0F;
-    // widget8->properties[WidgetProperty::GetTypeName(WidgetPropertyType::EDGE_OFFSET)] = 2;
-    // widget8->properties[WidgetProperty::GetTypeName(WidgetPropertyType::LABEL)] = "log";
+    // widget8->properties[WidgetPropertyType::ICON_TYPE] = static_cast<int>(IconType::Label);
+    // widget8->properties[WidgetPropertyType::IS_ACTIVE] = false;
+    // widget8->properties[WidgetPropertyType::POSITION_X] = 0;
+    // widget8->properties[WidgetPropertyType::POSITION_Y] = 0;
+    // widget8->properties[WidgetPropertyType::POSITION_ANGLE] = -56.0F;
+    // widget8->properties[WidgetPropertyType::EDGE_OFFSET] = 2;
+    // widget8->properties[WidgetPropertyType::LABEL] = "log";
     // widget8->bindings.push_back(LoggingBinding(WidgetPropertyType::IS_ACTIVE));
     // screen_configuration->AddWidget(std::move(widget8));
 
@@ -651,19 +651,19 @@ void UiController::SetupTestConfiguration() {
     widget9->size_grid.width = 466;
     widget9->size_grid.height = 466;
     widget9->z_index = 0;
-    widget9->properties[WidgetProperty::GetTypeName(WidgetPropertyType::FILE_PATH)] = "ui_img_arrow_al88.bin";
-    widget9->properties[WidgetProperty::GetTypeName(WidgetPropertyType::IMG_WIDTH)] = 15;
-    widget9->properties[WidgetProperty::GetTypeName(WidgetPropertyType::IMG_HEIGHT)] = 220;
-    widget9->properties[WidgetProperty::GetTypeName(WidgetPropertyType::IS_SMOOTHED)] = true;
-    widget9->properties[WidgetProperty::GetTypeName(WidgetPropertyType::POSITION_X)] = 0;
-    widget9->properties[WidgetProperty::GetTypeName(WidgetPropertyType::POSITION_Y)] = -104;
-    widget9->properties[WidgetProperty::GetTypeName(WidgetPropertyType::PIVOT_X)] = 7;
-    widget9->properties[WidgetProperty::GetTypeName(WidgetPropertyType::PIVOT_Y)] = 7;
-    widget9->properties[WidgetProperty::GetTypeName(WidgetPropertyType::MIN_VALUE)] = 0;
-    widget9->properties[WidgetProperty::GetTypeName(WidgetPropertyType::MAX_VALUE)] = 100;
+    widget9->properties[WidgetPropertyType::FILE_PATH] = "ui_img_arrow_al88.bin";
+    widget9->properties[WidgetPropertyType::IMG_WIDTH] = 15;
+    widget9->properties[WidgetPropertyType::IMG_HEIGHT] = 220;
+    widget9->properties[WidgetPropertyType::IS_SMOOTHED] = true;
+    widget9->properties[WidgetPropertyType::POSITION_X] = 0;
+    widget9->properties[WidgetPropertyType::POSITION_Y] = -104;
+    widget9->properties[WidgetPropertyType::PIVOT_X] = 7;
+    widget9->properties[WidgetPropertyType::PIVOT_Y] = 7;
+    widget9->properties[WidgetPropertyType::MIN_VALUE] = 0;
+    widget9->properties[WidgetPropertyType::MAX_VALUE] = 100;
     widget9->bindings.push_back(SensorBinding("sensor_1"));
-    // widget9->properties[WidgetProperty::GetTypeName(WidgetPropertyType::START_ANGLE)] = 0;
-    // widget9->properties[WidgetProperty::GetTypeName(WidgetPropertyType::END_ANGLE)] = 360;
+    // widget9->properties[WidgetPropertyType::START_ANGLE] = 0;
+    // widget9->properties[WidgetPropertyType::END_ANGLE] = 360;
     screen_configuration->AddWidget(std::move(widget9));
 
     // Widget: IndicatorBar - Horizontal Left to right
@@ -675,9 +675,9 @@ void UiController::SetupTestConfiguration() {
     widget10->size_grid.width = 466;
     widget10->size_grid.height = 8;
     widget10->z_index = 0;
-    widget10->properties[WidgetProperty::GetTypeName(WidgetPropertyType::IS_SMOOTHED)] = true;
-    widget10->properties[WidgetProperty::GetTypeName(WidgetPropertyType::MIN_VALUE)] = 0;
-    widget10->properties[WidgetProperty::GetTypeName(WidgetPropertyType::MAX_VALUE)] = 100;
+    widget10->properties[WidgetPropertyType::IS_SMOOTHED] = true;
+    widget10->properties[WidgetPropertyType::MIN_VALUE] = 0;
+    widget10->properties[WidgetPropertyType::MAX_VALUE] = 100;
     widget10->bindings.push_back(SensorBinding("sensor_1"));
     screen_configuration->AddWidget(std::move(widget10));
 
@@ -690,10 +690,10 @@ void UiController::SetupTestConfiguration() {
     widget11->size_grid.width = 40;
     widget11->size_grid.height = 466;
     widget11->z_index = 0;
-    widget11->properties[WidgetProperty::GetTypeName(WidgetPropertyType::DIRECTION)] = static_cast<int>(WidgetDirection::TopToBottom);
-    widget11->properties[WidgetProperty::GetTypeName(WidgetPropertyType::IS_SMOOTHED)] = true;
-    widget11->properties[WidgetProperty::GetTypeName(WidgetPropertyType::MIN_VALUE)] = 0;
-    widget11->properties[WidgetProperty::GetTypeName(WidgetPropertyType::MAX_VALUE)] = 100;
+    widget11->properties[WidgetPropertyType::DIRECTION] = static_cast<int>(WidgetDirection::TopToBottom);
+    widget11->properties[WidgetPropertyType::IS_SMOOTHED] = true;
+    widget11->properties[WidgetPropertyType::MIN_VALUE] = 0;
+    widget11->properties[WidgetPropertyType::MAX_VALUE] = 100;
     widget11->bindings.push_back(SensorBinding("sensor_1"));
     // screen_configuration->AddWidget(std::move(widget11));
 
@@ -719,11 +719,11 @@ void UiController::SetupTestConfiguration() {
     widget1_0->size_grid.width = 200;
     widget1_0->size_grid.height = 100;
     widget1_0->z_index = 0;
-    widget1_0->properties[WidgetProperty::GetTypeName(WidgetPropertyType::IS_SMOOTHED)] = true;
-    widget1_0->properties[WidgetProperty::GetTypeName(WidgetPropertyType::MIN_VALUE)] = 0;
-    widget1_0->properties[WidgetProperty::GetTypeName(WidgetPropertyType::MAX_VALUE)] = 100;
+    widget1_0->properties[WidgetPropertyType::IS_SMOOTHED] = true;
+    widget1_0->properties[WidgetPropertyType::MIN_VALUE] = 0;
+    widget1_0->properties[WidgetPropertyType::MAX_VALUE] = 100;
     widget1_0->bindings.push_back(SensorBinding("sensor_1"));
-    // widget1_0->properties[WidgetProperty::GetTypeName(WidgetPropertyType::VALUE_PRECISION)] = 2;
+    // widget1_0->properties[WidgetPropertyType::VALUE_PRECISION] = 2;
     screen_configuration_1->AddWidget(std::move(widget1_0));
 
     // Widget 1_1: IconType::TriangleIsosceles
@@ -735,12 +735,12 @@ void UiController::SetupTestConfiguration() {
     widget1_1->size_grid.width = 466;
     widget1_1->size_grid.height = 466;
     widget1_1->z_index = 0;
-    widget1_1->properties[WidgetProperty::GetTypeName(WidgetPropertyType::ICON_TYPE)] = static_cast<int>(IconType::TriangleIsosceles);
-    widget1_1->properties[WidgetProperty::GetTypeName(WidgetPropertyType::WIDTH_PX)] = 400;
-    widget1_1->properties[WidgetProperty::GetTypeName(WidgetPropertyType::HEIGHT_PX)] = 200;
-    widget1_1->properties[WidgetProperty::GetTypeName(WidgetPropertyType::CORNER_RAD_PX)] = 10;
-    widget1_1->properties[WidgetProperty::GetTypeName(WidgetPropertyType::FILL_MODE)] = static_cast<int>(WidgetFillMode::Outline);
-    widget1_1->properties[WidgetProperty::GetTypeName(WidgetPropertyType::STROKE_PX)] = 6;
+    widget1_1->properties[WidgetPropertyType::ICON_TYPE] = static_cast<int>(IconType::TriangleIsosceles);
+    widget1_1->properties[WidgetPropertyType::WIDTH_PX] = 400;
+    widget1_1->properties[WidgetPropertyType::HEIGHT_PX] = 200;
+    widget1_1->properties[WidgetPropertyType::CORNER_RAD_PX] = 10;
+    widget1_1->properties[WidgetPropertyType::FILL_MODE] = static_cast<int>(WidgetFillMode::Outline);
+    widget1_1->properties[WidgetPropertyType::STROKE_PX] = 6;
     screen_configuration_1->AddWidget(std::move(widget1_1));
 
     ui_configuration->screen_configurations.push_back(std::move(screen_configuration_1));
@@ -766,8 +766,8 @@ void UiController::SetupTestConfiguration() {
     widget2_0->size_grid.width = 300;
     widget2_0->size_grid.height = 60;
     widget2_0->z_index = 0;
-    widget2_0->properties[WidgetProperty::GetTypeName(WidgetPropertyType::SETTING_ID)] = SettingId::DISPLAY_BRIGHTNESS;
-    widget2_0->properties[WidgetProperty::GetTypeName(WidgetPropertyType::LABEL)] = "Brightness";
+    widget2_0->properties[WidgetPropertyType::SETTING_ID] = SettingId::DISPLAY_BRIGHTNESS;
+    widget2_0->properties[WidgetPropertyType::LABEL] = "Brightness";
     AddSettingBindings(*widget2_0, SettingId::DISPLAY_BRIGHTNESS, PropertyBindingDirection::In);
     screen_configuration_2->AddWidget(std::move(widget2_0));
 
@@ -780,7 +780,7 @@ void UiController::SetupTestConfiguration() {
     widget2_1->size_grid.width = 300;
     widget2_1->size_grid.height = 60;
     widget2_1->z_index = 0;
-    widget2_1->properties[WidgetProperty::GetTypeName(WidgetPropertyType::SETTING_ID)] = SettingId::DISPLAY_BRIGHTNESS;
+    widget2_1->properties[WidgetPropertyType::SETTING_ID] = SettingId::DISPLAY_BRIGHTNESS;
     AddSettingBindings(*widget2_1, SettingId::DISPLAY_BRIGHTNESS, PropertyBindingDirection::InOut);
     screen_configuration_2->AddWidget(std::move(widget2_1));
 
@@ -793,8 +793,8 @@ void UiController::SetupTestConfiguration() {
     widget2_2->size_grid.width = 160;
     widget2_2->size_grid.height = 60;
     widget2_2->z_index = 0;
-    widget2_2->properties[WidgetProperty::GetTypeName(WidgetPropertyType::LABEL)] = "Back";
-    widget2_2->properties[WidgetProperty::GetTypeName(WidgetPropertyType::TARGET_SCREEN_GROUP)] = 0;
+    widget2_2->properties[WidgetPropertyType::LABEL] = "Back";
+    widget2_2->properties[WidgetPropertyType::TARGET_SCREEN_GROUP] = 0;
     screen_configuration_2->AddWidget(std::move(widget2_2));
 
     ui_configuration->screen_configurations.push_back(std::move(screen_configuration_2));
@@ -822,9 +822,9 @@ void UiController::SetupTestConfiguration() {
     widget3_0->size_grid.width = 300;
     widget3_0->size_grid.height = 60;
     widget3_0->z_index = 0;
-    widget3_0->properties[WidgetProperty::GetTypeName(WidgetPropertyType::SETTING_ID)] = SettingId::DISPLAY_BRIGHTNESS;
-    widget3_0->properties[WidgetProperty::GetTypeName(WidgetPropertyType::MIN_VALUE)] = 10;
-    widget3_0->properties[WidgetProperty::GetTypeName(WidgetPropertyType::MAX_VALUE)] = 255;
+    widget3_0->properties[WidgetPropertyType::SETTING_ID] = SettingId::DISPLAY_BRIGHTNESS;
+    widget3_0->properties[WidgetPropertyType::MIN_VALUE] = 10;
+    widget3_0->properties[WidgetPropertyType::MAX_VALUE] = 255;
     AddSettingBindings(*widget3_0, SettingId::DISPLAY_BRIGHTNESS, PropertyBindingDirection::InOut);
     screen_configuration_3->AddWidget(std::move(widget3_0));
 
@@ -837,8 +837,8 @@ void UiController::SetupTestConfiguration() {
     widget3_1->size_grid.width = 160;
     widget3_1->size_grid.height = 60;
     widget3_1->z_index = 0;
-    widget3_1->properties[WidgetProperty::GetTypeName(WidgetPropertyType::LABEL)] = "Close";
-    widget3_1->properties[WidgetProperty::GetTypeName(WidgetPropertyType::NAVIGATION_INTENT)] =
+    widget3_1->properties[WidgetPropertyType::LABEL] = "Close";
+    widget3_1->properties[WidgetPropertyType::NAVIGATION_INTENT] =
         static_cast<int>(NavigationIntent::CloseOverlay);
     screen_configuration_3->AddWidget(std::move(widget3_1));
 

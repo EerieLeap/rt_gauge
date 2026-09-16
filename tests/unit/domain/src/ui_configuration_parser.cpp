@@ -1,4 +1,6 @@
+#include <array>
 #include <memory>
+#include <vector>
 #include <stdexcept>
 
 #include <zephyr/kernel.h>
@@ -6,6 +8,9 @@
 #include <eerie_memory.hpp>
 
 #include "configuration/services/cbor_configuration_service.h"
+#include "configuration/cbor/cbor_ui_config/cbor_ui_config_cbor_encode.h"
+#include "configuration/cbor/cbor_ui_config/cbor_ui_config_cbor_decode.h"
+#include "configuration/cbor/cbor_ui_config/cbor_ui_config_size.h"
 
 #include "domain/ui_domain/models/ui_configuration.h"
 #include "domain/ui_domain/models/widget_type.h"
@@ -52,9 +57,9 @@ pmr_unique_ptr<UiConfiguration> ui_configuration_parser_GetTestUiConfiguration()
     widget1->size_grid.width = 3;
     widget1->size_grid.height = 3;
     widget1->z_index = -1;
-    widget1->properties[WidgetProperty::GetTypeName(WidgetPropertyType::MIN_VALUE)] = 0;
-    widget1->properties[WidgetProperty::GetTypeName(WidgetPropertyType::MAX_VALUE)] = 100;
-    widget1->properties[WidgetProperty::GetTypeName(WidgetPropertyType::LABEL)] = "sensor_1";
+    widget1->properties[WidgetPropertyType::MIN_VALUE] = 0;
+    widget1->properties[WidgetPropertyType::MAX_VALUE] = 100;
+    widget1->properties[WidgetPropertyType::LABEL] = "sensor_1";
 
     // Two targets fed by one source, which is the fan-out the binding list exists for.
     PropertyBinding value_binding;
@@ -85,10 +90,10 @@ pmr_unique_ptr<UiConfiguration> ui_configuration_parser_GetTestUiConfiguration()
     widget2->position_grid.y = 1;
     widget2->size_grid.width = 1;
     widget2->size_grid.height = 1;
-    widget2->properties[WidgetProperty::GetTypeName(WidgetPropertyType::IS_VISIBLE)] = false;
-    widget2->properties[WidgetProperty::GetTypeName(WidgetPropertyType::MIN_VALUE)] = 0;
-    widget2->properties[WidgetProperty::GetTypeName(WidgetPropertyType::MAX_VALUE)] = 100;
-    widget2->properties[WidgetProperty::GetTypeName(WidgetPropertyType::LABEL)] = "sensor_1";
+    widget2->properties[WidgetPropertyType::IS_VISIBLE] = false;
+    widget2->properties[WidgetPropertyType::MIN_VALUE] = 0;
+    widget2->properties[WidgetPropertyType::MAX_VALUE] = 100;
+    widget2->properties[WidgetPropertyType::LABEL] = "sensor_1";
 
     // Two-way and unconditional: the selector stays unset and the outbound event carries the write.
     PropertyBinding setting_binding;
@@ -111,11 +116,11 @@ pmr_unique_ptr<UiConfiguration> ui_configuration_parser_GetTestUiConfiguration()
     widget3->size_grid.width = 3;
     widget3->size_grid.height = 1;
     widget3->z_index = 2;
-    widget3->properties[WidgetProperty::GetTypeName(WidgetPropertyType::MIN_VALUE)] = 0;
-    widget3->properties[WidgetProperty::GetTypeName(WidgetPropertyType::MAX_VALUE)] = 100;
-    widget3->properties[WidgetProperty::GetTypeName(WidgetPropertyType::LABEL)] = "sensor_1";
-    widget3->properties[WidgetProperty::GetTypeName(WidgetPropertyType::CHART_POINT_COUNT)] = 35;
-    widget3->properties[WidgetProperty::GetTypeName(WidgetPropertyType::CHART_TYPE)] = static_cast<std::uint16_t>(HorizontalChartIndicatorType::Line);
+    widget3->properties[WidgetPropertyType::MIN_VALUE] = 0;
+    widget3->properties[WidgetPropertyType::MAX_VALUE] = 100;
+    widget3->properties[WidgetPropertyType::LABEL] = "sensor_1";
+    widget3->properties[WidgetPropertyType::CHART_POINT_COUNT] = 35;
+    widget3->properties[WidgetPropertyType::CHART_TYPE] = static_cast<std::uint16_t>(HorizontalChartIndicatorType::Line);
     screen_configuration->AddWidget(std::move(widget3));
 
     ui_configuration->screen_configurations.push_back(std::move(screen_configuration));
@@ -188,13 +193,13 @@ ZTEST(ui_configuration_parser, test_shape_properties_and_bindings_round_trip) {
     auto& widget = *configuration->screen_configurations[0]->widget_configurations[0];
     widget.type = WidgetType::BasicIcon;
     widget.properties.clear();
-    widget.properties["ICON_TYPE"] = static_cast<int>(IconType::TriangleRight);
-    widget.properties["WIDTH_PX"] = 80;
-    widget.properties["HEIGHT_PX"] = 40;
-    widget.properties["STROKE_PX"] = 3;
-    widget.properties["CORNER_RAD_PX"] = 8;
-    widget.properties["FILL_MODE"] = static_cast<int>(WidgetFillMode::Outline);
-    widget.properties["DIRECTION"] = static_cast<int>(WidgetDirection::TopToBottom);
+    widget.properties[WidgetPropertyType::ICON_TYPE] = static_cast<int>(IconType::TriangleRight);
+    widget.properties[WidgetPropertyType::WIDTH_PX] = 80;
+    widget.properties[WidgetPropertyType::HEIGHT_PX] = 40;
+    widget.properties[WidgetPropertyType::STROKE_PX] = 3;
+    widget.properties[WidgetPropertyType::CORNER_RAD_PX] = 8;
+    widget.properties[WidgetPropertyType::FILL_MODE] = static_cast<int>(WidgetFillMode::Outline);
+    widget.properties[WidgetPropertyType::DIRECTION] = static_cast<int>(WidgetDirection::TopToBottom);
     widget.bindings[0].target = WidgetPropertyType::WIDTH_PX;
     widget.bindings[1].target = WidgetPropertyType::FILL_MODE;
 
@@ -318,4 +323,186 @@ ZTEST(ui_configuration_parser, test_CborDeserializeOrdersWidgetsByZIndex) {
     zassert_equal(deserialized_widget_configurations[0]->id, widget_configurations[1]->id);
     zassert_equal(deserialized_widget_configurations[1]->id, widget_configurations[2]->id);
     zassert_equal(deserialized_widget_configurations[2]->id, widget_configurations[0]->id);
+}
+
+namespace {
+
+bool Deserializes(const CborUiConfig& config) {
+    try {
+        UiConfigurationCborParser parser;
+        parser.Deserialize(Mrm::GetDefaultPmr(), config);
+    } catch(const std::invalid_argument&) {
+        return false;
+    }
+
+    return true;
+}
+
+// A version 2 config with one Gauge screen and one BasicIcon widget. Hand-encoded
+// to check the wire format independently of our encoder and parser.
+std::vector<uint8_t> WidgetPropertyPayload(std::initializer_list<uint8_t> properties) {
+    std::vector<uint8_t> payload = {
+        0x83, 0x02, 0x03, 0x81,
+        0x88, 0x08, 0x03, 0x02, 0x00, 0xf5, 0xf4, 0x84, 0xf5, 0x03, 0x03, 0x00, 0x81,
+        0x87, 0x1a, 0x00, 0x01, 0x00, 0x01, 0x00,
+        0x82, 0x00, 0x00, 0x82, 0x01, 0x01, 0x00
+    };
+    payload.insert(payload.end(), properties.begin(), properties.end());
+    payload.push_back(0x80); // No bindings.
+    return payload;
+}
+
+} // namespace
+
+ZTEST(ui_configuration_parser, test_widget_properties_round_trip_with_empty_ui_properties) {
+    auto configuration = ui_configuration_parser_GetTestUiConfiguration();
+    auto& properties = configuration->screen_configurations[0]->widget_configurations[0]->properties;
+    properties[WidgetPropertyType::MAX_VALUE] = 100.5;
+    properties[WidgetPropertyType::IS_SMOOTHED] = true;
+    properties[WidgetPropertyType::WIDTH_PX] = 80;
+    properties[WidgetPropertyType::FILL_MODE] = static_cast<int>(WidgetFillMode::Outline);
+    // Also exercise omission of the optional widget property map.
+    configuration->screen_configurations[0]->widget_configurations[2]->properties.clear();
+
+    UiConfigurationCborParser parser;
+    auto serialized = parser.Serialize(*configuration);
+    zassert_false(serialized->properties_present);
+    std::vector<uint8_t> payload(cbor_get_size_CborUiConfig(*serialized));
+    size_t encoded_size = 0;
+    zassert_equal(cbor_encode_CborUiConfig(payload.data(), payload.size(), serialized.get(), &encoded_size), 0);
+    zassert_equal(encoded_size, payload.size());
+
+    auto decoded = make_unique_pmr<CborUiConfig>(Mrm::GetDefaultPmr());
+    size_t decoded_size = 0;
+    zassert_equal(cbor_decode_CborUiConfig(payload.data(), encoded_size, decoded.get(), &decoded_size), 0);
+    zassert_equal(decoded_size, encoded_size);
+
+    const auto& cbor_properties = decoded->CborScreenConfig_m[0].CborWidgetConfig_m[0].properties.CborPropertyValueType_m;
+    zassert_equal(cbor_properties.size(), properties.size());
+    for(const auto& property : cbor_properties)
+        zassert_true(properties.contains(static_cast<WidgetPropertyType>(property.CborPropertyValueType_m_key)));
+
+    auto deserialized = parser.Deserialize(Mrm::GetDefaultPmr(), *decoded);
+    ui_configuration_parser_CompareUiConfigurations(*configuration, *deserialized);
+    zassert_true(deserialized->properties.empty());
+}
+
+ZTEST(ui_configuration_parser, test_decodes_integer_widget_property_keys) {
+    auto payload = WidgetPropertyPayload({ 0xa1, 0x18, 0x1d, 0x18, 0x50 }); // {29: 80}
+    auto decoded = make_unique_pmr<CborUiConfig>(Mrm::GetDefaultPmr());
+    size_t decoded_size = 0;
+    zassert_equal(cbor_decode_CborUiConfig(payload.data(), payload.size(), decoded.get(), &decoded_size), 0);
+    zassert_equal(decoded_size, payload.size());
+
+    UiConfigurationCborParser parser;
+    auto configuration = parser.Deserialize(Mrm::GetDefaultPmr(), *decoded);
+    const auto& properties = configuration->screen_configurations[0]->widget_configurations[0]->properties;
+    zassert_equal(properties.size(), 1U);
+    zassert_equal(std::get<int>(properties.at(WidgetPropertyType::WIDTH_PX)), 80);
+}
+
+ZTEST(ui_configuration_parser, test_rejects_legacy_text_widget_property_keys) {
+    auto payload = WidgetPropertyPayload({ 0xa1, 0x68, 'W', 'I', 'D', 'T', 'H', '_', 'P', 'X', 0x18, 0x50 });
+    auto decoded = make_unique_pmr<CborUiConfig>(Mrm::GetDefaultPmr());
+    size_t decoded_size = 0;
+    zassert_not_equal(cbor_decode_CborUiConfig(payload.data(), payload.size(), decoded.get(), &decoded_size), 0);
+}
+
+ZTEST(ui_configuration_parser, test_rejects_unknown_widget_property_ids_before_narrowing) {
+    const std::array<uint32_t, 5> invalid_ids = {
+        0, static_cast<uint32_t>(WidgetPropertyType::COUNT), 9999,
+        0x10000U + static_cast<uint32_t>(WidgetPropertyType::MIN_VALUE), UINT32_MAX
+    };
+    UiConfigurationCborParser parser;
+    auto configuration = ui_configuration_parser_GetTestUiConfiguration();
+    auto serialized = parser.Serialize(*configuration);
+    auto& widget = serialized->CborScreenConfig_m[0].CborWidgetConfig_m[0];
+    auto& property_id = widget.properties.CborPropertyValueType_m[0].CborPropertyValueType_m_key;
+    auto original_id = property_id;
+    for(auto id : invalid_ids) {
+        property_id = id;
+        zassert_false(Deserializes(*serialized), "Accepted invalid property ID %u.", id);
+    }
+    property_id = original_id;
+
+    for(auto id : invalid_ids) {
+        widget.CborPropertyBinding_m[0].target = id;
+        zassert_false(Deserializes(*serialized), "Accepted invalid binding target %u.", id);
+    }
+}
+
+ZTEST(ui_configuration_parser, test_rejects_duplicate_widget_property_ids) {
+    UiConfigurationCborParser parser;
+    auto configuration = ui_configuration_parser_GetTestUiConfiguration();
+    auto serialized = parser.Serialize(*configuration);
+    auto& properties = serialized->CborScreenConfig_m[0].CborWidgetConfig_m[0].properties.CborPropertyValueType_m;
+    properties[1].CborPropertyValueType_m_key = properties[0].CborPropertyValueType_m_key;
+
+    zassert_false(Deserializes(*serialized));
+}
+
+ZTEST(ui_configuration_parser, test_decodes_empty_ui_property_map) {
+    // Version 2, active group 0, an explicitly present empty property map, no screens.
+    const uint8_t payload[] = { 0x84, 0x02, 0x00, 0xa0, 0x80 };
+    auto decoded = make_unique_pmr<CborUiConfig>(Mrm::GetDefaultPmr());
+    size_t decoded_size = 0;
+    zassert_equal(cbor_decode_CborUiConfig(payload, sizeof(payload), decoded.get(), &decoded_size), 0);
+    zassert_equal(decoded_size, sizeof(payload));
+    zassert_true(decoded->properties_present);
+
+    UiConfigurationCborParser parser;
+    auto configuration = parser.Deserialize(Mrm::GetDefaultPmr(), *decoded);
+    zassert_true(configuration->properties.empty());
+}
+
+ZTEST(ui_configuration_parser, test_rejects_widget_property_ids_in_ui_properties) {
+    // WIDTH_PX (29) belongs to WidgetPropertyType, not UiPropertyType.
+    const uint8_t payload[] = { 0x84, 0x02, 0x00, 0xa1, 0x18, 0x1d, 0x18, 0x50, 0x80 };
+    auto decoded = make_unique_pmr<CborUiConfig>(Mrm::GetDefaultPmr());
+    size_t decoded_size = 0;
+    zassert_equal(cbor_decode_CborUiConfig(payload, sizeof(payload), decoded.get(), &decoded_size), 0);
+    zassert_equal(decoded_size, sizeof(payload));
+    zassert_false(Deserializes(*decoded));
+}
+
+ZTEST(ui_configuration_parser, test_rejects_legacy_text_ui_property_keys) {
+    const uint8_t payload[] = {
+        0x84, 0x02, 0x00, 0xa1, 0x68, 'W', 'I', 'D', 'T', 'H', '_', 'P', 'X', 0x18, 0x50, 0x80
+    };
+    auto decoded = make_unique_pmr<CborUiConfig>(Mrm::GetDefaultPmr());
+    size_t decoded_size = 0;
+    zassert_not_equal(cbor_decode_CborUiConfig(payload, sizeof(payload), decoded.get(), &decoded_size), 0);
+}
+
+ZTEST(ui_configuration_parser, test_rejects_undefined_ui_property_ids) {
+    const std::array<uint32_t, 5> invalid_ids = {
+        static_cast<uint32_t>(UiPropertyType::NONE), static_cast<uint32_t>(UiPropertyType::COUNT),
+        9999, 0x10000U, UINT32_MAX
+    };
+    UiConfigurationCborParser parser;
+    auto configuration = ui_configuration_parser_GetTestUiConfiguration();
+    auto serialized = parser.Serialize(*configuration);
+    serialized->properties_present = true;
+    auto& property = serialized->properties.CborPropertyValueType_m.emplace_back();
+    property.CborPropertyValueType_m.CborPropertyValueType_choice = CborPropertyValueType_r::CborPropertyValueType_int_c;
+    property.CborPropertyValueType_m.value = 0;
+    for(auto id : invalid_ids) {
+        property.CborPropertyValueType_m_key = id;
+        zassert_false(Deserializes(*serialized), "Accepted undefined UI property ID %u.", id);
+    }
+}
+
+ZTEST(ui_configuration_parser, test_serialize_rejects_undefined_ui_properties) {
+    UiConfigurationCborParser parser;
+    auto configuration = ui_configuration_parser_GetTestUiConfiguration();
+    configuration->properties[static_cast<UiPropertyType>(29)] = 80;
+
+    bool threw = false;
+    try {
+        parser.Serialize(*configuration);
+    } catch(const std::invalid_argument&) {
+        threw = true;
+    }
+
+    zassert_true(threw);
 }

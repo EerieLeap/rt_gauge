@@ -1,6 +1,4 @@
 #include <array>
-#include <stdexcept>
-#include <string_view>
 
 #include <zephyr/ztest.h>
 
@@ -68,43 +66,20 @@ ZTEST(widget_property, test_shape_additions_preserve_persisted_values) {
     zassert_equal(static_cast<int>(WidgetFillMode::Outline), 1);
 }
 
-// The enum and the name table are positional; a name added out of order silently
-// re-keys every persisted property after it.
-ZTEST(widget_property, test_every_type_round_trips_through_its_name) {
+// Persisted numeric IDs must stay stable when properties are added.
+ZTEST(widget_property, test_property_ids_preserve_persisted_values) {
+    for(size_t i = 0; i < all_types.size(); ++i)
+        zassert_equal(static_cast<uint16_t>(all_types[i]), i);
+}
+
+ZTEST(widget_property, test_every_property_type_is_valid) {
     for(auto type : all_types)
-        zassert_equal(
-            WidgetProperty::GetType(WidgetProperty::GetTypeName(type)),
-            type,
-            "Property type %u does not round trip.", static_cast<unsigned>(type));
+        zassert_equal(IsValidWidgetPropertyType(type), type != WidgetPropertyType::NONE);
 }
 
-ZTEST(widget_property, test_phase_four_names) {
-    zassert_equal(std::string_view(WidgetProperty::GetTypeName(WidgetPropertyType::SETTING_ID)), "SETTING_ID");
-    zassert_equal(std::string_view(WidgetProperty::GetTypeName(WidgetPropertyType::STEP)), "STEP");
-    zassert_equal(std::string_view(WidgetProperty::GetTypeName(WidgetPropertyType::UNIT)), "UNIT");
-    zassert_equal(std::string_view(WidgetProperty::GetTypeName(WidgetPropertyType::TARGET_SCREEN_GROUP)), "TARGET_SCREEN_GROUP");
-}
-
-ZTEST(widget_property, test_unknown_name_is_rejected) {
-    bool threw = false;
-
-    try {
-        WidgetProperty::GetType("NOT_A_PROPERTY");
-    } catch(const std::runtime_error&) {
-        threw = true;
-    }
-
-    zassert_true(threw);
-}
-
-ZTEST(widget_property, test_out_of_range_type_is_rejected) {
-    bool threw = false;
-
-    try {
-        WidgetProperty::GetTypeName(static_cast<WidgetPropertyType>(all_types.size()));
-    } catch(const std::runtime_error&) {
-        threw = true;
-    }
-
-    zassert_true(threw);
+ZTEST(widget_property, test_sentinels_and_unknown_types_are_invalid) {
+    zassert_false(IsValidWidgetPropertyType(WidgetPropertyType::NONE));
+    zassert_false(IsValidWidgetPropertyType(WidgetPropertyType::COUNT));
+    zassert_false(IsValidWidgetPropertyType(static_cast<WidgetPropertyType>(9999)));
+    zassert_false(IsValidWidgetPropertyType(static_cast<WidgetPropertyType>(UINT16_MAX)));
 }

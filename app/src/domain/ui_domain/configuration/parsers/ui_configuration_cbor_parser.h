@@ -12,18 +12,11 @@ using eerie_leap::utilities::type::ConfigValue;
 using eerie_leap::domain::ui_domain::models::UiConfiguration;
 
 class UiConfigurationCborParser {
-private:
-    void ValueTypeToCborPropertyValueType(CborPropertiesConfig& properties_config, const std::pmr::unordered_map<std::pmr::string, ConfigValue>& properties);
-    void CborPropertyValueTypeToValueType(
-        std::pmr::memory_resource* mr,
-        std::pmr::unordered_map<std::pmr::string, ConfigValue>& properties,
-        const CborPropertiesConfig& properties_config);
-
 public:
     // Bumped whenever the CBOR layout changes; a stored config that does not
     // match is rejected, as a result defaults are regenerated instead of decoding a
     // field-shifted layout into the current struct.
-    static constexpr uint32_t configuration_version = 1;
+    static constexpr uint32_t configuration_version = 2;
 
     UiConfigurationCborParser() = default;
 

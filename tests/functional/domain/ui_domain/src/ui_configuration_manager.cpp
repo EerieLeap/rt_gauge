@@ -50,9 +50,9 @@ std::shared_ptr<UiConfiguration> ui_configuration_manager_test_SetupTestUiConfig
     widget1->size_grid.width = 3;
     widget1->size_grid.height = 3;
     widget1->z_index = -1;
-    widget1->properties[WidgetProperty::GetTypeName(WidgetPropertyType::MIN_VALUE)] = 0;
-    widget1->properties[WidgetProperty::GetTypeName(WidgetPropertyType::MAX_VALUE)] = 100;
-    widget1->properties[WidgetProperty::GetTypeName(WidgetPropertyType::LABEL)] = "2348664336";
+    widget1->properties[WidgetPropertyType::MIN_VALUE] = 0;
+    widget1->properties[WidgetPropertyType::MAX_VALUE] = 100;
+    widget1->properties[WidgetPropertyType::LABEL] = "2348664336";
 
     PropertyBinding value_binding;
     value_binding.target = WidgetPropertyType::VALUE;
@@ -82,10 +82,10 @@ std::shared_ptr<UiConfiguration> ui_configuration_manager_test_SetupTestUiConfig
     widget2->position_grid.y = 1;
     widget2->size_grid.width = 1;
     widget2->size_grid.height = 1;
-    widget2->properties[WidgetProperty::GetTypeName(WidgetPropertyType::IS_VISIBLE)] = false;
-    widget2->properties[WidgetProperty::GetTypeName(WidgetPropertyType::MIN_VALUE)] = 0;
-    widget2->properties[WidgetProperty::GetTypeName(WidgetPropertyType::MAX_VALUE)] = 100;
-    widget2->properties[WidgetProperty::GetTypeName(WidgetPropertyType::LABEL)] = "2348664336";
+    widget2->properties[WidgetPropertyType::IS_VISIBLE] = false;
+    widget2->properties[WidgetPropertyType::MIN_VALUE] = 0;
+    widget2->properties[WidgetPropertyType::MAX_VALUE] = 100;
+    widget2->properties[WidgetPropertyType::LABEL] = "2348664336";
 
     PropertyBinding setting_binding;
     setting_binding.target = WidgetPropertyType::VALUE;
@@ -107,11 +107,11 @@ std::shared_ptr<UiConfiguration> ui_configuration_manager_test_SetupTestUiConfig
     widget3->size_grid.width = 3;
     widget3->size_grid.height = 1;
     widget3->z_index = 2;
-    widget3->properties[WidgetProperty::GetTypeName(WidgetPropertyType::MIN_VALUE)] = 0;
-    widget3->properties[WidgetProperty::GetTypeName(WidgetPropertyType::MAX_VALUE)] = 100;
-    widget3->properties[WidgetProperty::GetTypeName(WidgetPropertyType::LABEL)] = "2348664336";
-    widget3->properties[WidgetProperty::GetTypeName(WidgetPropertyType::CHART_POINT_COUNT)] = 35;
-    widget3->properties[WidgetProperty::GetTypeName(WidgetPropertyType::CHART_TYPE)] = static_cast<std::uint16_t>(HorizontalChartIndicatorType::Line);
+    widget3->properties[WidgetPropertyType::MIN_VALUE] = 0;
+    widget3->properties[WidgetPropertyType::MAX_VALUE] = 100;
+    widget3->properties[WidgetPropertyType::LABEL] = "2348664336";
+    widget3->properties[WidgetPropertyType::CHART_POINT_COUNT] = 35;
+    widget3->properties[WidgetPropertyType::CHART_TYPE] = static_cast<std::uint16_t>(HorizontalChartIndicatorType::Line);
     screen_configuration->AddWidget(std::move(widget3));
 
     ui_configuration->screen_configurations.push_back(std::move(screen_configuration));

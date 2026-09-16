@@ -71,6 +71,22 @@ static bool IsValidDirection(const ConfigValue& value) {
     return val >= 1.0 && val <= 4.0 && val == std::floor(val);
 }
 
+static std::string GetWidgetPropertyValidationError(WidgetPropertyType type, const ConfigValue& value) {
+    if(!IsValidWidgetPropertyType(type))
+        return "Unknown property ID: " + std::to_string(static_cast<uint16_t>(type)) + ".";
+
+    if(!HoldsPropertyValueKind(value, GetPropertyValueKind(type)))
+        return "Invalid value type for property ID: " + std::to_string(static_cast<uint16_t>(type)) + ".";
+
+    if(type == WidgetPropertyType::FILL_MODE && !IsValidFillMode(value))
+        return "Invalid value for property 'FILL_MODE'.";
+
+    if(type == WidgetPropertyType::DIRECTION && !IsValidDirection(value))
+        return "Invalid value for property 'DIRECTION'.";
+
+    return {};
+}
+
 static bool IsValidEventChannelId(EventChannelId channel) {
     switch(channel) {
         case EventChannelId::Sensors:
@@ -127,6 +143,11 @@ static void InvalidWidgetConfiguration(uint32_t screen_id, uint32_t widget_id, s
 }
 
 void UiConfigurationValidator::Validate(const UiConfiguration& configuration) {
+    for(const auto& [type, value] : configuration.properties) {
+        if(!IsValidUiPropertyType(type))
+            InvalidUiConfiguration("Unknown UI property ID: " + std::to_string(static_cast<uint16_t>(type)) + ".");
+    }
+
     ValidateScreenCount(configuration);
     ValidateScreenId(configuration);
     ValidateScreenType(configuration);
@@ -298,45 +319,12 @@ void UiConfigurationValidator::ValidateWidgetPosition(const ScreenConfiguration&
 
 void UiConfigurationValidator::ValidateWidgetProperties(const ScreenConfiguration& screen_configuration) {
     for(const auto& widget_configuration : screen_configuration.widget_configurations) {
-        for(const auto& [key, value] : widget_configuration->properties) {
-            auto property_type = WidgetPropertyType::NONE;
-
-            try {
-                property_type = WidgetProperty::GetType(key);
-            } catch(const std::runtime_error&) {
+        for(const auto& [property_type, value] : widget_configuration->properties) {
+            if(auto error = GetWidgetPropertyValidationError(property_type, value); !error.empty())
                 InvalidWidgetConfiguration(
                     screen_configuration.id,
                     widget_configuration->id,
-                    "Unknown widget property '" + std::string(key.data(), key.size()) + "'."
-                );
-            }
-
-            if(property_type == WidgetPropertyType::NONE)
-                InvalidWidgetConfiguration(
-                    screen_configuration.id,
-                    widget_configuration->id,
-                    "Widget property name cannot be empty."
-                );
-
-            if(!HoldsPropertyValueKind(value, GetPropertyValueKind(property_type)))
-                InvalidWidgetConfiguration(
-                    screen_configuration.id,
-                    widget_configuration->id,
-                    "Invalid value type for widget property '" + std::string(key.data(), key.size()) + "'."
-                );
-
-            if(property_type == WidgetPropertyType::FILL_MODE && !IsValidFillMode(value))
-                InvalidWidgetConfiguration(
-                    screen_configuration.id,
-                    widget_configuration->id,
-                    "Invalid value for widget property 'FILL_MODE'."
-                );
-
-            if(property_type == WidgetPropertyType::DIRECTION && !IsValidDirection(value))
-                InvalidWidgetConfiguration(
-                    screen_configuration.id,
-                    widget_configuration->id,
-                    "Invalid value for widget property 'DIRECTION'."
+                    error
                 );
         }
     }
@@ -368,15 +356,12 @@ void UiConfigurationValidator::ValidateWidgetBindings(const ScreenConfiguration&
                     "Binding must name a target property."
                 );
 
-            try {
-                WidgetProperty::GetTypeName(binding.target);
-            } catch(const std::runtime_error&) {
+            if(!IsValidWidgetPropertyType(binding.target))
                 InvalidWidgetConfiguration(
                     screen_configuration.id,
                     widget_configuration->id,
                     "Binding names an unknown target property."
                 );
-            }
 
             if(binding.HasSelector() && !IsComparableSelectorValue(binding.selector_value))
                 InvalidWidgetConfiguration(

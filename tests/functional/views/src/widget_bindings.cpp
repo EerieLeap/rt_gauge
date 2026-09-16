@@ -243,7 +243,7 @@ ZTEST(widget_bindings, test_a_binding_delivers_an_event_value_to_its_property) {
 // The persisted literal is the value until an event lands, which is what makes a binding optional.
 ZTEST(widget_bindings, test_an_unbound_property_keeps_its_configured_value) {
     auto configuration = MakeConfiguration();
-    configuration->properties["VALUE"] = 7.0;
+    configuration->properties[WidgetPropertyType::VALUE] = 7.0;
 
     auto widget = MakeActiveWidget(std::move(configuration));
 

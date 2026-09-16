@@ -35,7 +35,6 @@ using eerie_leap::domain::ui_domain::event_bus::NavigationPayloadType;
 using eerie_leap::domain::ui_domain::models::NavigationAction;
 using eerie_leap::domain::ui_domain::models::NavigationIntent;
 using eerie_leap::domain::ui_domain::models::WidgetConfiguration;
-using eerie_leap::domain::ui_domain::models::WidgetProperty;
 using eerie_leap::domain::ui_domain::models::WidgetPropertyType;
 using eerie_leap::domain::ui_domain::models::WidgetType;
 using eerie_leap::domain::ui_domain::services::NavigationService;
@@ -138,7 +137,7 @@ std::shared_ptr<WidgetConfiguration> MakeConfiguration() {
     configuration->position_grid.y = 0;
     configuration->size_grid.width = 100;
     configuration->size_grid.height = 40;
-    configuration->properties[WidgetProperty::GetTypeName(WidgetPropertyType::LABEL)] = "Go";
+    configuration->properties[WidgetPropertyType::LABEL] = "Go";
 
     return configuration;
 }
@@ -183,7 +182,7 @@ ZTEST(button_control, test_a_button_with_only_a_target_group_still_switches_grou
     NavigationProbe probe;
 
     auto configuration = MakeConfiguration();
-    configuration->properties[WidgetProperty::GetTypeName(WidgetPropertyType::TARGET_SCREEN_GROUP)] = 1;
+    configuration->properties[WidgetPropertyType::TARGET_SCREEN_GROUP] = 1;
 
     Click(navigation_service, configuration);
 
@@ -203,9 +202,9 @@ ZTEST(button_control, test_a_button_can_show_a_target_screen_as_an_overlay) {
     NavigationProbe probe;
 
     auto configuration = MakeConfiguration();
-    configuration->properties[WidgetProperty::GetTypeName(WidgetPropertyType::NAVIGATION_INTENT)] =
+    configuration->properties[WidgetPropertyType::NAVIGATION_INTENT] =
         static_cast<int>(NavigationIntent::ShowOverlay);
-    configuration->properties[WidgetProperty::GetTypeName(WidgetPropertyType::TARGET_SCREEN_GROUP)] = 7;
+    configuration->properties[WidgetPropertyType::TARGET_SCREEN_GROUP] = 7;
 
     Click(navigation_service, configuration);
 
@@ -230,7 +229,7 @@ ZTEST(button_control, test_a_button_can_close_the_active_overlay) {
     zassert_true(probe.WaitForEvent(), "Expected the overlay to open.");
 
     auto configuration = MakeConfiguration();
-    configuration->properties[WidgetProperty::GetTypeName(WidgetPropertyType::NAVIGATION_INTENT)] =
+    configuration->properties[WidgetPropertyType::NAVIGATION_INTENT] =
         static_cast<int>(NavigationIntent::CloseOverlay);
 
     Click(navigation_service, configuration);
@@ -251,7 +250,7 @@ ZTEST(button_control, test_a_show_overlay_button_without_a_target_does_nothing) 
     NavigationProbe probe;
 
     auto configuration = MakeConfiguration();
-    configuration->properties[WidgetProperty::GetTypeName(WidgetPropertyType::NAVIGATION_INTENT)] =
+    configuration->properties[WidgetPropertyType::NAVIGATION_INTENT] =
         static_cast<int>(NavigationIntent::ShowOverlay);
 
     Click(navigation_service, configuration);
@@ -285,7 +284,7 @@ ZTEST(button_control, test_a_button_can_carry_an_intent_that_needs_no_target) {
     NavigationProbe probe;
 
     auto configuration = MakeConfiguration();
-    configuration->properties[WidgetProperty::GetTypeName(WidgetPropertyType::NAVIGATION_INTENT)] =
+    configuration->properties[WidgetPropertyType::NAVIGATION_INTENT] =
         static_cast<int>(NavigationIntent::NextGroup);
 
     Click(navigation_service, configuration);

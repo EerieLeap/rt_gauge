@@ -178,7 +178,7 @@ static bool decode_repeated_CborPropertiesConfig_CborPropertyValueType_m(
 {
 	zcbor_log("%s\r\n", __func__);
 
-	bool res = ((zcbor_tstr_decode(state, (&(*result).CborPropertyValueType_m_key))))
+	bool res = ((zcbor_uint32_decode(state, (&(*result).CborPropertyValueType_m_key))))
 		&& (decode_CborPropertyValueType(state, (&(*result).CborPropertyValueType_m)));
 
 	log_result(state, res, __func__);

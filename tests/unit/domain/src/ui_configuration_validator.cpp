@@ -95,16 +95,16 @@ ZTEST(ui_configuration_validator, test_fill_mode_accepts_only_known_numeric_mode
     auto configuration = MakeConfiguration();
     auto& properties = configuration->screen_configurations[0]->widget_configurations[0]->properties;
     for(auto mode : { WidgetFillMode::Filled, WidgetFillMode::Outline }) {
-        properties["FILL_MODE"] = static_cast<int>(mode);
+        properties[WidgetPropertyType::FILL_MODE] = static_cast<int>(mode);
         zassert_true(Validates(*configuration));
     }
     for(auto value : { -1.0, 2.0, 0.5 }) {
-        properties["FILL_MODE"] = value;
+        properties[WidgetPropertyType::FILL_MODE] = value;
         zassert_false(Validates(*configuration));
     }
-    properties["FILL_MODE"] = true;
+    properties[WidgetPropertyType::FILL_MODE] = true;
     zassert_false(Validates(*configuration));
-    properties["FILL_MODE"] = "Outline";
+    properties[WidgetPropertyType::FILL_MODE] = "Outline";
     zassert_false(Validates(*configuration));
 }
 
@@ -208,26 +208,29 @@ ZTEST(ui_configuration_validator, test_known_widget_properties_are_valid) {
     auto configuration = MakeConfiguration();
     auto& properties = configuration->screen_configurations[0]->widget_configurations[0]->properties;
 
-    properties[WidgetProperty::GetTypeName(WidgetPropertyType::LABEL)] = "sensor_1";
-    properties[WidgetProperty::GetTypeName(WidgetPropertyType::IS_SMOOTHED)] = true;
-    properties[WidgetProperty::GetTypeName(WidgetPropertyType::MIN_VALUE)] = 0;
-    properties[WidgetProperty::GetTypeName(WidgetPropertyType::MAX_VALUE)] = 100.5;
+    properties[WidgetPropertyType::LABEL] = "sensor_1";
+    properties[WidgetPropertyType::IS_SMOOTHED] = true;
+    properties[WidgetPropertyType::MIN_VALUE] = 0;
+    properties[WidgetPropertyType::MAX_VALUE] = 100.5;
 
     zassert_true(Validates(*configuration));
 }
 
 ZTEST(ui_configuration_validator, test_unknown_widget_property_is_invalid) {
-    auto configuration = MakeConfiguration();
-    configuration->screen_configurations[0]->widget_configurations[0]->properties["NOT_A_PROPERTY"] = 1;
+    for(auto type : { WidgetPropertyType::NONE, WidgetPropertyType::COUNT,
+                      static_cast<WidgetPropertyType>(9999), static_cast<WidgetPropertyType>(UINT16_MAX) }) {
+        auto configuration = MakeConfiguration();
+        configuration->screen_configurations[0]->widget_configurations[0]->properties[type] = 1;
 
-    zassert_false(Validates(*configuration));
+        zassert_false(Validates(*configuration), "Accepted invalid property ID %u.", static_cast<unsigned>(type));
+    }
 }
 
 ZTEST(ui_configuration_validator, test_widget_property_with_wrong_value_type_is_invalid) {
     auto configuration = MakeConfiguration();
     auto& properties = configuration->screen_configurations[0]->widget_configurations[0]->properties;
 
-    properties[WidgetProperty::GetTypeName(WidgetPropertyType::MIN_VALUE)] = true;
+    properties[WidgetPropertyType::MIN_VALUE] = true;
 
     zassert_false(Validates(*configuration));
 }
@@ -236,7 +239,7 @@ ZTEST(ui_configuration_validator, test_widget_property_without_value_is_invalid)
     auto configuration = MakeConfiguration();
     auto& properties = configuration->screen_configurations[0]->widget_configurations[0]->properties;
 
-    properties[WidgetProperty::GetTypeName(WidgetPropertyType::LABEL)] = ConfigValue{};
+    properties[WidgetPropertyType::LABEL] = ConfigValue{};
 
     zassert_false(Validates(*configuration));
 }
@@ -277,10 +280,10 @@ ZTEST(ui_configuration_validator, test_control_widget_properties_are_valid) {
     widget_configuration->type = WidgetType::ControlSlider;
 
     auto& properties = widget_configuration->properties;
-    properties[WidgetProperty::GetTypeName(WidgetPropertyType::SETTING_ID)] = "display.brightness";
-    properties[WidgetProperty::GetTypeName(WidgetPropertyType::UNIT)] = "%";
-    properties[WidgetProperty::GetTypeName(WidgetPropertyType::STEP)] = 5.0;
-    properties[WidgetProperty::GetTypeName(WidgetPropertyType::TARGET_SCREEN_GROUP)] = 2;
+    properties[WidgetPropertyType::SETTING_ID] = "display.brightness";
+    properties[WidgetPropertyType::UNIT] = "%";
+    properties[WidgetPropertyType::STEP] = 5.0;
+    properties[WidgetPropertyType::TARGET_SCREEN_GROUP] = 2;
 
     zassert_true(Validates(*configuration));
 }
@@ -289,7 +292,7 @@ ZTEST(ui_configuration_validator, test_numeric_setting_id_is_invalid) {
     auto configuration = MakeConfiguration();
     auto& properties = configuration->screen_configurations[0]->widget_configurations[0]->properties;
 
-    properties[WidgetProperty::GetTypeName(WidgetPropertyType::SETTING_ID)] = 1;
+    properties[WidgetPropertyType::SETTING_ID] = 1;
 
     zassert_false(Validates(*configuration));
 }
@@ -412,4 +415,20 @@ ZTEST(ui_configuration_validator, test_a_selector_that_cannot_be_compared_is_inv
     AddBinding(*configuration, std::move(binding));
 
     zassert_false(Validates(*configuration));
+}
+
+ZTEST(ui_configuration_validator, test_empty_ui_properties_are_valid) {
+    auto configuration = MakeConfiguration();
+    zassert_true(configuration->properties.empty());
+    zassert_true(Validates(*configuration));
+}
+
+ZTEST(ui_configuration_validator, test_undefined_ui_properties_are_invalid) {
+    for(auto type : { UiPropertyType::NONE, UiPropertyType::COUNT, static_cast<UiPropertyType>(29),
+                      static_cast<UiPropertyType>(9999), static_cast<UiPropertyType>(UINT16_MAX) }) {
+        auto configuration = MakeConfiguration();
+        configuration->properties[type] = 1;
+
+        zassert_false(Validates(*configuration), "Accepted undefined UI property ID %u.", static_cast<unsigned>(type));
+    }
 }

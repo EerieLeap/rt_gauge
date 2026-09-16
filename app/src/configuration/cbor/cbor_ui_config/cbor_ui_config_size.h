@@ -69,7 +69,7 @@ static size_t cbor_get_size_CborUiConfig(const CborUiConfig& config) {
         builder.AddIndefiniteArrayStart();
 
         for(const auto& property : properties.CborPropertyValueType_m) {
-            builder.AddTstr(property.CborPropertyValueType_m_key)
+            builder.AddUint(property.CborPropertyValueType_m_key)
                 .AddSize(GetCborPropertyValueTypeSize(property.CborPropertyValueType_m));
         }
 
@@ -121,7 +121,7 @@ static size_t cbor_get_size_CborUiConfig(const CborUiConfig& config) {
                 builder.AddIndefiniteArrayStart();
 
                 for(const auto& property : properties.CborPropertyValueType_m) {
-                    builder.AddTstr(property.CborPropertyValueType_m_key)
+                    builder.AddUint(property.CborPropertyValueType_m_key)
                         .AddSize(GetCborPropertyValueTypeSize(property.CborPropertyValueType_m));
                 }
 

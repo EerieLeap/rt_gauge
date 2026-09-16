@@ -60,7 +60,7 @@ struct CborPropertyValueType_r {
 struct CborPropertiesConfig_CborPropertyValueType_m {
 	using allocator_type = std::pmr::polymorphic_allocator<>;
 
-	zcbor_string CborPropertyValueType_m_key{};
+	uint32_t CborPropertyValueType_m_key{};
 	CborPropertyValueType_r CborPropertyValueType_m;
 
 	CborPropertiesConfig_CborPropertyValueType_m(std::allocator_arg_t, allocator_type alloc)

@@ -63,16 +63,16 @@ std::shared_ptr<WidgetConfiguration> Configuration(
     auto configuration = std::make_shared<WidgetConfiguration>(std::allocator_arg, std::pmr::get_default_resource());
     configuration->type = WidgetType::BasicIcon;
     configuration->id = 1;
-    configuration->properties["ICON_TYPE"] = static_cast<int>(type);
-    configuration->properties["WIDTH_PX"] = width_px;
-    configuration->properties["HEIGHT_PX"] = height_px;
-    configuration->properties["STROKE_PX"] = stroke_px;
+    configuration->properties[WidgetPropertyType::ICON_TYPE] = static_cast<int>(type);
+    configuration->properties[WidgetPropertyType::WIDTH_PX] = width_px;
+    configuration->properties[WidgetPropertyType::HEIGHT_PX] = height_px;
+    configuration->properties[WidgetPropertyType::STROKE_PX] = stroke_px;
     if(type == IconType::Line)
-        configuration->properties["DIRECTION"] = static_cast<int>(direction);
+        configuration->properties[WidgetPropertyType::DIRECTION] = static_cast<int>(direction);
     else
-        configuration->properties["FILL_MODE"] = static_cast<int>(fill);
+        configuration->properties[WidgetPropertyType::FILL_MODE] = static_cast<int>(fill);
     if(type == IconType::Rectangle || type == IconType::TriangleIsosceles || type == IconType::TriangleRight)
-        configuration->properties["CORNER_RAD_PX"] = radius_px;
+        configuration->properties[WidgetPropertyType::CORNER_RAD_PX] = radius_px;
     return configuration;
 }
 
@@ -272,7 +272,7 @@ ZTEST(shape_icons, test_default_shapes_have_visible_geometry) {
     for(auto type : shape_types) {
         auto configuration = Configuration(type);
         configuration->properties.clear();
-        configuration->properties["ICON_TYPE"] = static_cast<int>(type);
+        configuration->properties[WidgetPropertyType::ICON_TYPE] = static_cast<int>(type);
         auto widget = MakeWidget(configuration);
         zassert_equal(Mask(*widget).header.w, 32);
         zassert_equal(Mask(*widget).header.h, 32);
@@ -408,7 +408,7 @@ ZTEST(shape_icons, test_lines_allow_zero_unused_dimension_and_keep_the_entire_st
 ZTEST(shape_icons, test_invalid_sizes_and_zero_strokes_suppress_drawing_safely) {
     for(double width : { -1.0, 0.0, 1e100, std::numeric_limits<double>::infinity() }) {
         auto configuration = Configuration(IconType::Rectangle);
-        configuration->properties["WIDTH_PX"] = width;
+        configuration->properties[WidgetPropertyType::WIDTH_PX] = width;
         auto widget = MakeWidget(configuration);
         zassert_is_null(lv_image_get_src(ImageObject(*widget)));
         zassert_equal(lv_obj_get_style_opa(ImageObject(*widget), LV_PART_MAIN), LV_OPA_TRANSP);
@@ -503,7 +503,7 @@ ZTEST(shape_icons, test_bound_fill_radius_thickness_and_direction_refresh_the_ma
 
 ZTEST(shape_icons, test_arc_repositions_when_shape_height_changes) {
     auto configuration = Configuration(IconType::Rectangle, 32, 32);
-    configuration->properties["POSITION_ANGLE"] = 0;
+    configuration->properties[WidgetPropertyType::POSITION_ANGLE] = 0;
     Bind(*configuration, WidgetPropertyType::HEIGHT_PX);
     auto widget = std::make_unique<ArcIconWidget>(1, MakeRoot(), WidgetContext {});
     widget->Configure(configuration);

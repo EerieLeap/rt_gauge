@@ -45,8 +45,9 @@ CborPropertyBinding = [
     selector_value: CborPropertyValueType
 ]
 
+; Keys are UiPropertyType IDs for UI properties and WidgetPropertyType IDs for widget properties.
 CborPropertiesConfig = {
-    * tstr => CborPropertyValueType
+    * uint => CborPropertyValueType
 }
 
 CborWidgetPositionConfig = [

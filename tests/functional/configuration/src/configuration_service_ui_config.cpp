@@ -1,3 +1,4 @@
+#include <array>
 #include <memory>
 #include <vector>
 #include <map>
@@ -11,10 +12,13 @@
 #include "utilities/cbor/cbor_helpers.hpp"
 #include "configuration/cbor/cbor_ui_config/cbor_ui_config.h"
 #include "configuration/services/cbor_configuration_service.h"
+#include "domain/ui_domain/models/widget_property.h"
 
 #include "subsys/device_tree/dt_fs.h"
 #include "subsys/fs/services/i_fs_service.h"
 #include "subsys/fs/services/fs_service.h"
+
+using eerie_leap::domain::ui_domain::models::WidgetPropertyType;
 
 using namespace eerie_memory;
 using namespace eerie_leap::utilities::memory;
@@ -23,6 +27,8 @@ using namespace eerie_leap::configuration::services;
 using namespace eerie_leap::subsys::fs::services;
 using namespace eerie_leap::subsys::device_tree;
 
+// These storage tests use raw CBOR IDs to exercise key widths and value encodings.
+// UiPropertyType validation is covered by the domain tests; no UI properties are defined yet.
 ZTEST_SUITE(configuration_service_ui_config, NULL, NULL, NULL, NULL, NULL);
 
 ZTEST(configuration_service_ui_config, test_CborUiConfig_CborPropertyValueType_int_Save_successfully_saved_and_loaded) {
@@ -31,13 +37,13 @@ ZTEST(configuration_service_ui_config, test_CborUiConfig_CborPropertyValueType_i
 
     ui_config->properties_present = true;
 
-    std::vector<std::string> keys = {"t_0", "t_1", "t_2", "t_3"};
+    const std::array<uint32_t, 4> keys = { 1, 23, 24, UINT32_MAX };
     std::vector<int32_t> values = {1, 2, 3, 4};
 
     for(int i = 0; i < 4; i++) {
         CborPropertiesConfig_CborPropertyValueType_m property_value(std::allocator_arg, Mrm::GetDefaultPmr());
 
-        property_value.CborPropertyValueType_m_key = CborHelpers::ToZcborString(keys[i]);
+        property_value.CborPropertyValueType_m_key = static_cast<uint32_t>(keys[i]);
         property_value.CborPropertyValueType_m.CborPropertyValueType_choice = CborPropertyValueType_r::CborPropertyValueType_int_c;
         property_value.CborPropertyValueType_m.value = values[i];
         ui_config->properties.CborPropertyValueType_m.push_back(std::move(property_value));
@@ -60,7 +66,7 @@ ZTEST(configuration_service_ui_config, test_CborUiConfig_CborPropertyValueType_i
     zassert_equal(loaded_config.value().config->properties.CborPropertyValueType_m.size(), 4);
 
     for(int i = 0; i < 4; i++) {
-        zassert_equal(CborHelpers::ToStdString(loaded_config.value().config->properties.CborPropertyValueType_m[i].CborPropertyValueType_m_key), keys[i]);
+        zassert_equal(loaded_config.value().config->properties.CborPropertyValueType_m[i].CborPropertyValueType_m_key, static_cast<uint32_t>(keys[i]));
         zassert_equal(loaded_config.value().config->properties.CborPropertyValueType_m[i].CborPropertyValueType_m.CborPropertyValueType_choice, CborPropertyValueType_r::CborPropertyValueType_int_c);
         zassert_equal(std::get<int32_t>(loaded_config.value().config->properties.CborPropertyValueType_m[i].CborPropertyValueType_m.value), values[i]);
     }
@@ -73,13 +79,13 @@ ZTEST(configuration_service_ui_config, test_CborUiConfig_CborPropertyValueType_d
 
     ui_config->properties_present = true;
 
-    std::vector<std::string> keys = {"t_0", "t_1", "t_2", "t_3"};
+    const std::array<uint32_t, 4> keys = { 1, 23, 24, UINT32_MAX };
     std::vector<double> values = {1.1, 2.2, 3.3, 4.4};
 
     for(int i = 0; i < 4; i++) {
         CborPropertiesConfig_CborPropertyValueType_m property_value(std::allocator_arg, Mrm::GetDefaultPmr());
 
-        property_value.CborPropertyValueType_m_key = CborHelpers::ToZcborString(keys[i]);
+        property_value.CborPropertyValueType_m_key = static_cast<uint32_t>(keys[i]);
         property_value.CborPropertyValueType_m.CborPropertyValueType_choice = CborPropertyValueType_r::CborPropertyValueType_float_c;
         property_value.CborPropertyValueType_m.value = values[i];
         ui_config->properties.CborPropertyValueType_m.push_back(std::move(property_value));
@@ -102,7 +108,7 @@ ZTEST(configuration_service_ui_config, test_CborUiConfig_CborPropertyValueType_d
     zassert_equal(loaded_config.value().config->properties.CborPropertyValueType_m.size(), 4);
 
     for(int i = 0; i < 4; i++) {
-        zassert_equal(CborHelpers::ToStdString(loaded_config.value().config->properties.CborPropertyValueType_m[i].CborPropertyValueType_m_key), keys[i]);
+        zassert_equal(loaded_config.value().config->properties.CborPropertyValueType_m[i].CborPropertyValueType_m_key, static_cast<uint32_t>(keys[i]));
         zassert_equal(loaded_config.value().config->properties.CborPropertyValueType_m[i].CborPropertyValueType_m.CborPropertyValueType_choice, CborPropertyValueType_r::CborPropertyValueType_float_c);
         zassert_equal(std::get<double>(loaded_config.value().config->properties.CborPropertyValueType_m[i].CborPropertyValueType_m.value), values[i]);
     }
@@ -115,13 +121,13 @@ ZTEST(configuration_service_ui_config, test_CborUiConfig_CborPropertyValueType_s
 
     ui_config->properties_present = true;
 
-    std::vector<std::string> keys = {"t_0", "t_1", "t_2", "t_3"};
+    const std::array<uint32_t, 4> keys = { 1, 23, 24, UINT32_MAX };
     std::vector<std::string> values = {"v_0", "v_1", "v_2", "v_3"};
 
     for(int i = 0; i < 4; i++) {
         CborPropertiesConfig_CborPropertyValueType_m property_value(std::allocator_arg, Mrm::GetDefaultPmr());
 
-        property_value.CborPropertyValueType_m_key = CborHelpers::ToZcborString(keys[i]);
+        property_value.CborPropertyValueType_m_key = static_cast<uint32_t>(keys[i]);
         property_value.CborPropertyValueType_m.CborPropertyValueType_choice = CborPropertyValueType_r::CborPropertyValueType_tstr_c;
         property_value.CborPropertyValueType_m.value = CborHelpers::ToZcborString(values[i]);
         ui_config->properties.CborPropertyValueType_m.push_back(std::move(property_value));
@@ -144,7 +150,7 @@ ZTEST(configuration_service_ui_config, test_CborUiConfig_CborPropertyValueType_s
     zassert_equal(loaded_config.value().config->properties.CborPropertyValueType_m.size(), 4);
 
     for(int i = 0; i < 4; i++) {
-        zassert_equal(CborHelpers::ToStdString(loaded_config.value().config->properties.CborPropertyValueType_m[i].CborPropertyValueType_m_key), keys[i]);
+        zassert_equal(loaded_config.value().config->properties.CborPropertyValueType_m[i].CborPropertyValueType_m_key, static_cast<uint32_t>(keys[i]));
         zassert_equal(loaded_config.value().config->properties.CborPropertyValueType_m[i].CborPropertyValueType_m.CborPropertyValueType_choice, CborPropertyValueType_r::CborPropertyValueType_tstr_c);
         zassert_equal(CborHelpers::ToStdString(
             std::get<zcbor_string>(loaded_config.value().config->properties.CborPropertyValueType_m[i].CborPropertyValueType_m.value)
@@ -159,13 +165,13 @@ ZTEST(configuration_service_ui_config, test_CborUiConfig_CborPropertyValueType_b
 
     ui_config->properties_present = true;
 
-    std::vector<std::string> keys = {"t_0", "t_1", "t_2", "t_3"};
+    const std::array<uint32_t, 4> keys = { 1, 23, 24, UINT32_MAX };
     std::vector<bool> values = {true, false, true, false};
 
     for(int i = 0; i < 4; i++) {
         CborPropertiesConfig_CborPropertyValueType_m property_value(std::allocator_arg, Mrm::GetDefaultPmr());
 
-        property_value.CborPropertyValueType_m_key = CborHelpers::ToZcborString(keys[i]);
+        property_value.CborPropertyValueType_m_key = static_cast<uint32_t>(keys[i]);
         property_value.CborPropertyValueType_m.CborPropertyValueType_choice = CborPropertyValueType_r::CborPropertyValueType_bool_c;
         property_value.CborPropertyValueType_m.value = values[i];
         ui_config->properties.CborPropertyValueType_m.push_back(std::move(property_value));
@@ -188,7 +194,7 @@ ZTEST(configuration_service_ui_config, test_CborUiConfig_CborPropertyValueType_b
     zassert_equal(loaded_config.value().config->properties.CborPropertyValueType_m.size(), 4);
 
     for(int i = 0; i < 4; i++) {
-        zassert_equal(CborHelpers::ToStdString(loaded_config.value().config->properties.CborPropertyValueType_m[i].CborPropertyValueType_m_key), keys[i]);
+        zassert_equal(loaded_config.value().config->properties.CborPropertyValueType_m[i].CborPropertyValueType_m_key, static_cast<uint32_t>(keys[i]));
         zassert_equal(loaded_config.value().config->properties.CborPropertyValueType_m[i].CborPropertyValueType_m.CborPropertyValueType_choice, CborPropertyValueType_r::CborPropertyValueType_bool_c);
         zassert_equal(std::get<bool>(loaded_config.value().config->properties.CborPropertyValueType_m[i].CborPropertyValueType_m.value), values[i]);
     }
@@ -201,13 +207,13 @@ ZTEST(configuration_service_ui_config, test_CborUiConfig_CborPropertyValueType_i
 
     ui_config->properties_present = true;
 
-    std::vector<std::string> keys = {"t_0", "t_1", "t_2", "t_3"};
+    const std::array<uint32_t, 4> keys = { 1, 23, 24, UINT32_MAX };
     std::pmr::vector<std::pmr::vector<int32_t>> values = {{1, 2, 3}, {4, 5, 6}, {7, 8, 9}, {10, 11, 12}};
 
     for(int i = 0; i < 4; i++) {
         CborPropertiesConfig_CborPropertyValueType_m property_value(std::allocator_arg, Mrm::GetDefaultPmr());
 
-        property_value.CborPropertyValueType_m_key = CborHelpers::ToZcborString(keys[i]);
+        property_value.CborPropertyValueType_m_key = static_cast<uint32_t>(keys[i]);
         property_value.CborPropertyValueType_m.CborPropertyValueType_choice = CborPropertyValueType_r::CborPropertyValueType_int_l_c;
         property_value.CborPropertyValueType_m.value = values[i];
         ui_config->properties.CborPropertyValueType_m.push_back(std::move(property_value));
@@ -230,7 +236,7 @@ ZTEST(configuration_service_ui_config, test_CborUiConfig_CborPropertyValueType_i
     zassert_equal(loaded_config.value().config->properties.CborPropertyValueType_m.size(), 4);
 
     for(int i = 0; i < 4; i++) {
-        zassert_equal(CborHelpers::ToStdString(loaded_config.value().config->properties.CborPropertyValueType_m[i].CborPropertyValueType_m_key), keys[i]);
+        zassert_equal(loaded_config.value().config->properties.CborPropertyValueType_m[i].CborPropertyValueType_m_key, static_cast<uint32_t>(keys[i]));
         zassert_equal(loaded_config.value().config->properties.CborPropertyValueType_m[i].CborPropertyValueType_m.CborPropertyValueType_choice, CborPropertyValueType_r::CborPropertyValueType_int_l_c);
         zassert_equal(std::get<std::pmr::vector<int32_t>>(loaded_config.value().config->properties.CborPropertyValueType_m[i].CborPropertyValueType_m.value), values[i]);
     }
@@ -243,7 +249,7 @@ ZTEST(configuration_service_ui_config, test_CborUiConfig_CborPropertyValueType_s
 
     ui_config->properties_present = true;
 
-    std::vector<std::string> keys = {"t_0", "t_1", "t_2", "t_3"};
+    const std::array<uint32_t, 4> keys = { 1, 23, 24, UINT32_MAX };
     std::vector<std::vector<std::string>> values = {{"v_0", "v_1", "v_2"}, {"v_3", "v_4", "v_5"}, {"v_6", "v_7", "v_8"}, {"v_9", "v_10", "v_11"}};
 
     std::pmr::vector<std::pmr::vector<zcbor_string>> values_zcbor;
@@ -260,7 +266,7 @@ ZTEST(configuration_service_ui_config, test_CborUiConfig_CborPropertyValueType_s
     for(int i = 0; i < 4; i++) {
         CborPropertiesConfig_CborPropertyValueType_m property_value(std::allocator_arg, Mrm::GetDefaultPmr());
 
-        property_value.CborPropertyValueType_m_key = CborHelpers::ToZcborString(keys[i]);
+        property_value.CborPropertyValueType_m_key = static_cast<uint32_t>(keys[i]);
         property_value.CborPropertyValueType_m.CborPropertyValueType_choice = CborPropertyValueType_r::CborPropertyValueType_tstr_l_c;
         property_value.CborPropertyValueType_m.value = values_zcbor[i];
         ui_config->properties.CborPropertyValueType_m.push_back(std::move(property_value));
@@ -283,7 +289,7 @@ ZTEST(configuration_service_ui_config, test_CborUiConfig_CborPropertyValueType_s
     zassert_equal(loaded_config.value().config->properties.CborPropertyValueType_m.size(), 4);
 
     for(int i = 0; i < 4; i++) {
-        zassert_equal(CborHelpers::ToStdString(loaded_config.value().config->properties.CborPropertyValueType_m[i].CborPropertyValueType_m_key), keys[i]);
+        zassert_equal(loaded_config.value().config->properties.CborPropertyValueType_m[i].CborPropertyValueType_m_key, static_cast<uint32_t>(keys[i]));
         zassert_equal(loaded_config.value().config->properties.CborPropertyValueType_m[i].CborPropertyValueType_m.CborPropertyValueType_choice, CborPropertyValueType_r::CborPropertyValueType_tstr_l_c);
 
         for(int j = 0; j < 3; j++) {
@@ -301,7 +307,7 @@ ZTEST(configuration_service_ui_config, test_CborUiConfig_CborPropertyValueType_s
 
     ui_config->properties_present = true;
 
-    std::vector<std::string> keys = {"t_0", "t_1", "t_2", "t_3"};
+    const std::array<uint32_t, 4> keys = { 1, 23, 24, UINT32_MAX };
 
     std::vector<std::map<std::string, std::string>> values = {
         {{"k_0", "v_0"}, {"k_1", "v_1"}, {"k_2", "v_2"}},
@@ -328,7 +334,7 @@ ZTEST(configuration_service_ui_config, test_CborUiConfig_CborPropertyValueType_s
     for(int i = 0; i < 4; i++) {
         CborPropertiesConfig_CborPropertyValueType_m property_value(std::allocator_arg, Mrm::GetDefaultPmr());
 
-        property_value.CborPropertyValueType_m_key = CborHelpers::ToZcborString(keys[i]);
+        property_value.CborPropertyValueType_m_key = static_cast<uint32_t>(keys[i]);
         property_value.CborPropertyValueType_m.CborPropertyValueType_choice = CborPropertyValueType_r::CborPropertyValueType_map_c;
         property_value.CborPropertyValueType_m.value = values_zcbor[i];
         ui_config->properties.CborPropertyValueType_m.push_back(std::move(property_value));
@@ -350,7 +356,7 @@ ZTEST(configuration_service_ui_config, test_CborUiConfig_CborPropertyValueType_s
     zassert_equal(loaded_config.value().config->properties_present, true);
 
     for(int i = 0; i < 4; i++) {
-        zassert_equal(CborHelpers::ToStdString(loaded_config.value().config->properties.CborPropertyValueType_m[i].CborPropertyValueType_m_key), keys[i]);
+        zassert_equal(loaded_config.value().config->properties.CborPropertyValueType_m[i].CborPropertyValueType_m_key, static_cast<uint32_t>(keys[i]));
         zassert_equal(loaded_config.value().config->properties.CborPropertyValueType_m[i].CborPropertyValueType_m.CborPropertyValueType_choice, CborPropertyValueType_r::CborPropertyValueType_map_c);
 
         for(int j = 0; j < 3; j++) {
@@ -375,7 +381,7 @@ ZTEST(configuration_service_ui_config, test_CborUiConfig_CborPropertyValueType_s
 
     ui_config->properties_present = true;
 
-    std::vector<std::string> keys = {"t_0", "t_1", "t_2", "t_3", "t_4", "t_5", "t_6"};
+    const std::array<uint32_t, 7> keys = { 0, 1, 23, 24, 255, 256, UINT32_MAX };
     int32_t uint32_t_value = 46;
     double double_value = 1.1;
     std::string string_value = "string";
@@ -393,35 +399,35 @@ ZTEST(configuration_service_ui_config, test_CborUiConfig_CborPropertyValueType_s
 
     // int32_t
     CborPropertiesConfig_CborPropertyValueType_m property_value_int32_t(std::allocator_arg, Mrm::GetDefaultPmr());
-    property_value_int32_t.CborPropertyValueType_m_key = CborHelpers::ToZcborString(keys[0]);
+    property_value_int32_t.CborPropertyValueType_m_key = static_cast<uint32_t>(keys[0]);
     property_value_int32_t.CborPropertyValueType_m.CborPropertyValueType_choice = CborPropertyValueType_r::CborPropertyValueType_int_c;
     property_value_int32_t.CborPropertyValueType_m.value = uint32_t_value;
     ui_config->properties.CborPropertyValueType_m.push_back(std::move(property_value_int32_t));
 
     // double
     CborPropertiesConfig_CborPropertyValueType_m property_value_double(std::allocator_arg, Mrm::GetDefaultPmr());
-    property_value_double.CborPropertyValueType_m_key = CborHelpers::ToZcborString(keys[1]);
+    property_value_double.CborPropertyValueType_m_key = static_cast<uint32_t>(keys[1]);
     property_value_double.CborPropertyValueType_m.CborPropertyValueType_choice = CborPropertyValueType_r::CborPropertyValueType_float_c;
     property_value_double.CborPropertyValueType_m.value = double_value;
     ui_config->properties.CborPropertyValueType_m.push_back(std::move(property_value_double));
 
     // string
     CborPropertiesConfig_CborPropertyValueType_m property_value_string(std::allocator_arg, Mrm::GetDefaultPmr());
-    property_value_string.CborPropertyValueType_m_key = CborHelpers::ToZcborString(keys[2]);
+    property_value_string.CborPropertyValueType_m_key = static_cast<uint32_t>(keys[2]);
     property_value_string.CborPropertyValueType_m.CborPropertyValueType_choice = CborPropertyValueType_r::CborPropertyValueType_tstr_c;
     property_value_string.CborPropertyValueType_m.value = CborHelpers::ToZcborString(string_value);
     ui_config->properties.CborPropertyValueType_m.push_back(std::move(property_value_string));
 
     // bool
     CborPropertiesConfig_CborPropertyValueType_m property_value_bool(std::allocator_arg, Mrm::GetDefaultPmr());
-    property_value_bool.CborPropertyValueType_m_key = CborHelpers::ToZcborString(keys[3]);
+    property_value_bool.CborPropertyValueType_m_key = static_cast<uint32_t>(keys[3]);
     property_value_bool.CborPropertyValueType_m.CborPropertyValueType_choice = CborPropertyValueType_r::CborPropertyValueType_bool_c;
     property_value_bool.CborPropertyValueType_m.value = bool_value;
     ui_config->properties.CborPropertyValueType_m.push_back(std::move(property_value_bool));
 
     // int vector
     CborPropertiesConfig_CborPropertyValueType_m property_value_int_vector(std::allocator_arg, Mrm::GetDefaultPmr());
-    property_value_int_vector.CborPropertyValueType_m_key = CborHelpers::ToZcborString(keys[4]);
+    property_value_int_vector.CborPropertyValueType_m_key = static_cast<uint32_t>(keys[4]);
     property_value_int_vector.CborPropertyValueType_m.CborPropertyValueType_choice = CborPropertyValueType_r::CborPropertyValueType_int_l_c;
     property_value_int_vector.CborPropertyValueType_m.value = int_vector_value;
     ui_config->properties.CborPropertyValueType_m.push_back(std::move(property_value_int_vector));
@@ -433,7 +439,7 @@ ZTEST(configuration_service_ui_config, test_CborUiConfig_CborPropertyValueType_s
         string_vector_value_zcbor.push_back(CborHelpers::ToZcborString(string_vector_value[i]));
 
     CborPropertiesConfig_CborPropertyValueType_m property_value_string_vector(std::allocator_arg, Mrm::GetDefaultPmr());
-    property_value_string_vector.CborPropertyValueType_m_key = CborHelpers::ToZcborString(keys[5]);
+    property_value_string_vector.CborPropertyValueType_m_key = static_cast<uint32_t>(keys[5]);
     property_value_string_vector.CborPropertyValueType_m.CborPropertyValueType_choice = CborPropertyValueType_r::CborPropertyValueType_tstr_l_c;
     property_value_string_vector.CborPropertyValueType_m.value = string_vector_value_zcbor;
     ui_config->properties.CborPropertyValueType_m.push_back(std::move(property_value_string_vector));
@@ -449,7 +455,7 @@ ZTEST(configuration_service_ui_config, test_CborUiConfig_CborPropertyValueType_s
     }
 
     CborPropertiesConfig_CborPropertyValueType_m property_value_string_map(std::allocator_arg, Mrm::GetDefaultPmr());
-    property_value_string_map.CborPropertyValueType_m_key = CborHelpers::ToZcborString(keys[6]);
+    property_value_string_map.CborPropertyValueType_m_key = static_cast<uint32_t>(keys[6]);
     property_value_string_map.CborPropertyValueType_m.CborPropertyValueType_choice = CborPropertyValueType_r::CborPropertyValueType_map_c;
     property_value_string_map.CborPropertyValueType_m.value = string_map_value_zcbor;
     ui_config->properties.CborPropertyValueType_m.push_back(std::move(property_value_string_map));
@@ -472,32 +478,32 @@ ZTEST(configuration_service_ui_config, test_CborUiConfig_CborPropertyValueType_s
     zassert_equal(loaded_config.value().config->properties.CborPropertyValueType_m.size(), 7);
 
     // int32_t
-    zassert_equal(CborHelpers::ToStdString(loaded_config.value().config->properties.CborPropertyValueType_m[0].CborPropertyValueType_m_key), keys[0]);
+    zassert_equal(loaded_config.value().config->properties.CborPropertyValueType_m[0].CborPropertyValueType_m_key, static_cast<uint32_t>(keys[0]));
     zassert_equal(loaded_config.value().config->properties.CborPropertyValueType_m[0].CborPropertyValueType_m.CborPropertyValueType_choice, CborPropertyValueType_r::CborPropertyValueType_int_c);
     zassert_equal(std::get<int32_t>(loaded_config.value().config->properties.CborPropertyValueType_m[0].CborPropertyValueType_m.value), uint32_t_value);
 
     // double
-    zassert_equal(CborHelpers::ToStdString(loaded_config.value().config->properties.CborPropertyValueType_m[1].CborPropertyValueType_m_key), keys[1]);
+    zassert_equal(loaded_config.value().config->properties.CborPropertyValueType_m[1].CborPropertyValueType_m_key, static_cast<uint32_t>(keys[1]));
     zassert_equal(loaded_config.value().config->properties.CborPropertyValueType_m[1].CborPropertyValueType_m.CborPropertyValueType_choice, CborPropertyValueType_r::CborPropertyValueType_float_c);
     zassert_equal(std::get<double>(loaded_config.value().config->properties.CborPropertyValueType_m[1].CborPropertyValueType_m.value), double_value);
 
     // string
-    zassert_equal(CborHelpers::ToStdString(loaded_config.value().config->properties.CborPropertyValueType_m[2].CborPropertyValueType_m_key), keys[2]);
+    zassert_equal(loaded_config.value().config->properties.CborPropertyValueType_m[2].CborPropertyValueType_m_key, static_cast<uint32_t>(keys[2]));
     zassert_equal(loaded_config.value().config->properties.CborPropertyValueType_m[2].CborPropertyValueType_m.CborPropertyValueType_choice, CborPropertyValueType_r::CborPropertyValueType_tstr_c);
     zassert_equal(CborHelpers::ToStdString(std::get<zcbor_string>(loaded_config.value().config->properties.CborPropertyValueType_m[2].CborPropertyValueType_m.value)), string_value);
 
     // bool
-    zassert_equal(CborHelpers::ToStdString(loaded_config.value().config->properties.CborPropertyValueType_m[3].CborPropertyValueType_m_key), keys[3]);
+    zassert_equal(loaded_config.value().config->properties.CborPropertyValueType_m[3].CborPropertyValueType_m_key, static_cast<uint32_t>(keys[3]));
     zassert_equal(loaded_config.value().config->properties.CborPropertyValueType_m[3].CborPropertyValueType_m.CborPropertyValueType_choice, CborPropertyValueType_r::CborPropertyValueType_bool_c);
     zassert_equal(std::get<bool>(loaded_config.value().config->properties.CborPropertyValueType_m[3].CborPropertyValueType_m.value), bool_value);
 
     // int vector
-    zassert_equal(CborHelpers::ToStdString(loaded_config.value().config->properties.CborPropertyValueType_m[4].CborPropertyValueType_m_key), keys[4]);
+    zassert_equal(loaded_config.value().config->properties.CborPropertyValueType_m[4].CborPropertyValueType_m_key, static_cast<uint32_t>(keys[4]));
     zassert_equal(loaded_config.value().config->properties.CborPropertyValueType_m[4].CborPropertyValueType_m.CborPropertyValueType_choice, CborPropertyValueType_r::CborPropertyValueType_int_l_c);
     zassert_equal(std::get<std::pmr::vector<int32_t>>(loaded_config.value().config->properties.CborPropertyValueType_m[4].CborPropertyValueType_m.value), int_vector_value);
 
     // string vector
-    zassert_equal(CborHelpers::ToStdString(loaded_config.value().config->properties.CborPropertyValueType_m[5].CborPropertyValueType_m_key), keys[5]);
+    zassert_equal(loaded_config.value().config->properties.CborPropertyValueType_m[5].CborPropertyValueType_m_key, static_cast<uint32_t>(keys[5]));
     zassert_equal(loaded_config.value().config->properties.CborPropertyValueType_m[5].CborPropertyValueType_m.CborPropertyValueType_choice, CborPropertyValueType_r::CborPropertyValueType_tstr_l_c);
     for(int i = 0; i < string_vector_value.size(); i++)
         zassert_equal(
@@ -506,7 +512,7 @@ ZTEST(configuration_service_ui_config, test_CborUiConfig_CborPropertyValueType_s
             string_vector_value[i]);
 
     // string map
-    zassert_equal(CborHelpers::ToStdString(loaded_config.value().config->properties.CborPropertyValueType_m[6].CborPropertyValueType_m_key), keys[6]);
+    zassert_equal(loaded_config.value().config->properties.CborPropertyValueType_m[6].CborPropertyValueType_m_key, static_cast<uint32_t>(keys[6]));
     zassert_equal(loaded_config.value().config->properties.CborPropertyValueType_m[6].CborPropertyValueType_m.CborPropertyValueType_choice, CborPropertyValueType_r::CborPropertyValueType_map_c);
     for(int j = 0; j < 3; j++) {
         auto key = CborHelpers::ToStdString(
@@ -529,13 +535,13 @@ ZTEST(configuration_service_ui_config, test_CborUiConfig_Save_successfully_saved
 
     ui_config->properties_present = true;
 
-    std::vector<std::string> keys = {"t_0", "t_1", "t_2", "t_3"};
+    const std::array<uint32_t, 4> keys = { 1, 23, 24, UINT32_MAX };
     std::vector<int32_t> values = {1, 2, 3, 4};
 
     for(int i = 0; i < 4; i++) {
         CborPropertiesConfig_CborPropertyValueType_m property_value(std::allocator_arg, Mrm::GetDefaultPmr());
 
-        property_value.CborPropertyValueType_m_key = CborHelpers::ToZcborString(keys[i]);
+        property_value.CborPropertyValueType_m_key = static_cast<uint32_t>(keys[i]);
         property_value.CborPropertyValueType_m.CborPropertyValueType_choice = CborPropertyValueType_r::CborPropertyValueType_int_c;
         property_value.CborPropertyValueType_m.value = values[i];
         ui_config->properties.CborPropertyValueType_m.push_back(std::move(property_value));
@@ -553,6 +559,11 @@ ZTEST(configuration_service_ui_config, test_CborUiConfig_Save_successfully_saved
     screen.grid.height = 100;
     screen.grid.spacing_px = 10;
 
+    const std::array widget_keys = {
+        WidgetPropertyType::MIN_VALUE, WidgetPropertyType::MAX_VALUE,
+        WidgetPropertyType::STEP, WidgetPropertyType::WIDTH_PX
+    };
+
     // First widget
     CborWidgetConfig widget1(std::allocator_arg, Mrm::GetDefaultPmr());
     widget1.type = 1;
@@ -565,7 +576,7 @@ ZTEST(configuration_service_ui_config, test_CborUiConfig_Save_successfully_saved
     widget1.properties_present = true;
 
     CborPropertiesConfig_CborPropertyValueType_m prop1(std::allocator_arg, Mrm::GetDefaultPmr());
-    prop1.CborPropertyValueType_m_key = CborHelpers::ToZcborString(keys[0]);
+    prop1.CborPropertyValueType_m_key = static_cast<uint32_t>(widget_keys[0]);
     prop1.CborPropertyValueType_m.value = values[0];
     prop1.CborPropertyValueType_m.CborPropertyValueType_choice = CborPropertyValueType_r::CborPropertyValueType_int_c;
     widget1.properties.CborPropertyValueType_m.push_back(std::move(prop1));
@@ -584,25 +595,25 @@ ZTEST(configuration_service_ui_config, test_CborUiConfig_Save_successfully_saved
     widget2.properties_present = true;
 
     CborPropertiesConfig_CborPropertyValueType_m prop2_1(std::allocator_arg, Mrm::GetDefaultPmr());
-    prop2_1.CborPropertyValueType_m_key = CborHelpers::ToZcborString(keys[0]);
+    prop2_1.CborPropertyValueType_m_key = static_cast<uint32_t>(widget_keys[0]);
     prop2_1.CborPropertyValueType_m.value = values[0];
     prop2_1.CborPropertyValueType_m.CborPropertyValueType_choice = CborPropertyValueType_r::CborPropertyValueType_int_c;
     widget2.properties.CborPropertyValueType_m.push_back(std::move(prop2_1));
 
     CborPropertiesConfig_CborPropertyValueType_m prop2_2(std::allocator_arg, Mrm::GetDefaultPmr());
-    prop2_2.CborPropertyValueType_m_key = CborHelpers::ToZcborString(keys[1]);
+    prop2_2.CborPropertyValueType_m_key = static_cast<uint32_t>(widget_keys[1]);
     prop2_2.CborPropertyValueType_m.value = values[1];
     prop2_2.CborPropertyValueType_m.CborPropertyValueType_choice = CborPropertyValueType_r::CborPropertyValueType_int_c;
     widget2.properties.CborPropertyValueType_m.push_back(std::move(prop2_2));
 
     CborPropertiesConfig_CborPropertyValueType_m prop2_3(std::allocator_arg, Mrm::GetDefaultPmr());
-    prop2_3.CborPropertyValueType_m_key = CborHelpers::ToZcborString(keys[2]);
+    prop2_3.CborPropertyValueType_m_key = static_cast<uint32_t>(widget_keys[2]);
     prop2_3.CborPropertyValueType_m.value = values[2];
     prop2_3.CborPropertyValueType_m.CborPropertyValueType_choice = CborPropertyValueType_r::CborPropertyValueType_int_c;
     widget2.properties.CborPropertyValueType_m.push_back(std::move(prop2_3));
 
     CborPropertiesConfig_CborPropertyValueType_m prop2_4(std::allocator_arg, Mrm::GetDefaultPmr());
-    prop2_4.CborPropertyValueType_m_key = CborHelpers::ToZcborString(keys[3]);
+    prop2_4.CborPropertyValueType_m_key = static_cast<uint32_t>(widget_keys[3]);
     prop2_4.CborPropertyValueType_m.value = values[3];
     prop2_4.CborPropertyValueType_m.CborPropertyValueType_choice = CborPropertyValueType_r::CborPropertyValueType_int_c;
     widget2.properties.CborPropertyValueType_m.push_back(std::move(prop2_4));
@@ -629,7 +640,7 @@ ZTEST(configuration_service_ui_config, test_CborUiConfig_Save_successfully_saved
     zassert_equal(loaded_config.value().config->properties.CborPropertyValueType_m.size(), 4);
 
     for(int i = 0; i < 4; i++) {
-        zassert_equal(CborHelpers::ToStdString(loaded_config.value().config->properties.CborPropertyValueType_m[i].CborPropertyValueType_m_key), keys[i]);
+        zassert_equal(loaded_config.value().config->properties.CborPropertyValueType_m[i].CborPropertyValueType_m_key, static_cast<uint32_t>(keys[i]));
         zassert_equal(loaded_config.value().config->properties.CborPropertyValueType_m[i].CborPropertyValueType_m.CborPropertyValueType_choice, CborPropertyValueType_r::CborPropertyValueType_int_c);
         zassert_equal(std::get<int32_t>(loaded_config.value().config->properties.CborPropertyValueType_m[i].CborPropertyValueType_m.value), values[i]);
     }
@@ -656,7 +667,7 @@ ZTEST(configuration_service_ui_config, test_CborUiConfig_Save_successfully_saved
     zassert_equal(loaded_config.value().config->CborScreenConfig_m[0].CborWidgetConfig_m[0].CborPropertyBinding_m.size(), 0U);
     zassert_equal(loaded_config.value().config->CborScreenConfig_m[0].CborWidgetConfig_m[0].properties_present, true);
     zassert_equal(loaded_config.value().config->CborScreenConfig_m[0].CborWidgetConfig_m[0].properties.CborPropertyValueType_m.size(), 1);
-    zassert_equal(CborHelpers::ToStdString(loaded_config.value().config->CborScreenConfig_m[0].CborWidgetConfig_m[0].properties.CborPropertyValueType_m[0].CborPropertyValueType_m_key), keys[0]);
+    zassert_equal(loaded_config.value().config->CborScreenConfig_m[0].CborWidgetConfig_m[0].properties.CborPropertyValueType_m[0].CborPropertyValueType_m_key, static_cast<uint32_t>(widget_keys[0]));
     zassert_equal(loaded_config.value().config->CborScreenConfig_m[0].CborWidgetConfig_m[0].properties.CborPropertyValueType_m[0].CborPropertyValueType_m.CborPropertyValueType_choice, CborPropertyValueType_r::CborPropertyValueType_int_c);
     zassert_equal(std::get<int32_t>(loaded_config.value().config->CborScreenConfig_m[0].CborWidgetConfig_m[0].properties.CborPropertyValueType_m[0].CborPropertyValueType_m.value), values[0]);
 
@@ -670,16 +681,16 @@ ZTEST(configuration_service_ui_config, test_CborUiConfig_Save_successfully_saved
     zassert_equal(loaded_config.value().config->CborScreenConfig_m[0].CborWidgetConfig_m[1].CborPropertyBinding_m.size(), 0U);
     zassert_equal(loaded_config.value().config->CborScreenConfig_m[0].CborWidgetConfig_m[1].properties_present, true);
     zassert_equal(loaded_config.value().config->CborScreenConfig_m[0].CborWidgetConfig_m[1].properties.CborPropertyValueType_m.size(), 4);
-    zassert_equal(CborHelpers::ToStdString(loaded_config.value().config->CborScreenConfig_m[0].CborWidgetConfig_m[1].properties.CborPropertyValueType_m[0].CborPropertyValueType_m_key), keys[0]);
+    zassert_equal(loaded_config.value().config->CborScreenConfig_m[0].CborWidgetConfig_m[1].properties.CborPropertyValueType_m[0].CborPropertyValueType_m_key, static_cast<uint32_t>(widget_keys[0]));
     zassert_equal(loaded_config.value().config->CborScreenConfig_m[0].CborWidgetConfig_m[1].properties.CborPropertyValueType_m[0].CborPropertyValueType_m.CborPropertyValueType_choice, CborPropertyValueType_r::CborPropertyValueType_int_c);
     zassert_equal(std::get<int32_t>(loaded_config.value().config->CborScreenConfig_m[0].CborWidgetConfig_m[1].properties.CborPropertyValueType_m[0].CborPropertyValueType_m.value), values[0]);
-    zassert_equal(CborHelpers::ToStdString(loaded_config.value().config->CborScreenConfig_m[0].CborWidgetConfig_m[1].properties.CborPropertyValueType_m[1].CborPropertyValueType_m_key), keys[1]);
+    zassert_equal(loaded_config.value().config->CborScreenConfig_m[0].CborWidgetConfig_m[1].properties.CborPropertyValueType_m[1].CborPropertyValueType_m_key, static_cast<uint32_t>(widget_keys[1]));
     zassert_equal(loaded_config.value().config->CborScreenConfig_m[0].CborWidgetConfig_m[1].properties.CborPropertyValueType_m[1].CborPropertyValueType_m.CborPropertyValueType_choice, CborPropertyValueType_r::CborPropertyValueType_int_c);
     zassert_equal(std::get<int32_t>(loaded_config.value().config->CborScreenConfig_m[0].CborWidgetConfig_m[1].properties.CborPropertyValueType_m[1].CborPropertyValueType_m.value), values[1]);
-    zassert_equal(CborHelpers::ToStdString(loaded_config.value().config->CborScreenConfig_m[0].CborWidgetConfig_m[1].properties.CborPropertyValueType_m[2].CborPropertyValueType_m_key), keys[2]);
+    zassert_equal(loaded_config.value().config->CborScreenConfig_m[0].CborWidgetConfig_m[1].properties.CborPropertyValueType_m[2].CborPropertyValueType_m_key, static_cast<uint32_t>(widget_keys[2]));
     zassert_equal(loaded_config.value().config->CborScreenConfig_m[0].CborWidgetConfig_m[1].properties.CborPropertyValueType_m[2].CborPropertyValueType_m.CborPropertyValueType_choice, CborPropertyValueType_r::CborPropertyValueType_int_c);
     zassert_equal(std::get<int32_t>(loaded_config.value().config->CborScreenConfig_m[0].CborWidgetConfig_m[1].properties.CborPropertyValueType_m[2].CborPropertyValueType_m.value), values[2]);
-    zassert_equal(CborHelpers::ToStdString(loaded_config.value().config->CborScreenConfig_m[0].CborWidgetConfig_m[1].properties.CborPropertyValueType_m[3].CborPropertyValueType_m_key), keys[3]);
+    zassert_equal(loaded_config.value().config->CborScreenConfig_m[0].CborWidgetConfig_m[1].properties.CborPropertyValueType_m[3].CborPropertyValueType_m_key, static_cast<uint32_t>(widget_keys[3]));
     zassert_equal(loaded_config.value().config->CborScreenConfig_m[0].CborWidgetConfig_m[1].properties.CborPropertyValueType_m[3].CborPropertyValueType_m.CborPropertyValueType_choice, CborPropertyValueType_r::CborPropertyValueType_int_c);
     zassert_equal(std::get<int32_t>(loaded_config.value().config->CborScreenConfig_m[0].CborWidgetConfig_m[1].properties.CborPropertyValueType_m[3].CborPropertyValueType_m.value), values[3]);
 }

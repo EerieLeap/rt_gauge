@@ -13,8 +13,8 @@
 
 #include "views_test_support.h"
 
-using eerie_leap::domain::ui_domain::models::WidgetProperty;
 using eerie_leap::domain::ui_domain::models::WidgetPropertyType;
+using eerie_leap::domain::ui_domain::models::IsValidWidgetPropertyType;
 using eerie_leap::views::utilitites::Frame;
 using eerie_leap::views::widgets::WidgetContext;
 using eerie_leap::views::widgets::indicators::BarIndicator;
@@ -90,11 +90,11 @@ ZTEST(widget_supported_properties, test_a_widget_reports_the_properties_of_its_d
     zassert_true(Supports(supported, WidgetPropertyType::POSITION_Y));
 }
 
-ZTEST(widget_supported_properties, test_every_reported_property_has_a_name) {
+ZTEST(widget_supported_properties, test_every_reported_property_is_a_valid_type) {
     DialIndicator dial(1, MakeRoot(), WidgetContext { });
 
     for(auto type : dial.GetSupportedProperties()) {
         zassert_not_equal(type, WidgetPropertyType::NONE);
-        zassert_not_null(WidgetProperty::GetTypeName(type));
+        zassert_true(IsValidWidgetPropertyType(type));
     }
 }
