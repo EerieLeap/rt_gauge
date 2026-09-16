@@ -1,12 +1,14 @@
 #include <algorithm>
 #include <utility>
 
+#include "domain/ui_domain/utilities/widget_property_validation.h"
 #include "subsys/threading/scoped_mutex.h"
 
 #include "widget_property_store.h"
 
 namespace eerie_leap::views::widgets {
 
+using eerie_leap::domain::ui_domain::utilities::IsValidWidgetAppearanceValue;
 using eerie_leap::subsys::threading::ScopedMutex;
 
 WidgetPropertyStore::WidgetPropertyStore() {
@@ -71,7 +73,7 @@ bool WidgetPropertyStore::Set(WidgetPropertyType type, const ConfigValue& value)
     ScopedMutex guard(lock_);
 
     auto* entry = Find(type);
-    if(entry == nullptr)
+    if(entry == nullptr || !IsValidWidgetAppearanceValue(type, value))
         return false;
 
     entry->value = value;

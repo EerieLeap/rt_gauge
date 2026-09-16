@@ -45,6 +45,7 @@ using eerie_leap::event_bus::EventChannelId;
 using eerie_leap::event_bus::InitializeEventChannels;
 using eerie_leap::subsys::event_bus::AnySubscription;
 using eerie_leap::subsys::event_bus::CreateScopedSubscription;
+using eerie_leap::subsys::event_bus::EventData;
 using eerie_leap::utilities::memory::Mrm;
 using eerie_leap::utilities::string::StringHelpers;
 using eerie_leap::utilities::type::ConfigValue;
@@ -65,6 +66,12 @@ constexpr const char* OTHER_SENSOR_ID = "sensor_2";
 constexpr const char* SETTING_ID = "display.brightness";
 constexpr int DISPATCH_TIMEOUT_MS = 1000;
 constexpr int NO_DISPATCH_TIMEOUT_MS = 200;
+
+constexpr WidgetPropertyType color_properties[] = {
+    WidgetPropertyType::COLOR_PRIMARY_ACTIVE, WidgetPropertyType::COLOR_PRIMARY_INACTIVE,
+    WidgetPropertyType::COLOR_SECONDARY_ACTIVE, WidgetPropertyType::COLOR_SECONDARY_INACTIVE,
+    WidgetPropertyType::COLOR_TERTIARY_ACTIVE, WidgetPropertyType::COLOR_TERTIARY_INACTIVE
+};
 
 std::shared_ptr<Frame> MakeRoot() {
     return std::make_shared<Frame>(Frame::CreateWrapped()
@@ -97,6 +104,9 @@ private:
 
         store.Register(WidgetPropertyType::VALUE, ConfigValue { 0.0 }, PropertyChangeEffect::None);
         store.Register(WidgetPropertyType::LABEL, ConfigValue { std::pmr::string { } }, PropertyChangeEffect::None);
+        store.Register(WidgetPropertyType::OPACITY, ConfigValue { 255 }, PropertyChangeEffect::None);
+        for(auto type : color_properties)
+            store.Register(type, ConfigValue { std::pmr::string { } }, PropertyChangeEffect::None);
     }
 
     void OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) override {
@@ -139,7 +149,7 @@ PropertyBinding SettingBinding(PropertyBindingDirection direction) {
 }
 
 // Published synchronously so a test observes the result without waiting on the bus worker.
-void PublishSensor(const char* sensor_id, float value) {
+void PublishSensor(const char* sensor_id, const EventData& value) {
     SensorEventsChannel::GetInstance().Publish({
         .source_id = 0,
         .type = SensorEventType::DataUpdated,
@@ -226,6 +236,92 @@ void* SetUp() {
 } // namespace
 
 ZTEST_SUITE(widget_bindings, NULL, SetUp, NULL, CleanTestDisplay, NULL);
+
+ZTEST(widget_bindings, test_color_store_rejects_invalid_updates_and_accepts_reset) {
+    WidgetPropertyStore store;
+    const ConfigValue invalid_values[] = {
+        {}, 0, 255, 128.0, true, false, std::pmr::string("#3366FF"), std::pmr::string("#3366FF8G"),
+        std::pmr::string("#3366FF80\0", 10)
+    };
+    for(auto type : color_properties) {
+        store.Register(type, std::pmr::string{}, PropertyChangeEffect::None);
+        zassert_true(std::get<std::pmr::string>(store.Get(type)).empty());
+        for(auto text : { "#3366fF80", "#00000000", "#FFFFFFFF" }) {
+            ConfigValue color = std::pmr::string(text, Mrm::GetExtPmr());
+            zassert_true(store.Set(type, color));
+            for(const auto& value : invalid_values) {
+                zassert_false(store.Set(type, value));
+                zassert_true(store.Get(type) == color);
+            }
+        }
+        zassert_true(store.Set(type, std::pmr::string{}));
+        zassert_true(std::get<std::pmr::string>(store.Get(type)).empty());
+    }
+}
+
+ZTEST(widget_bindings, test_opacity_store_rejects_invalid_updates_without_changing_value) {
+    WidgetPropertyStore store;
+    store.Register(WidgetPropertyType::OPACITY, 255, PropertyChangeEffect::None);
+    zassert_equal(std::get<int>(store.Get(WidgetPropertyType::OPACITY)), 255);
+    const ConfigValue invalid_values[] = {
+        {}, -1, 256, INT32_MIN, INT32_MAX, 0.0, 128.5, 255.0, true, false, std::pmr::string("128")
+    };
+    for(int opacity : { 0, 128, 255 }) {
+        zassert_true(store.Set(WidgetPropertyType::OPACITY, opacity));
+        for(const auto& value : invalid_values) {
+            zassert_false(store.Set(WidgetPropertyType::OPACITY, value));
+            zassert_equal(std::get<int>(store.Get(WidgetPropertyType::OPACITY)), opacity);
+        }
+    }
+}
+
+ZTEST(widget_bindings, test_color_bindings_preserve_exact_rgba_and_reject_invalid_input) {
+    const EventData invalid_values[] = {
+        0, uint32_t{255}, 128.0F, true, false, std::string("#3366FF"), std::string("3366FF80"),
+        std::string("#3366FF8G"), std::string("#3366FF80\0", 10)
+    };
+    for(auto type : color_properties) {
+        auto configuration = MakeConfiguration();
+        configuration->bindings.push_back(SensorBinding(type, SENSOR_ID));
+        auto widget = MakeActiveWidget(std::move(configuration));
+        for(auto text : { "#3366fF80", "#00000000", "#FFFFFFFF", "" }) {
+            PublishSensor(SENSOR_ID, std::string(text));
+            zassert_true(std::get<std::pmr::string>(widget->Read(type)) == text);
+            zassert_equal(widget->notified.size(), 1U);
+            widget->notified.clear();
+            for(const auto& value : invalid_values) {
+                PublishSensor(SENSOR_ID, value);
+                zassert_true(std::get<std::pmr::string>(widget->Read(type)) == text);
+                zassert_true(widget->notified.empty());
+            }
+        }
+    }
+}
+
+ZTEST(widget_bindings, test_opacity_bindings_validate_before_numeric_coercion) {
+    auto configuration = MakeConfiguration();
+    configuration->bindings.push_back(SensorBinding(WidgetPropertyType::OPACITY, SENSOR_ID));
+    auto widget = MakeActiveWidget(std::move(configuration));
+    zassert_equal(std::get<int>(widget->Read(WidgetPropertyType::OPACITY)), 255);
+    const EventData invalid_values[] = {
+        -1, 256, INT32_MIN, INT32_MAX, uint32_t{256}, UINT32_MAX,
+        0.0F, 128.5F, 255.0F, true, false, std::string("128")
+    };
+    const EventData valid_values[] = { 0, 128, 255, uint32_t{0}, uint32_t{128}, uint32_t{255} };
+    for(const auto& opacity : valid_values) {
+        PublishSensor(SENSOR_ID, opacity);
+        int expected = std::holds_alternative<int>(opacity)
+            ? std::get<int>(opacity) : static_cast<int>(std::get<uint32_t>(opacity));
+        zassert_equal(std::get<int>(widget->Read(WidgetPropertyType::OPACITY)), expected);
+        zassert_equal(widget->notified.size(), 1U);
+        widget->notified.clear();
+        for(const auto& value : invalid_values) {
+            PublishSensor(SENSOR_ID, value);
+            zassert_equal(std::get<int>(widget->Read(WidgetPropertyType::OPACITY)), expected);
+            zassert_true(widget->notified.empty());
+        }
+    }
+}
 
 ZTEST(widget_bindings, test_a_binding_delivers_an_event_value_to_its_property) {
     auto configuration = MakeConfiguration();

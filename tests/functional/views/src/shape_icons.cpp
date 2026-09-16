@@ -518,7 +518,7 @@ ZTEST(shape_icons, test_arc_repositions_when_shape_height_changes) {
 
 ZTEST(shape_icons, test_theme_and_active_state_repaint_without_rebuilding_geometry) {
     class BlueTheme : public DefaultTheme {
-        Color GetAccentColor() const override { return Color(0x3366FF, 128); }
+        LvglColor GetAccentColor() const override { return LvglColor(0x3366FF, 128); }
     };
     auto widget = MakeWidget(Configuration(IconType::Rectangle, 32, 32));
     const auto* data = Mask(*widget).data;

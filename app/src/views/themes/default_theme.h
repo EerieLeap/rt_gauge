@@ -8,44 +8,44 @@ namespace eerie_leap::views::themes {
 
 class DefaultTheme : public ITheme {
 public:
-    Color GetPrimaryColor() const override {
-        return Color(0x0F0F0F); // Dark gray
+    LvglColor GetPrimaryColor() const override {
+        return LvglColor(0x0F0F0F); // Dark gray
     }
 
-    Color GetSecondaryColor() const override {
-        return Color(0x1BBE5F); // Green
+    LvglColor GetSecondaryColor() const override {
+        return LvglColor(0x1BBE5F); // Green
     }
 
-    Color GetInactiveColor() const override {
-        return Color(0x919191); // Medium gray
+    LvglColor GetInactiveColor() const override {
+        return LvglColor(0x919191); // Medium gray
     }
 
-    Color GetBackgroundColor() const override {
-        return Color(0xFFFFFF); // White
+    LvglColor GetBackgroundColor() const override {
+        return LvglColor(0xFFFFFF); // White
     }
 
-    Color GetSurfaceColor() const override {
-        return Color(0xF5F5F5); // Light gray
+    LvglColor GetSurfaceColor() const override {
+        return LvglColor(0xF5F5F5); // Light gray
     }
 
-    Color GetAccentColor() const override {
-        return Color(0xF56060); // Red
+    LvglColor GetAccentColor() const override {
+        return LvglColor(0xF56060); // Red
     }
 
-    Color GetErrorColor() const override {
-        return Color(0xF44336); // Red
+    LvglColor GetErrorColor() const override {
+        return LvglColor(0xF44336); // Red
     }
 
-    Font GetPrimaryFont() const override {
-        return Font("Montserrat", &lv_font_rubik_medium_20, 20);
+    LvglFont GetPrimaryFont() const override {
+        return LvglFont("Montserrat", &lv_font_rubik_medium_20, 20);
     }
 
-    Font GetSecondaryFont() const override {
-        return Font("Montserrat", &lv_font_montserrat_20, 20);
+    LvglFont GetSecondaryFont() const override {
+        return LvglFont("Montserrat", &lv_font_montserrat_20, 20);
     }
 
-    Font GetPrimaryFontLarge() const override {
-        return Font("Inconsolata", &lv_font_inconsolata_bold_120, 120);
+    LvglFont GetPrimaryFontLarge() const override {
+        return LvglFont("Inconsolata", &lv_font_inconsolata_bold_120, 120);
     }
 };
 

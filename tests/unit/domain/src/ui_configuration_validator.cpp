@@ -91,6 +91,47 @@ ZTEST(ui_configuration_validator, test_valid_configuration) {
     zassert_true(Validates(*MakeConfiguration()));
 }
 
+ZTEST(ui_configuration_validator, test_color_properties_require_rgba_text_or_empty_reset) {
+    auto configuration = MakeConfiguration();
+    auto& properties = configuration->screen_configurations[0]->widget_configurations[0]->properties;
+    const ConfigValue invalid_values[] = {
+        {}, 0, 255, 128.0, true, false, std::pmr::string("#3366FF"), std::pmr::string("3366FF80"),
+        std::pmr::string("#3366FF8G"), std::pmr::string("#3366FF800"), std::pmr::string("#3366FF80\0", 10)
+    };
+    for(auto type : { WidgetPropertyType::COLOR_PRIMARY_ACTIVE, WidgetPropertyType::COLOR_PRIMARY_INACTIVE,
+            WidgetPropertyType::COLOR_SECONDARY_ACTIVE, WidgetPropertyType::COLOR_SECONDARY_INACTIVE,
+            WidgetPropertyType::COLOR_TERTIARY_ACTIVE, WidgetPropertyType::COLOR_TERTIARY_INACTIVE }) {
+        for(auto text : { "", "#00000000", "#FFFFFFFF", "#3366fF80" }) {
+            properties[type] = std::pmr::string(text, Mrm::GetExtPmr());
+            zassert_true(Validates(*configuration));
+        }
+        for(const auto& value : invalid_values) {
+            properties[type] = value;
+            zassert_false(Validates(*configuration));
+        }
+        properties.erase(type);
+        zassert_true(Validates(*configuration));
+    }
+}
+
+ZTEST(ui_configuration_validator, test_opacity_requires_an_integer_in_byte_range) {
+    auto configuration = MakeConfiguration();
+    auto& properties = configuration->screen_configurations[0]->widget_configurations[0]->properties;
+    for(int opacity : { 0, 128, 255 }) {
+        properties[WidgetPropertyType::OPACITY] = opacity;
+        zassert_true(Validates(*configuration));
+    }
+    const ConfigValue invalid_values[] = {
+        {}, -1, 256, INT32_MIN, INT32_MAX, 0.0, 128.5, 255.0, true, false, std::pmr::string("128")
+    };
+    for(const auto& value : invalid_values) {
+        properties[WidgetPropertyType::OPACITY] = value;
+        zassert_false(Validates(*configuration));
+    }
+    properties.erase(WidgetPropertyType::OPACITY);
+    zassert_true(Validates(*configuration));
+}
+
 ZTEST(ui_configuration_validator, test_fill_mode_accepts_only_known_numeric_modes) {
     auto configuration = MakeConfiguration();
     auto& properties = configuration->screen_configurations[0]->widget_configurations[0]->properties;

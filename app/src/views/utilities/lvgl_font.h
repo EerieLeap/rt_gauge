@@ -1,19 +1,20 @@
 #pragma once
 
+#include <cstdint>
 #include <string>
 
 #include <lvgl.h>
 
-namespace eerie_leap::views::themes::types {
+namespace eerie_leap::views::utilities {
 
-struct Font {
+struct LvglFont {
 private:
     const lv_font_t* lv_font_;
 
 public:
     const std::string name;
 
-    Font(const std::string& name, const lv_font_t* font, uint32_t size)
+    LvglFont(const std::string& name, const lv_font_t* font, uint32_t size)
         : lv_font_(font), name(name) { }
 
     [[nodiscard]] const lv_font_t* ToLvFont() const {
@@ -21,4 +22,4 @@ public:
     }
 };
 
-} // namespace eerie_leap::views::themes::types
+} // namespace eerie_leap::views::utilities

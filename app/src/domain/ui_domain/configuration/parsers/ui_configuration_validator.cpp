@@ -7,12 +7,14 @@
 #include "domain/ui_domain/models/widget_direction.h"
 #include "domain/ui_domain/models/widget_fill_mode.h"
 #include "domain/ui_domain/models/widget_property.h"
+#include "domain/ui_domain/utilities/widget_property_validation.h"
 
 #include "ui_configuration_validator.h"
 
 namespace eerie_leap::domain::ui_domain::configuration::parsers {
 
 using namespace eerie_leap::domain::ui_domain::models;
+using namespace eerie_leap::domain::ui_domain::utilities;
 
 // Matches the screen count the persisted CBOR schema allows.
 static constexpr std::size_t max_screen_count = 24;
@@ -24,6 +26,9 @@ enum class PropertyValueKind {
 };
 
 static PropertyValueKind GetPropertyValueKind(WidgetPropertyType type) {
+    if(IsWidgetColorProperty(type))
+        return PropertyValueKind::Text;
+
     switch(type) {
         case WidgetPropertyType::IS_ACTIVE:
         case WidgetPropertyType::IS_SMOOTHED:
@@ -77,6 +82,9 @@ static std::string GetWidgetPropertyValidationError(WidgetPropertyType type, con
 
     if(!HoldsPropertyValueKind(value, GetPropertyValueKind(type)))
         return "Invalid value type for property ID: " + std::to_string(static_cast<uint16_t>(type)) + ".";
+
+    if(!IsValidWidgetAppearanceValue(type, value))
+        return "Invalid value for property ID: " + std::to_string(static_cast<uint16_t>(type)) + ".";
 
     if(type == WidgetPropertyType::FILL_MODE && !IsValidFillMode(value))
         return "Invalid value for property 'FILL_MODE'.";

@@ -58,7 +58,7 @@ public:
     // it, so a publisher cannot change the type a widget reads back.
     size_t GetDeclaredAlternative(WidgetPropertyType type) const;
 
-    // False when the type was never registered, in which case the value is dropped.
+    // False when unregistered or when color/opacity validation fails; the previous value is retained.
     bool Set(WidgetPropertyType type, const ConfigValue& value);
 
     ConfigValue Get(WidgetPropertyType type) const;

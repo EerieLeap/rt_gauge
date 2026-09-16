@@ -246,7 +246,7 @@ void WidgetBase::ResolveBindings() {
                 if(data == nullptr)
                     return;
 
-                auto value = CoerceToConfigValue(*data, store->GetDeclaredAlternative(target));
+                auto value = CoerceToConfigValue(*data, store->GetDeclaredAlternative(target), target);
                 if(std::holds_alternative<std::monostate>(value))
                     return;
 
