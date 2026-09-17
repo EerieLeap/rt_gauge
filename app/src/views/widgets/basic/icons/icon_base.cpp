@@ -1,17 +1,17 @@
 #include "icon_base.h"
 
 #include "domain/ui_domain/models/widget_property.h"
-#include "views/themes/theme_manager.h"
+#include "domain/ui_domain/lvgl_lock.h"
 
 namespace eerie_leap::views::widgets::basic::icons {
 
 using namespace eerie_leap::utilities::type;
 using namespace eerie_leap::domain::ui_domain::models;
 using namespace eerie_leap::views::utilitites;
-using eerie_leap::views::themes::ThemeManager;
+using eerie_leap::domain::ui_domain::ScopedLvglLock;
 
 IconBase::IconBase(std::shared_ptr<Frame> parent)
-    : parent_(std::move(parent)), is_active_(false) {
+    : parent_(std::move(parent)) {
 
     container_ = std::make_shared<Frame>(Frame::CreateWrapped(parent_->GetObject())
         .SetWidth(100, false)
@@ -23,20 +23,27 @@ void IconBase::SetAssetsManager(std::shared_ptr<AssetsManager> ui_assets_manager
     ui_assets_manager_ = std::move(ui_assets_manager);
 }
 
-void IconBase::SetIsActive(bool is_active) {
-    is_active_ = is_active;
+void IconBase::SetProcessingEnabled(bool enabled) {
+    ScopedLvglLock lvgl_guard;
+    is_processing_enabled_ = enabled;
+}
 
-    if(!is_ready_)
-        return;
+bool IconBase::IsProcessingEligible() const {
+    ScopedLvglLock lvgl_guard;
+    if(!IsReady() || !is_processing_enabled_ || !parent_->IsProcessingEnabled())
+        return false;
 
-    ApplyTheme(ThemeManager::GetInstance().GetCurrentTheme());
-    container_->Invalidate();
+    // Start at the owning widget, excluding the icon's own pulse/part opacity.
+    for(auto* object = parent_->GetObject(); object != nullptr; object = lv_obj_get_parent(object)) {
+        if(lv_obj_has_flag(object, LV_OBJ_FLAG_HIDDEN)
+            || lv_obj_get_style_opa(object, LV_PART_MAIN) == LV_OPA_TRANSP)
+            return false;
+    }
+    return true;
 }
 
 void IconBase::Configure(std::shared_ptr<WidgetPropertyStore> properties) {
     properties_ = std::move(properties);
-
-    is_active_ = properties_->GetAs<bool>(WidgetPropertyType::IS_ACTIVE, true);
 }
 
 } // namespace eerie_leap::views::widgets::basic::icons

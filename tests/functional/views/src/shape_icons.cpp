@@ -516,21 +516,45 @@ ZTEST(shape_icons, test_arc_repositions_when_shape_height_changes) {
     zassert_equal(lv_obj_get_style_transform_pivot_y(ImageObject(*widget), LV_PART_MAIN), 32);
 }
 
-ZTEST(shape_icons, test_theme_and_active_state_repaint_without_rebuilding_geometry) {
+ZTEST(shape_icons, test_theme_and_visibility_preserve_geometry_and_part_opacity) {
     class BlueTheme : public DefaultTheme {
         LvglColor GetAccentColor() const override { return LvglColor(0x3366FF, 128); }
     };
-    auto widget = MakeWidget(Configuration(IconType::Rectangle, 32, 32));
+    auto configuration = Configuration(IconType::Rectangle, 32, 32);
+    Bind(*configuration, WidgetPropertyType::IS_VISIBLE);
+    auto widget = MakeWidget(configuration);
     const auto* data = Mask(*widget).data;
     ThemeManager::GetInstance().SetTheme(std::make_shared<BlueTheme>());
     zassert_equal(Mask(*widget).data, data);
     zassert_equal(lv_obj_get_style_opa(ImageObject(*widget), LV_PART_MAIN), 128);
     zassert_equal(lv_color_to_u32(lv_obj_get_style_image_recolor(ImageObject(*widget), LV_PART_MAIN)),
         lv_color_to_u32(lv_color_hex(0x3366FF)));
-    widget->SetIsActive(false);
-    zassert_equal(lv_obj_get_style_opa(ImageObject(*widget), LV_PART_MAIN), 0);
-    widget->SetIsActive(true);
+    Publish(0);
+    zassert_true(lv_obj_has_flag(widget->GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN));
     zassert_equal(lv_obj_get_style_opa(ImageObject(*widget), LV_PART_MAIN), 128);
+    Publish(1);
+    zassert_false(lv_obj_has_flag(widget->GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN));
+    zassert_equal(Mask(*widget).data, data);
+    zassert_equal(lv_obj_get_style_opa(ImageObject(*widget), LV_PART_MAIN), 128);
+}
+
+ZTEST(shape_icons, test_inactive_shapes_keep_their_appearance_across_theme_changes) {
+    for(auto type : shape_types) {
+        auto configuration = Configuration(type);
+        configuration->properties[WidgetPropertyType::IS_ACTIVE] = false;
+        Bind(*configuration, WidgetPropertyType::IS_ACTIVE);
+        auto widget = MakeWidget(configuration);
+        const auto* data = Mask(*widget).data;
+        const auto opacity = lv_obj_get_style_opa(ImageObject(*widget), LV_PART_MAIN);
+        zassert_true(opacity > 0);
+        zassert_false(lv_obj_has_flag(widget->GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN));
+        Publish(1);
+        zassert_equal(lv_obj_get_style_opa(ImageObject(*widget), LV_PART_MAIN), opacity);
+        Publish(0);
+        ThemeManager::GetInstance().SetTheme(std::make_shared<DefaultTheme>());
+        zassert_equal(lv_obj_get_style_opa(ImageObject(*widget), LV_PART_MAIN), opacity);
+        zassert_equal(Mask(*widget).data, data);
+    }
 }
 
 ZTEST(shape_icons, test_rendered_gallery_preserves_background_and_recolors_masks) {

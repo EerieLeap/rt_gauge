@@ -64,6 +64,7 @@ protected:
     WidgetContext context_;
 
     bool is_group_active_ = false;
+    bool was_processing_ = false;
 
     int SetVisibility(bool is_visible);
 
@@ -91,6 +92,8 @@ protected:
     void ApplyProperties(const PropertySet& selected);
     void UpdateProcessingState();
     virtual void OnProcessingSuspended();
+    // Idempotently synchronize owned work, including after an ancestor changes between refreshes.
+    virtual void OnProcessingUpdated(bool enabled);
 
     // One-shot setup after every property has been applied, for work that must not repeat when a
     // property changes again - subscriptions above all.

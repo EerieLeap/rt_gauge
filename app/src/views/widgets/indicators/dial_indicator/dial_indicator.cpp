@@ -22,14 +22,22 @@ DialIndicator::DialIndicator(uint32_t id, std::shared_ptr<Frame> parent, WidgetC
     AddDependency(*needle_icon_);
 }
 
+DialIndicator::~DialIndicator() {
+    ScopedLvglLock lvgl_guard;
+    DetachDispatch();
+    OnProcessingSuspended();
+    container_->SetChild(nullptr);
+    needle_icon_.reset();
+    dependencies_.clear();
+}
+
 int DialIndicator::DoRender() {
     auto lv_obj = Create();
     if(lv_obj == nullptr)
         return -1;
 
-    auto child = std::make_shared<Frame>(
-        Frame::Create(lv_obj).Build());
-    container_->SetChild(child);
+    // Share the needle's Frame; a second wrapper would also own/delete the same LVGL object.
+    container_->SetChild(needle_icon_->GetContainer());
 
     return 0;
 }

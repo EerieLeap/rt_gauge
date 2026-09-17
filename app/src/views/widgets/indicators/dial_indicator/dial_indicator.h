@@ -37,6 +37,7 @@ public:
 
 public:
     explicit DialIndicator(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context);
+    ~DialIndicator() override;
 
     [[nodiscard]] WidgetType GetType() const override { return WidgetType::IndicatorDial; }
 };

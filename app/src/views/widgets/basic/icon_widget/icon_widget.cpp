@@ -54,9 +54,9 @@ lv_obj_t* IconWidget::Create() {
     return icon_->GetContainer()->GetObject();
 }
 
-void IconWidget::SetIsActive(bool is_active) {
+void IconWidget::OnProcessingUpdated(bool enabled) {
     if(icon_ != nullptr)
-        icon_->SetIsActive(is_active);
+        icon_->SetProcessingEnabled(enabled);
 }
 
 void IconWidget::RegisterProperties(WidgetPropertyStore& store) const {
@@ -65,7 +65,6 @@ void IconWidget::RegisterProperties(WidgetPropertyStore& store) const {
     store.Register(WidgetPropertyType::ICON_TYPE, ConfigValue { 0 }, PropertyChangeEffect::Rebuild);
     store.Register(WidgetPropertyType::POSITION_X, ConfigValue { 0 }, PropertyChangeEffect::Relayout);
     store.Register(WidgetPropertyType::POSITION_Y, ConfigValue { 0 }, PropertyChangeEffect::Relayout);
-    store.Register(WidgetPropertyType::IS_ACTIVE, ConfigValue { true }, PropertyChangeEffect::Repaint);
 
     // ICON_TYPE is seeded after registration, so resolve it from configuration
     // here. A constructor-fixed icon (for example a dial's image needle) wins.
@@ -100,10 +99,6 @@ void IconWidget::OnPropertyChanged(WidgetPropertyType type, const ConfigValue& v
                 lv_obj_set_y(icon_->GetContainer()->GetObject(), position_y_);
                 ApplyTheme(ThemeManager::GetInstance().GetCurrentTheme());
             }
-            break;
-
-        case WidgetPropertyType::IS_ACTIVE:
-            SetIsActive(ConfigValueAs<bool>(value, false));
             break;
 
         case WidgetPropertyType::WIDTH_PX:

@@ -17,13 +17,8 @@ void LabelIcon::RegisterProperties(WidgetPropertyStore& store) {
 }
 
 int LabelIcon::ApplyTheme(const ITheme& theme) {
-    if(is_active_) {
-        lv_obj_set_style_bg_color(container_->GetObject(), theme.GetAccentColor().ToLvColor(), LV_PART_MAIN | LV_STATE_DEFAULT);
-        lv_obj_set_style_bg_opa(container_->GetObject(), theme.GetAccentColor().ToLvOpa(), LV_PART_MAIN | LV_STATE_DEFAULT);
-    } else {
-        lv_obj_set_style_bg_color(container_->GetObject(), theme.GetInactiveColor().ToLvColor(), LV_PART_MAIN | LV_STATE_DEFAULT);
-        lv_obj_set_style_bg_opa(container_->GetObject(), theme.GetInactiveColor().ToLvOpa(), LV_PART_MAIN | LV_STATE_DEFAULT);
-    }
+    lv_obj_set_style_bg_color(container_->GetObject(), theme.GetAccentColor().ToLvColor(), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(container_->GetObject(), theme.GetAccentColor().ToLvOpa(), LV_PART_MAIN | LV_STATE_DEFAULT);
 
     lv_obj_set_style_text_color(lv_label_, theme.GetPrimaryColor().ToLvColor(), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_opa(lv_label_, theme.GetPrimaryColor().ToLvOpa(), LV_PART_MAIN | LV_STATE_DEFAULT);

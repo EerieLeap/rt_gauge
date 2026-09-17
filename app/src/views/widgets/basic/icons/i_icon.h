@@ -28,7 +28,8 @@ public:
     // Reads the owning widget's store rather than the raw configuration, so the icon and the
     // widget cannot disagree about a property they share.
     virtual void Configure(std::shared_ptr<WidgetPropertyStore> properties) = 0;
-    virtual void SetIsActive(bool is_active) = 0;
+    // Processing eligibility is supplied by the owner; it never selects the icon's appearance.
+    virtual void SetProcessingEnabled(bool enabled) = 0;
 };
 
 } // namespace eerie_leap::views::widgets::basic::icons

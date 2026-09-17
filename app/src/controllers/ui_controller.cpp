@@ -616,12 +616,12 @@ void UiController::SetupTestConfiguration() {
     widget7->size_grid.height = 466;
     widget7->z_index = 0;
     widget7->properties[WidgetPropertyType::ICON_TYPE] = static_cast<int>(IconType::Dot);
-    widget7->properties[WidgetPropertyType::IS_ACTIVE] = false;
+    widget7->properties[WidgetPropertyType::IS_VISIBLE] = false;
     widget7->properties[WidgetPropertyType::POSITION_X] = 0;
     widget7->properties[WidgetPropertyType::POSITION_Y] = 0;
     widget7->properties[WidgetPropertyType::POSITION_ANGLE] = 180.0F;
     widget7->properties[WidgetPropertyType::EDGE_OFFSET] = 6;
-    widget7->bindings.push_back(LoggingBinding(WidgetPropertyType::IS_ACTIVE));
+    widget7->bindings.push_back(LoggingBinding(WidgetPropertyType::IS_VISIBLE));
     screen_configuration->AddWidget(std::move(widget7));
 
     // auto widget8 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
@@ -633,13 +633,13 @@ void UiController::SetupTestConfiguration() {
     // widget8->size_grid.height = 3;
     // widget8->z_index = 0;
     // widget8->properties[WidgetPropertyType::ICON_TYPE] = static_cast<int>(IconType::Label);
-    // widget8->properties[WidgetPropertyType::IS_ACTIVE] = false;
+    // widget8->properties[WidgetPropertyType::IS_VISIBLE] = false;
     // widget8->properties[WidgetPropertyType::POSITION_X] = 0;
     // widget8->properties[WidgetPropertyType::POSITION_Y] = 0;
     // widget8->properties[WidgetPropertyType::POSITION_ANGLE] = -56.0F;
     // widget8->properties[WidgetPropertyType::EDGE_OFFSET] = 2;
     // widget8->properties[WidgetPropertyType::LABEL] = "log";
-    // widget8->bindings.push_back(LoggingBinding(WidgetPropertyType::IS_ACTIVE));
+    // widget8->bindings.push_back(LoggingBinding(WidgetPropertyType::IS_VISIBLE));
     // screen_configuration->AddWidget(std::move(widget8));
 
     // Widget: IndicatorDial

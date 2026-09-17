@@ -99,7 +99,7 @@ int ShapeIconBase::ApplyTheme(const ITheme& theme) {
     auto color = theme.GetAccentColor();
     lv_obj_set_style_image_recolor(image_object_, color.ToLvColor(), 0);
     lv_obj_set_style_image_recolor_opa(image_object_, LV_OPA_COVER, 0);
-    lv_obj_set_style_opa(image_object_, is_active_ && image_.data != nullptr ? color.ToLvOpa() : LV_OPA_TRANSP, 0);
+    lv_obj_set_style_opa(image_object_, image_.data != nullptr ? color.ToLvOpa() : LV_OPA_TRANSP, 0);
     container_->Invalidate();
     return 0;
 }

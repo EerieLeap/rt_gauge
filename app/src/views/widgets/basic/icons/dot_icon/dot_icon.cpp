@@ -10,15 +10,8 @@ using namespace eerie_leap::views::themes;
 DotIcon::DotIcon(std::shared_ptr<Frame> parent) : IconBase(std::move(parent)) { }
 
 int DotIcon::ApplyTheme(const ITheme& theme) {
-    if(is_active_) {
-        lv_obj_set_style_bg_color(container_->GetObject(), theme.GetAccentColor().ToLvColor(), LV_PART_MAIN | LV_STATE_DEFAULT);
-        lv_obj_set_style_bg_opa(container_->GetObject(), theme.GetAccentColor().ToLvOpa(), LV_PART_MAIN | LV_STATE_DEFAULT);
-
-        lv_anim_start(&animation_);
-    } else {
-        lv_anim_pause(&animation_);
-        lv_obj_set_style_bg_opa(container_->GetObject(), 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    }
+    lv_obj_set_style_bg_color(container_->GetObject(), theme.GetAccentColor().ToLvColor(), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(container_->GetObject(), theme.GetAccentColor().ToLvOpa(), LV_PART_MAIN | LV_STATE_DEFAULT);
 
     lv_obj_update_layout(container_->GetObject());
 
@@ -38,8 +31,6 @@ int DotIcon::DoRender() {
     auto lv_icon = Create(parent_->GetObject());
     container_ = std::make_shared<Frame>(Frame::Create(lv_icon).Build());
 
-    animation_ = CreateAnimation();
-
     return 0;
 }
 
@@ -53,27 +44,6 @@ lv_obj_t* DotIcon::Create(lv_obj_t* parent) {
     lv_obj_set_style_border_width(lv_icon, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     return lv_icon;
-}
-
-void DotIcon::AnimateIconCallback(void* obj, int32_t value) {
-    lv_obj_set_style_opa((lv_obj_t*)obj, value, LV_PART_MAIN);
-}
-
-lv_anim_t DotIcon::CreateAnimation() {
-    lv_anim_t anim;
-    lv_anim_init(&anim);
-    lv_anim_set_values(&anim, LV_OPA_TRANSP, LV_OPA_COVER);
-
-    lv_anim_set_var(&anim, container_->GetObject());
-    lv_anim_set_exec_cb(&anim, AnimateIconCallback);
-
-    lv_anim_set_time(&anim, 500);
-    lv_anim_set_playback_time(&anim, 500);
-    lv_anim_set_repeat_count(&anim, LV_ANIM_REPEAT_INFINITE);
-    lv_anim_set_repeat_delay(&anim, 100);
-    lv_anim_set_path_cb(&anim, lv_anim_path_ease_in_out);
-
-    return anim;
 }
 
 } // namespace eerie_leap::views::widgets::basic::icons

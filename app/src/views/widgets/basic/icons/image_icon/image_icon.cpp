@@ -23,12 +23,7 @@ void ImageIcon::RegisterProperties(WidgetPropertyStore& store) {
     store.Register(WidgetPropertyType::PIVOT_Y, ConfigValue { 0 }, PropertyChangeEffect::Rebuild);
 }
 
-int ImageIcon::ApplyTheme(const ITheme& theme) {
-    lv_obj_set_style_opa(
-        container_->GetObject(),
-        is_active_ ? LV_OPA_COVER : 0,
-        0);
-
+int ImageIcon::ApplyTheme(const ITheme&) {
     return 0;
 }
 

@@ -143,12 +143,17 @@ void WidgetBase::OnActivated() {
 
     if(IsReady() && IsProcessingEligible())
         ReplayProperties();
+
+    for(auto* dependency : dependencies_)
+        dependency->OnActivated();
 }
 
 void WidgetBase::OnDeactivated() {
     ScopedLvglLock lvgl_guard;
     is_group_active_ = false;
     UpdateProcessingState();
+    for(auto* dependency : dependencies_)
+        dependency->OnDeactivated();
 }
 
 void WidgetBase::RegisterProperties(WidgetPropertyStore& store) const {
@@ -176,11 +181,19 @@ void WidgetBase::UpdateProcessingState() {
     container_->SetTrackingEnabled(IsActive());
     container_->SetProcessingEnabled(is_group_active_ && IsActive() && IsVisible()
         && properties_->GetAs<int>(WidgetPropertyType::OPACITY, 255) > 0);
-    if(!IsProcessingEligible())
+    const bool enabled = IsReady() && IsProcessingEligible();
+    if(was_processing_ && !enabled)
         OnProcessingSuspended();
+    was_processing_ = enabled;
+    OnProcessingUpdated(enabled);
+
+    for(auto* dependency : dependencies_)
+        dependency->UpdateProcessingState();
 }
 
 void WidgetBase::OnProcessingSuspended() { }
+
+void WidgetBase::OnProcessingUpdated(bool) { }
 
 void WidgetBase::OnConfigured() { }
 
@@ -377,6 +390,7 @@ void WidgetBase::ReplayPendingProperties() {
 void WidgetBase::RefreshCallback(lv_event_t* event) {
     ScopedLvglLock lvgl_guard;
     auto* widget = static_cast<WidgetBase*>(lv_event_get_user_data(event));
+    widget->UpdateProcessingState();
     widget->ReplayPendingProperties();
 }
 
@@ -399,6 +413,11 @@ void WidgetBase::ApplyConfiguration(std::shared_ptr<WidgetConfiguration> configu
     auto supported = is_owner ? GetSupportedProperties() : std::vector<WidgetPropertyType> { };
 
     for(const auto& [type, value] : configuration_->properties) {
+        // Parts inherit their owner's management state through the Frame parent. Copying those
+        // flags would leave a part independently hidden/inactive after its owner is restored.
+        if(!is_owner && IsWidgetManagementProperty(type))
+            continue;
+
         if(!properties_->Set(type, value) && is_owner
             && std::find(supported.begin(), supported.end(), type) == supported.end())
             LOG_WRN("Widget %u does not support property %u.", id_, static_cast<unsigned>(type));
