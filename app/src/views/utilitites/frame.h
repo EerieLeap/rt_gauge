@@ -18,6 +18,9 @@ class Frame {
 private:
     lv_obj_t* lv_object_;
     std::shared_ptr<Frame> child_;
+    std::weak_ptr<Frame> processing_parent_;
+    bool is_processing_enabled_ = true;
+    bool is_tracking_enabled_ = true;
 
     Frame();
 
@@ -50,6 +53,11 @@ public:
     Frame& AlignLeft();
     Frame& AlignRight();
     Frame& AlignCenter();
+    Frame& SetProcessingParent(std::weak_ptr<Frame> parent);
+    void SetProcessingEnabled(bool enabled);
+    bool IsProcessingEnabled() const;
+    void SetTrackingEnabled(bool enabled);
+    bool IsTrackingEnabled() const;
 
     lv_obj_t* GetObject();
     void SetChild(std::shared_ptr<Frame> child);

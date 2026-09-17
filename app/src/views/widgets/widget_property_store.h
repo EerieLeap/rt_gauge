@@ -24,8 +24,7 @@ enum class PropertyChangeEffect : uint8_t {
 };
 
 // Every property a widget declares support for, with its default and its current value.
-// Held by shared_ptr so an event subscription can keep writing values while the widget that
-// declared them is being torn down.
+// Subscriptions share its lifetime; WidgetBase guards accepted writes against activity and teardown.
 class WidgetPropertyStore {
 private:
     struct Entry {
@@ -58,7 +57,7 @@ public:
     // it, so a publisher cannot change the type a widget reads back.
     size_t GetDeclaredAlternative(WidgetPropertyType type) const;
 
-    // False when unregistered or when color/opacity validation fails; the previous value is retained.
+    // False when unregistered or when management/color validation fails; the previous value is retained.
     bool Set(WidgetPropertyType type, const ConfigValue& value);
 
     ConfigValue Get(WidgetPropertyType type) const;
@@ -68,8 +67,7 @@ public:
         return ConfigValueAs<T>(Get(type), fallback);
     }
 
-    // In registration order, which runs base class first, so a replay applies a base property
-    // before the derived property that reads it.
+    // In registration order, base class first. Callers arrange any application dependencies.
     std::vector<WidgetPropertyType> GetRegisteredTypes() const;
 };
 

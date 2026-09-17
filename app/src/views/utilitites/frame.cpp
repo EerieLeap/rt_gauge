@@ -1,9 +1,13 @@
 #include <stdexcept>
 #include <utility>
 
+#include "domain/ui_domain/lvgl_lock.h"
+
 #include "frame.h"
 
 namespace eerie_leap::views::utilitites {
+
+using eerie_leap::domain::ui_domain::ScopedLvglLock;
 
 Frame::Frame() : lv_object_(nullptr) { }
 
@@ -17,7 +21,11 @@ Frame::~Frame() {
 }
 
 Frame::Frame(Frame&& other) noexcept
-    : lv_object_(other.lv_object_), child_(std::move(other.child_)) {
+        : lv_object_(other.lv_object_),
+        child_(std::move(other.child_)),
+        processing_parent_(std::move(other.processing_parent_)),
+        is_processing_enabled_(other.is_processing_enabled_),
+        is_tracking_enabled_(other.is_tracking_enabled_) {
 
     other.lv_object_ = nullptr;
 }
@@ -33,6 +41,9 @@ Frame& Frame::operator=(Frame&& other) noexcept {
 
     lv_object_ = other.lv_object_;
     child_ = std::move(other.child_);
+    processing_parent_ = std::move(other.processing_parent_);
+    is_processing_enabled_ = other.is_processing_enabled_;
+    is_tracking_enabled_ = other.is_tracking_enabled_;
     other.lv_object_ = nullptr;
 
     return *this;
@@ -188,6 +199,40 @@ Frame& Frame::AlignCenter() {
 
 lv_obj_t* Frame::GetObject() {
     return lv_object_;
+}
+
+Frame& Frame::SetProcessingParent(std::weak_ptr<Frame> parent) {
+    ScopedLvglLock lvgl_guard;
+    processing_parent_ = std::move(parent);
+    return *this;
+}
+
+void Frame::SetProcessingEnabled(bool enabled) {
+    ScopedLvglLock lvgl_guard;
+    is_processing_enabled_ = enabled;
+}
+
+bool Frame::IsProcessingEnabled() const {
+    ScopedLvglLock lvgl_guard;
+    if(!is_processing_enabled_)
+        return false;
+
+    auto parent = processing_parent_.lock();
+    return parent == nullptr || parent->IsProcessingEnabled();
+}
+
+void Frame::SetTrackingEnabled(bool enabled) {
+    ScopedLvglLock lvgl_guard;
+    is_tracking_enabled_ = enabled;
+}
+
+bool Frame::IsTrackingEnabled() const {
+    ScopedLvglLock lvgl_guard;
+    if(!is_tracking_enabled_)
+        return false;
+
+    auto parent = processing_parent_.lock();
+    return parent == nullptr || parent->IsTrackingEnabled();
 }
 
 void Frame::SetChild(std::shared_ptr<Frame> child) {

@@ -38,9 +38,8 @@ public:
 
     virtual void Update(float value);
 
-    void OnDeactivated() override;
-
 protected:
+    void OnProcessingSuspended() override;
     void RegisterProperties(WidgetPropertyStore& store) const override;
     void OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) override;
 };

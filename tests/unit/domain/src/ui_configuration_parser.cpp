@@ -457,7 +457,8 @@ ZTEST(ui_configuration_parser, test_deserialize_rejects_invalid_persisted_opacit
         value.value = opacity;
         zassert_true(Deserializes(*serialized));
     }
-    for(int32_t opacity : { -1, 256, INT32_MIN, INT32_MAX }) {
+    const int32_t invalid_opacities[] = { -1, 256, INT32_MIN, INT32_MAX };
+    for(int32_t opacity : invalid_opacities) {
         value.value = opacity;
         zassert_false(Deserializes(*serialized));
     }

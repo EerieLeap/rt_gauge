@@ -23,10 +23,14 @@ IndicatorBase::~IndicatorBase() {
 }
 
 void IndicatorBase::UpdateIndicatorCallback(void* obj, int32_t value) {
-    float value_float = static_cast<float>(value) / (10 * CONFIG_EERIE_LEAP_FLOAT_SIGNIFICANT_DIGITS);
-
+    ScopedLvglLock lvgl_guard;
     auto* indicator = static_cast<IndicatorBase*>(obj);
+    if(!indicator->IsAnimationEligible()) {
+        indicator->OnProcessingSuspended();
+        return;
+    }
 
+    float value_float = static_cast<float>(value) / (10 * CONFIG_EERIE_LEAP_FLOAT_SIGNIFICANT_DIGITS);
     indicator->UpdateIndicator(value_float);
     indicator->value_ = value_float;
 }
@@ -72,7 +76,8 @@ void IndicatorBase::ValueChangeAnimation(lv_anim_t& anim, float range, float sta
 // compared to Exponential Moving Average Filter which
 // can be jumpy and result in noticeable tearing effect
 void IndicatorBase::Update(float value) {
-    if(!IsReady())
+    ScopedLvglLock lvgl_guard;
+    if(!IsAnimationEligible())
         return;
 
     if(value < range_start_)
@@ -94,11 +99,11 @@ void IndicatorBase::Update(float value) {
     }
 }
 
-void IndicatorBase::OnDeactivated() {
-    WidgetBase::OnDeactivated();
-
-    // A running animation keeps invalidating the widget after its group is hidden.
-    lv_anim_delete(this, UpdateIndicatorCallback);
+void IndicatorBase::OnProcessingSuspended() {
+    // The store already contains the target, but the display has not reached it. Retain that
+    // work even if no further value event arrives before processing becomes eligible again.
+    if(lv_anim_delete(this, UpdateIndicatorCallback))
+        pending_properties_.set(static_cast<size_t>(WidgetPropertyType::VALUE));
 }
 
 void IndicatorBase::RegisterProperties(WidgetPropertyStore& store) const {

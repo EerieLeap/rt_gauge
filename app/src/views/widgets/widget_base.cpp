@@ -21,6 +21,7 @@ namespace eerie_leap::views::widgets {
 using namespace eerie_leap::utilities::type;
 using namespace eerie_leap::domain::ui_domain::models;
 
+using eerie_leap::domain::ui_domain::utilities::IsWidgetManagementProperty;
 using eerie_leap::event_bus::EventChannelRegistry;
 using eerie_leap::utilities::reflection::GetCallerName;
 using eerie_leap::utilities::string::StringHelpers;
@@ -74,9 +75,12 @@ WidgetBase::WidgetBase(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext
     context_(std::move(context)) {
 
     container_ = std::make_shared<Frame>(Frame::CreateWrapped(parent_->GetObject())
+        .SetProcessingParent(parent_)
         .SetWidth(100, false)
         .SetHeight(100, false)
         .Build());
+    container_->SetProcessingEnabled(false);
+    lv_display_add_event_cb(lv_obj_get_display(container_->GetObject()), RefreshCallback, LV_EVENT_REFR_START, this);
 }
 
 WidgetBase::~WidgetBase() {
@@ -87,6 +91,8 @@ WidgetBase::~WidgetBase() {
 }
 
 void WidgetBase::DetachDispatch() {
+    ScopedLvglLock lvgl_guard;
+    lv_display_remove_event_cb_with_user_data(lv_obj_get_display(container_->GetObject()), RefreshCallback, this);
     dispatch_guard_->Detach();
 }
 
@@ -100,23 +106,55 @@ uint32_t WidgetBase::GetId() const {
 }
 
 bool WidgetBase::IsActive() const {
-    return is_active_;
+    return properties_->GetAs<bool>(WidgetPropertyType::IS_ACTIVE, true);
+}
+
+bool WidgetBase::IsTrackingEligible() const {
+    ScopedLvglLock lvgl_guard;
+    return IsActive() && parent_->IsTrackingEnabled();
+}
+
+bool WidgetBase::IsProcessingEligible() const {
+    ScopedLvglLock lvgl_guard;
+
+    if(!is_group_active_ || !IsActive() || !IsVisible()
+        || properties_->GetAs<int>(WidgetPropertyType::OPACITY, 255) == 0
+        || !parent_->IsProcessingEnabled())
+        return false;
+
+    for(auto* object = container_->GetObject(); object != nullptr; object = lv_obj_get_parent(object)) {
+        if(lv_obj_has_flag(object, LV_OBJ_FLAG_HIDDEN)
+            || lv_obj_get_style_opa(object, LV_PART_MAIN) == LV_OPA_TRANSP)
+            return false;
+    }
+
+    return true;
+}
+
+bool WidgetBase::IsAnimationEligible() const {
+    ScopedLvglLock lvgl_guard;
+    return IsReady() && IsProcessingEligible();
 }
 
 void WidgetBase::OnActivated() {
-    is_active_ = true;
+    ScopedLvglLock lvgl_guard;
+    is_group_active_ = true;
+    UpdateProcessingState();
 
-    // The store kept tracking while the group was hidden, so this is where the widget catches up.
-    if(IsReady())
+    if(IsReady() && IsProcessingEligible())
         ReplayProperties();
 }
 
 void WidgetBase::OnDeactivated() {
-    is_active_ = false;
+    ScopedLvglLock lvgl_guard;
+    is_group_active_ = false;
+    UpdateProcessingState();
 }
 
 void WidgetBase::RegisterProperties(WidgetPropertyStore& store) const {
+    store.Register(WidgetPropertyType::IS_ACTIVE, ConfigValue { true }, PropertyChangeEffect::None);
     store.Register(WidgetPropertyType::IS_VISIBLE, ConfigValue { true }, PropertyChangeEffect::None);
+    store.Register(WidgetPropertyType::OPACITY, ConfigValue { 255 }, PropertyChangeEffect::None);
     store.Register(WidgetPropertyType::IS_SMOOTHED, ConfigValue { false }, PropertyChangeEffect::None);
 }
 
@@ -124,6 +162,25 @@ void WidgetBase::OnPropertyChanged(WidgetPropertyType type, const ConfigValue& v
     if(type == WidgetPropertyType::IS_VISIBLE)
         SetVisibility(ConfigValueAs<bool>(value, true));
 }
+
+void WidgetBase::ApplyProperty(WidgetPropertyType type, const ConfigValue& value) {
+    if(IsWidgetManagementProperty(type)) {
+        WidgetBase::OnPropertyChanged(type, value);
+        UpdateProcessingState();
+    } else {
+        OnPropertyChanged(type, value);
+    }
+}
+
+void WidgetBase::UpdateProcessingState() {
+    container_->SetTrackingEnabled(IsActive());
+    container_->SetProcessingEnabled(is_group_active_ && IsActive() && IsVisible()
+        && properties_->GetAs<int>(WidgetPropertyType::OPACITY, 255) > 0);
+    if(!IsProcessingEligible())
+        OnProcessingSuspended();
+}
+
+void WidgetBase::OnProcessingSuspended() { }
 
 void WidgetBase::OnConfigured() { }
 
@@ -157,17 +214,24 @@ void WidgetBase::RunEffect(PropertyChangeEffect effect) {
 
 // Caller holds the LVGL lock and the dispatch guard, in that order.
 void WidgetBase::NotifyPropertyChanged(WidgetPropertyType type, const ConfigValue& value, PropertyChangeEffect effect) {
-    if(!IsReady() || !IsActive())
+    if(IsWidgetManagementProperty(type)) {
+        ApplyProperty(type, value);
+        RunEffect(effect);
+    } else if(pending_properties_.none() && IsReady() && IsProcessingEligible()) {
+        ApplyProperty(type, value);
+        RunEffect(effect);
         return;
+    } else
+        pending_properties_.set(static_cast<size_t>(type));
 
-    OnPropertyChanged(type, value);
-    RunEffect(effect);
+    ReplayPendingProperties();
 }
 
 void WidgetBase::SetPropertyLocal(WidgetPropertyType type, const ConfigValue& value) {
     static constexpr auto caller = GetCallerName();
+    ScopedLvglLock lvgl_guard;
 
-    if(!properties_->Set(type, value))
+    if(!IsProcessingEligible() || !properties_->Set(type, value))
         return;
 
     for(const auto& binding : outbound_bindings_) {
@@ -246,40 +310,74 @@ void WidgetBase::ResolveBindings() {
                 if(data == nullptr)
                     return;
 
-                auto value = CoerceToConfigValue(*data, store->GetDeclaredAlternative(target), target);
-                if(std::holds_alternative<std::monostate>(value))
-                    return;
-
-                // The store is written through the captured shared_ptr, never through `this`, so
-                // the model keeps tracking while the widget is hidden or being destroyed.
-                if(!store->Set(target, value))
-                    return;
-
-                // Two acquisitions rather than one. Reading the flags under the guard alone is
-                // safe; taking the LVGL lock inside the guard would invert the lock order, and
-                // taking it unconditionally would put every hidden widget back on the hot path.
-                bool is_renderable = false;
-                guard->Dispatch([&] { is_renderable = IsReady() && IsActive(); });
-
-                if(!is_renderable)
-                    return;
-
                 ScopedLvglLock lvgl_guard;
 
-                guard->Dispatch([&] { NotifyPropertyChanged(target, value, effect); });
+                guard->Dispatch([&] {
+                    if(!IsWidgetManagementProperty(target) && !IsTrackingEligible())
+                        return;
+
+                    auto value = CoerceToConfigValue(*data, store->GetDeclaredAlternative(target), target);
+                    if(std::holds_alternative<std::monostate>(value) || !store->Set(target, value))
+                        return;
+
+                    NotifyPropertyChanged(target, value, effect);
+                });
             }));
     }
 }
 
 void WidgetBase::ReplayProperties() {
-    auto strongest = PropertyChangeEffect::None;
+    PropertySet selected;
+    const auto registered = properties_->GetRegisteredTypes();
+    for(auto type : registered)
+        selected.set(static_cast<size_t>(type));
 
-    for(auto type : properties_->GetRegisteredTypes()) {
-        OnPropertyChanged(type, properties_->Get(type));
-        strongest = std::max(strongest, properties_->GetEffect(type));
+    pending_properties_.reset();
+    ApplyProperties(selected);
+
+    // Configuration seeds members before rendering. Those handlers cannot necessarily apply
+    // their visual state yet, and activation may still be blocked by visibility or opacity.
+    if(!IsReady() || !IsProcessingEligible()) {
+        for(auto type : registered) {
+            if(!IsWidgetManagementProperty(type))
+                pending_properties_.set(static_cast<size_t>(type));
+        }
     }
+}
+
+void WidgetBase::ApplyProperties(const PropertySet& selected) {
+    auto strongest = PropertyChangeEffect::None;
+    auto apply = [&](WidgetPropertyType type) {
+        if(!selected.test(static_cast<size_t>(type)))
+            return;
+
+        ApplyProperty(type, properties_->Get(type));
+        strongest = std::max(strongest, properties_->GetEffect(type));
+    };
+
+    // VALUE consumes state declared by derived classes too (for example digital precision).
+    // Registration order alone cannot express that dependency. Apply the value once, after
+    // configuration, so charts still append at most one sample per replay.
+    for(auto type : properties_->GetRegisteredTypes()) {
+        if(type != WidgetPropertyType::VALUE)
+            apply(type);
+    }
+    apply(WidgetPropertyType::VALUE);
 
     RunEffect(strongest);
+}
+
+void WidgetBase::ReplayPendingProperties() {
+    if(pending_properties_.none() || !IsReady() || !IsProcessingEligible())
+        return;
+
+    ApplyProperties(std::exchange(pending_properties_, {}));
+}
+
+void WidgetBase::RefreshCallback(lv_event_t* event) {
+    ScopedLvglLock lvgl_guard;
+    auto* widget = static_cast<WidgetBase*>(lv_event_get_user_data(event));
+    widget->ReplayPendingProperties();
 }
 
 void WidgetBase::Configure(std::shared_ptr<WidgetConfiguration> configuration) {
@@ -291,6 +389,7 @@ void WidgetBase::ConfigureAsPart(std::shared_ptr<WidgetConfiguration> configurat
 }
 
 void WidgetBase::ApplyConfiguration(std::shared_ptr<WidgetConfiguration> configuration, bool is_owner) {
+    ScopedLvglLock lvgl_guard;
     configuration_ = std::move(configuration);
 
     RegisterProperties(*properties_);
@@ -321,6 +420,7 @@ std::shared_ptr<WidgetConfiguration> WidgetBase::GetConfiguration() const {
 }
 
 int WidgetBase::SetVisibility(bool is_visible) {
+    ScopedLvglLock lvgl_guard;
     if(is_visible)
         lv_obj_clear_flag(container_->GetObject(), LV_OBJ_FLAG_HIDDEN);
     else

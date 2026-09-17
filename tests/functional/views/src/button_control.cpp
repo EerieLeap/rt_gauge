@@ -152,6 +152,7 @@ void Click(
 
     button.Configure(configuration);
     zassert_equal(button.Render(), 0, "Expected the button to render.");
+    button.OnActivated();
 
     lv_obj_send_event(FindButton(root), LV_EVENT_CLICKED, nullptr);
 }
@@ -292,4 +293,44 @@ ZTEST(button_control, test_a_button_can_carry_an_intent_that_needs_no_target) {
     zassert_true(probe.WaitForEvent(), "Expected the click to publish a navigation change.");
     zassert_equal(probe.Actions().front(), NavigationAction::ShowGroup);
     zassert_equal(probe.TargetGroupIds().front(), 1);
+}
+
+ZTEST(button_control, test_suspended_buttons_do_not_navigate_or_use_disabled_colors) {
+    EnsureTestDisplay();
+    auto navigation_service = std::make_shared<NavigationService>();
+    navigation_service->SetGroupIds({ 0, 1 });
+    navigation_service->SetActiveGroupId(0);
+    NavigationProbe probe;
+
+    for(auto target : { WidgetPropertyType::IS_ACTIVE, WidgetPropertyType::IS_VISIBLE, WidgetPropertyType::OPACITY }) {
+        auto root = MakeRoot();
+        auto configuration = MakeConfiguration();
+        configuration->properties[WidgetPropertyType::TARGET_SCREEN_GROUP] = 1;
+        configuration->properties[target] = target == WidgetPropertyType::OPACITY
+            ? eerie_leap::utilities::type::ConfigValue{0} : eerie_leap::utilities::type::ConfigValue{false};
+        ButtonControl button(0, root, WidgetContext { .navigation_service = navigation_service });
+        button.Configure(configuration);
+        zassert_equal(button.Render(), 0);
+        button.OnActivated();
+        lv_obj_send_event(FindButton(root), LV_EVENT_CLICKED, nullptr);
+        zassert_false(lv_obj_has_state(FindButton(root), LV_STATE_DISABLED));
+    }
+    zassert_false(probe.WaitForEvent(NO_DISPATCH_TIMEOUT_MS));
+
+    auto root = MakeRoot();
+    auto configuration = MakeConfiguration();
+    configuration->properties[WidgetPropertyType::TARGET_SCREEN_GROUP] = 1;
+    ButtonControl button(0, root, WidgetContext { .navigation_service = navigation_service });
+    button.Configure(configuration);
+    zassert_equal(button.Render(), 0);
+    button.OnActivated();
+    button.OnDeactivated();
+    lv_obj_send_event(FindButton(root), LV_EVENT_CLICKED, nullptr);
+    button.OnActivated();
+    lv_obj_set_style_opa(root->GetObject(), 0, LV_PART_MAIN);
+    lv_obj_send_event(FindButton(root), LV_EVENT_CLICKED, nullptr);
+    zassert_false(probe.WaitForEvent(NO_DISPATCH_TIMEOUT_MS));
+    lv_obj_set_style_opa(root->GetObject(), 255, LV_PART_MAIN);
+    lv_obj_send_event(FindButton(root), LV_EVENT_CLICKED, nullptr);
+    zassert_true(probe.WaitForEvent());
 }

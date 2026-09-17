@@ -52,6 +52,8 @@ ZTEST(widget_supported_properties, test_a_widget_reports_its_properties_before_i
 
     auto supported = indicator.GetSupportedProperties();
 
+    zassert_true(Supports(supported, WidgetPropertyType::IS_ACTIVE));
+    zassert_true(Supports(supported, WidgetPropertyType::OPACITY));
     zassert_true(Supports(supported, WidgetPropertyType::IS_VISIBLE));
     zassert_true(Supports(supported, WidgetPropertyType::IS_SMOOTHED));
     zassert_true(Supports(supported, WidgetPropertyType::MIN_VALUE));

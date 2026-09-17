@@ -28,6 +28,19 @@ using eerie_leap::utilities::type::ConfigValue;
 // Monostate means the value cannot fill that property, and the event is dropped.
 inline ConfigValue CoerceToConfigValue(
     const EventData& value, size_t alternative, WidgetPropertyType type = WidgetPropertyType::NONE) {
+    if(type == WidgetPropertyType::IS_ACTIVE || type == WidgetPropertyType::IS_VISIBLE) {
+        return std::visit([](const auto& argument) -> ConfigValue {
+            using T = std::decay_t<decltype(argument)>;
+            if constexpr(std::is_same_v<T, bool>)
+                return argument;
+            else if constexpr(std::is_arithmetic_v<T>) {
+                if(argument == 0 || argument == 1)
+                    return argument == 1;
+            }
+            return std::monostate{};
+        }, value);
+    }
+
     if(type == WidgetPropertyType::OPACITY) {
         if(const auto* opacity = std::get_if<int>(&value); opacity != nullptr && *opacity >= 0 && *opacity <= 255)
             return *opacity;

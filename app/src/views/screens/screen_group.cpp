@@ -3,9 +3,13 @@
 #include <zephyr/logging/log.h>
 #include <lvgl.h>
 
+#include "domain/ui_domain/lvgl_lock.h"
+
 #include "screen_group.h"
 
 namespace eerie_leap::views::screens {
+
+using eerie_leap::domain::ui_domain::ScopedLvglLock;
 
 LOG_MODULE_REGISTER(screen_group_logger);
 
@@ -13,6 +17,7 @@ ScreenGroup::ScreenGroup(uint32_t screen_group_id, std::shared_ptr<Frame> parent
     : screen_group_id_(screen_group_id) {
 
     container_ = std::make_shared<Frame>(Frame::CreateWrapped(parent->GetObject())
+        .SetProcessingParent(parent)
         .SetWidth(100, false)
         .SetHeight(100, false)
         .Build());
@@ -72,26 +77,28 @@ bool ScreenGroup::IsRendered() const {
 // Recorded here and applied by EnsureRendered() when the group is rendered
 // later, so a caller can select a group without waiting for it to be built.
 void ScreenGroup::Activate() {
+    ScopedLvglLock lvgl_guard;
     is_activation_requested_ = true;
 
     ApplyActivation();
 }
 
 void ScreenGroup::ApplyActivation() {
+    ScopedLvglLock lvgl_guard;
     if(is_activated_ || !is_activation_requested_ || !is_rendered_)
         return;
 
     lv_obj_remove_flag(container_->GetObject(), LV_OBJ_FLAG_HIDDEN);
 
     for(auto& screen : screens_)
-        if(screen->IsVisible())
-            screen->OnActivated();
+        screen->OnActivated();
 
     container_->Invalidate();
     is_activated_ = true;
 }
 
 void ScreenGroup::Deactivate() {
+    ScopedLvglLock lvgl_guard;
     is_activation_requested_ = false;
 
     if(!is_activated_)

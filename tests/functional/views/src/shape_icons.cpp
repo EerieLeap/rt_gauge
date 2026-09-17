@@ -431,7 +431,7 @@ ZTEST(shape_icons, test_large_radii_and_thicknesses_fit_small_shapes) {
     zassert_within(Alpha(*pixel, 0, 0), 255, 1);
 }
 
-ZTEST(shape_icons, test_bound_size_updates_visible_geometry_and_replays_after_reactivation) {
+ZTEST(shape_icons, test_bound_size_tracks_hidden_updates_and_replays_visible_geometry) {
     auto configuration = Configuration(IconType::Rectangle);
     Bind(*configuration, WidgetPropertyType::WIDTH_PX);
     auto widget = MakeWidget(configuration);

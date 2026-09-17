@@ -138,7 +138,7 @@ ZTEST(screen_group, test_activate_and_deactivate_are_idempotent) {
     zassert_equal(screen->activated_count, 2);
 }
 
-ZTEST(screen_group, test_an_invisible_screen_renders_but_is_not_activated) {
+ZTEST(screen_group, test_group_lifecycle_reaches_invisible_screens_without_revealing_them) {
     auto root = MakeRoot();
     auto group = std::make_shared<ScreenGroup>(0, root);
 
@@ -151,7 +151,8 @@ ZTEST(screen_group, test_an_invisible_screen_renders_but_is_not_activated) {
     group->Activate();
 
     zassert_equal(hidden->render_count, 1);
-    zassert_equal(hidden->activated_count, 0);
+    zassert_equal(hidden->activated_count, 1);
+    zassert_false(hidden->IsVisible());
     zassert_equal(visible->activated_count, 1);
 
     // Deactivation is unconditional: a screen made invisible while active still
