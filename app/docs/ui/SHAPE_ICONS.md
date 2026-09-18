@@ -24,8 +24,9 @@ declared by each icon and registered through `IconFactory` for the selected
 `ICON_TYPE`. `IconWidget` adds the shared position and active-state properties.
 Ovals do not expose corner radius or direction; lines do not expose fill mode
 or corner radius. Image and label icons likewise expose only their own properties.
-Properties support the existing event bindings. Changes
-while a widget is inactive are applied when it is activated again.
+Properties support the existing event bindings. Hidden widgets retain the latest
+incoming properties and apply them when visible. Explicit `IS_ACTIVE=false`
+rejects ordinary updates instead; those rejected events are not replayed.
 
 `GetSupportedProperties()` reports the selected icon's properties after
 configuration, or before configuration when the constructor fixes the icon type.
@@ -57,8 +58,11 @@ least the stroke thickness across the line, keeping the entire stroke visible.
 Opposite directions have identical appearance for a plain line. Diagonal line
 directions are not defined by this enum.
 
-Shapes use the theme's accent color and opacity. `IS_ACTIVE=false` makes the
-icon transparent, and `IS_VISIBLE` continues to control the owning widget.
+Shapes default to the theme's accent RGBA. `COLOR_PRIMARY_ACTIVE` overrides it
+with an explicit `#RRGGBBAA` color. `IS_VISIBLE` controls visibility and `OPACITY`
+fades the owning widget. `IS_ACTIVE=false` pauses tracking and visual work without
+hiding or recoloring the icon. See [Widget appearance](WIDGET_APPEARANCE.md) for
+examples, reset semantics, migration guidance, and the native color gallery.
 
 ## Example
 
@@ -107,7 +111,7 @@ temporary ARGB buffer is approximately 5–7 KiB, depending on board alignment,
 plus about 18 KiB of temporary renderer workspace on the LVGL heap. Only the
 alpha mask persists: one byte per pixel plus row padding, allocated through the
 existing external-memory resource.
-Theme and active-state changes recolor the mask without rasterizing it again.
+Theme and color-property changes recolor the mask without rasterizing it again.
 
 Dimensions must be in 0–32767, with both dimensions positive for closed shapes
 and the length positive for lines. Invalid dimensions, zero outline/line
@@ -137,9 +141,10 @@ On ESP32-S3 this caused unresolved `open`, `close`, `read`, `write`, `lseek`, an
 ESP32-S3 and ESP32-P4; it does not require these document loaders.
 
 Existing property, icon, and direction identifiers retain their numeric values.
-UI configuration version 2 stores property keys as unsigned IDs in CBOR:
+UI configuration version 1 stores property keys as unsigned IDs in CBOR:
 `UiPropertyType` for the UI and `WidgetPropertyType` for widgets. No UI properties
-are defined yet. Older configurations are rejected and replaced with defaults.
+are defined yet. The color/opacity additions preserve the existing CBOR layout;
+older firmware rejects the newly added property IDs.
 
 ## Verification
 
@@ -155,7 +160,7 @@ west build -b esp32s3_touch_amoled_1_75/esp32s3/procpu -d build-shapes-s3 ./app
 ```
 
 The view tests cover rasterized geometry, transparent outlines, tile boundaries,
-live bindings on the event worker, inactive replay, theme changes, arc placement,
+live bindings on the event worker, hidden replay, theme changes, arc placement,
 object ownership, overlay redraws, and existing bar directions. Stack sentinels
 and stack canaries are enabled in the view tests; the controller tests also
 exercise opening and reopening an overlay above the shape screen.

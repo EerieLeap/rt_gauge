@@ -1,5 +1,7 @@
 #include <algorithm>
 #include <array>
+#include <cstdio>
+#include <cstdlib>
 #include <memory>
 #include <string>
 #include <utility>
@@ -113,6 +115,45 @@ void CheckArc(lv_obj_t* object, lv_part_t part, LvglColor expected) {
     zassert_equal(lv_obj_get_style_arc_opa(object, part), expected.ToLvOpa());
 }
 
+void GallerySnapshot(lv_obj_t* root, const char* name, bool visible = true) {
+    lv_obj_update_layout(root);
+    std::unique_ptr<lv_draw_buf_t, decltype(&lv_draw_buf_destroy)> snapshot(
+        lv_snapshot_take(root, LV_COLOR_FORMAT_ARGB8888), lv_draw_buf_destroy);
+    zassert_not_null(snapshot);
+    zassert_equal(snapshot->header.w, 96);
+    zassert_equal(snapshot->header.h, 72);
+    const auto* background = reinterpret_cast<const lv_color32_t*>(snapshot->data);
+    size_t changed = 0;
+    for(uint32_t row = 0; row < snapshot->header.h; ++row) {
+        auto* pixels = reinterpret_cast<const lv_color32_t*>(snapshot->data + row * snapshot->header.stride);
+        for(uint32_t column = 0; column < snapshot->header.w; ++column) {
+            if(pixels[column].red != background->red || pixels[column].green != background->green
+                || pixels[column].blue != background->blue)
+                ++changed;
+        }
+    }
+    zassert_equal(changed > 0, visible, "%s visibility", name);
+#ifdef CONFIG_ARCH_POSIX
+    const char* directory = std::getenv("WIDGET_COLOR_PREVIEW_DIR");
+    if(directory == nullptr)
+        return;
+    char path[512];
+    const int length = std::snprintf(path, sizeof(path), "%s/%s.ppm", directory, name);
+    zassert_true(length > 0 && static_cast<size_t>(length) < sizeof(path));
+    auto* file = std::fopen(path, "wb");
+    zassert_not_null(file, "%s", path);
+    std::fprintf(file, "P6\n%u %u\n255\n", snapshot->header.w, snapshot->header.h);
+    for(uint32_t row = 0; row < snapshot->header.h; ++row) {
+        auto* pixels = reinterpret_cast<const lv_color32_t*>(snapshot->data + row * snapshot->header.stride);
+        for(uint32_t column = 0; column < snapshot->header.w; ++column) {
+            const uint8_t rgb[] { pixels[column].red, pixels[column].green, pixels[column].blue };
+            zassert_equal(std::fwrite(rgb, 1, sizeof(rgb), file), sizeof(rgb));
+        }
+    }
+    zassert_equal(std::fclose(file), 0);
+#endif
+}
+
 void* Setup() {
     views_test::EnsureTestDisplay();
     eerie_leap::event_bus::InitializeEventChannels();
@@ -131,6 +172,125 @@ void Clean(void* fixture) {
 } // namespace
 
 ZTEST_SUITE(widget_colors, NULL, Setup, Before, Clean, NULL);
+
+ZTEST(widget_colors, test_simulator_gallery) {
+    auto root = std::make_shared<Frame>(
+        Frame::CreateWrapped().SetWidth(96, true).SetHeight(72, true).Build());
+    auto parent = std::make_shared<Frame>(
+        Frame::CreateWrapped(root->GetObject()).SetWidth(72, true).SetHeight(32, true).Build());
+    lv_obj_center(parent->GetObject());
+    lv_obj_set_style_bg_color(root->GetObject(), lv_color_hex(0x202428), 0);
+    lv_obj_set_style_bg_opa(root->GetObject(), LV_OPA_COVER, 0);
+    auto render = [&](std::shared_ptr<WidgetConfiguration> configuration) {
+        configuration->properties[WidgetPropertyType::IS_SMOOTHED] = false;
+        auto widget = WidgetFactory::GetInstance().CreateWidget(configuration, parent, WidgetContext{});
+        zassert_equal(widget->Render(), 0);
+        widget->OnActivated();
+        lv_obj_update_layout(root->GetObject());
+        return widget;
+    };
+
+    const std::array<std::shared_ptr<ITheme>, 4> themes {
+        std::make_shared<DefaultTheme>(), std::make_shared<DarkTheme>(),
+        std::make_shared<DarkBWTheme>(), std::make_shared<TranslucentTheme>()
+    };
+    const char* theme_names[] { "01_default", "02_dark", "03_monochrome", "04_theme_alpha" };
+    auto configuration = Configuration(WidgetType::IndicatorBar);
+    configuration->bindings.clear();
+    configuration->properties[WidgetPropertyType::VALUE] = 70;
+    {
+        auto widget = render(configuration);
+        for(size_t index = 0; index < themes.size(); ++index) {
+            ThemeManager::GetInstance().SetTheme(themes[index]);
+            CheckBackground(Inner(*widget), LV_PART_INDICATOR, themes[index]->GetSecondaryColor());
+            GallerySnapshot(root->GetObject(), theme_names[index]);
+        }
+        configuration->properties[primary] = std::pmr::string("#33CC9980");
+        configuration->properties[secondary] = std::pmr::string("#6688AA40");
+        widget->Configure(configuration);
+        CheckBackground(Inner(*widget), LV_PART_INDICATOR, LvglColor(0x33CC99, 128));
+        GallerySnapshot(root->GetObject(), "05_explicit_rgba");
+        configuration->properties[WidgetPropertyType::OPACITY] = 128;
+        widget->Configure(configuration);
+        zassert_equal(lv_obj_get_style_opa_layered(widget->GetContainer()->GetObject(), LV_PART_MAIN), 128);
+        GallerySnapshot(root->GetObject(), "06_widget_fade");
+    }
+
+    ThemeManager::GetInstance().SetTheme(std::make_shared<DefaultTheme>());
+    for(auto type : { WidgetType::ControlButton, WidgetType::ControlSlider, WidgetType::ControlToggle }) {
+        configuration = Configuration(type);
+        configuration->bindings.clear();
+        configuration->properties[WidgetPropertyType::LABEL] = std::pmr::string("LOG");
+        configuration->properties[primary] = std::pmr::string("#33CC99FF");
+        configuration->properties[primary_inactive] = std::pmr::string("#6688AA80");
+        configuration->properties[secondary] = std::pmr::string("#FFFFFFFF");
+        configuration->properties[secondary_inactive] = std::pmr::string("#DDEEFFC0");
+        if(type == WidgetType::ControlSlider) {
+            configuration->properties[secondary] = std::pmr::string("#6688AA80");
+            configuration->properties[secondary_inactive] = std::pmr::string("#6688AA40");
+            configuration->properties[tertiary] = std::pmr::string("#FFFFFFFF");
+            configuration->properties[tertiary_inactive] = std::pmr::string("#DDEEFFC0");
+            configuration->properties[WidgetPropertyType::MIN_VALUE] = 0;
+            configuration->properties[WidgetPropertyType::MAX_VALUE] = 100;
+            configuration->properties[WidgetPropertyType::STEP] = 1;
+            configuration->properties[WidgetPropertyType::VALUE] = 65;
+        }
+        auto widget = render(configuration);
+        auto* object = Inner(*widget);
+        const bool toggle = type == WidgetType::ControlToggle;
+        const bool button = type == WidgetType::ControlButton;
+        if(type == WidgetType::ControlSlider)
+            zassert_equal(lv_slider_get_value(object), 65);
+        GallerySnapshot(root->GetObject(), button ? "07_button_idle" : toggle ? "11_toggle_off" : "09_slider_idle");
+        if(toggle) {
+            configuration->properties[WidgetPropertyType::VALUE] = true;
+            widget->Configure(configuration);
+            zassert_true(lv_obj_has_state(object, LV_STATE_CHECKED));
+        } else {
+            lv_obj_add_state(object, LV_STATE_PRESSED);
+            lv_obj_send_event(object, LV_EVENT_PRESSED, nullptr);
+            zassert_true(lv_obj_has_state(object, LV_STATE_PRESSED));
+        }
+        lv_tick_inc(500);
+        lv_anim_refr_now();
+        if(type == WidgetType::ControlSlider)
+            zassert_equal(lv_slider_get_value(object), 65);
+        GallerySnapshot(root->GetObject(), button ? "08_button_pressed" : toggle ? "12_toggle_on" : "10_slider_pressed");
+    }
+
+    configuration = Configuration(WidgetType::IndicatorBar);
+    std::erase_if(configuration->bindings, [](const auto& binding) {
+        return binding.target != WidgetPropertyType::VALUE && binding.target != WidgetPropertyType::IS_VISIBLE
+            && binding.target != WidgetPropertyType::IS_ACTIVE && binding.target != WidgetPropertyType::OPACITY;
+    });
+    configuration->properties[primary] = std::pmr::string("#33CC99FF");
+    configuration->properties[secondary] = std::pmr::string("#6688AA40");
+    auto widget = render(configuration);
+    auto* bar = Inner(*widget);
+    Publish(WidgetPropertyType::VALUE, 25);
+    zassert_equal(lv_bar_get_value(bar), 25);
+    GallerySnapshot(root->GetObject(), "13_initial_25");
+    Publish(WidgetPropertyType::IS_VISIBLE, false);
+    Publish(WidgetPropertyType::VALUE, 50);
+    Publish(WidgetPropertyType::VALUE, 80);
+    zassert_equal(lv_bar_get_value(bar), 25);
+    GallerySnapshot(root->GetObject(), "14_hidden_80", false);
+    Publish(WidgetPropertyType::IS_VISIBLE, true);
+    zassert_equal(lv_bar_get_value(bar), 80);
+    GallerySnapshot(root->GetObject(), "15_revealed_80");
+    Publish(WidgetPropertyType::OPACITY, 0);
+    Publish(WidgetPropertyType::VALUE, 60);
+    zassert_equal(lv_bar_get_value(bar), 80);
+    GallerySnapshot(root->GetObject(), "16_transparent_60", false);
+    Publish(WidgetPropertyType::OPACITY, 255);
+    zassert_equal(lv_bar_get_value(bar), 60);
+    GallerySnapshot(root->GetObject(), "17_restored_60");
+    Publish(WidgetPropertyType::IS_ACTIVE, false);
+    Publish(WidgetPropertyType::VALUE, 95);
+    Publish(WidgetPropertyType::IS_ACTIVE, true);
+    zassert_equal(lv_bar_get_value(bar), 60);
+    GallerySnapshot(root->GetObject(), "18_rejected_95");
+}
 
 ZTEST(widget_colors, test_whole_widget_opacity_survives_render_theme_and_configuration_replay) {
     for(auto type : { WidgetType::BasicIcon, WidgetType::BasicArcIcon, WidgetType::IndicatorDigital,

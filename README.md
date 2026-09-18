@@ -140,6 +140,12 @@ And GDB in another:
 
 ## Development
 
+### Widget Appearance
+
+See [Widget appearance](app/docs/ui/WIDGET_APPEARANCE.md) for RGBA colors,
+whole-widget opacity, activity/visibility compatibility, live-binding examples,
+and the reproducible native simulator gallery.
+
 ### Required tools
 
 #### CBOR
