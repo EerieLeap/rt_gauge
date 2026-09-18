@@ -123,8 +123,7 @@ bool WidgetPropertyStore::Set(WidgetPropertyType type, const ConfigValue& value)
         return true;
     }
 
-    if(WidgetPropertyValidator::IsAppearanceProperty(type)
-        && !WidgetPropertyValidator::IsValidAppearanceValue(type, value))
+    if(WidgetPropertyValidator::IsAppearanceProperty(type) && !WidgetPropertyValidator::IsValidAppearanceValue(type, value))
         return false;
 
     entry->value = value;

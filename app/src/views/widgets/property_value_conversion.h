@@ -50,7 +50,24 @@ inline ConfigValue CoerceToConfigValue(
     if(WidgetPropertyValidator::IsColorProperty(type)) {
         if(const auto* text = std::get_if<std::string>(&value))
             return std::pmr::string(*text, Mrm::GetExtPmr());
-        return std::monostate{};
+        uint32_t color_int;
+        if(const auto* color = std::get_if<uint32_t>(&value))
+            color_int = *color;
+        else if(const auto* color = std::get_if<int>(&value))
+            color_int = static_cast<uint32_t>(*color);
+        else if(const auto* color = std::get_if<float>(&value))
+            color_int = static_cast<uint32_t>(*color);
+        else
+            return std::monostate{};
+
+        constexpr char hex_digits[] = "0123456789ABCDEF";
+        char color_str[] = "#000000FF";
+        for(size_t i = 6; i > 0; --i) {
+            color_str[i] = hex_digits[color_int & 0xF];
+            color_int >>= 4;
+        }
+
+        return ConfigValue(std::in_place_type<std::pmr::string>, color_str, sizeof(color_str) - 1, Mrm::GetExtPmr());
     }
 
     return std::visit([alternative](auto&& argument) -> ConfigValue {

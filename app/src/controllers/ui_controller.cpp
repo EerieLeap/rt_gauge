@@ -112,6 +112,17 @@ PropertyBinding LoggingBinding(WidgetPropertyType target) {
     };
 }
 
+PropertyBinding SensorToColorBinding(WidgetPropertyType target, const char* sensor_id) {
+    return PropertyBinding {
+        .target = target,
+        .channel = EventChannelId::Sensors,
+        .event_type = std::to_underlying(SensorEventType::DataUpdated),
+        .payload_key = std::to_underlying(SensorPayloadType::Value),
+        .selector_key = std::to_underlying(SensorPayloadType::SensorId),
+        .selector_value = std::pmr::string(sensor_id, Mrm::GetExtPmr())
+    };
+}
+
 PropertyBinding SettingBinding(
     WidgetPropertyType target,
     SettingsEventType event,
@@ -541,6 +552,8 @@ void UiController::SetupTestConfiguration() {
     widget2->bindings.push_back(SensorBinding("sensor_1"));
     widget2->properties[WidgetPropertyType::CHART_POINT_COUNT] = 35;
     widget2->properties[WidgetPropertyType::CHART_TYPE] = static_cast<int>(HorizontalChartIndicatorType::Bar);
+    widget2->properties[WidgetPropertyType::COLOR_PRIMARY_ACTIVE] = "#FFFFFFFF";
+    widget2->bindings.push_back(SensorToColorBinding(WidgetPropertyType::COLOR_PRIMARY_ACTIVE, "sensor_1"));
     screen_configuration->AddWidget(std::move(widget2));
 
     // Widget 3: IndicatorHorizontalChart (Line)
