@@ -27,9 +27,25 @@ int HorizontalChartIndicator::DoRender() {
     return 0;
 }
 
+void HorizontalChartIndicator::RegisterProperties(WidgetPropertyStore& store) const {
+    IndicatorBase::RegisterProperties(store);
+
+    store.RegisterColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE);
+
+    store.Register(WidgetPropertyType::CHART_POINT_COUNT, ConfigValue { 30 }, PropertyChangeEffect::Rebuild);
+    store.Register(
+        WidgetPropertyType::CHART_TYPE,
+        ConfigValue { static_cast<int>(HorizontalChartIndicatorType::Bar) },
+        PropertyChangeEffect::Rebuild);
+}
+
 int HorizontalChartIndicator::ApplyTheme(const ITheme& theme) {
+    const auto primary = properties_->ResolveColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE, theme.GetPrimaryColor());
+
     auto ser = lv_chart_get_series_next(lv_chart_, nullptr);
-    lv_chart_set_series_color(lv_chart_, ser, theme.GetPrimaryColor().ToLvColor());
+    lv_chart_set_series_color(lv_chart_, ser, primary.ToLvColor());
+    lv_obj_set_style_line_opa(lv_chart_, primary.ToLvOpa(), LV_PART_ITEMS | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(lv_chart_, primary.ToLvOpa(), LV_PART_ITEMS | LV_STATE_DEFAULT);
 
     return 0;
 }
@@ -87,16 +103,6 @@ void HorizontalChartIndicator::Update(float value) {
         value = range_end_;
 
     UpdateIndicator(value);
-}
-
-void HorizontalChartIndicator::RegisterProperties(WidgetPropertyStore& store) const {
-    IndicatorBase::RegisterProperties(store);
-
-    store.Register(WidgetPropertyType::CHART_POINT_COUNT, ConfigValue { 30 }, PropertyChangeEffect::Rebuild);
-    store.Register(
-        WidgetPropertyType::CHART_TYPE,
-        ConfigValue { static_cast<int>(HorizontalChartIndicatorType::Bar) },
-        PropertyChangeEffect::Rebuild);
 }
 
 void HorizontalChartIndicator::OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) {

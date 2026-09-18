@@ -1,12 +1,16 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 #include <zephyr/kernel.h>
 
 #include "domain/ui_domain/models/widget_property.h"
+#include "domain/ui_domain/utilities/widget_property_validator.h"
 #include "utilities/type/config_value.h"
+#include "views/utilities/lvgl_color.h"
 
 namespace eerie_leap::views::widgets {
 
@@ -36,6 +40,10 @@ private:
 
     // A widget declares roughly ten properties, so a scan beats hashing and allocates once.
     std::vector<Entry> entries_;
+    using ColorCache = std::array<std::optional<eerie_leap::utilities::type::Color>,
+        eerie_leap::domain::ui_domain::utilities::WidgetPropertyValidator::color_properties.size()>;
+    ColorCache colors_;
+    ColorCache applied_colors_;
     mutable k_mutex lock_;
 
     Entry* Find(WidgetPropertyType type);
@@ -49,6 +57,11 @@ public:
 
     // Re-registering replaces the default, so a derived class can narrow what its base declared.
     void Register(WidgetPropertyType type, ConfigValue default_value, PropertyChangeEffect effect);
+
+    void RegisterColor(WidgetPropertyType type);
+    void ApplyColor(WidgetPropertyType type);
+    eerie_leap::views::utilities::LvglColor ResolveColor(
+        WidgetPropertyType type, eerie_leap::views::utilities::LvglColor fallback) const;
 
     bool IsRegistered(WidgetPropertyType type) const;
     PropertyChangeEffect GetEffect(WidgetPropertyType type) const;

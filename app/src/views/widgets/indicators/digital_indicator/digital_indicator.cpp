@@ -23,10 +23,20 @@ int DigitalIndicator::DoRender() {
     return 0;
 }
 
+void DigitalIndicator::RegisterProperties(WidgetPropertyStore& store) const {
+    IndicatorBase::RegisterProperties(store);
+
+    store.RegisterColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE);
+
+    store.Register(WidgetPropertyType::VALUE_PRECISION, ConfigValue { 0 }, PropertyChangeEffect::Repaint);
+}
+
 int DigitalIndicator::ApplyTheme(const ITheme& theme) {
+    const auto primary = properties_->ResolveColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE, theme.GetPrimaryColor());
+
     lv_obj_set_style_text_font(lv_label_, theme.GetPrimaryFontLarge().ToLvFont(), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_color(lv_label_, theme.GetPrimaryColor().ToLvColor(), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_opa(lv_label_, theme.GetPrimaryColor().ToLvOpa(), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_color(lv_label_, primary.ToLvColor(), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_opa(lv_label_, primary.ToLvOpa(), LV_PART_MAIN | LV_STATE_DEFAULT);
 
     return 0;
 }
@@ -51,12 +61,6 @@ void DigitalIndicator::UpdateIndicator(float value) {
     snprintf(value_str, sizeof(value_str), "%.*f", value_precision_, value);
 
     lv_label_set_text(lv_label_, value_str);
-}
-
-void DigitalIndicator::RegisterProperties(WidgetPropertyStore& store) const {
-    IndicatorBase::RegisterProperties(store);
-
-    store.Register(WidgetPropertyType::VALUE_PRECISION, ConfigValue { 0 }, PropertyChangeEffect::Repaint);
 }
 
 void DigitalIndicator::OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) {

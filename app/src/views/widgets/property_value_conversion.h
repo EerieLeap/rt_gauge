@@ -4,20 +4,18 @@
 #include <string>
 #include <variant>
 
-#include "domain/ui_domain/utilities/widget_property_validation.h"
+#include "domain/ui_domain/utilities/widget_property_validator.h"
 #include "subsys/event_bus/event.h"
 
 #include "utilities/memory/memory_resource_manager.h"
-#include "utilities/type/color.h"
 #include "utilities/type/config_value.h"
 
 namespace eerie_leap::views::widgets {
 
 using eerie_leap::domain::ui_domain::models::WidgetPropertyType;
-using eerie_leap::domain::ui_domain::utilities::IsWidgetColorProperty;
+using eerie_leap::domain::ui_domain::utilities::WidgetPropertyValidator;
 using eerie_leap::subsys::event_bus::EventData;
 using eerie_leap::utilities::memory::Mrm;
-using eerie_leap::utilities::type::Color;
 using eerie_leap::utilities::type::ConfigValue;
 
 // EventData and ConfigValue overlap but are not the same variant: the bus has no monostate and
@@ -49,9 +47,8 @@ inline ConfigValue CoerceToConfigValue(
         return std::monostate{};
     }
 
-    if(IsWidgetColorProperty(type)) {
-        const auto* text = std::get_if<std::string>(&value);
-        if(text != nullptr && Color::TryParse(*text).has_value())
+    if(WidgetPropertyValidator::IsColorProperty(type)) {
+        if(const auto* text = std::get_if<std::string>(&value))
             return std::pmr::string(*text, Mrm::GetExtPmr());
         return std::monostate{};
     }

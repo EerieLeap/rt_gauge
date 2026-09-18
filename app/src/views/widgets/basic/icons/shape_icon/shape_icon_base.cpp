@@ -55,9 +55,21 @@ ShapeIconBase::~ShapeIconBase() {
 
 void ShapeIconBase::RegisterProperties(WidgetPropertyStore& store) {
     IconBase::RegisterProperties(store);
+
+    store.RegisterColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE);
+
     store.Register(WidgetPropertyType::WIDTH_PX, ConfigValue { 32 }, PropertyChangeEffect::Relayout);
     store.Register(WidgetPropertyType::HEIGHT_PX, ConfigValue { 32 }, PropertyChangeEffect::Relayout);
     store.Register(WidgetPropertyType::STROKE_PX, ConfigValue { 2 }, PropertyChangeEffect::Relayout);
+}
+
+int ShapeIconBase::ApplyTheme(const ITheme& theme) {
+    const auto color = properties_->ResolveColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE, theme.GetAccentColor());
+    lv_obj_set_style_image_recolor(image_object_, color.ToLvColor(), 0);
+    lv_obj_set_style_image_recolor_opa(image_object_, LV_OPA_COVER, 0);
+    lv_obj_set_style_opa(image_object_, image_.data != nullptr ? color.ToLvOpa() : LV_OPA_TRANSP, 0);
+    container_->Invalidate();
+    return 0;
 }
 
 bool ShapeIconBase::ReadGeometry() {
@@ -92,15 +104,6 @@ int ShapeIconBase::DoRender() {
         lv_image_set_antialias(image_object_, true);
     }
     UpdateImage();
-    return 0;
-}
-
-int ShapeIconBase::ApplyTheme(const ITheme& theme) {
-    auto color = theme.GetAccentColor();
-    lv_obj_set_style_image_recolor(image_object_, color.ToLvColor(), 0);
-    lv_obj_set_style_image_recolor_opa(image_object_, LV_OPA_COVER, 0);
-    lv_obj_set_style_opa(image_object_, image_.data != nullptr ? color.ToLvOpa() : LV_OPA_TRANSP, 0);
-    container_->Invalidate();
     return 0;
 }
 

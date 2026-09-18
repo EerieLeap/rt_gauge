@@ -250,6 +250,31 @@ void* SetUp() {
 
 ZTEST_SUITE(widget_bindings, NULL, SetUp, NULL, CleanTestDisplay, NULL);
 
+ZTEST(widget_bindings, test_digital_color_binding_applies_rgba_and_resets_without_rebuilding) {
+    using eerie_leap::views::themes::ThemeManager;
+    auto configuration = MakeConfiguration();
+    configuration->properties[WidgetPropertyType::COLOR_PRIMARY_ACTIVE] = std::pmr::string("#12345680");
+    configuration->bindings.push_back(SensorBinding(WidgetPropertyType::COLOR_PRIMARY_ACTIVE, SENSOR_ID));
+    eerie_leap::views::widgets::indicators::DigitalIndicator widget(1, MakeRoot(), WidgetContext{});
+    widget.Configure(configuration);
+    zassert_equal(widget.Render(), 0);
+    widget.OnActivated();
+    auto* label = widget.GetContainer()->GetChild()->GetObject();
+    zassert_equal(lv_obj_get_style_text_opa(label, LV_PART_MAIN), 128);
+    zassert_equal(lv_color_to_u32(lv_obj_get_style_text_color(label, LV_PART_MAIN)),
+        lv_color_to_u32(lv_color_hex(0x123456)));
+    PublishSensor(SENSOR_ID, std::string("#abcdef00"));
+    zassert_equal(lv_obj_get_style_text_opa(label, LV_PART_MAIN), 0);
+    PublishSensor(SENSOR_ID, std::string("#abcdef"));
+    zassert_equal(lv_obj_get_style_text_opa(label, LV_PART_MAIN), 0);
+    PublishSensor(SENSOR_ID, std::string(""));
+    const auto fallback = ThemeManager::GetInstance().GetCurrentTheme().GetPrimaryColor();
+    zassert_equal(lv_obj_get_style_text_opa(label, LV_PART_MAIN), fallback.ToLvOpa());
+    zassert_equal(lv_color_to_u32(lv_obj_get_style_text_color(label, LV_PART_MAIN)),
+        lv_color_to_u32(fallback.ToLvColor()));
+    zassert_equal(widget.GetContainer()->GetChild()->GetObject(), label);
+}
+
 ZTEST(widget_bindings, test_color_store_rejects_invalid_updates_and_accepts_reset) {
     WidgetPropertyStore store;
     const ConfigValue invalid_values[] = {
@@ -270,6 +295,58 @@ ZTEST(widget_bindings, test_color_store_rejects_invalid_updates_and_accepts_rese
         zassert_true(store.Set(type, std::pmr::string{}));
         zassert_true(std::get<std::pmr::string>(store.Get(type)).empty());
     }
+}
+
+ZTEST(widget_bindings, test_color_cache_maps_properties_independently_of_registration_order) {
+    using eerie_leap::views::utilities::LvglColor;
+    struct ColorCase {
+        WidgetPropertyType type;
+        const char* text;
+        uint32_t rgb;
+        uint8_t alpha;
+    };
+    const ColorCase cases[] = {
+        { WidgetPropertyType::COLOR_TERTIARY_INACTIVE, "#11223300", 0x112233, 0 },
+        { WidgetPropertyType::COLOR_PRIMARY_ACTIVE, "#22334440", 0x223344, 64 },
+        { WidgetPropertyType::COLOR_SECONDARY_INACTIVE, "#33445580", 0x334455, 128 },
+        { WidgetPropertyType::COLOR_TERTIARY_ACTIVE, "#445566FF", 0x445566, 255 },
+        { WidgetPropertyType::COLOR_PRIMARY_INACTIVE, "#55667720", 0x556677, 32 },
+        { WidgetPropertyType::COLOR_SECONDARY_ACTIVE, "#667788C0", 0x667788, 192 }
+    };
+    WidgetPropertyStore store;
+    const LvglColor fallback(0xABCDEF, 64);
+    auto check = [&](WidgetPropertyType type, LvglColor expected) {
+        const auto actual = store.ResolveColor(type, fallback);
+        zassert_equal(lv_color_to_u32(actual.ToLvColor()), lv_color_to_u32(expected.ToLvColor()));
+        zassert_equal(actual.ToLvOpa(), expected.ToLvOpa());
+    };
+    for(const auto& color : cases)
+        store.Register(color.type, std::pmr::string(color.text), PropertyChangeEffect::Repaint);
+
+    for(const auto& color : cases) {
+        check(color.type, LvglColor(color.rgb, color.alpha));
+        zassert_true(store.Set(color.type, std::pmr::string("#FEDCBA80")));
+    }
+    for(const auto& color : cases)
+        check(color.type, LvglColor(color.rgb, color.alpha));
+
+    store.ApplyColor(cases[0].type);
+    check(cases[0].type, LvglColor(0xFEDCBA, 128));
+    for(const auto& color : cases) {
+        if(color.type != cases[0].type)
+            check(color.type, LvglColor(color.rgb, color.alpha));
+    }
+    for(const auto& color : cases) {
+        store.ApplyColor(color.type);
+        check(color.type, LvglColor(0xFEDCBA, 128));
+        zassert_true(store.Set(color.type, std::pmr::string{}));
+        check(color.type, LvglColor(0xFEDCBA, 128));
+        store.ApplyColor(color.type);
+        check(color.type, fallback);
+    }
+    store.ApplyColor(WidgetPropertyType::VALUE);
+    check(WidgetPropertyType::VALUE, fallback);
+    check(static_cast<WidgetPropertyType>(UINT16_MAX), fallback);
 }
 
 ZTEST(widget_bindings, test_opacity_store_rejects_invalid_updates_without_changing_value) {

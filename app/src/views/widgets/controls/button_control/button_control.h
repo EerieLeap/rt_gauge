@@ -36,6 +36,7 @@ private:
 
 protected:
     void OnControlEvent(lv_event_code_t code) override;
+    void OnProcessingSuspended() override;
 
 public:
     explicit ButtonControl(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context);

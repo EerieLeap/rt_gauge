@@ -41,13 +41,13 @@ enum class WidgetPropertyType : std::uint16_t {
     STROKE_PX,              // int
     CORNER_RAD_PX,          // int
     FILL_MODE,              // int (WidgetFillMode)
-    OPACITY,
-    COLOR_PRIMARY_ACTIVE,
-    COLOR_PRIMARY_INACTIVE,
-    COLOR_SECONDARY_ACTIVE,
-    COLOR_SECONDARY_INACTIVE,
-    COLOR_TERTIARY_ACTIVE,
-    COLOR_TERTIARY_INACTIVE,
+    OPACITY,                // int (0-255)
+    COLOR_PRIMARY_ACTIVE,       // string in format: "#RRGGBBAA" eg "#FF0000FF"
+    COLOR_PRIMARY_INACTIVE,     // string in format: "#RRGGBBAA" eg "#FF0000FF"
+    COLOR_SECONDARY_ACTIVE,     // string in format: "#RRGGBBAA" eg "#FF0000FF"
+    COLOR_SECONDARY_INACTIVE,   // string in format: "#RRGGBBAA" eg "#FF0000FF"
+    COLOR_TERTIARY_ACTIVE,      // string in format: "#RRGGBBAA" eg "#FF0000FF"
+    COLOR_TERTIARY_INACTIVE,    // string in format: "#RRGGBBAA" eg "#FF0000FF"
     COUNT                  // Sentinel, not a property
 };
 

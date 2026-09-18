@@ -12,6 +12,7 @@ namespace eerie_leap::views::widgets::indicators {
 using namespace eerie_leap::utilities::type;
 using namespace eerie_leap::domain::ui_domain::models;
 using namespace eerie_leap::views::utilitites;
+using eerie_leap::views::utilities::LvglColor;
 
 ArcFillIndicator::ArcFillIndicator(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context)
     : IndicatorBase(id, std::move(parent), std::move(context)) {}
@@ -25,9 +26,24 @@ int ArcFillIndicator::DoRender() {
     return 0;
 }
 
+void ArcFillIndicator::RegisterProperties(WidgetPropertyStore& store) const {
+    IndicatorBase::RegisterProperties(store);
+
+    store.RegisterColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE);
+    store.RegisterColor(WidgetPropertyType::COLOR_SECONDARY_ACTIVE);
+
+    store.Register(WidgetPropertyType::START_ANGLE, ConfigValue { DEFAULT_START_ANGLE }, PropertyChangeEffect::Repaint);
+    store.Register(WidgetPropertyType::END_ANGLE, ConfigValue { DEFAULT_END_ANGLE }, PropertyChangeEffect::Repaint);
+}
+
 int ArcFillIndicator::ApplyTheme(const ITheme& theme) {
-    lv_obj_set_style_arc_color(lv_arc_, theme.GetSecondaryColor().ToLvColor(), LV_PART_INDICATOR | LV_STATE_DEFAULT);
-    lv_obj_set_style_arc_opa(lv_arc_, theme.GetSecondaryColor().ToLvOpa(), LV_PART_INDICATOR | LV_STATE_DEFAULT);
+    const auto primary = properties_->ResolveColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE, theme.GetSecondaryColor());
+    const auto secondary = properties_->ResolveColor(WidgetPropertyType::COLOR_SECONDARY_ACTIVE, LvglColor(0, 0));
+
+    lv_obj_set_style_arc_color(lv_arc_, primary.ToLvColor(), LV_PART_INDICATOR | LV_STATE_DEFAULT);
+    lv_obj_set_style_arc_opa(lv_arc_, primary.ToLvOpa(), LV_PART_INDICATOR | LV_STATE_DEFAULT);
+    lv_obj_set_style_arc_color(lv_arc_, secondary.ToLvColor(), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_arc_opa(lv_arc_, secondary.ToLvOpa(), LV_PART_MAIN | LV_STATE_DEFAULT);
 
     return 0;
 }
@@ -55,13 +71,6 @@ lv_obj_t* ArcFillIndicator::Create(lv_obj_t* parent, int32_t range_start, int32_
 
 void ArcFillIndicator::UpdateIndicator(float value) {
     lv_arc_set_value(lv_arc_, static_cast<int32_t>(value));
-}
-
-void ArcFillIndicator::RegisterProperties(WidgetPropertyStore& store) const {
-    IndicatorBase::RegisterProperties(store);
-
-    store.Register(WidgetPropertyType::START_ANGLE, ConfigValue { DEFAULT_START_ANGLE }, PropertyChangeEffect::Repaint);
-    store.Register(WidgetPropertyType::END_ANGLE, ConfigValue { DEFAULT_END_ANGLE }, PropertyChangeEffect::Repaint);
 }
 
 void ArcFillIndicator::OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) {

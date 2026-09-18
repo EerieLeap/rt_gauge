@@ -20,9 +20,21 @@ SettingIndicator::SettingIndicator(uint32_t id, std::shared_ptr<Frame> parent, W
 void SettingIndicator::RegisterProperties(WidgetPropertyStore& store) const {
     SettingWidgetBase::RegisterProperties(store);
 
+    store.RegisterColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE);
+
     store.Register(WidgetPropertyType::LABEL, ConfigValue { std::pmr::string { } }, PropertyChangeEffect::Repaint);
     store.Register(WidgetPropertyType::UNIT, ConfigValue { std::pmr::string { } }, PropertyChangeEffect::Repaint);
     store.Register(WidgetPropertyType::VALUE_PRECISION, ConfigValue { 0 }, PropertyChangeEffect::Repaint);
+}
+
+int SettingIndicator::ApplyTheme(const ITheme& theme) {
+    const auto primary = properties_->ResolveColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE, theme.GetPrimaryColor());
+
+    lv_obj_set_style_text_font(lv_label_, theme.GetPrimaryFont().ToLvFont(), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_color(lv_label_, primary.ToLvColor(), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_opa(lv_label_, primary.ToLvOpa(), LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    return 0;
 }
 
 void SettingIndicator::OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) {
@@ -62,14 +74,6 @@ int SettingIndicator::DoRender() {
     UpdateText();
 
     container_->SetChild(std::make_shared<Frame>(Frame::Create(lv_label_).Build()));
-
-    return 0;
-}
-
-int SettingIndicator::ApplyTheme(const ITheme& theme) {
-    lv_obj_set_style_text_font(lv_label_, theme.GetPrimaryFont().ToLvFont(), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_color(lv_label_, theme.GetPrimaryColor().ToLvColor(), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_opa(lv_label_, theme.GetPrimaryColor().ToLvOpa(), LV_PART_MAIN | LV_STATE_DEFAULT);
 
     return 0;
 }

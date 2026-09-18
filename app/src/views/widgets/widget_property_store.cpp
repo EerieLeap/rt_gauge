@@ -1,15 +1,17 @@
 #include <algorithm>
 #include <utility>
 
-#include "domain/ui_domain/utilities/widget_property_validation.h"
+#include "domain/ui_domain/utilities/widget_property_validator.h"
 #include "subsys/threading/scoped_mutex.h"
 
 #include "widget_property_store.h"
 
 namespace eerie_leap::views::widgets {
 
-using eerie_leap::domain::ui_domain::utilities::IsValidWidgetAppearanceValue;
+using eerie_leap::domain::ui_domain::utilities::WidgetPropertyValidator;
 using eerie_leap::subsys::threading::ScopedMutex;
+using eerie_leap::utilities::type::Color;
+using eerie_leap::views::utilities::LvglColor;
 
 WidgetPropertyStore::WidgetPropertyStore() {
     k_mutex_init(&lock_);
@@ -31,6 +33,13 @@ void WidgetPropertyStore::Register(WidgetPropertyType type, ConfigValue default_
 
     auto alternative = static_cast<uint8_t>(default_value.index());
 
+    if(const auto index = WidgetPropertyValidator::GetColorPropertyIndex(type)) {
+        const auto* text = std::get_if<std::pmr::string>(&default_value);
+        colors_[*index] =
+            text == nullptr ? std::nullopt : Color::TryParse(*text).value_or(std::nullopt);
+        applied_colors_[*index] = colors_[*index];
+    }
+
     if(auto* entry = Find(type)) {
         entry->effect = effect;
         entry->declared_alternative = alternative;
@@ -45,6 +54,29 @@ void WidgetPropertyStore::Register(WidgetPropertyType type, ConfigValue default_
         .declared_alternative = alternative,
         .value = std::move(default_value)
     });
+}
+
+void WidgetPropertyStore::RegisterColor(WidgetPropertyType type) {
+    Register(type, ConfigValue { std::pmr::string {} }, PropertyChangeEffect::Repaint);
+}
+
+void WidgetPropertyStore::ApplyColor(WidgetPropertyType type) {
+    ScopedMutex guard(lock_);
+    const auto index = WidgetPropertyValidator::GetColorPropertyIndex(type);
+    if(!index)
+        return;
+
+    applied_colors_[*index] = colors_[*index];
+}
+
+LvglColor WidgetPropertyStore::ResolveColor(WidgetPropertyType type, LvglColor fallback) const {
+    ScopedMutex guard(lock_);
+    const auto index = WidgetPropertyValidator::GetColorPropertyIndex(type);
+    if(!index)
+        return fallback;
+
+    const auto& color = applied_colors_[*index];
+    return color.has_value() ? LvglColor(*color) : fallback;
 }
 
 bool WidgetPropertyStore::IsRegistered(WidgetPropertyType type) const {
@@ -73,7 +105,26 @@ bool WidgetPropertyStore::Set(WidgetPropertyType type, const ConfigValue& value)
     ScopedMutex guard(lock_);
 
     auto* entry = Find(type);
-    if(entry == nullptr || !IsValidWidgetAppearanceValue(type, value))
+    if(entry == nullptr)
+        return false;
+
+    if(const auto index = WidgetPropertyValidator::GetColorPropertyIndex(type)) {
+        const auto* text = std::get_if<std::pmr::string>(&value);
+        if(text == nullptr)
+            return false;
+
+        const auto parsed = Color::TryParse(*text);
+        if(!parsed.has_value())
+            return false;
+
+        entry->value = value;
+        colors_[*index] = *parsed;
+
+        return true;
+    }
+
+    if(WidgetPropertyValidator::IsAppearanceProperty(type)
+        && !WidgetPropertyValidator::IsValidAppearanceValue(type, value))
         return false;
 
     entry->value = value;

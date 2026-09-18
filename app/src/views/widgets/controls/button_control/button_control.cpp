@@ -24,12 +24,39 @@ ButtonControl::ButtonControl(uint32_t id, std::shared_ptr<Frame> parent, WidgetC
 void ButtonControl::RegisterProperties(WidgetPropertyStore& store) const {
     ControlBase::RegisterProperties(store);
 
+    store.RegisterColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE);
+    store.RegisterColor(WidgetPropertyType::COLOR_PRIMARY_INACTIVE);
+    store.RegisterColor(WidgetPropertyType::COLOR_SECONDARY_ACTIVE);
+    store.RegisterColor(WidgetPropertyType::COLOR_SECONDARY_INACTIVE);
+
     store.Register(WidgetPropertyType::LABEL, ConfigValue { std::pmr::string { } }, PropertyChangeEffect::Repaint);
     store.Register(WidgetPropertyType::TARGET_SCREEN_GROUP, ConfigValue { no_target }, PropertyChangeEffect::None);
     store.Register(
         WidgetPropertyType::NAVIGATION_INTENT,
         ConfigValue { static_cast<int>(NavigationIntent::None) },
         PropertyChangeEffect::None);
+}
+
+int ButtonControl::ApplyTheme(const ITheme& theme) {
+    lv_obj_set_style_recolor_opa(lv_button_, LV_OPA_TRANSP, LV_PART_MAIN | LV_STATE_PRESSED);
+
+    for(bool pressed : { false, true }) {
+        const auto state = pressed ? LV_STATE_PRESSED : LV_STATE_DEFAULT;
+        const auto primary = properties_->ResolveColor(pressed ? WidgetPropertyType::COLOR_PRIMARY_ACTIVE
+            : WidgetPropertyType::COLOR_PRIMARY_INACTIVE, pressed ? theme.GetAccentColor() : theme.GetSurfaceColor());
+        const auto secondary = properties_->ResolveColor(pressed ? WidgetPropertyType::COLOR_SECONDARY_ACTIVE
+            : WidgetPropertyType::COLOR_SECONDARY_INACTIVE, theme.GetPrimaryColor());
+
+            lv_obj_set_style_bg_color(lv_button_, primary.ToLvColor(), LV_PART_MAIN | state);
+        lv_obj_set_style_bg_opa(lv_button_, primary.ToLvOpa(), LV_PART_MAIN | state);
+        lv_obj_set_style_text_color(lv_label_, secondary.ToLvColor(), LV_PART_MAIN | state);
+        lv_obj_set_style_text_opa(lv_label_, secondary.ToLvOpa(), LV_PART_MAIN | state);
+    }
+
+    lv_obj_set_style_text_font(lv_label_, theme.GetPrimaryFont().ToLvFont(), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_state(lv_label_, LV_STATE_PRESSED, lv_obj_has_state(lv_button_, LV_STATE_PRESSED));
+
+    return 0;
 }
 
 void ButtonControl::OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) {
@@ -68,28 +95,23 @@ int ButtonControl::DoRender() {
     lv_label_set_text(lv_label_, label_.c_str());
     lv_obj_center(lv_label_);
 
-    AttachEvents(lv_button_, { LV_EVENT_CLICKED });
+    AttachEvents(lv_button_, { LV_EVENT_CLICKED, LV_EVENT_PRESSED, LV_EVENT_RELEASED, LV_EVENT_PRESS_LOST });
 
     container_->SetChild(std::make_shared<Frame>(Frame::Create(lv_button_).Build()));
 
     return 0;
 }
 
-int ButtonControl::ApplyTheme(const ITheme& theme) {
-    lv_obj_set_style_bg_color(lv_button_, theme.GetSurfaceColor().ToLvColor(), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(lv_button_, theme.GetSurfaceColor().ToLvOpa(), LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    lv_obj_set_style_bg_color(lv_button_, theme.GetAccentColor().ToLvColor(), LV_PART_MAIN | LV_STATE_PRESSED);
-    lv_obj_set_style_bg_opa(lv_button_, theme.GetAccentColor().ToLvOpa(), LV_PART_MAIN | LV_STATE_PRESSED);
-
-    lv_obj_set_style_text_font(lv_label_, theme.GetPrimaryFont().ToLvFont(), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_color(lv_label_, theme.GetPrimaryColor().ToLvColor(), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_opa(lv_label_, theme.GetPrimaryColor().ToLvOpa(), LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    return 0;
+void ButtonControl::OnProcessingSuspended() {
+    ControlBase::OnProcessingSuspended();
+    if(lv_label_ != nullptr)
+        lv_obj_remove_state(lv_label_, LV_STATE_PRESSED);
 }
 
 void ButtonControl::OnControlEvent(lv_event_code_t code) {
+    if(code == LV_EVENT_PRESSED || code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST)
+        lv_obj_set_state(lv_label_, LV_STATE_PRESSED, lv_obj_has_state(lv_button_, LV_STATE_PRESSED));
+
     if(code != LV_EVENT_CLICKED || context_.navigation_service == nullptr)
         return;
 

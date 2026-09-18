@@ -13,15 +13,22 @@ LabelIcon::LabelIcon(std::shared_ptr<Frame> parent) : IconBase(std::move(parent)
 
 void LabelIcon::RegisterProperties(WidgetPropertyStore& store) {
     IconBase::RegisterProperties(store);
+
+    store.RegisterColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE);
+    store.RegisterColor(WidgetPropertyType::COLOR_SECONDARY_ACTIVE);
+
     store.Register(WidgetPropertyType::LABEL, ConfigValue { std::pmr::string { } }, PropertyChangeEffect::Rebuild);
 }
 
 int LabelIcon::ApplyTheme(const ITheme& theme) {
-    lv_obj_set_style_bg_color(container_->GetObject(), theme.GetAccentColor().ToLvColor(), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(container_->GetObject(), theme.GetAccentColor().ToLvOpa(), LV_PART_MAIN | LV_STATE_DEFAULT);
+    const auto primary = properties_->ResolveColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE, theme.GetAccentColor());
+    const auto secondary = properties_->ResolveColor(WidgetPropertyType::COLOR_SECONDARY_ACTIVE, theme.GetPrimaryColor());
 
-    lv_obj_set_style_text_color(lv_label_, theme.GetPrimaryColor().ToLvColor(), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_opa(lv_label_, theme.GetPrimaryColor().ToLvOpa(), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(container_->GetObject(), primary.ToLvColor(), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(container_->GetObject(), primary.ToLvOpa(), LV_PART_MAIN | LV_STATE_DEFAULT);
+
+    lv_obj_set_style_text_color(lv_label_, secondary.ToLvColor(), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_opa(lv_label_, secondary.ToLvOpa(), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_text_font(lv_label_, theme.GetPrimaryFont().ToLvFont(), LV_PART_MAIN | LV_STATE_DEFAULT);
 
     lv_obj_update_layout(lv_label_);

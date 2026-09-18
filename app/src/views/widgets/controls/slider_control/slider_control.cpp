@@ -16,6 +16,39 @@ using namespace eerie_leap::views::themes;
 SliderControl::SliderControl(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context)
     : ControlBase(id, std::move(parent), std::move(context), true) {}
 
+void SliderControl::RegisterProperties(WidgetPropertyStore& store) const {
+    ControlBase::RegisterProperties(store);
+
+    store.RegisterColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE);
+    store.RegisterColor(WidgetPropertyType::COLOR_PRIMARY_INACTIVE);
+    store.RegisterColor(WidgetPropertyType::COLOR_SECONDARY_ACTIVE);
+    store.RegisterColor(WidgetPropertyType::COLOR_SECONDARY_INACTIVE);
+    store.RegisterColor(WidgetPropertyType::COLOR_TERTIARY_ACTIVE);
+    store.RegisterColor(WidgetPropertyType::COLOR_TERTIARY_INACTIVE);
+}
+
+int SliderControl::ApplyTheme(const ITheme& theme) {
+    for(bool pressed : { false, true }) {
+        const auto state = pressed ? LV_STATE_PRESSED : LV_STATE_DEFAULT;
+        const auto primary = properties_->ResolveColor(pressed ? WidgetPropertyType::COLOR_PRIMARY_ACTIVE
+            : WidgetPropertyType::COLOR_PRIMARY_INACTIVE, theme.GetPrimaryColor());
+        const auto secondary = properties_->ResolveColor(pressed ? WidgetPropertyType::COLOR_SECONDARY_ACTIVE
+            : WidgetPropertyType::COLOR_SECONDARY_INACTIVE, theme.GetSurfaceColor());
+        const auto tertiary = properties_->ResolveColor(pressed ? WidgetPropertyType::COLOR_TERTIARY_ACTIVE
+            : WidgetPropertyType::COLOR_TERTIARY_INACTIVE, theme.GetAccentColor());
+
+        lv_obj_set_style_recolor_opa(lv_slider_, LV_OPA_TRANSP, LV_PART_INDICATOR | state);
+        lv_obj_set_style_bg_color(lv_slider_, primary.ToLvColor(), LV_PART_INDICATOR | state);
+        lv_obj_set_style_bg_opa(lv_slider_, primary.ToLvOpa(), LV_PART_INDICATOR | state);
+        lv_obj_set_style_bg_color(lv_slider_, secondary.ToLvColor(), LV_PART_MAIN | state);
+        lv_obj_set_style_bg_opa(lv_slider_, secondary.ToLvOpa(), LV_PART_MAIN | state);
+        lv_obj_set_style_bg_color(lv_slider_, tertiary.ToLvColor(), LV_PART_KNOB | state);
+        lv_obj_set_style_bg_opa(lv_slider_, tertiary.ToLvOpa(), LV_PART_KNOB | state);
+    }
+
+    return 0;
+}
+
 void SliderControl::OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) {
     switch(type) {
         case WidgetPropertyType::MIN_VALUE:
@@ -79,19 +112,6 @@ int SliderControl::DoRender() {
     UpdateSlider();
 
     container_->SetChild(std::make_shared<Frame>(Frame::Create(lv_slider_).Build()));
-
-    return 0;
-}
-
-int SliderControl::ApplyTheme(const ITheme& theme) {
-    lv_obj_set_style_bg_color(lv_slider_, theme.GetSurfaceColor().ToLvColor(), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(lv_slider_, theme.GetSurfaceColor().ToLvOpa(), LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    lv_obj_set_style_bg_color(lv_slider_, theme.GetPrimaryColor().ToLvColor(), LV_PART_INDICATOR | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(lv_slider_, theme.GetPrimaryColor().ToLvOpa(), LV_PART_INDICATOR | LV_STATE_DEFAULT);
-
-    lv_obj_set_style_bg_color(lv_slider_, theme.GetAccentColor().ToLvColor(), LV_PART_KNOB | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(lv_slider_, theme.GetAccentColor().ToLvOpa(), LV_PART_KNOB | LV_STATE_DEFAULT);
 
     return 0;
 }

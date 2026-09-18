@@ -5,11 +5,15 @@
 #include <zephyr/ztest.h>
 
 #include "domain/ui_domain/models/widget_property.h"
+#include "domain/ui_domain/utilities/widget_property_validator.h"
 
 #include "views/utilitites/frame.h"
 #include "views/widgets/indicators/bar_indicator/bar_indicator.h"
 #include "views/widgets/indicators/dial_indicator/dial_indicator.h"
 #include "views/widgets/widget_context.h"
+#include "views/widgets/widget_factory.h"
+#include "views/widgets/basic/icon_widget/icon_widget.h"
+#include "views/widgets/basic/arc_icon_widget/arc_icon_widget.h"
 
 #include "views_test_support.h"
 
@@ -98,5 +102,60 @@ ZTEST(widget_supported_properties, test_every_reported_property_is_a_valid_type)
     for(auto type : dial.GetSupportedProperties()) {
         zassert_not_equal(type, WidgetPropertyType::NONE);
         zassert_true(IsValidWidgetPropertyType(type));
+    }
+}
+
+ZTEST(widget_supported_properties, test_widgets_report_exact_color_roles) {
+    using eerie_leap::domain::ui_domain::models::WidgetType;
+    using eerie_leap::views::widgets::WidgetFactory;
+    struct Expected {
+        WidgetType type;
+        std::vector<WidgetPropertyType> colors;
+    };
+    const auto primary = WidgetPropertyType::COLOR_PRIMARY_ACTIVE;
+    const auto secondary = WidgetPropertyType::COLOR_SECONDARY_ACTIVE;
+    const auto primary_inactive = WidgetPropertyType::COLOR_PRIMARY_INACTIVE;
+    const auto secondary_inactive = WidgetPropertyType::COLOR_SECONDARY_INACTIVE;
+    const Expected cases[] = {
+        { WidgetType::IndicatorDigital, { primary } },
+        { WidgetType::IndicatorSetting, { primary } },
+        { WidgetType::IndicatorHorizontalChart, { primary } },
+        { WidgetType::IndicatorArcFill, { primary, secondary } },
+        { WidgetType::IndicatorBar, { primary, secondary } },
+        { WidgetType::IndicatorSegmentArc, { primary, primary_inactive } },
+        { WidgetType::IndicatorDial, {} },
+        { WidgetType::ControlButton, { primary, primary_inactive, secondary, secondary_inactive } },
+        { WidgetType::ControlToggle, { primary, primary_inactive, secondary, secondary_inactive } },
+        { WidgetType::ControlSlider, { primary, primary_inactive, secondary, secondary_inactive,
+            WidgetPropertyType::COLOR_TERTIARY_ACTIVE, WidgetPropertyType::COLOR_TERTIARY_INACTIVE } }
+    };
+    for(const auto& expected : cases) {
+        auto widget = WidgetFactory::GetInstance().CreateWidget(expected.type, 1, MakeRoot(), WidgetContext{});
+        const auto supported = widget->GetSupportedProperties();
+        for(auto property : eerie_leap::domain::ui_domain::utilities::WidgetPropertyValidator::color_properties) {
+            zassert_equal(Supports(supported, property), Supports(expected.colors, property),
+            "widget %d property %d", static_cast<int>(expected.type), static_cast<int>(property));
+        }
+        for(auto property : { WidgetPropertyType::IS_ACTIVE, WidgetPropertyType::IS_VISIBLE, WidgetPropertyType::OPACITY })
+            zassert_true(Supports(supported, property));
+    }
+}
+
+ZTEST(widget_supported_properties, test_icon_wrappers_report_only_selected_icon_colors) {
+    using eerie_leap::domain::ui_domain::models::IconType;
+    using eerie_leap::views::widgets::basic::IconWidget;
+    using eerie_leap::views::widgets::basic::ArcIconWidget;
+    for(auto type : { IconType::Dot, IconType::Label, IconType::Rectangle, IconType::TriangleIsosceles,
+                     IconType::TriangleRight, IconType::Oval, IconType::Line, IconType::Image }) {
+        IconWidget basic(1, MakeRoot(), WidgetContext{}, type);
+        ArcIconWidget arc(2, MakeRoot(), WidgetContext{}, type);
+        for(const auto* widget : { static_cast<const IconWidget*>(&basic), static_cast<const IconWidget*>(&arc) }) {
+            const auto supported = widget->GetSupportedProperties();
+            zassert_equal(Supports(supported, WidgetPropertyType::COLOR_PRIMARY_ACTIVE), type != IconType::Image);
+            zassert_equal(Supports(supported, WidgetPropertyType::COLOR_SECONDARY_ACTIVE), type == IconType::Label);
+            for(auto property : { WidgetPropertyType::COLOR_PRIMARY_INACTIVE, WidgetPropertyType::COLOR_SECONDARY_INACTIVE,
+                                 WidgetPropertyType::COLOR_TERTIARY_ACTIVE, WidgetPropertyType::COLOR_TERTIARY_INACTIVE })
+                zassert_false(Supports(supported, property));
+        }
     }
 }

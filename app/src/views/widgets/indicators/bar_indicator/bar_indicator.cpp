@@ -14,6 +14,7 @@ namespace eerie_leap::views::widgets::indicators {
 using namespace eerie_leap::utilities::type;
 using namespace eerie_leap::domain::ui_domain::models;
 using namespace eerie_leap::views::utilitites;
+using eerie_leap::views::utilities::LvglColor;
 
 BarIndicator::BarIndicator(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context)
     : IndicatorBase(id, std::move(parent), std::move(context)) {}
@@ -27,9 +28,26 @@ int BarIndicator::DoRender() {
     return 0;
 }
 
+void BarIndicator::RegisterProperties(WidgetPropertyStore& store) const {
+    IndicatorBase::RegisterProperties(store);
+
+    store.RegisterColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE);
+    store.RegisterColor(WidgetPropertyType::COLOR_SECONDARY_ACTIVE);
+
+    store.Register(
+        WidgetPropertyType::DIRECTION,
+        ConfigValue { static_cast<int>(WidgetDirection::LeftToRight) },
+        PropertyChangeEffect::Repaint);
+}
+
 int BarIndicator::ApplyTheme(const ITheme& theme) {
-    lv_obj_set_style_bg_color(lv_bar_, theme.GetSecondaryColor().ToLvColor(), LV_PART_INDICATOR | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(lv_bar_, theme.GetSecondaryColor().ToLvOpa(), LV_PART_INDICATOR | LV_STATE_DEFAULT);
+    const auto primary = properties_->ResolveColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE, theme.GetSecondaryColor());
+    const auto secondary = properties_->ResolveColor(WidgetPropertyType::COLOR_SECONDARY_ACTIVE, LvglColor(0, 0));
+
+    lv_obj_set_style_bg_color(lv_bar_, primary.ToLvColor(), LV_PART_INDICATOR | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(lv_bar_, primary.ToLvOpa(), LV_PART_INDICATOR | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(lv_bar_, secondary.ToLvColor(), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(lv_bar_, secondary.ToLvOpa(), LV_PART_MAIN | LV_STATE_DEFAULT);
 
     return 0;
 }
@@ -69,15 +87,6 @@ void BarIndicator::UpdateDirection(lv_obj_t* lv_bar, WidgetDirection direction, 
 
 void BarIndicator::UpdateIndicator(float value) {
     lv_bar_set_value(lv_bar_, static_cast<int32_t>(value), LV_ANIM_OFF);
-}
-
-void BarIndicator::RegisterProperties(WidgetPropertyStore& store) const {
-    IndicatorBase::RegisterProperties(store);
-
-    store.Register(
-        WidgetPropertyType::DIRECTION,
-        ConfigValue { static_cast<int>(WidgetDirection::LeftToRight) },
-        PropertyChangeEffect::Repaint);
 }
 
 void BarIndicator::OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) {

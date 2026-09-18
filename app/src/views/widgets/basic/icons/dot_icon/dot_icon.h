@@ -15,6 +15,7 @@ private:
 public:
     explicit DotIcon(std::shared_ptr<Frame> parent);
 
+    static void RegisterProperties(WidgetPropertyStore& store);
     int ApplyTheme(const ITheme& theme) override;
     int DoRender() override;
     [[nodiscard]] IconType GetIconType() const override { return IconType::Dot; }

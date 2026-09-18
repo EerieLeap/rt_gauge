@@ -12,6 +12,7 @@ namespace eerie_leap::views::widgets::indicators {
 using namespace eerie_leap::utilities::type;
 using namespace eerie_leap::domain::ui_domain::models;
 using namespace eerie_leap::views::utilitites;
+using eerie_leap::views::utilities::LvglColor;
 
 SegmentArcIndicator::SegmentArcIndicator(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context)
     : IndicatorBase(id, std::move(parent), std::move(context)) { }
@@ -28,10 +29,24 @@ int SegmentArcIndicator::DoRender() {
     return 0;
 }
 
+void SegmentArcIndicator::RegisterProperties(WidgetPropertyStore& store) const {
+    IndicatorBase::RegisterProperties(store);
+
+    store.RegisterColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE);
+    store.RegisterColor(WidgetPropertyType::COLOR_PRIMARY_INACTIVE);
+
+    store.Register(WidgetPropertyType::START_ANGLE, ConfigValue { 45 }, PropertyChangeEffect::Repaint);
+    store.Register(WidgetPropertyType::END_ANGLE, ConfigValue { 315 }, PropertyChangeEffect::Repaint);
+}
+
 int SegmentArcIndicator::ApplyTheme(const ITheme& theme) {
+    const auto active = properties_->ResolveColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE, theme.GetSecondaryColor());
+    const auto inactive = properties_->ResolveColor(WidgetPropertyType::COLOR_PRIMARY_INACTIVE, LvglColor(0, 0));
+
     for(auto& segment : segments_) {
-        lv_obj_set_style_arc_color(segment.lv_segment, theme.GetSecondaryColor().ToLvColor(), LV_PART_INDICATOR | LV_STATE_DEFAULT);
-        lv_obj_set_style_arc_opa(segment.lv_segment, theme.GetSecondaryColor().ToLvOpa(), LV_PART_INDICATOR | LV_STATE_DEFAULT);
+        const auto& color = segment.is_active ? active : inactive;
+        lv_obj_set_style_arc_color(segment.lv_segment, color.ToLvColor(), LV_PART_INDICATOR | LV_STATE_DEFAULT);
+        lv_obj_set_style_arc_opa(segment.lv_segment, color.ToLvOpa(), LV_PART_INDICATOR | LV_STATE_DEFAULT);
     }
 
     return 0;
@@ -87,20 +102,10 @@ void SegmentArcIndicator::UpdateIndicator(float value) {
         segment_index = segments_.size() - 1;
 
     for(size_t i = 0; i < segments_.size(); i++) {
-        if(i <= segment_index && !segments_[i].is_active)
-            lv_obj_set_style_arc_opa(segments_[i].lv_segment, 255, LV_PART_INDICATOR | LV_STATE_DEFAULT);
-        else if(i > segment_index && segments_[i].is_active)
-            lv_obj_set_style_arc_opa(segments_[i].lv_segment, 0, LV_PART_INDICATOR | LV_STATE_DEFAULT);
-
         segments_[i].is_active = i <= segment_index;
     }
-}
 
-void SegmentArcIndicator::RegisterProperties(WidgetPropertyStore& store) const {
-    IndicatorBase::RegisterProperties(store);
-
-    store.Register(WidgetPropertyType::START_ANGLE, ConfigValue { 45 }, PropertyChangeEffect::Repaint);
-    store.Register(WidgetPropertyType::END_ANGLE, ConfigValue { 315 }, PropertyChangeEffect::Repaint);
+    ApplyTheme(ThemeManager::GetInstance().GetCurrentTheme());
 }
 
 void SegmentArcIndicator::OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) {

@@ -18,7 +18,34 @@ ToggleControl::ToggleControl(uint32_t id, std::shared_ptr<Frame> parent, WidgetC
 void ToggleControl::RegisterProperties(WidgetPropertyStore& store) const {
     ControlBase::RegisterProperties(store);
 
+    store.RegisterColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE);
+    store.RegisterColor(WidgetPropertyType::COLOR_PRIMARY_INACTIVE);
+    store.RegisterColor(WidgetPropertyType::COLOR_SECONDARY_ACTIVE);
+    store.RegisterColor(WidgetPropertyType::COLOR_SECONDARY_INACTIVE);
+
     store.Register(WidgetPropertyType::VALUE, ConfigValue { false }, PropertyChangeEffect::None);
+}
+
+int ToggleControl::ApplyTheme(const ITheme& theme) {
+    const auto active = properties_->ResolveColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE, theme.GetPrimaryColor());
+    const auto inactive = properties_->ResolveColor(WidgetPropertyType::COLOR_PRIMARY_INACTIVE, theme.GetSurfaceColor());
+
+    lv_obj_set_style_bg_color(lv_switch_, inactive.ToLvColor(), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(lv_switch_, inactive.ToLvOpa(), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(lv_switch_, active.ToLvColor(), LV_PART_INDICATOR | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(lv_switch_, LV_OPA_TRANSP, LV_PART_INDICATOR | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(lv_switch_, active.ToLvColor(), LV_PART_INDICATOR | LV_STATE_CHECKED);
+    lv_obj_set_style_bg_opa(lv_switch_, active.ToLvOpa(), LV_PART_INDICATOR | LV_STATE_CHECKED);
+
+    for(bool checked : { false, true }) {
+        const auto state = checked ? LV_STATE_CHECKED : LV_STATE_DEFAULT;
+        const auto secondary = properties_->ResolveColor(checked ? WidgetPropertyType::COLOR_SECONDARY_ACTIVE
+            : WidgetPropertyType::COLOR_SECONDARY_INACTIVE, theme.GetAccentColor());
+        lv_obj_set_style_bg_color(lv_switch_, secondary.ToLvColor(), LV_PART_KNOB | state);
+        lv_obj_set_style_bg_opa(lv_switch_, secondary.ToLvOpa(), LV_PART_KNOB | state);
+    }
+
+    return 0;
 }
 
 void ToggleControl::OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) {
@@ -38,19 +65,6 @@ int ToggleControl::DoRender() {
     UpdateSwitch();
 
     container_->SetChild(std::make_shared<Frame>(Frame::Create(lv_switch_).Build()));
-
-    return 0;
-}
-
-int ToggleControl::ApplyTheme(const ITheme& theme) {
-    lv_obj_set_style_bg_color(lv_switch_, theme.GetSurfaceColor().ToLvColor(), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(lv_switch_, theme.GetSurfaceColor().ToLvOpa(), LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    lv_obj_set_style_bg_color(lv_switch_, theme.GetPrimaryColor().ToLvColor(), LV_PART_INDICATOR | LV_STATE_CHECKED);
-    lv_obj_set_style_bg_opa(lv_switch_, theme.GetPrimaryColor().ToLvOpa(), LV_PART_INDICATOR | LV_STATE_CHECKED);
-
-    lv_obj_set_style_bg_color(lv_switch_, theme.GetAccentColor().ToLvColor(), LV_PART_KNOB | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(lv_switch_, theme.GetAccentColor().ToLvOpa(), LV_PART_KNOB | LV_STATE_DEFAULT);
 
     return 0;
 }

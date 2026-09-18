@@ -14,6 +14,7 @@
 #include "domain/ui_domain/models/widget_fill_mode.h"
 #include "domain/ui_domain/models/property_binding.h"
 #include "domain/ui_domain/configuration/parsers/ui_configuration_validator.h"
+#include "domain/ui_domain/utilities/widget_property_validator.h"
 
 using namespace eerie_memory;
 using namespace eerie_leap::utilities::memory;
@@ -21,6 +22,36 @@ using namespace eerie_leap::domain::ui_domain::models;
 using namespace eerie_leap::domain::ui_domain::configuration::parsers;
 
 ZTEST_SUITE(ui_configuration_validator, NULL, NULL, NULL, NULL, NULL);
+
+ZTEST(ui_configuration_validator, test_color_property_mapping_uses_explicit_membership) {
+    using namespace eerie_leap::domain::ui_domain::utilities;
+    constexpr std::array expected {
+        WidgetPropertyType::COLOR_TERTIARY_INACTIVE, WidgetPropertyType::COLOR_PRIMARY_ACTIVE,
+        WidgetPropertyType::COLOR_SECONDARY_INACTIVE, WidgetPropertyType::COLOR_TERTIARY_ACTIVE,
+        WidgetPropertyType::COLOR_PRIMARY_INACTIVE, WidgetPropertyType::COLOR_SECONDARY_ACTIVE
+    };
+    zassert_equal(WidgetPropertyValidator::color_properties.size(), expected.size());
+    std::array<bool, WidgetPropertyValidator::color_properties.size()> seen{};
+    for(auto type : expected) {
+        const auto index = WidgetPropertyValidator::GetColorPropertyIndex(type);
+        zassert_true(index.has_value());
+        zassert_true(*index < seen.size());
+        zassert_false(seen[*index]);
+        seen[*index] = true;
+        zassert_equal(WidgetPropertyValidator::color_properties[*index], type);
+        zassert_true(WidgetPropertyValidator::IsColorProperty(type));
+    }
+    for(std::uint16_t id = 0; id <= static_cast<std::uint16_t>(WidgetPropertyType::COUNT); ++id) {
+        const auto type = static_cast<WidgetPropertyType>(id);
+        bool is_color = false;
+        for(auto color : expected)
+            is_color |= type == color;
+        zassert_equal(WidgetPropertyValidator::GetColorPropertyIndex(type).has_value(), is_color);
+        zassert_equal(WidgetPropertyValidator::IsColorProperty(type), is_color);
+    }
+    zassert_false(WidgetPropertyValidator::GetColorPropertyIndex(
+        static_cast<WidgetPropertyType>(UINT16_MAX)).has_value());
+}
 
 namespace {
 
@@ -89,6 +120,32 @@ void AddBinding(UiConfiguration& configuration, PropertyBinding binding) {
 
 ZTEST(ui_configuration_validator, test_valid_configuration) {
     zassert_true(Validates(*MakeConfiguration()));
+}
+
+ZTEST(ui_configuration_validator, test_appearance_classification_is_separate_from_value_validation) {
+    using namespace eerie_leap::domain::ui_domain::utilities;
+    for(auto type : { WidgetPropertyType::IS_ACTIVE, WidgetPropertyType::IS_VISIBLE }) {
+        zassert_true(WidgetPropertyValidator::IsAppearanceProperty(type));
+        zassert_true(WidgetPropertyValidator::IsValidAppearanceValue(type, true));
+        zassert_true(WidgetPropertyValidator::IsValidAppearanceValue(type, false));
+        zassert_false(WidgetPropertyValidator::IsValidAppearanceValue(type, 1));
+    }
+    zassert_true(WidgetPropertyValidator::IsAppearanceProperty(WidgetPropertyType::OPACITY));
+    zassert_true(WidgetPropertyValidator::IsValidAppearanceValue(WidgetPropertyType::OPACITY, 128));
+    zassert_false(WidgetPropertyValidator::IsValidAppearanceValue(WidgetPropertyType::OPACITY, 256));
+    for(auto type : { WidgetPropertyType::COLOR_PRIMARY_ACTIVE, WidgetPropertyType::COLOR_PRIMARY_INACTIVE,
+                     WidgetPropertyType::COLOR_SECONDARY_ACTIVE, WidgetPropertyType::COLOR_SECONDARY_INACTIVE,
+                     WidgetPropertyType::COLOR_TERTIARY_ACTIVE, WidgetPropertyType::COLOR_TERTIARY_INACTIVE }) {
+        zassert_true(WidgetPropertyValidator::IsAppearanceProperty(type));
+        zassert_true(WidgetPropertyValidator::IsValidAppearanceValue(type, std::pmr::string("#12345680")));
+        zassert_true(WidgetPropertyValidator::IsValidAppearanceValue(type, std::pmr::string("")));
+        zassert_false(WidgetPropertyValidator::IsValidAppearanceValue(type, std::pmr::string("#123456")));
+    }
+    for(auto type : { WidgetPropertyType::VALUE, WidgetPropertyType::LABEL, WidgetPropertyType::IS_SMOOTHED,
+                     WidgetPropertyType::DIRECTION, WidgetPropertyType::NONE, WidgetPropertyType::COUNT }) {
+        zassert_false(WidgetPropertyValidator::IsAppearanceProperty(type));
+        zassert_false(WidgetPropertyValidator::IsValidAppearanceValue(type, 1));
+    }
 }
 
 ZTEST(ui_configuration_validator, test_color_properties_require_rgba_text_or_empty_reset) {

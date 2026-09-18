@@ -9,9 +9,16 @@ using namespace eerie_leap::views::themes;
 
 DotIcon::DotIcon(std::shared_ptr<Frame> parent) : IconBase(std::move(parent)) { }
 
+void DotIcon::RegisterProperties(WidgetPropertyStore& store) {
+    IconBase::RegisterProperties(store);
+    store.RegisterColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE);
+}
+
 int DotIcon::ApplyTheme(const ITheme& theme) {
-    lv_obj_set_style_bg_color(container_->GetObject(), theme.GetAccentColor().ToLvColor(), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(container_->GetObject(), theme.GetAccentColor().ToLvOpa(), LV_PART_MAIN | LV_STATE_DEFAULT);
+    const auto primary = properties_->ResolveColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE, theme.GetAccentColor());
+
+    lv_obj_set_style_bg_color(container_->GetObject(), primary.ToLvColor(), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(container_->GetObject(), primary.ToLvOpa(), LV_PART_MAIN | LV_STATE_DEFAULT);
 
     lv_obj_update_layout(container_->GetObject());
 

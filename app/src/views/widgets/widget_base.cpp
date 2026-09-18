@@ -21,7 +21,7 @@ namespace eerie_leap::views::widgets {
 using namespace eerie_leap::utilities::type;
 using namespace eerie_leap::domain::ui_domain::models;
 
-using eerie_leap::domain::ui_domain::utilities::IsWidgetManagementProperty;
+using eerie_leap::domain::ui_domain::utilities::WidgetPropertyValidator;
 using eerie_leap::event_bus::EventChannelRegistry;
 using eerie_leap::utilities::reflection::GetCallerName;
 using eerie_leap::utilities::string::StringHelpers;
@@ -166,13 +166,16 @@ void WidgetBase::RegisterProperties(WidgetPropertyStore& store) const {
 void WidgetBase::OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) {
     if(type == WidgetPropertyType::IS_VISIBLE)
         SetVisibility(ConfigValueAs<bool>(value, true));
+    else if(WidgetPropertyValidator::IsColorProperty(type) && IsReady())
+        ApplyTheme(ThemeManager::GetInstance().GetCurrentTheme());
 }
 
 void WidgetBase::ApplyProperty(WidgetPropertyType type, const ConfigValue& value) {
-    if(IsWidgetManagementProperty(type)) {
+    if(WidgetPropertyValidator::IsManagementProperty(type)) {
         WidgetBase::OnPropertyChanged(type, value);
         UpdateProcessingState();
     } else {
+        properties_->ApplyColor(type);
         OnPropertyChanged(type, value);
     }
 }
@@ -227,7 +230,7 @@ void WidgetBase::RunEffect(PropertyChangeEffect effect) {
 
 // Caller holds the LVGL lock and the dispatch guard, in that order.
 void WidgetBase::NotifyPropertyChanged(WidgetPropertyType type, const ConfigValue& value, PropertyChangeEffect effect) {
-    if(IsWidgetManagementProperty(type)) {
+    if(WidgetPropertyValidator::IsManagementProperty(type)) {
         ApplyProperty(type, value);
         RunEffect(effect);
     } else if(pending_properties_.none() && IsReady() && IsProcessingEligible()) {
@@ -312,13 +315,14 @@ void WidgetBase::ResolveBindings() {
         AddSubscription(channel->SubscribeErased(
             binding.event_type,
             std::move(filter),
-            [this,
-             store = properties_,
-             guard = dispatch_guard_,
-             target = binding.target,
-             effect = properties_->GetEffect(binding.target),
-             payload_key = binding.payload_key](const ErasedPayloadView& view) {
-
+            [
+                this,
+                store = properties_,
+                guard = dispatch_guard_,
+                target = binding.target,
+                effect = properties_->GetEffect(binding.target),
+                payload_key = binding.payload_key
+            ](const ErasedPayloadView& view) {
                 const auto* data = view.Find(payload_key);
                 if(data == nullptr)
                     return;
@@ -326,7 +330,7 @@ void WidgetBase::ResolveBindings() {
                 ScopedLvglLock lvgl_guard;
 
                 guard->Dispatch([&] {
-                    if(!IsWidgetManagementProperty(target) && !IsTrackingEligible())
+                    if(!WidgetPropertyValidator::IsManagementProperty(target) && !IsTrackingEligible())
                         return;
 
                     auto value = CoerceToConfigValue(*data, store->GetDeclaredAlternative(target), target);
@@ -352,7 +356,7 @@ void WidgetBase::ReplayProperties() {
     // their visual state yet, and activation may still be blocked by visibility or opacity.
     if(!IsReady() || !IsProcessingEligible()) {
         for(auto type : registered) {
-            if(!IsWidgetManagementProperty(type))
+            if(!WidgetPropertyValidator::IsManagementProperty(type))
                 pending_properties_.set(static_cast<size_t>(type));
         }
     }
@@ -415,7 +419,7 @@ void WidgetBase::ApplyConfiguration(std::shared_ptr<WidgetConfiguration> configu
     for(const auto& [type, value] : configuration_->properties) {
         // Parts inherit their owner's management state through the Frame parent. Copying those
         // flags would leave a part independently hidden/inactive after its owner is restored.
-        if(!is_owner && IsWidgetManagementProperty(type))
+        if(!is_owner && WidgetPropertyValidator::IsManagementProperty(type))
             continue;
 
         if(!properties_->Set(type, value) && is_owner

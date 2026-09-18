@@ -7,7 +7,7 @@
 #include "domain/ui_domain/models/widget_direction.h"
 #include "domain/ui_domain/models/widget_fill_mode.h"
 #include "domain/ui_domain/models/widget_property.h"
-#include "domain/ui_domain/utilities/widget_property_validation.h"
+#include "domain/ui_domain/utilities/widget_property_validator.h"
 
 #include "ui_configuration_validator.h"
 
@@ -26,7 +26,7 @@ enum class PropertyValueKind {
 };
 
 static PropertyValueKind GetPropertyValueKind(WidgetPropertyType type) {
-    if(IsWidgetColorProperty(type))
+    if(WidgetPropertyValidator::IsColorProperty(type))
         return PropertyValueKind::Text;
 
     switch(type) {
@@ -83,7 +83,8 @@ static std::string GetWidgetPropertyValidationError(WidgetPropertyType type, con
     if(!HoldsPropertyValueKind(value, GetPropertyValueKind(type)))
         return "Invalid value type for property ID: " + std::to_string(static_cast<uint16_t>(type)) + ".";
 
-    if(!IsValidWidgetAppearanceValue(type, value))
+    if(WidgetPropertyValidator::IsAppearanceProperty(type)
+        && !WidgetPropertyValidator::IsValidAppearanceValue(type, value))
         return "Invalid value for property ID: " + std::to_string(static_cast<uint16_t>(type)) + ".";
 
     if(type == WidgetPropertyType::FILL_MODE && !IsValidFillMode(value))
