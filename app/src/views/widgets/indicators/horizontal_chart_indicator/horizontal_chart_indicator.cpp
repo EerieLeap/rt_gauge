@@ -44,8 +44,11 @@ int HorizontalChartIndicator::ApplyTheme(const ITheme& theme) {
 
     auto ser = lv_chart_get_series_next(lv_chart_, nullptr);
     lv_chart_set_series_color(lv_chart_, ser, primary.ToLvColor());
-    lv_obj_set_style_line_opa(lv_chart_, primary.ToLvOpa(), LV_PART_ITEMS | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(lv_chart_, primary.ToLvOpa(), LV_PART_ITEMS | LV_STATE_DEFAULT);
+    // LVGL's bar renderer forces its rectangles to full opacity. Composite this style-free,
+    // single-series chart once for both chart types; the outer wrapper owns widget opacity.
+    lv_obj_set_style_line_opa(lv_chart_, LV_OPA_COVER, LV_PART_ITEMS | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(lv_chart_, LV_OPA_COVER, LV_PART_ITEMS | LV_STATE_DEFAULT);
+    lv_obj_set_style_opa_layered(lv_chart_, primary.ToLvOpa(), LV_PART_MAIN | LV_STATE_DEFAULT);
 
     return 0;
 }

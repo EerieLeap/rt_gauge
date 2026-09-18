@@ -132,6 +132,92 @@ void Clean(void* fixture) {
 
 ZTEST_SUITE(widget_colors, NULL, Setup, Before, Clean, NULL);
 
+ZTEST(widget_colors, test_whole_widget_opacity_survives_render_theme_and_configuration_replay) {
+    for(auto type : { WidgetType::BasicIcon, WidgetType::BasicArcIcon, WidgetType::IndicatorDigital,
+                     WidgetType::IndicatorSetting, WidgetType::IndicatorHorizontalChart, WidgetType::IndicatorArcFill,
+                     WidgetType::IndicatorBar, WidgetType::IndicatorSegmentArc, WidgetType::ControlButton,
+                     WidgetType::ControlSlider, WidgetType::ControlToggle }) {
+        auto configuration = Configuration(type);
+        configuration->bindings.clear();
+        configuration->properties[WidgetPropertyType::OPACITY] = 128;
+        auto widget = Render(configuration);
+        auto* outer = widget->GetContainer()->GetObject();
+        auto* inner = lv_obj_get_child(outer, 0);
+        zassert_equal(lv_obj_get_style_opa_layered(outer, LV_PART_MAIN), 128);
+        zassert_equal(lv_obj_get_style_opa_layered(inner, LV_PART_MAIN), type == WidgetType::IndicatorHorizontalChart
+            ? ThemeManager::GetInstance().GetCurrentTheme().GetPrimaryColor().ToLvOpa() : LV_OPA_COVER);
+        ThemeManager::GetInstance().SetTheme(std::make_shared<DefaultTheme>());
+        widget->OnDeactivated();
+        widget->OnActivated();
+        zassert_equal(lv_obj_get_style_opa_layered(outer, LV_PART_MAIN), 128);
+        zassert_equal(lv_obj_get_child(outer, 0), inner);
+        configuration->properties[WidgetPropertyType::OPACITY] = 0;
+        widget->Configure(configuration);
+        zassert_equal(lv_obj_get_style_opa_layered(outer, LV_PART_MAIN), 0);
+        configuration->properties.erase(WidgetPropertyType::OPACITY);
+        widget->Configure(configuration);
+        zassert_equal(lv_obj_get_style_opa_layered(outer, LV_PART_MAIN), LV_OPA_COVER);
+    }
+}
+
+ZTEST(widget_colors, test_opacity_binding_restores_retained_colors_after_all_gates_open) {
+    auto configuration = Configuration(WidgetType::BasicIcon);
+    configuration->properties[primary] = std::pmr::string("#12345660");
+    auto widget = Render(configuration);
+    auto* outer = widget->GetContainer()->GetObject();
+    auto* inner = Inner(*widget);
+    Publish(WidgetPropertyType::OPACITY, 0);
+    Color(primary, "#ABCDEF80");
+    Color(primary, "#FEDCBA40");
+    CheckBackground(inner, LV_PART_MAIN, LvglColor(0x123456, 96));
+    zassert_equal(lv_obj_get_style_opa_layered(outer, LV_PART_MAIN), 0);
+    Publish(WidgetPropertyType::IS_VISIBLE, false);
+    Publish(WidgetPropertyType::IS_ACTIVE, false);
+    widget->OnDeactivated();
+    Publish(WidgetPropertyType::OPACITY, 128);
+    zassert_equal(lv_obj_get_style_opa_layered(outer, LV_PART_MAIN), 128);
+    Publish(WidgetPropertyType::IS_VISIBLE, true);
+    Publish(WidgetPropertyType::IS_ACTIVE, true);
+    CheckBackground(inner, LV_PART_MAIN, LvglColor(0x123456, 96));
+    widget->OnActivated();
+    CheckBackground(inner, LV_PART_MAIN, LvglColor(0xFEDCBA, 64));
+    zassert_equal(lv_obj_get_style_opa_layered(outer, LV_PART_MAIN), 128);
+    for(const EventData& invalid : { EventData{-1}, EventData{256}, EventData{128.5F}, EventData{true} }) {
+        Publish(WidgetPropertyType::OPACITY, invalid);
+        zassert_equal(lv_obj_get_style_opa_layered(outer, LV_PART_MAIN), 128);
+    }
+    Publish(WidgetPropertyType::OPACITY, uint32_t{255});
+    zassert_equal(lv_obj_get_style_opa_layered(outer, LV_PART_MAIN), LV_OPA_COVER);
+}
+
+ZTEST(widget_colors, test_value_animation_and_theme_changes_preserve_whole_widget_opacity) {
+    auto configuration = Configuration(WidgetType::IndicatorBar);
+    configuration->properties[WidgetPropertyType::OPACITY] = 128;
+    configuration->properties[WidgetPropertyType::IS_SMOOTHED] = true;
+    auto widget = Render(configuration);
+    auto* outer = widget->GetContainer()->GetObject();
+    auto* indicator = dynamic_cast<WidgetBase*>(widget.get());
+    Publish(WidgetPropertyType::VALUE, 100.0F);
+    zassert_not_null(lv_anim_get(indicator, nullptr));
+    lv_tick_inc(100);
+    lv_anim_refr_now();
+    ThemeManager::GetInstance().SetTheme(std::make_shared<DefaultTheme>());
+    zassert_equal(lv_obj_get_style_opa_layered(outer, LV_PART_MAIN), 128);
+    Publish(WidgetPropertyType::OPACITY, 0);
+    zassert_is_null(lv_anim_get(indicator, nullptr));
+    Publish(WidgetPropertyType::VALUE, 75.0F);
+    ThemeManager::GetInstance().SetTheme(std::make_shared<TranslucentTheme>());
+    lv_tick_inc(100);
+    lv_anim_refr_now();
+    zassert_equal(lv_obj_get_style_opa_layered(outer, LV_PART_MAIN), 0);
+    Publish(WidgetPropertyType::OPACITY, 128);
+    zassert_not_null(lv_anim_get(indicator, nullptr));
+    lv_tick_inc(5000);
+    lv_anim_refr_now();
+    zassert_equal(lv_bar_get_value(Inner(*widget)), 75);
+    zassert_equal(lv_obj_get_style_opa_layered(outer, LV_PART_MAIN), 128);
+}
+
 ZTEST(widget_colors, test_text_colors_follow_theme_only_when_unset) {
     for(auto type : { WidgetType::IndicatorDigital, WidgetType::IndicatorSetting }) {
         auto configuration = Configuration(type);
@@ -324,12 +410,13 @@ ZTEST(widget_colors, test_chart_color_changes_preserve_series_and_samples) {
         const auto count = lv_chart_get_point_count(chart);
         const std::vector<int32_t> before(samples, samples + count);
         Color(primary, "#11223380");
-        zassert_equal(lv_obj_get_style_line_opa(chart, LV_PART_ITEMS), 128);
-        zassert_equal(lv_obj_get_style_bg_opa(chart, LV_PART_ITEMS), 128);
+        zassert_equal(lv_obj_get_style_opa_layered(chart, LV_PART_MAIN), 128);
+        zassert_equal(lv_obj_get_style_line_opa(chart, LV_PART_ITEMS), LV_OPA_COVER);
+        zassert_equal(lv_obj_get_style_bg_opa(chart, LV_PART_ITEMS), LV_OPA_COVER);
         zassert_equal(lv_chart_get_series_next(chart, nullptr), series);
         zassert_true(std::equal(before.begin(), before.end(), samples));
         Color(primary, "");
-        zassert_equal(lv_obj_get_style_line_opa(chart, LV_PART_ITEMS),
+        zassert_equal(lv_obj_get_style_opa_layered(chart, LV_PART_MAIN),
             ThemeManager::GetInstance().GetCurrentTheme().GetPrimaryColor().ToLvOpa());
         zassert_true(std::equal(before.begin(), before.end(), samples));
     }

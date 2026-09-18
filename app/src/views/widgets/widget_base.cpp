@@ -124,8 +124,11 @@ bool WidgetBase::IsProcessingEligible() const {
 
     for(auto* object = container_->GetObject(); object != nullptr; object = lv_obj_get_parent(object)) {
         if(lv_obj_has_flag(object, LV_OBJ_FLAG_HIDDEN)
-            || lv_obj_get_style_opa(object, LV_PART_MAIN) == LV_OPA_TRANSP)
+            || lv_obj_get_style_opa(object, LV_PART_MAIN) == LV_OPA_TRANSP
+            || lv_obj_get_style_opa_layered(object, LV_PART_MAIN) == LV_OPA_TRANSP
+        ) {
             return false;
+        }
     }
 
     return true;
@@ -166,6 +169,9 @@ void WidgetBase::RegisterProperties(WidgetPropertyStore& store) const {
 void WidgetBase::OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) {
     if(type == WidgetPropertyType::IS_VISIBLE)
         SetVisibility(ConfigValueAs<bool>(value, true));
+    else if(type == WidgetPropertyType::OPACITY)
+        // Composite the children before fading, so overlapping parts fade together once.
+        lv_obj_set_style_opa_layered(container_->GetObject(), ConfigValueAs<int>(value, 255), LV_PART_MAIN);
     else if(WidgetPropertyValidator::IsColorProperty(type) && IsReady())
         ApplyTheme(ThemeManager::GetInstance().GetCurrentTheme());
 }

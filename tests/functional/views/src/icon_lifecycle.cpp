@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <memory>
 #include <utility>
@@ -15,6 +16,7 @@
 #include "views/widgets/basic/icon_widget/icon_widget.h"
 #include "views/widgets/basic/icons/dot_icon/dot_icon.h"
 #include "views/widgets/indicators/dial_indicator/dial_indicator.h"
+#include "domain/ui_domain/utilities/widget_property_validator.h"
 
 #include "views_test_support.h"
 
@@ -104,6 +106,7 @@ void Tick(uint32_t elapsed) {
 WidgetContext ImageContext(WidgetConfiguration& configuration) {
     using eerie_leap::subsys::device_tree::DtFs;
     using eerie_leap::subsys::fs::services::FsService;
+    DtFs::InitInternalFs();
     auto fs = std::make_shared<FsService>(DtFs::GetInternalFsMp());
     zassert_true(fs->Initialize());
     auto assets = std::make_shared<AssetsManager>(fs, "icon-lifecycle");
@@ -191,7 +194,7 @@ ZTEST(icon_lifecycle, test_dot_management_changes_keep_static_appearance) {
 }
 
 ZTEST(icon_lifecycle, test_dot_ancestor_suspension_keeps_static_appearance) {
-    for(bool hidden : { false, true }) {
+    for(int gate : { 0, 1, 2 }) {
         auto root = MakeRoot();
         TestIcon widget(1, root, WidgetContext{});
         widget.Configure(Configuration(IconType::Dot));
@@ -200,22 +203,46 @@ ZTEST(icon_lifecycle, test_dot_ancestor_suspension_keeps_static_appearance) {
         Tick(200);
         const auto opacity = lv_obj_get_style_opa(Inner(widget), LV_PART_MAIN);
         zassert_equal(opacity, LV_OPA_COVER);
-        if(hidden)
+        if(gate == 0)
             lv_obj_add_flag(root->GetObject(), LV_OBJ_FLAG_HIDDEN);
-        else
+        else if(gate == 1)
             lv_obj_set_style_opa(root->GetObject(), 0, 0);
+        else
+            lv_obj_set_style_opa_layered(root->GetObject(), 0, 0);
         Tick(50);
         zassert_false(widget.IsProcessingEligible());
         zassert_is_null(Pulse(widget));
         zassert_equal(lv_obj_get_style_opa(Inner(widget), LV_PART_MAIN), opacity);
         lv_obj_remove_flag(root->GetObject(), LV_OBJ_FLAG_HIDDEN);
         lv_obj_set_style_opa(root->GetObject(), 255, 0);
+        lv_obj_set_style_opa_layered(root->GetObject(), 255, 0);
         lv_refr_now(nullptr);
         zassert_true(widget.IsProcessingEligible());
         zassert_is_null(Pulse(widget));
         Tick(100);
         zassert_equal(lv_obj_get_style_opa(Inner(widget), LV_PART_MAIN), opacity);
     }
+}
+
+ZTEST(icon_lifecycle, test_icon_eligibility_uses_ancestor_layered_opacity_but_not_color_alpha) {
+    class TestDot : public icons::DotIcon {
+    public:
+        using DotIcon::DotIcon;
+        using IconBase::IsProcessingEligible;
+    };
+    auto root = MakeRoot();
+    auto properties = std::make_shared<WidgetPropertyStore>();
+    TestDot::RegisterProperties(*properties);
+    zassert_true(properties->Set(WidgetPropertyType::COLOR_PRIMARY_ACTIVE, std::pmr::string("#FFFFFF00")));
+    TestDot dot(root);
+    dot.Configure(properties);
+    zassert_equal(dot.Render(), 0);
+    dot.SetProcessingEnabled(true);
+    zassert_true(dot.IsProcessingEligible());
+    lv_obj_set_style_opa_layered(root->GetObject(), 0, LV_PART_MAIN);
+    zassert_false(dot.IsProcessingEligible());
+    lv_obj_set_style_opa_layered(root->GetObject(), 128, LV_PART_MAIN);
+    zassert_true(dot.IsProcessingEligible());
 }
 
 ZTEST(icon_lifecycle, test_dot_group_lifecycle_and_teardown_do_not_start_animation) {
@@ -353,5 +380,71 @@ ZTEST(icon_lifecycle, test_dial_needle_inherits_live_owner_state_and_has_one_fra
         }
         zassert_equal(lv_display_get_event_count(lv_display_get_default()), callbacks);
         lv_refr_now(nullptr);
+    }
+}
+
+ZTEST(icon_lifecycle, test_images_and_dials_apply_opacity_once_without_recoloring_or_reloading) {
+    for(bool is_dial : { false, true }) {
+        auto configuration = Configuration(IconType::Image);
+        configuration->properties[WidgetPropertyType::OPACITY] = 128;
+        if(is_dial)
+            configuration->properties[WidgetPropertyType::START_ANGLE] = 180;
+        auto root = MakeRoot();
+        auto context = ImageContext(*configuration);
+        std::unique_ptr<WidgetBase> widget;
+        if(is_dial)
+            widget = std::make_unique<TestDial>(1, root, context);
+        else
+            widget = std::make_unique<TestIcon>(1, root, context);
+        widget->Configure(configuration);
+        auto* outer = widget->GetContainer()->GetObject();
+        zassert_equal(lv_obj_get_style_opa_layered(outer, LV_PART_MAIN), 128);
+        zassert_equal(widget->Render(), 0);
+        widget->OnActivated();
+        const auto supported = widget->GetSupportedProperties();
+        for(auto property : supported)
+            zassert_false(eerie_leap::domain::ui_domain::utilities::WidgetPropertyValidator::IsColorProperty(property));
+
+        auto* image = widget->GetContainer()->GetChild()->GetObject();
+        if(is_dial) {
+            zassert_equal(lv_obj_get_style_opa(image, LV_PART_MAIN), LV_OPA_COVER);
+            image = static_cast<TestDial*>(widget.get())->Needle().GetContainer()->GetChild()->GetObject();
+        }
+        const auto* source = lv_image_get_src(image);
+        zassert_not_null(source);
+        lv_obj_set_style_bg_color(root->GetObject(), lv_color_black(), 0);
+        lv_obj_set_style_bg_opa(root->GetObject(), LV_OPA_COVER, 0);
+        lv_obj_update_layout(root->GetObject());
+
+        for(int opacity : { 128, 0, 255 }) {
+            Publish(WidgetPropertyType::OPACITY, opacity);
+            ThemeManager::GetInstance().SetTheme(std::make_shared<BlueTheme>());
+            widget->OnDeactivated();
+            widget->OnActivated();
+            Tick(100);
+            zassert_equal(lv_obj_get_style_opa_layered(outer, LV_PART_MAIN), opacity);
+            zassert_equal(lv_obj_get_style_opa(image, LV_PART_MAIN), LV_OPA_COVER);
+            zassert_equal(lv_obj_get_style_image_recolor_opa(image, LV_PART_MAIN), LV_OPA_TRANSP);
+            zassert_equal(lv_image_get_src(image), source);
+            zassert_equal(widget->IsProcessingEligible(), opacity > 0);
+            if(is_dial) {
+                auto& needle = static_cast<TestDial*>(widget.get())->Needle();
+                zassert_equal(lv_obj_get_style_opa_layered(needle.GetContainer()->GetObject(), LV_PART_MAIN), LV_OPA_COVER);
+                zassert_equal(needle.IsProcessingEligible(), opacity > 0);
+            }
+
+            std::unique_ptr<lv_draw_buf_t, decltype(&lv_draw_buf_destroy)> snapshot(
+                lv_snapshot_take(root->GetObject(), LV_COLOR_FORMAT_ARGB8888), lv_draw_buf_destroy);
+            zassert_not_null(snapshot);
+            int brightest = 0;
+            for(uint32_t y = 0; y < snapshot->header.h; ++y) {
+                auto* pixels = reinterpret_cast<const lv_color32_t*>(snapshot->data + y * snapshot->header.stride);
+                for(uint32_t x = 0; x < snapshot->header.w; ++x)
+                    brightest = std::max(brightest, static_cast<int>(pixels[x].red));
+            }
+            // White image pixels on black must fade once: 128, never the double-faded ~64.
+            // Allow one RGB565 red-channel quantization step in the intermediate layer.
+            zassert_within(brightest, opacity, 8, "dial=%d opacity=%d brightest=%d", is_dial, opacity, brightest);
+        }
     }
 }
