@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <array>
 #include <memory>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -9,6 +10,7 @@
 #include "domain/sensor_domain/event_bus/sensor_events_channel.h"
 #include "event_bus/event_channel_id.h"
 #include "event_bus/event_channels.h"
+#include "views/animations/view_animator.h"
 #include "views/widgets/basic/icons/dot_icon/dot_icon.h"
 #include "views/widgets/controls/button_control/button_control.h"
 #include "views/widgets/controls/slider_control/slider_control.h"
@@ -21,12 +23,45 @@ using namespace eerie_leap::domain::sensor_domain::event_bus;
 using namespace eerie_leap::views::widgets;
 using eerie_leap::domain::ui_domain::ScopedLvglLock;
 using eerie_leap::event_bus::EventChannelId;
+using eerie_leap::views::animations::ViewAnimator;
 using eerie_leap::views::themes::ITheme;
 using eerie_leap::views::utilitites::Frame;
 
 namespace {
 
 constexpr int extent = 96;
+
+static_assert(!std::is_copy_constructible_v<ViewAnimator>);
+static_assert(!std::is_move_constructible_v<ViewAnimator>);
+static_assert(!std::is_copy_assignable_v<ViewAnimator>);
+static_assert(!std::is_move_assignable_v<ViewAnimator>);
+
+bool fail_next_animation_start = false;
+uint32_t animation_start_calls = 0;
+
+struct AnimatorScene {
+    Frame layout = Frame::CreateWrapped().SetWidth(64, true).SetHeight(24, true).Build();
+    Frame presentation = Frame::CreatePresentation(layout.GetObject()).Build();
+    bool eligible = true;
+    ViewAnimator animator;
+
+    AnimatorScene() {
+        lv_obj_update_layout(layout.GetObject());
+        zassert_true(animator.Attach(presentation.GetObject(), layout.GetObject(), [](void* context) {
+            return *static_cast<bool*>(context);
+        }, &eligible));
+    }
+
+    int Opacity() { return lv_obj_get_style_opa_layered(presentation.GetObject(), LV_PART_MAIN); }
+    int Angle() { return lv_obj_get_style_transform_rotation(presentation.GetObject(), LV_PART_MAIN); }
+};
+
+void Advance(uint32_t elapsed) {
+    lv_tick_inc(elapsed);
+    lv_anim_refr_now();
+}
+
+void OtherAnimation(void*, int32_t) {}
 
 std::shared_ptr<WidgetConfiguration> Configuration() {
     auto configuration = std::make_shared<WidgetConfiguration>(std::allocator_arg, std::pmr::get_default_resource());
@@ -241,7 +276,460 @@ void* Setup() {
 
 } // namespace
 
+extern "C" lv_anim_t* __real_lv_anim_start(const lv_anim_t* animation);
+
+extern "C" lv_anim_t* __wrap_lv_anim_start(const lv_anim_t* animation) {
+    ++animation_start_calls;
+    if(std::exchange(fail_next_animation_start, false))
+        return nullptr;
+    return __real_lv_anim_start(animation);
+}
+
 ZTEST_SUITE(widget_animations, NULL, Setup, NULL, views_test::CleanTestDisplay, NULL);
+
+ZTEST(widget_animations, test_animator_start_failure_stays_neutral_and_retries_only_on_explicit_transitions) {
+    ScopedLvglLock lock;
+    for(auto type : { Animation::Type::Blinking, Animation::Type::Rotation }) {
+        for(int transition : { 0, 1, 2 }) {
+            AnimatorScene scene;
+            const auto count = lv_anim_count_running();
+            const auto attempts = animation_start_calls;
+            ViewAnimator::Settings settings { type, true, 1000 };
+            fail_next_animation_start = true;
+            scene.animator.Synchronize(settings);
+            zassert_equal(animation_start_calls, attempts + 1);
+            zassert_false(scene.animator.IsRunning());
+            zassert_equal(lv_anim_count_running(), count);
+            zassert_equal(scene.Opacity(), 255);
+            zassert_equal(scene.Angle(), 0);
+            zassert_false(lv_obj_has_flag(scene.layout.GetObject(), LV_OBJ_FLAG_OVERFLOW_VISIBLE));
+            zassert_equal(DrawMargin(scene.layout.GetObject()), 0);
+            for(int iteration = 0; iteration < 5; ++iteration) {
+                Advance(100);
+                scene.animator.Synchronize(settings);
+            }
+            zassert_equal(animation_start_calls, attempts + 1);
+            if(transition == 0)
+                settings.duration_ms = 2000;
+            else if(transition == 1) {
+                scene.eligible = false;
+                scene.animator.Synchronize(settings);
+                scene.eligible = true;
+            } else {
+                zassert_true(scene.animator.Attach(scene.presentation.GetObject(), scene.layout.GetObject(),
+                    [](void* context) { return *static_cast<bool*>(context); }, &scene.eligible));
+            }
+            scene.animator.Synchronize(settings);
+            zassert_equal(animation_start_calls, attempts + 2);
+            zassert_true(scene.animator.IsRunning());
+            zassert_equal(lv_anim_count_running(), count + 1);
+        }
+    }
+}
+
+ZTEST(widget_animations, test_animator_defaults_and_stop_are_neutral_without_registrations) {
+    ScopedLvglLock lock;
+    const auto count = lv_anim_count_running();
+    {
+        AnimatorScene scene;
+        for(auto settings : { ViewAnimator::Settings{}, ViewAnimator::Settings{ Animation::Type::None, true, 1000 },
+                             ViewAnimator::Settings{ Animation::Type::Blinking, false, 1000 } }) {
+            scene.animator.Synchronize(settings);
+            zassert_false(scene.animator.IsRunning());
+            zassert_equal(scene.Opacity(), 255);
+            zassert_equal(scene.Angle(), 0);
+            zassert_equal(lv_anim_count_running(), count);
+        }
+        scene.animator.StopAndReset();
+        scene.animator.StopAndReset();
+    }
+    zassert_equal(lv_anim_count_running(), count);
+}
+
+ZTEST(widget_animations, test_animator_rejects_invalid_settings_without_changing_running_phase) {
+    ScopedLvglLock lock;
+    AnimatorScene scene;
+    scene.animator.Synchronize({ Animation::Type::Rotation, true, 1000 });
+    Advance(250);
+    const auto attempts = animation_start_calls;
+    for(auto settings : { ViewAnimator::Settings{ Animation::Type::Rotation, true, -1 },
+                         ViewAnimator::Settings{ Animation::Type::Rotation, true, 0 },
+                         ViewAnimator::Settings{ Animation::Type::Rotation, true, 1 },
+                         ViewAnimator::Settings{ static_cast<Animation::Type>(3), true, 1000 } }) {
+        scene.animator.Synchronize(settings);
+        zassert_true(scene.animator.IsRunning());
+        zassert_equal(scene.Angle(), 900);
+        zassert_equal(animation_start_calls, attempts);
+    }
+    scene.animator.Synchronize({ Animation::Type::Rotation, true, Animation::MAX_DURATION_MS });
+    zassert_equal(lv_anim_get(&scene.animator, nullptr)->duration, Animation::MAX_DURATION_MS);
+    zassert_equal(scene.Angle(), 0);
+    scene.animator.Synchronize({ Animation::Type::Blinking, true, Animation::MAX_DURATION_MS });
+    auto* registration = lv_anim_get(&scene.animator, nullptr);
+    zassert_equal(registration->duration, Animation::MAX_DURATION_MS / 2);
+    zassert_equal(registration->reverse_duration, Animation::MAX_DURATION_MS - Animation::MAX_DURATION_MS / 2);
+    zassert_equal(registration->path_cb, lv_anim_path_ease_in_out);
+}
+
+ZTEST(widget_animations, test_animator_blink_uses_two_halves_of_one_even_or_odd_cycle) {
+    ScopedLvglLock lock;
+    for(int duration : { 1000, 1001, 2, 3 }) {
+        AnimatorScene scene;
+        scene.animator.Synchronize({ Animation::Type::Blinking, true, duration });
+        zassert_true(scene.animator.IsRunning());
+        zassert_equal(scene.Opacity(), 255);
+        const int forward = duration / 2;
+        const int reverse = duration - forward;
+        if(forward > 1) {
+            Advance(forward / 2);
+            zassert_true(scene.Opacity() > 0 && scene.Opacity() < 255);
+        }
+        Advance(forward - (forward > 1 ? forward / 2 : 0));
+        zassert_equal(scene.Opacity(), 0);
+        zassert_true(scene.animator.IsRunning());
+        if(reverse > 1) {
+            Advance(reverse / 2);
+            zassert_true(scene.Opacity() > 0 && scene.Opacity() < 255);
+        }
+        Advance(reverse - (reverse > 1 ? reverse / 2 : 0));
+        zassert_equal(scene.Opacity(), 255);
+        zassert_true(scene.animator.IsRunning());
+        Advance(forward);
+        zassert_equal(scene.Opacity(), 0);
+        scene.animator.StopAndReset();
+        zassert_equal(scene.Opacity(), 255);
+        zassert_is_null(lv_anim_get(&scene.animator, nullptr));
+    }
+}
+
+ZTEST(widget_animations, test_animator_rotation_is_linear_clockwise_and_repeats_without_drift) {
+    ScopedLvglLock lock;
+    AnimatorScene scene;
+    scene.animator.Synchronize({ Animation::Type::Rotation, true, 1000 });
+    zassert_equal(scene.Angle(), 0);
+    for(int cycle = 0; cycle < 3; ++cycle) {
+        for(int quarter = 1; quarter <= 4; ++quarter) {
+            Advance(250);
+            zassert_equal(scene.Angle(), quarter * 900);
+            zassert_true(scene.animator.IsRunning());
+        }
+    }
+    scene.animator.StopAndReset();
+    zassert_equal(scene.Angle(), 0);
+    zassert_equal(scene.Opacity(), 255);
+}
+
+ZTEST(widget_animations, test_animator_same_settings_preserve_phase_and_changed_settings_restart_once) {
+    ScopedLvglLock lock;
+    const auto count = lv_anim_count_running();
+    AnimatorScene scene;
+    ViewAnimator::Settings settings { Animation::Type::Rotation, true, 1000 };
+    scene.animator.Synchronize(settings);
+    Advance(250);
+    auto* registration = lv_anim_get(&scene.animator, nullptr);
+    const auto attempts = animation_start_calls;
+    for(int iteration = 0; iteration < 10; ++iteration) {
+        scene.animator.Synchronize(settings);
+        lv_refr_now(nullptr);
+        zassert_equal(lv_anim_get(&scene.animator, nullptr), registration);
+        zassert_equal(registration->act_time, 250);
+        zassert_equal(scene.Angle(), 900);
+        zassert_equal(lv_anim_count_running(), count + 1);
+    }
+    zassert_equal(animation_start_calls, attempts);
+    settings.duration_ms = 2000;
+    scene.animator.Synchronize(settings);
+    zassert_equal(animation_start_calls, attempts + 1);
+    zassert_equal(scene.Angle(), 0);
+    Advance(500);
+    zassert_equal(scene.Angle(), 900);
+    settings.type = Animation::Type::Blinking;
+    scene.animator.Synchronize(settings);
+    zassert_equal(animation_start_calls, attempts + 2);
+    zassert_equal(scene.Angle(), 0);
+    zassert_equal(scene.Opacity(), 255);
+    zassert_false(lv_obj_has_flag(scene.layout.GetObject(), LV_OBJ_FLAG_OVERFLOW_VISIBLE));
+    Advance(1000);
+    zassert_equal(scene.Opacity(), 0);
+    settings.active = false;
+    scene.animator.Synchronize(settings);
+    zassert_false(scene.animator.IsRunning());
+    zassert_equal(scene.Opacity(), 255);
+    zassert_equal(lv_anim_count_running(), count);
+    settings.active = true;
+    scene.animator.Synchronize(settings);
+    zassert_equal(scene.Opacity(), 255);
+    zassert_equal(lv_anim_count_running(), count + 1);
+    settings.type = Animation::Type::None;
+    scene.animator.Synchronize(settings);
+    zassert_false(scene.animator.IsRunning());
+    zassert_equal(lv_anim_count_running(), count);
+}
+
+ZTEST(widget_animations, test_animator_checks_eligibility_at_each_execution_and_restarts_without_catchup) {
+    ScopedLvglLock lock;
+    for(auto type : { Animation::Type::Blinking, Animation::Type::Rotation }) {
+        AnimatorScene scene;
+        const ViewAnimator::Settings settings { type, true, 1000 };
+        scene.eligible = false;
+        scene.animator.Synchronize(settings);
+        zassert_false(scene.animator.IsRunning());
+        scene.eligible = true;
+        scene.animator.Synchronize(settings);
+        Advance(250);
+        scene.eligible = false;
+        Advance(250);
+        zassert_false(scene.animator.IsRunning());
+        zassert_equal(scene.Opacity(), 255);
+        zassert_equal(scene.Angle(), 0);
+        zassert_is_null(lv_anim_get(&scene.animator, nullptr));
+        scene.animator.Synchronize(settings);
+        Advance(9000);
+        scene.eligible = true;
+        scene.animator.Synchronize(settings);
+        zassert_true(scene.animator.IsRunning());
+        zassert_equal(scene.Opacity(), 255);
+        zassert_equal(scene.Angle(), 0);
+        Advance(250);
+        if(type == Animation::Type::Rotation)
+            zassert_equal(scene.Angle(), 900);
+        else
+            zassert_true(scene.Opacity() > 0 && scene.Opacity() < 255);
+    }
+}
+
+ZTEST(widget_animations, test_animator_synchronous_first_callback_can_suspend_without_deleting_during_start) {
+    ScopedLvglLock lock;
+    AnimatorScene scene;
+    struct Eligibility {
+        int calls = 0;
+        bool reject_start = true;
+    } eligibility;
+    zassert_true(scene.animator.Attach(scene.presentation.GetObject(), scene.layout.GetObject(), [](void* context) {
+        auto* state = static_cast<Eligibility*>(context);
+        return ++state->calls != 2 || !state->reject_start;
+    }, &eligibility));
+    scene.animator.Synchronize({ Animation::Type::Blinking, true, 1000 });
+    zassert_equal(eligibility.calls, 2);
+    zassert_false(scene.animator.IsRunning());
+    zassert_equal(scene.Opacity(), 255);
+    zassert_is_null(lv_anim_get(&scene.animator, nullptr));
+    eligibility.reject_start = false;
+    scene.animator.Synchronize({ Animation::Type::Blinking, true, 1000 });
+    zassert_true(scene.animator.IsRunning());
+    Advance(500);
+    zassert_equal(scene.Opacity(), 0);
+}
+
+ZTEST(widget_animations, test_animator_cancellation_uses_exact_executor_and_deleted_callback_only_clears_state) {
+    ScopedLvglLock lock;
+    const auto count = lv_anim_count_running();
+    AnimatorScene scene;
+    lv_anim_t other;
+    lv_anim_init(&other);
+    lv_anim_set_exec_cb(&other, OtherAnimation);
+    lv_anim_set_repeat_count(&other, LV_ANIM_REPEAT_INFINITE);
+    lv_anim_set_var(&other, &scene.animator);
+    auto* same_variable = lv_anim_start(&other);
+    lv_anim_set_var(&other, scene.presentation.GetObject());
+    auto* same_target = lv_anim_start(&other);
+    const ViewAnimator::Settings settings { Animation::Type::Blinking, true, 1000 };
+    scene.animator.Synchronize(settings);
+    Advance(250);
+    auto* owned = lv_anim_get(&scene.animator, nullptr);
+    zassert_not_equal(owned->exec_cb, OtherAnimation);
+    const auto opacity = scene.Opacity();
+    zassert_true(lv_anim_delete(&scene.animator, owned->exec_cb));
+    zassert_false(scene.animator.IsRunning());
+    zassert_equal(scene.Opacity(), opacity);
+    scene.animator.Synchronize(settings);
+    zassert_false(scene.animator.IsRunning());
+    scene.animator.StopAndReset();
+    scene.animator.Synchronize(settings);
+    scene.animator.StopAndReset();
+    scene.animator.Detach();
+    scene.animator.Detach();
+    zassert_equal(lv_anim_get(&scene.animator, OtherAnimation), same_variable);
+    zassert_equal(lv_anim_get(scene.presentation.GetObject(), OtherAnimation), same_target);
+    zassert_equal(lv_anim_count_running(), count + 2);
+    lv_anim_delete(&scene.animator, OtherAnimation);
+    lv_anim_delete(scene.presentation.GetObject(), OtherAnimation);
+    zassert_equal(lv_anim_count_running(), count);
+}
+
+ZTEST(widget_animations, test_animator_live_reattachment_resets_old_target_without_affecting_another_helper) {
+    ScopedLvglLock lock;
+    const auto count = lv_anim_count_running();
+    AnimatorScene first;
+    AnimatorScene second;
+    Frame replacement = Frame::CreatePresentation(first.layout.GetObject()).Build();
+    const ViewAnimator::Settings fade { Animation::Type::Blinking, true, 1000 };
+    first.animator.Synchronize(fade);
+    second.animator.Synchronize({ Animation::Type::Rotation, true, 1000 });
+    Advance(250);
+    zassert_equal(lv_anim_count_running(), count + 2);
+    zassert_false(first.animator.Attach(nullptr, first.layout.GetObject(), [](void*) { return true; }, nullptr));
+    zassert_false(first.animator.Attach(first.presentation.GetObject(), second.layout.GetObject(),
+        [](void*) { return true; }, nullptr));
+    zassert_true(first.animator.IsRunning());
+    const auto callbacks = lv_obj_get_event_count(first.layout.GetObject());
+    zassert_true(first.animator.Attach(replacement.GetObject(), first.layout.GetObject(),
+        [](void*) { return true; }, nullptr));
+    zassert_equal(first.Opacity(), 255);
+    zassert_false(first.animator.IsRunning());
+    zassert_equal(lv_obj_get_event_count(first.layout.GetObject()), callbacks);
+    zassert_equal(lv_anim_count_running(), count + 1);
+    first.animator.Synchronize(fade);
+    zassert_equal(second.Angle(), 900);
+    Advance(250);
+    zassert_equal(second.Angle(), 1800);
+    zassert_equal(first.Opacity(), 255);
+    const auto opacity = lv_obj_get_style_opa_layered(replacement.GetObject(), LV_PART_MAIN);
+    zassert_true(opacity > 0 && opacity < 255);
+    first.animator.Detach();
+    zassert_true(second.animator.IsRunning());
+    zassert_equal(lv_anim_count_running(), count + 1);
+}
+
+ZTEST(widget_animations, test_animator_target_and_wrapper_deletion_cancel_and_allow_reattachment) {
+    ScopedLvglLock lock;
+    const auto count = lv_anim_count_running();
+    for(auto type : { Animation::Type::Blinking, Animation::Type::Rotation }) {
+        for(bool delete_wrapper : { false, true }) {
+            ViewAnimator animator;
+            auto layout = std::make_unique<Frame>(Frame::CreateWrapped().SetWidth(64, true).SetHeight(24, true).Build());
+            auto* target = lv_obj_create(layout->GetObject());
+            const auto callbacks = lv_obj_get_event_count(layout->GetObject());
+            zassert_true(animator.Attach(target, layout->GetObject(), [](void*) { return true; }, nullptr));
+            animator.Synchronize({ type, true, 1000 });
+            Advance(500);
+            if(delete_wrapper)
+                layout.reset();
+            else {
+                lv_obj_delete(target);
+                zassert_equal(lv_obj_get_event_count(layout->GetObject()), callbacks);
+                zassert_false(lv_obj_has_flag(layout->GetObject(), LV_OBJ_FLAG_OVERFLOW_VISIBLE));
+                zassert_equal(DrawMargin(layout->GetObject()), 0);
+            }
+            zassert_false(animator.IsRunning());
+            zassert_equal(lv_anim_count_running(), count);
+            Advance(1000);
+            animator.Synchronize({ type, true, 1000 });
+            zassert_false(animator.IsRunning());
+            Frame replacement = Frame::CreateWrapped().Build();
+            Frame content = Frame::CreatePresentation(replacement.GetObject()).Build();
+            zassert_true(animator.Attach(content.GetObject(), replacement.GetObject(), [](void*) { return true; }, nullptr));
+            animator.Synchronize({ type, true, 1000 });
+            zassert_true(animator.IsRunning());
+            animator.Detach();
+            zassert_equal(lv_anim_count_running(), count);
+        }
+    }
+}
+
+ZTEST(widget_animations, test_animator_scope_exit_restores_flags_margins_and_callbacks_for_both_effects) {
+    ScopedLvglLock lock;
+    const auto count = lv_anim_count_running();
+    for(auto type : { Animation::Type::Blinking, Animation::Type::Rotation }) {
+        for(int elapsed : { 250, 500 }) {
+            for(bool overflow : { false, true }) {
+                AnimatorScene scene;
+                scene.animator.Detach();
+                auto* layout = scene.layout.GetObject();
+                auto* content = scene.presentation.GetObject();
+                lv_obj_set_flag(layout, LV_OBJ_FLAG_OVERFLOW_VISIBLE, overflow);
+                lv_obj_set_flag(content, LV_OBJ_FLAG_OVERFLOW_VISIBLE, !overflow);
+                lv_obj_set_ext_draw_size(layout, 3);
+                lv_obj_refresh_ext_draw_size(layout);
+                const auto layout_callbacks = lv_obj_get_event_count(layout);
+                const auto content_callbacks = lv_obj_get_event_count(content);
+                {
+                    ViewAnimator animator;
+                    zassert_true(animator.Attach(content, layout, [](void*) { return true; }, nullptr));
+                    animator.Synchronize({ type, true, 1000 });
+                    Advance(elapsed);
+                    zassert_equal(lv_anim_count_running(), count + 1);
+                }
+                zassert_equal(lv_anim_count_running(), count);
+                zassert_equal(scene.Opacity(), 255);
+                zassert_equal(scene.Angle(), 0);
+                zassert_equal(DrawMargin(layout), 3);
+                zassert_equal(lv_obj_has_flag(layout, LV_OBJ_FLAG_OVERFLOW_VISIBLE), overflow);
+                zassert_equal(lv_obj_has_flag(content, LV_OBJ_FLAG_OVERFLOW_VISIBLE), !overflow);
+                zassert_equal(lv_obj_get_event_count(layout), layout_callbacks);
+                zassert_equal(lv_obj_get_event_count(content), content_callbacks);
+            }
+        }
+    }
+}
+
+ZTEST(widget_animations, test_animator_rotation_pixels_resize_and_external_clipping_match_feasibility) {
+    ScopedLvglLock lock;
+    Scene scene;
+    const auto baseline = scene.Pixels();
+    ViewAnimator animator;
+    zassert_true(animator.Attach(views_test::WidgetContent(scene.widget), scene.widget.GetContainer()->GetObject(),
+        [](void*) { return true; }, nullptr));
+    const ViewAnimator::Settings settings { Animation::Type::Rotation, true, 1000 };
+    animator.Synchronize(settings);
+    Advance(125);
+    auto pixels = scene.Pixels();
+    CheckPixel(pixels, 34, 23, 255, 0);
+    CheckPixel(pixels, 59, 68, 0, 255);
+    Advance(125);
+    pixels = scene.Pixels();
+    CheckPixel(pixels, 56, 20, 255, 0);
+    CheckPixel(pixels, 42, 70, 0, 255);
+    scene.clip->SetHeight(48, true);
+    pixels = scene.Pixels();
+    CheckPixel(pixels, 56, 20, 255, 0);
+    CheckPixel(pixels, 42, 70, 0, 0);
+    scene.clip->SetHeight(extent, true);
+    scene.widget.SetPositionPx({ 12, 32 });
+    scene.widget.SetSizePx({ 72, 32 });
+    pixels = scene.Pixels();
+    CheckPixel(pixels, 60, 16, 255, 0);
+    CheckPixel(pixels, 48, 58, 0, 255);
+    zassert_equal(lv_anim_get(&animator, nullptr)->act_time, 250);
+    scene.widget.SetPositionPx({ 16, 36 });
+    scene.widget.SetSizePx({ 64, 24 });
+    animator.StopAndReset();
+    const auto restored = scene.Pixels();
+    zassert_mem_equal(baseline.data(), restored.data(), baseline.size() * sizeof(lv_color32_t));
+}
+
+ZTEST(widget_animations, test_animator_fade_renders_full_mid_zero_and_return_without_suspending_data) {
+    ScopedLvglLock lock;
+    Scene scene;
+    lv_obj_set_style_opa_layered(scene.widget.GetContainer()->GetObject(), 128, LV_PART_MAIN);
+    auto* presentation = views_test::WidgetContent(scene.widget);
+    auto* leaf = lv_obj_get_child(presentation, 0);
+    lv_obj_set_style_bg_opa(leaf, 128, LV_PART_MAIN);
+    ViewAnimator animator;
+    zassert_true(animator.Attach(presentation, scene.widget.GetContainer()->GetObject(),
+        [](void*) { return true; }, nullptr));
+    animator.Synchronize({ Animation::Type::Blinking, true, 1000 });
+    CheckPixel(scene.Pixels(), 20, 40, 64, 0);
+    Advance(250);
+    CheckPixel(scene.Pixels(), 20, 40, 32, 0);
+    Advance(250);
+    CheckPixel(scene.Pixels(), 20, 40, 0, 0);
+    zassert_true(animator.IsRunning());
+    zassert_true(scene.widget.IsProcessingEligible());
+    SensorEventsChannel::GetInstance().Publish({
+        .source_id = 0,
+        .type = SensorEventType::DataUpdated,
+        .payload = {{ SensorPayloadType::Value, 62.0F }}
+    });
+    zassert_equal(scene.widget.applied_value, 62.0);
+    Advance(250);
+    CheckPixel(scene.Pixels(), 20, 40, 32, 0);
+    Advance(250);
+    CheckPixel(scene.Pixels(), 20, 40, 64, 0);
+    animator.StopAndReset();
+    zassert_equal(lv_obj_get_style_bg_opa(leaf, LV_PART_MAIN), 128);
+    zassert_equal(lv_obj_get_style_opa_layered(scene.widget.GetContainer()->GetObject(), LV_PART_MAIN), 128);
+}
 
 ZTEST(widget_animations, test_presentation_frame_is_neutral_stable_and_not_an_input_surface) {
     ScopedLvglLock lock;

@@ -51,3 +51,5 @@ target_sources(app PRIVATE
   ${APP_SRC_VIEWS}
   ${TEST_SOURCES}
 )
+
+zephyr_link_libraries(-Wl,--wrap=lv_anim_start)
