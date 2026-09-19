@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -18,6 +19,7 @@
 #include "domain/sensor_domain/event_bus/sensor_events_channel.h"
 #include "domain/settings_domain/event_bus/settings_events_channel.h"
 #include "domain/ui_domain/models/property_binding.h"
+#include "domain/ui_domain/models/animation.h"
 #include "domain/ui_domain/lvgl_lock.h"
 #include "domain/ui_domain/models/widget_configuration.h"
 
@@ -64,6 +66,7 @@ using eerie_leap::views::widgets::PropertyChangeEffect;
 using eerie_leap::views::widgets::WidgetBase;
 using eerie_leap::views::widgets::WidgetContext;
 using eerie_leap::views::widgets::WidgetPropertyStore;
+using eerie_leap::domain::ui_domain::models::Animation;
 using views_test::CleanTestDisplay;
 using views_test::EnsureTestDisplay;
 
@@ -117,6 +120,12 @@ private:
 
         store.Register(WidgetPropertyType::VALUE, ConfigValue { 0.0 }, PropertyChangeEffect::None);
         store.Register(WidgetPropertyType::LABEL, ConfigValue { std::pmr::string { } }, PropertyChangeEffect::None);
+
+        store.Register(WidgetPropertyType::ANIMATION_TYPE,
+            static_cast<int>(Animation::DEFAULT_TYPE), PropertyChangeEffect::None);
+        store.Register(WidgetPropertyType::IS_ANIMATION_ACTIVE, Animation::DEFAULT_ACTIVE, PropertyChangeEffect::None);
+        store.Register(WidgetPropertyType::ANIMATION_DURATION_MS,
+            Animation::DEFAULT_DURATION_MS, PropertyChangeEffect::None);
         for(auto type : color_properties)
             store.Register(type, ConfigValue { std::pmr::string { } }, PropertyChangeEffect::None);
     }
@@ -410,6 +419,175 @@ ZTEST(widget_bindings, test_opacity_bindings_validate_before_numeric_coercion) {
             zassert_true(widget->notified.empty());
         }
     }
+}
+
+ZTEST(widget_bindings, test_animation_store_validates_before_mutation) {
+    WidgetPropertyStore store;
+    store.Register(WidgetPropertyType::ANIMATION_TYPE,
+        static_cast<int>(Animation::DEFAULT_TYPE), PropertyChangeEffect::None);
+    store.Register(WidgetPropertyType::IS_ANIMATION_ACTIVE, Animation::DEFAULT_ACTIVE, PropertyChangeEffect::None);
+    store.Register(WidgetPropertyType::ANIMATION_DURATION_MS,
+        Animation::DEFAULT_DURATION_MS, PropertyChangeEffect::None);
+    zassert_equal(std::get<int>(store.Get(WidgetPropertyType::ANIMATION_TYPE)), 0);
+    zassert_false(std::get<bool>(store.Get(WidgetPropertyType::IS_ANIMATION_ACTIVE)));
+    zassert_equal(std::get<int>(store.Get(WidgetPropertyType::ANIMATION_DURATION_MS)), 1000);
+
+    const ConfigValue invalid_numbers[] = {
+        {}, INT32_MIN, -1, true, false, 0.0, 1.0, 2.0, 2.5, 1000.0,
+        static_cast<double>(INT32_MAX) + 1.0, std::pmr::string("2"),
+        std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity(),
+        -std::numeric_limits<double>::infinity()
+    };
+    for(auto type : { WidgetPropertyType::ANIMATION_TYPE, WidgetPropertyType::ANIMATION_DURATION_MS }) {
+        const std::vector<int> valid_values = type == WidgetPropertyType::ANIMATION_TYPE
+            ? std::vector<int>{ 0, 1, 2 } : std::vector<int>{ 2, 3, 1000, INT32_MAX };
+        for(int accepted : valid_values) {
+            zassert_true(store.Set(type, accepted));
+            auto reject = [&](const ConfigValue& value) {
+                zassert_false(store.Set(type, value));
+                zassert_equal(std::get<int>(store.Get(type)), accepted);
+            };
+            for(const auto& value : invalid_numbers)
+                reject(value);
+            if(type == WidgetPropertyType::ANIMATION_TYPE) {
+                reject(3);
+                reject(INT32_MAX);
+            } else {
+                reject(0);
+                reject(1);
+            }
+        }
+    }
+    const ConfigValue invalid_active[] = {
+        {}, 0, 1, -1, 2, 0.0, 1.0, 0.5, std::pmr::string("true"),
+        std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity()
+    };
+    for(bool accepted : { true, false }) {
+        zassert_true(store.Set(WidgetPropertyType::IS_ANIMATION_ACTIVE, accepted));
+        for(const auto& value : invalid_active) {
+            zassert_false(store.Set(WidgetPropertyType::IS_ANIMATION_ACTIVE, value));
+            zassert_equal(std::get<bool>(store.Get(WidgetPropertyType::IS_ANIMATION_ACTIVE)), accepted);
+        }
+    }
+}
+
+ZTEST(widget_bindings, test_animation_numeric_bindings_reject_floats_overflow_and_invalid_values) {
+    const EventData invalid_numbers[] = {
+        INT32_MIN, -1, UINT32_MAX, static_cast<uint32_t>(INT32_MAX) + 1U,
+        true, false, 0.0F, 1.0F, 2.0F, 2.5F, 1000.0F, static_cast<float>(INT32_MAX), std::string("2"),
+        std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity(),
+        -std::numeric_limits<float>::infinity()
+    };
+    for(auto type : { WidgetPropertyType::ANIMATION_TYPE, WidgetPropertyType::ANIMATION_DURATION_MS }) {
+        auto configuration = MakeConfiguration();
+        configuration->bindings.push_back(SensorBinding(type, SENSOR_ID));
+        auto widget = MakeActiveWidget(std::move(configuration));
+        const std::vector<int> valid_values = type == WidgetPropertyType::ANIMATION_TYPE
+            ? std::vector<int>{ 0, 1, 2 } : std::vector<int>{ 2, 3, 1000, INT32_MAX };
+        for(int accepted : valid_values) {
+            for(const EventData& input : { EventData{accepted}, EventData{static_cast<uint32_t>(accepted)} }) {
+                PublishSensor(SENSOR_ID, input);
+                zassert_equal(std::get<int>(widget->Read(type)), accepted);
+                widget->notified.clear();
+                auto reject = [&](const EventData& value) {
+                    PublishSensor(SENSOR_ID, value);
+                    zassert_equal(std::get<int>(widget->Read(type)), accepted);
+                    zassert_true(widget->notified.empty());
+                };
+                for(const auto& value : invalid_numbers)
+                    reject(value);
+                const int invalid_value = type == WidgetPropertyType::ANIMATION_TYPE ? 3 : 0;
+                reject(invalid_value);
+                reject(static_cast<uint32_t>(invalid_value));
+                if(type == WidgetPropertyType::ANIMATION_TYPE) {
+                    reject(INT32_MAX);
+                    reject(static_cast<uint32_t>(INT32_MAX));
+                } else {
+                    reject(1);
+                    reject(uint32_t{1});
+                }
+            }
+        }
+    }
+}
+
+ZTEST(widget_bindings, test_animation_active_binding_accepts_only_booleans_or_exact_zero_one) {
+    auto configuration = MakeConfiguration();
+    configuration->bindings.push_back(SensorBinding(WidgetPropertyType::IS_ANIMATION_ACTIVE, SENSOR_ID));
+    auto widget = MakeActiveWidget(std::move(configuration));
+    const EventData invalid_values[] = {
+        -1, 2, INT32_MIN, INT32_MAX, uint32_t{2}, UINT32_MAX, -1.0F, 0.5F, 2.0F,
+        std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity(),
+        -std::numeric_limits<float>::infinity(), std::string("true"), std::string("1")
+    };
+    for(bool accepted : { true, false }) {
+        const EventData valid_values[] = {
+            accepted, static_cast<int>(accepted), static_cast<uint32_t>(accepted), static_cast<float>(accepted)
+        };
+        for(const auto& value : valid_values) {
+            PublishSensor(SENSOR_ID, value);
+            zassert_equal(std::get<bool>(widget->Read(WidgetPropertyType::IS_ANIMATION_ACTIVE)), accepted);
+            widget->notified.clear();
+            for(const auto& invalid : invalid_values) {
+                PublishSensor(SENSOR_ID, invalid);
+                zassert_equal(std::get<bool>(widget->Read(WidgetPropertyType::IS_ANIMATION_ACTIVE)), accepted);
+                zassert_true(widget->notified.empty());
+            }
+        }
+    }
+}
+
+ZTEST(widget_bindings, test_animation_bindings_follow_ordinary_tracking_policy) {
+    auto configuration = MakeConfiguration();
+    configuration->bindings.push_back(SensorBinding(WidgetPropertyType::ANIMATION_TYPE, "type"));
+    configuration->bindings.push_back(SensorBinding(WidgetPropertyType::IS_ANIMATION_ACTIVE, "enabled"));
+    configuration->bindings.push_back(SensorBinding(WidgetPropertyType::ANIMATION_DURATION_MS, "duration"));
+    configuration->bindings.push_back(SensorBinding(WidgetPropertyType::IS_VISIBLE, "visible"));
+    configuration->bindings.push_back(SensorBinding(WidgetPropertyType::IS_ACTIVE, "active"));
+    configuration->bindings.push_back(SensorBinding(WidgetPropertyType::OPACITY, "opacity"));
+    auto widget = MakeActiveWidget(configuration);
+
+    auto update = [&](int type, bool enabled, int duration) {
+        PublishSensor("type", type);
+        PublishSensor("enabled", enabled);
+        PublishSensor("duration", duration);
+    };
+    auto check = [&](int type, bool enabled, int duration) {
+        zassert_equal(std::get<int>(widget->Read(WidgetPropertyType::ANIMATION_TYPE)), type);
+        zassert_equal(std::get<bool>(widget->Read(WidgetPropertyType::IS_ANIMATION_ACTIVE)), enabled);
+        zassert_equal(std::get<int>(widget->Read(WidgetPropertyType::ANIMATION_DURATION_MS)), duration);
+    };
+    PublishSensor("visible", false);
+    update(1, true, 333);
+    check(1, true, 333);
+    zassert_true(widget->notified.empty());
+    PublishSensor("duration", 1.5F);
+    check(1, true, 333);
+    PublishSensor("visible", true);
+    zassert_equal(widget->notified.size(), 3U);
+    widget->notified.clear();
+
+    PublishSensor("opacity", 0);
+    update(2, false, 222);
+    check(2, false, 222);
+    zassert_true(widget->notified.empty());
+    PublishSensor("opacity", 255);
+    zassert_equal(widget->notified.size(), 3U);
+    widget->notified.clear();
+
+    widget->OnDeactivated();
+    update(1, true, 444);
+    check(1, true, 444);
+    zassert_true(widget->notified.empty());
+    widget->OnActivated();
+    widget->notified.clear();
+
+    PublishSensor("active", false);
+    update(2, false, 555);
+    check(1, true, 444);
+    zassert_true(widget->notified.empty());
+    PublishSensor("active", true);
+    check(1, true, 444);
 }
 
 ZTEST(widget_bindings, test_a_binding_delivers_an_event_value_to_its_property) {

@@ -3,6 +3,7 @@
 #include <zephyr/ztest.h>
 
 #include "domain/ui_domain/models/widget_property.h"
+#include "domain/ui_domain/models/animation.h"
 #include "domain/ui_domain/models/widget_direction.h"
 #include "domain/ui_domain/models/widget_fill_mode.h"
 #include "domain/ui_domain/models/icon_type.h"
@@ -56,7 +57,10 @@ constexpr std::array all_types = {
     WidgetPropertyType::COLOR_SECONDARY_ACTIVE,
     WidgetPropertyType::COLOR_SECONDARY_INACTIVE,
     WidgetPropertyType::COLOR_TERTIARY_ACTIVE,
-    WidgetPropertyType::COLOR_TERTIARY_INACTIVE
+    WidgetPropertyType::COLOR_TERTIARY_INACTIVE,
+    WidgetPropertyType::ANIMATION_TYPE,
+    WidgetPropertyType::IS_ANIMATION_ACTIVE,
+    WidgetPropertyType::ANIMATION_DURATION_MS
 };
 
 } // namespace
@@ -77,7 +81,7 @@ ZTEST(widget_property, test_shape_additions_preserve_persisted_values) {
 
 // Persisted numeric IDs must stay stable when properties are added.
 ZTEST(widget_property, test_property_ids_preserve_persisted_values) {
-    zassert_equal(all_types.size(), 41);
+    zassert_equal(all_types.size(), 44);
     zassert_equal(static_cast<uint16_t>(WidgetPropertyType::COUNT), all_types.size());
     for(size_t index = 0; index < all_types.size(); ++index)
         zassert_equal(static_cast<uint16_t>(all_types[index]), index);
@@ -86,6 +90,17 @@ ZTEST(widget_property, test_property_ids_preserve_persisted_values) {
 ZTEST(widget_property, test_every_property_type_is_valid) {
     for(auto type : all_types)
         zassert_equal(IsValidWidgetPropertyType(type), type != WidgetPropertyType::NONE);
+}
+
+ZTEST(widget_property, test_animation_ids_defaults_and_duration_contract) {
+    zassert_equal(static_cast<int>(Animation::Type::None), 0);
+    zassert_equal(static_cast<int>(Animation::Type::Blinking), 1);
+    zassert_equal(static_cast<int>(Animation::Type::Rotation), 2);
+    zassert_equal(Animation::DEFAULT_TYPE, Animation::Type::None);
+    zassert_false(Animation::DEFAULT_ACTIVE);
+    zassert_equal(Animation::DEFAULT_DURATION_MS, 1000);
+    zassert_equal(Animation::MIN_DURATION_MS, 2);
+    zassert_equal(Animation::MAX_DURATION_MS, INT32_MAX);
 }
 
 ZTEST(widget_property, test_sentinels_and_unknown_types_are_invalid) {

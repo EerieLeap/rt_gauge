@@ -33,6 +33,7 @@ static PropertyValueKind GetPropertyValueKind(WidgetPropertyType type) {
         case WidgetPropertyType::IS_ACTIVE:
         case WidgetPropertyType::IS_SMOOTHED:
         case WidgetPropertyType::IS_VISIBLE:
+        case WidgetPropertyType::IS_ANIMATION_ACTIVE:
             return PropertyValueKind::Boolean;
 
         case WidgetPropertyType::LABEL:
@@ -85,6 +86,10 @@ static std::string GetWidgetPropertyValidationError(WidgetPropertyType type, con
 
     if(WidgetPropertyValidator::IsAppearanceProperty(type)
         && !WidgetPropertyValidator::IsValidAppearanceValue(type, value))
+        return "Invalid value for property ID: " + std::to_string(static_cast<uint16_t>(type)) + ".";
+
+    if(WidgetPropertyValidator::IsAnimationProperty(type)
+        && !WidgetPropertyValidator::IsValidAnimationValue(type, value))
         return "Invalid value for property ID: " + std::to_string(static_cast<uint16_t>(type)) + ".";
 
     if(type == WidgetPropertyType::FILL_MODE && !IsValidFillMode(value))

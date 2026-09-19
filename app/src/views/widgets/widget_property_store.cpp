@@ -126,6 +126,10 @@ bool WidgetPropertyStore::Set(WidgetPropertyType type, const ConfigValue& value)
     if(WidgetPropertyValidator::IsAppearanceProperty(type) && !WidgetPropertyValidator::IsValidAppearanceValue(type, value))
         return false;
 
+    if(WidgetPropertyValidator::IsAnimationProperty(type)
+        && !WidgetPropertyValidator::IsValidAnimationValue(type, value))
+        return false;
+
     entry->value = value;
 
     return true;

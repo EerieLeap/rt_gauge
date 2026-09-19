@@ -1,4 +1,5 @@
 #include <array>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <utility>
@@ -120,6 +121,89 @@ void AddBinding(UiConfiguration& configuration, PropertyBinding binding) {
 
 ZTEST(ui_configuration_validator, test_valid_configuration) {
     zassert_true(Validates(*MakeConfiguration()));
+}
+
+ZTEST(ui_configuration_validator, test_animation_controls_are_separate_from_management_and_colors) {
+    using eerie_leap::domain::ui_domain::utilities::WidgetPropertyValidator;
+    for(uint16_t id = 0; id <= static_cast<uint16_t>(WidgetPropertyType::COUNT); ++id) {
+        const auto type = static_cast<WidgetPropertyType>(id);
+        const bool is_animation = id >= 41 && id <= 43;
+        zassert_equal(WidgetPropertyValidator::IsAnimationProperty(type), is_animation);
+        if(is_animation) {
+            zassert_false(WidgetPropertyValidator::IsManagementProperty(type));
+            zassert_false(WidgetPropertyValidator::IsColorProperty(type));
+            zassert_false(WidgetPropertyValidator::IsAppearanceProperty(type));
+        } else {
+            zassert_false(WidgetPropertyValidator::IsValidAnimationValue(type, 2));
+            zassert_false(WidgetPropertyValidator::IsValidAnimationValue(type, true));
+        }
+    }
+    zassert_false(WidgetPropertyValidator::IsAnimationProperty(static_cast<WidgetPropertyType>(UINT16_MAX)));
+}
+
+ZTEST(ui_configuration_validator, test_animation_defaults_effects_and_duration_boundaries_are_valid) {
+    auto configuration = MakeConfiguration();
+    auto& properties = configuration->screen_configurations[0]->widget_configurations[0]->properties;
+    properties[WidgetPropertyType::ANIMATION_TYPE] = static_cast<int>(Animation::DEFAULT_TYPE);
+    properties[WidgetPropertyType::IS_ANIMATION_ACTIVE] = Animation::DEFAULT_ACTIVE;
+    properties[WidgetPropertyType::ANIMATION_DURATION_MS] = Animation::DEFAULT_DURATION_MS;
+    zassert_true(Validates(*configuration));
+
+    for(int type : { 0, 1, 2 }) {
+        properties[WidgetPropertyType::ANIMATION_TYPE] = type;
+        for(bool active : { false, true }) {
+            properties[WidgetPropertyType::IS_ANIMATION_ACTIVE] = active;
+            for(int duration : { 2, 3, 1000, INT32_MAX }) {
+                properties[WidgetPropertyType::ANIMATION_DURATION_MS] = duration;
+                zassert_true(Validates(*configuration));
+            }
+        }
+    }
+}
+
+ZTEST(ui_configuration_validator, test_invalid_animation_values_are_rejected_even_when_dormant) {
+    using eerie_leap::domain::ui_domain::utilities::WidgetPropertyValidator;
+    const ConfigValue invalid_numbers[] = {
+        {}, true, false, 0.0, 1.0, 2.0, 2.5, 1000.0,
+        static_cast<double>(INT32_MAX) + 1.0,
+        std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity(),
+        -std::numeric_limits<double>::infinity(), std::pmr::string("2")
+    };
+    auto configuration = MakeConfiguration();
+    auto& properties = configuration->screen_configurations[0]->widget_configurations[0]->properties;
+    for(auto type : { WidgetPropertyType::ANIMATION_TYPE, WidgetPropertyType::ANIMATION_DURATION_MS }) {
+        auto reject = [&](const ConfigValue& value) {
+            properties[WidgetPropertyType::ANIMATION_TYPE] = 0;
+            properties[WidgetPropertyType::IS_ANIMATION_ACTIVE] = false;
+            properties[WidgetPropertyType::ANIMATION_DURATION_MS] = 1000;
+            properties[type] = value;
+            zassert_false(WidgetPropertyValidator::IsValidAnimationValue(type, value));
+            zassert_false(Validates(*configuration));
+        };
+        for(const auto& value : invalid_numbers)
+            reject(value);
+        for(int value : { INT32_MIN, -1 })
+            reject(value);
+        if(type == WidgetPropertyType::ANIMATION_TYPE) {
+            reject(3);
+            reject(INT32_MAX);
+        } else {
+            reject(0);
+            reject(1);
+        }
+    }
+
+    properties[WidgetPropertyType::ANIMATION_TYPE] = 0;
+    properties[WidgetPropertyType::ANIMATION_DURATION_MS] = 1000;
+    const ConfigValue invalid_active[] = {
+        {}, 0, 1, -1, 2, 0.0, 1.0, 0.5, std::pmr::string("true"),
+        std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity()
+    };
+    for(const auto& value : invalid_active) {
+        properties[WidgetPropertyType::IS_ANIMATION_ACTIVE] = value;
+        zassert_false(WidgetPropertyValidator::IsValidAnimationValue(WidgetPropertyType::IS_ANIMATION_ACTIVE, value));
+        zassert_false(Validates(*configuration));
+    }
 }
 
 ZTEST(ui_configuration_validator, test_appearance_classification_is_separate_from_value_validation) {

@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <optional>
 
+#include "domain/ui_domain/models/animation.h"
 #include "domain/ui_domain/models/widget_property.h"
 #include "utilities/type/color.h"
 #include "utilities/type/config_value.h"
@@ -16,6 +17,33 @@ using eerie_leap::utilities::type::ConfigValue;
 
 class WidgetPropertyValidator {
 public:
+    static constexpr bool IsAnimationProperty(WidgetPropertyType type) {
+        return type == WidgetPropertyType::ANIMATION_TYPE
+            || type == WidgetPropertyType::IS_ANIMATION_ACTIVE
+            || type == WidgetPropertyType::ANIMATION_DURATION_MS;
+    }
+
+    static bool IsValidAnimationValue(WidgetPropertyType type, const ConfigValue& value) {
+        using namespace eerie_leap::domain::ui_domain::models;
+
+        if(type == WidgetPropertyType::IS_ANIMATION_ACTIVE)
+            return std::holds_alternative<bool>(value);
+
+        const auto* number = std::get_if<int>(&value);
+        if(number == nullptr)
+            return false;
+
+        if(type == WidgetPropertyType::ANIMATION_TYPE)
+            return *number == static_cast<int>(Animation::Type::None)
+                || *number == static_cast<int>(Animation::Type::Blinking)
+                || *number == static_cast<int>(Animation::Type::Rotation);
+
+        if(type == WidgetPropertyType::ANIMATION_DURATION_MS)
+            return *number >= Animation::MIN_DURATION_MS && *number <= Animation::MAX_DURATION_MS;
+
+        return false;
+    }
+
     static constexpr bool IsManagementProperty(WidgetPropertyType type) {
         return type == WidgetPropertyType::IS_ACTIVE
             || type == WidgetPropertyType::IS_VISIBLE

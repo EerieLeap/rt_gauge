@@ -48,6 +48,9 @@ enum class WidgetPropertyType : std::uint16_t {
     COLOR_SECONDARY_INACTIVE,   // string in format: "#RRGGBBAA" eg "#FF0000FF"
     COLOR_TERTIARY_ACTIVE,      // string in format: "#RRGGBBAA" eg "#FF0000FF"
     COLOR_TERTIARY_INACTIVE,    // string in format: "#RRGGBBAA" eg "#FF0000FF"
+    ANIMATION_TYPE = 41,        // int (Animation::Type)
+    IS_ANIMATION_ACTIVE = 42,   // bool (requested enablement)
+    ANIMATION_DURATION_MS = 43, // int (milliseconds per complete cycle)
     COUNT                  // Sentinel, not a property
 };
 

@@ -16,6 +16,7 @@
 #include "domain/ui_domain/models/ui_configuration.h"
 #include "domain/ui_domain/models/widget_type.h"
 #include "domain/ui_domain/models/widget_property.h"
+#include "domain/ui_domain/models/animation.h"
 #include "domain/ui_domain/models/icon_type.h"
 #include "domain/ui_domain/models/widget_direction.h"
 #include "domain/ui_domain/models/widget_fill_mode.h"
@@ -208,6 +209,56 @@ ZTEST(ui_configuration_parser, test_shape_properties_and_bindings_round_trip) {
     auto serialized = parser.Serialize(*configuration);
     auto deserialized = parser.Deserialize(Mrm::GetDefaultPmr(), *serialized);
     ui_configuration_parser_CompareUiConfigurations(*configuration, *deserialized);
+}
+
+ZTEST(ui_configuration_parser, test_animation_properties_and_numeric_binding_targets_round_trip) {
+    const struct {
+        Animation::Type type;
+        bool active;
+        int duration_ms;
+    } cases[] = {
+        { Animation::DEFAULT_TYPE, Animation::DEFAULT_ACTIVE, Animation::DEFAULT_DURATION_MS },
+        { Animation::Type::Blinking, true, 3 },
+        { Animation::Type::Rotation, false, INT32_MAX },
+        { Animation::Type::Rotation, true, 2 }
+    };
+    for(const auto& settings : cases) {
+        auto configuration = ui_configuration_parser_GetTestUiConfiguration();
+        auto& widget = *configuration->screen_configurations[0]->widget_configurations[0];
+        widget.properties.clear();
+        widget.properties[WidgetPropertyType::ANIMATION_TYPE] = static_cast<int>(settings.type);
+        widget.properties[WidgetPropertyType::IS_ANIMATION_ACTIVE] = settings.active;
+        widget.properties[WidgetPropertyType::ANIMATION_DURATION_MS] = settings.duration_ms;
+        auto binding = widget.bindings.front();
+        widget.bindings.clear();
+        for(auto type : { WidgetPropertyType::ANIMATION_TYPE, WidgetPropertyType::IS_ANIMATION_ACTIVE,
+                WidgetPropertyType::ANIMATION_DURATION_MS }) {
+            binding.target = type;
+            widget.bindings.push_back(binding);
+        }
+
+        UiConfigurationCborParser parser;
+        auto serialized = parser.Serialize(*configuration);
+        zassert_equal(serialized->version, 1);
+        std::vector<uint8_t> payload(cbor_get_size_CborUiConfig(*serialized));
+        size_t encoded_size = 0;
+        zassert_equal(cbor_encode_CborUiConfig(payload.data(), payload.size(), serialized.get(), &encoded_size), 0);
+        zassert_equal(encoded_size, payload.size());
+        auto decoded = make_unique_pmr<CborUiConfig>(Mrm::GetDefaultPmr());
+        size_t decoded_size = 0;
+        zassert_equal(cbor_decode_CborUiConfig(payload.data(), payload.size(), decoded.get(), &decoded_size), 0);
+        zassert_equal(decoded_size, payload.size());
+        const auto& wire_widget = decoded->CborScreenConfig_m[0].CborWidgetConfig_m[0];
+        zassert_equal(wire_widget.properties.CborPropertyValueType_m.size(), 3U);
+        for(const auto& property : wire_widget.properties.CborPropertyValueType_m)
+            zassert_true(property.CborPropertyValueType_m_key >= 41 && property.CborPropertyValueType_m_key <= 43);
+        zassert_equal(wire_widget.CborPropertyBinding_m.size(), 3U);
+        for(size_t index = 0; index < 3; ++index)
+            zassert_equal(wire_widget.CborPropertyBinding_m[index].target, 41U + index);
+
+        auto deserialized = parser.Deserialize(Mrm::GetDefaultPmr(), *decoded);
+        ui_configuration_parser_CompareUiConfigurations(*configuration, *deserialized);
+    }
 }
 
 ZTEST(ui_configuration_parser, test_CborRoundTripKeepsBindingDetail) {
@@ -488,6 +539,16 @@ ZTEST(ui_configuration_parser, test_decodes_integer_widget_property_keys) {
     const auto& properties = configuration->screen_configurations[0]->widget_configurations[0]->properties;
     zassert_equal(properties.size(), 1U);
     zassert_equal(std::get<int>(properties.at(WidgetPropertyType::WIDTH_PX)), 80);
+
+    // A pre-animation version-1 payload stays unchanged; defaults are not injected into persistence.
+    for(auto type : { WidgetPropertyType::ANIMATION_TYPE, WidgetPropertyType::IS_ANIMATION_ACTIVE,
+            WidgetPropertyType::ANIMATION_DURATION_MS })
+        zassert_false(properties.contains(type));
+
+    auto serialized = parser.Serialize(*configuration);
+    zassert_equal(serialized->version, 1);
+    auto round_tripped = parser.Deserialize(Mrm::GetDefaultPmr(), *serialized);
+    ui_configuration_parser_CompareUiConfigurations(*configuration, *round_tripped);
 }
 
 ZTEST(ui_configuration_parser, test_rejects_legacy_text_widget_property_keys) {

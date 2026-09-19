@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <limits>
 #include <string>
 #include <variant>
 
@@ -26,7 +27,8 @@ using eerie_leap::utilities::type::ConfigValue;
 // Monostate means the value cannot fill that property, and the event is dropped.
 inline ConfigValue CoerceToConfigValue(
     const EventData& value, size_t alternative, WidgetPropertyType type = WidgetPropertyType::NONE) {
-    if(type == WidgetPropertyType::IS_ACTIVE || type == WidgetPropertyType::IS_VISIBLE) {
+    if(type == WidgetPropertyType::IS_ACTIVE || type == WidgetPropertyType::IS_VISIBLE
+        || type == WidgetPropertyType::IS_ANIMATION_ACTIVE) {
         return std::visit([](const auto& argument) -> ConfigValue {
             using T = std::decay_t<decltype(argument)>;
             if constexpr(std::is_same_v<T, bool>)
@@ -37,6 +39,23 @@ inline ConfigValue CoerceToConfigValue(
             }
             return std::monostate{};
         }, value);
+    }
+
+    if(WidgetPropertyValidator::IsAnimationProperty(type)) {
+        ConfigValue converted;
+        if(const auto* number = std::get_if<int>(&value))
+            converted = *number;
+        else if(const auto* number = std::get_if<uint32_t>(&value)) {
+            using namespace eerie_leap::domain::ui_domain::models;
+            const uint32_t minimum = type == WidgetPropertyType::ANIMATION_TYPE ? 0 : Animation::MIN_DURATION_MS;
+            const uint32_t maximum = type == WidgetPropertyType::ANIMATION_TYPE
+                ? static_cast<uint32_t>(Animation::Type::Rotation) : Animation::MAX_DURATION_MS;
+            if(*number >= minimum && *number <= maximum
+                && *number <= static_cast<uint32_t>(std::numeric_limits<int>::max()))
+                converted = static_cast<int>(*number);
+        }
+
+        return WidgetPropertyValidator::IsValidAnimationValue(type, converted) ? converted : ConfigValue{};
     }
 
     if(type == WidgetPropertyType::OPACITY) {
