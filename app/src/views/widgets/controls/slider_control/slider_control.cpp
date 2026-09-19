@@ -101,7 +101,7 @@ double SliderControl::ToValue(int32_t index) const {
 }
 
 int SliderControl::DoRender() {
-    lv_slider_ = lv_slider_create(container_->GetObject());
+    lv_slider_ = lv_slider_create(content_frame_->GetObject());
 
     lv_obj_set_width(lv_slider_, lv_pct(100));
     lv_obj_center(lv_slider_);
@@ -111,7 +111,7 @@ int SliderControl::DoRender() {
 
     UpdateSlider();
 
-    container_->SetChild(std::make_shared<Frame>(Frame::Create(lv_slider_).Build()));
+    content_frame_->SetChild(std::make_shared<Frame>(Frame::Create(lv_slider_).Build()));
 
     return 0;
 }

@@ -17,7 +17,7 @@ DialIndicator::DialIndicator(uint32_t id, std::shared_ptr<Frame> parent, WidgetC
     : IndicatorBase(id, std::move(parent), std::move(context)) {
 
     // Built here rather than in Create() so it is declarable as a dependency before any render.
-    needle_icon_ = std::make_unique<IconWidget>(id_, container_, context_, IconType::Image);
+    needle_icon_ = std::make_unique<IconWidget>(id_, content_frame_, context_, IconType::Image);
 
     AddDependency(*needle_icon_);
 }
@@ -26,7 +26,7 @@ DialIndicator::~DialIndicator() {
     ScopedLvglLock lvgl_guard;
     DetachDispatch();
     OnProcessingSuspended();
-    container_->SetChild(nullptr);
+    content_frame_->SetChild(nullptr);
     needle_icon_.reset();
     dependencies_.clear();
 }
@@ -37,7 +37,7 @@ int DialIndicator::DoRender() {
         return -1;
 
     // Share the needle's Frame; a second wrapper would also own/delete the same LVGL object.
-    container_->SetChild(needle_icon_->GetContainer());
+    content_frame_->SetChild(needle_icon_->GetContainer());
 
     return 0;
 }
@@ -52,7 +52,7 @@ lv_obj_t* DialIndicator::Create() {
     if(needle_icon_->Render() != 0)
         return nullptr;
 
-    lv_needle_icon_ = needle_icon_->GetContainer()->GetChild()->GetObject();
+    lv_needle_icon_ = needle_icon_->GetIconContainer()->GetObject();
     UpdateIndicator(range_start_);
 
     return needle_icon_->GetContainer()->GetObject();

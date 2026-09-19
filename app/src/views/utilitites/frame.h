@@ -36,6 +36,10 @@ public:
 
     static Frame Create(lv_obj_t* parent);
     static Frame CreateWrapped(lv_obj_t* parent = nullptr);
+    // Internal widget presentation node; only its layered opacity is excluded from logical visibility.
+    static Frame CreatePresentation(lv_obj_t* parent);
+    // Includes object itself and every LVGL ancestor. Caller holds the LVGL lock.
+    static bool IsVisibleInHierarchy(const lv_obj_t* object);
 
     Frame Build();
     Frame& Invalidate();

@@ -56,7 +56,7 @@ void ToggleControl::OnPropertyChanged(WidgetPropertyType type, const ConfigValue
 }
 
 int ToggleControl::DoRender() {
-    lv_switch_ = lv_switch_create(container_->GetObject());
+    lv_switch_ = lv_switch_create(content_frame_->GetObject());
 
     lv_obj_center(lv_switch_);
 
@@ -64,7 +64,7 @@ int ToggleControl::DoRender() {
 
     UpdateSwitch();
 
-    container_->SetChild(std::make_shared<Frame>(Frame::Create(lv_switch_).Build()));
+    content_frame_->SetChild(std::make_shared<Frame>(Frame::Create(lv_switch_).Build()));
 
     return 0;
 }

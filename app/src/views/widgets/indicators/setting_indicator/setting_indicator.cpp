@@ -64,7 +64,7 @@ void SettingIndicator::OnPropertyChanged(WidgetPropertyType type, const ConfigVa
 }
 
 int SettingIndicator::DoRender() {
-    lv_label_ = lv_label_create(container_->GetObject());
+    lv_label_ = lv_label_create(content_frame_->GetObject());
 
     lv_obj_set_width(lv_label_, LV_SIZE_CONTENT);
     lv_obj_set_height(lv_label_, LV_SIZE_CONTENT);
@@ -73,7 +73,7 @@ int SettingIndicator::DoRender() {
 
     UpdateText();
 
-    container_->SetChild(std::make_shared<Frame>(Frame::Create(lv_label_).Build()));
+    content_frame_->SetChild(std::make_shared<Frame>(Frame::Create(lv_label_).Build()));
 
     return 0;
 }

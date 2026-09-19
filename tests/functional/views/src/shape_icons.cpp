@@ -85,7 +85,7 @@ std::unique_ptr<IconWidget> MakeWidget(std::shared_ptr<WidgetConfiguration> conf
 }
 
 lv_obj_t* ImageObject(const IconWidget& widget) {
-    return widget.GetContainer()->GetChild()->GetObject();
+    return lv_obj_get_child(views_test::WidgetContent(widget), 0);
 }
 
 const lv_image_dsc_t& Mask(const IconWidget& widget) {
@@ -514,6 +514,33 @@ ZTEST(shape_icons, test_arc_repositions_when_shape_height_changes) {
     zassert_equal(Mask(*widget).header.h, 64);
     zassert_equal(std::abs(lv_obj_get_y(ImageObject(*widget)) - before), 16);
     zassert_equal(lv_obj_get_style_transform_pivot_y(ImageObject(*widget), LV_PART_MAIN), 32);
+}
+
+ZTEST(shape_icons, test_arc_position_angle_and_edge_offset_remain_leaf_owned) {
+    ScopedLvglLock lock;
+    for(int angle : { 0, 90 }) {
+        for(int edge_offset : { 0, 9 }) {
+            auto configuration = Configuration(IconType::Rectangle, 32, 32);
+            configuration->properties[WidgetPropertyType::POSITION_X] = 5;
+            configuration->properties[WidgetPropertyType::POSITION_Y] = 7;
+            configuration->properties[WidgetPropertyType::POSITION_ANGLE] = angle;
+            configuration->properties[WidgetPropertyType::EDGE_OFFSET] = edge_offset;
+            ArcIconWidget widget(1, MakeRoot(), WidgetContext{});
+            widget.Configure(configuration);
+            zassert_equal(widget.Render(), 0);
+            widget.OnActivated();
+            auto* image = widget.GetIconContainer()->GetObject();
+            auto* presentation = views_test::WidgetContent(widget);
+            lv_obj_set_style_transform_rotation(presentation, 450, LV_PART_MAIN);
+            ThemeManager::GetInstance().SetTheme(std::make_shared<DefaultTheme>());
+            const int radius = 100 - 16 - edge_offset;
+            zassert_within(lv_obj_get_style_x(image, LV_PART_MAIN), angle == 0 ? 5 : 5 - radius, 1);
+            zassert_within(lv_obj_get_style_y(image, LV_PART_MAIN), angle == 0 ? 7 + radius : 7, 1);
+            zassert_equal(lv_obj_get_style_transform_rotation(image, LV_PART_MAIN), angle * 10);
+            zassert_equal(lv_obj_get_style_transform_rotation(presentation, LV_PART_MAIN), 450);
+            zassert_equal(lv_obj_get_width(widget.GetContainer()->GetObject()), 200);
+        }
+    }
 }
 
 ZTEST(shape_icons, test_theme_and_visibility_preserve_geometry_and_part_opacity) {

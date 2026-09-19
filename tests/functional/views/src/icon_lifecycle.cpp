@@ -43,7 +43,7 @@ public:
 class TestDial : public indicators::DialIndicator {
 public:
     using DialIndicator::DialIndicator;
-    WidgetBase& Needle() const { return *dependencies_.front(); }
+    IconWidget& Needle() const { return *static_cast<IconWidget*>(dependencies_.front()); }
 };
 
 class BlueTheme : public DefaultTheme {
@@ -91,7 +91,7 @@ void PublishLogging(bool active) {
 }
 
 lv_obj_t* Inner(const IconWidget& widget) {
-    return widget.GetContainer()->GetChild()->GetObject();
+    return widget.GetIconContainer()->GetObject();
 }
 
 lv_anim_t* Pulse(const TestIcon& widget) {
@@ -363,8 +363,8 @@ ZTEST(icon_lifecycle, test_dial_needle_inherits_live_owner_state_and_has_one_fra
             zassert_true(needle.IsActive());
             zassert_true(needle.IsVisible());
             zassert_false(needle.IsProcessingEligible());
-            zassert_equal(dial.GetContainer()->GetChild().get(), needle.GetContainer().get());
-            auto* image = needle.GetContainer()->GetChild()->GetObject();
+            zassert_equal(dial.GetContainer()->GetChild()->GetChild().get(), needle.GetContainer().get());
+            auto* image = needle.GetIconContainer()->GetObject();
             const auto* source = lv_image_get_src(image);
             Publish(target, 1);
             zassert_true(needle.IsProcessingEligible());
@@ -380,6 +380,38 @@ ZTEST(icon_lifecycle, test_dial_needle_inherits_live_owner_state_and_has_one_fra
         }
         zassert_equal(lv_display_get_event_count(lv_display_get_default()), callbacks);
         lv_refr_now(nullptr);
+    }
+}
+
+ZTEST(icon_lifecycle, test_dial_value_still_rotates_image_under_owner_presentation_transform) {
+    ScopedLvglLock lock;
+    auto configuration = Configuration(IconType::Image);
+    configuration->properties[WidgetPropertyType::START_ANGLE] = 180;
+    configuration->properties[WidgetPropertyType::END_ANGLE] = 450;
+    TestDial dial(1, MakeRoot(), ImageContext(*configuration));
+    zassert_is_null(dial.Needle().GetIconContainer());
+    dial.Configure(configuration);
+    zassert_equal(dial.Render(), 0);
+    dial.OnActivated();
+    auto* image = dial.Needle().GetIconContainer()->GetObject();
+    zassert_true(lv_obj_check_type(image, &lv_image_class));
+    const auto* source = lv_image_get_src(image);
+    auto* presentation = views_test::WidgetContent(dial);
+    auto* needle_presentation = views_test::WidgetContent(dial.Needle());
+    for(int angle : { 450, 900 }) {
+        lv_obj_set_style_transform_rotation(presentation, angle, LV_PART_MAIN);
+        for(int opacity : { 255, 0 }) {
+            lv_obj_set_style_opa_layered(presentation, opacity, LV_PART_MAIN);
+            for(int value : { 25, 75 }) {
+                Publish(WidgetPropertyType::VALUE, value);
+                zassert_equal(lv_image_get_rotation(image), dial.GetAngleForValue(value));
+                zassert_equal(lv_obj_get_style_transform_rotation(presentation, LV_PART_MAIN), angle);
+                zassert_equal(lv_obj_get_style_transform_rotation(needle_presentation, LV_PART_MAIN), 0);
+                zassert_equal(lv_image_get_src(image), source);
+                zassert_true(dial.Needle().IsProcessingEligible());
+                zassert_is_null(lv_anim_get(&dial, nullptr));
+            }
+        }
     }
 }
 
@@ -405,10 +437,10 @@ ZTEST(icon_lifecycle, test_images_and_dials_apply_opacity_once_without_recolorin
         for(auto property : supported)
             zassert_false(eerie_leap::domain::ui_domain::utilities::WidgetPropertyValidator::IsColorProperty(property));
 
-        auto* image = widget->GetContainer()->GetChild()->GetObject();
+        auto* image = lv_obj_get_child(views_test::WidgetContent(*widget), 0);
         if(is_dial) {
             zassert_equal(lv_obj_get_style_opa(image, LV_PART_MAIN), LV_OPA_COVER);
-            image = static_cast<TestDial*>(widget.get())->Needle().GetContainer()->GetChild()->GetObject();
+            image = static_cast<TestDial*>(widget.get())->Needle().GetIconContainer()->GetObject();
         }
         const auto* source = lv_image_get_src(image);
         zassert_not_null(source);

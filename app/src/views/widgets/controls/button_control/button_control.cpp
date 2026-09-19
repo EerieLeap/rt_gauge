@@ -86,7 +86,7 @@ void ButtonControl::OnPropertyChanged(WidgetPropertyType type, const ConfigValue
 }
 
 int ButtonControl::DoRender() {
-    lv_button_ = lv_button_create(container_->GetObject());
+    lv_button_ = lv_button_create(content_frame_->GetObject());
 
     lv_obj_set_size(lv_button_, lv_pct(100), lv_pct(100));
     lv_obj_center(lv_button_);
@@ -97,7 +97,7 @@ int ButtonControl::DoRender() {
 
     AttachEvents(lv_button_, { LV_EVENT_CLICKED, LV_EVENT_PRESSED, LV_EVENT_RELEASED, LV_EVENT_PRESS_LOST });
 
-    container_->SetChild(std::make_shared<Frame>(Frame::Create(lv_button_).Build()));
+    content_frame_->SetChild(std::make_shared<Frame>(Frame::Create(lv_button_).Build()));
 
     return 0;
 }

@@ -117,18 +117,6 @@ std::shared_ptr<Frame> MakeRoot() {
         .Build());
 }
 
-// A button renders its lv_button into the container the widget creates under the
-// parent, so the clickable object is the first grandchild of the root.
-lv_obj_t* FindButton(const std::shared_ptr<Frame>& root) {
-    lv_obj_t* container = lv_obj_get_child(root->GetObject(), 0);
-    zassert_not_null(container, "Expected the widget to create a container.");
-
-    lv_obj_t* button = lv_obj_get_child(container, 0);
-    zassert_not_null(button, "Expected the widget to create a button.");
-
-    return button;
-}
-
 std::shared_ptr<WidgetConfiguration> MakeConfiguration() {
     auto configuration = make_shared_pmr<WidgetConfiguration>(Mrm::GetDefaultPmr());
     configuration->type = WidgetType::ControlButton;
@@ -154,7 +142,7 @@ void Click(
     zassert_equal(button.Render(), 0, "Expected the button to render.");
     button.OnActivated();
 
-    lv_obj_send_event(FindButton(root), LV_EVENT_CLICKED, nullptr);
+    lv_obj_send_event(lv_obj_get_child(views_test::WidgetContent(button), 0), LV_EVENT_CLICKED, nullptr);
 }
 
 void* StartEventBus() {
@@ -312,8 +300,8 @@ ZTEST(button_control, test_suspended_buttons_do_not_navigate_or_use_disabled_col
         button.Configure(configuration);
         zassert_equal(button.Render(), 0);
         button.OnActivated();
-        lv_obj_send_event(FindButton(root), LV_EVENT_CLICKED, nullptr);
-        zassert_false(lv_obj_has_state(FindButton(root), LV_STATE_DISABLED));
+        lv_obj_send_event(lv_obj_get_child(views_test::WidgetContent(button), 0), LV_EVENT_CLICKED, nullptr);
+        zassert_false(lv_obj_has_state(lv_obj_get_child(views_test::WidgetContent(button), 0), LV_STATE_DISABLED));
     }
     zassert_false(probe.WaitForEvent(NO_DISPATCH_TIMEOUT_MS));
 
@@ -325,12 +313,12 @@ ZTEST(button_control, test_suspended_buttons_do_not_navigate_or_use_disabled_col
     zassert_equal(button.Render(), 0);
     button.OnActivated();
     button.OnDeactivated();
-    lv_obj_send_event(FindButton(root), LV_EVENT_CLICKED, nullptr);
+    lv_obj_send_event(lv_obj_get_child(views_test::WidgetContent(button), 0), LV_EVENT_CLICKED, nullptr);
     button.OnActivated();
     lv_obj_set_style_opa(root->GetObject(), 0, LV_PART_MAIN);
-    lv_obj_send_event(FindButton(root), LV_EVENT_CLICKED, nullptr);
+    lv_obj_send_event(lv_obj_get_child(views_test::WidgetContent(button), 0), LV_EVENT_CLICKED, nullptr);
     zassert_false(probe.WaitForEvent(NO_DISPATCH_TIMEOUT_MS));
     lv_obj_set_style_opa(root->GetObject(), 255, LV_PART_MAIN);
-    lv_obj_send_event(FindButton(root), LV_EVENT_CLICKED, nullptr);
+    lv_obj_send_event(lv_obj_get_child(views_test::WidgetContent(button), 0), LV_EVENT_CLICKED, nullptr);
     zassert_true(probe.WaitForEvent());
 }

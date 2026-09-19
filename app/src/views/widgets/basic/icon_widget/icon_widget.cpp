@@ -20,7 +20,11 @@ IconWidget::IconWidget(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext
 
 IconWidget::~IconWidget() {
     DetachDispatch();
-    container_->SetChild(nullptr);
+    content_frame_->SetChild(nullptr);
+}
+
+std::shared_ptr<Frame> IconWidget::GetIconContainer() const {
+    return icon_ != nullptr && icon_->IsReady() ? icon_->GetContainer() : nullptr;
 }
 
 int IconWidget::DoRender() {
@@ -28,7 +32,7 @@ int IconWidget::DoRender() {
     if(lv_obj == nullptr)
         return -1;
 
-    container_->SetChild(icon_->GetContainer());
+    content_frame_->SetChild(icon_->GetContainer());
 
     return 0;
 }
@@ -43,7 +47,7 @@ lv_obj_t* IconWidget::Create() {
     if(icon_type_ == IconType::None)
         throw std::runtime_error("Invalid icon type.");
 
-    icon_ = IconFactory::GetInstance().Create(icon_type_, properties_, container_);
+    icon_ = IconFactory::GetInstance().Create(icon_type_, properties_, content_frame_);
     icon_->SetAssetsManager(context_.assets_manager);
     if(icon_->Render() != 0)
         return nullptr;

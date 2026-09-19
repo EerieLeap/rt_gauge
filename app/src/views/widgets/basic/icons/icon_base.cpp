@@ -33,16 +33,8 @@ bool IconBase::IsProcessingEligible() const {
     if(!IsReady() || !is_processing_enabled_ || !parent_->IsProcessingEnabled())
         return false;
 
-    // Start at the owning widget, excluding the icon's own pulse/part opacity.
-    for(auto* object = parent_->GetObject(); object != nullptr; object = lv_obj_get_parent(object)) {
-        if(lv_obj_has_flag(object, LV_OBJ_FLAG_HIDDEN)
-            || lv_obj_get_style_opa(object, LV_PART_MAIN) == LV_OPA_TRANSP
-            || lv_obj_get_style_opa_layered(object, LV_PART_MAIN) == LV_OPA_TRANSP
-        ) {
-            return false;
-        }
-    }
-    return true;
+    // The icon's own part opacity is visual; owner management and ancestors still gate processing.
+    return Frame::IsVisibleInHierarchy(parent_->GetObject());
 }
 
 void IconBase::Configure(std::shared_ptr<WidgetPropertyStore> properties) {

@@ -268,7 +268,7 @@ ZTEST(widget_bindings, test_digital_color_binding_applies_rgba_and_resets_withou
     widget.Configure(configuration);
     zassert_equal(widget.Render(), 0);
     widget.OnActivated();
-    auto* label = widget.GetContainer()->GetChild()->GetObject();
+    auto* label = lv_obj_get_child(views_test::WidgetContent(widget), 0);
     zassert_equal(lv_obj_get_style_text_opa(label, LV_PART_MAIN), 128);
     zassert_equal(lv_color_to_u32(lv_obj_get_style_text_color(label, LV_PART_MAIN)),
         lv_color_to_u32(lv_color_hex(0x123456)));
@@ -281,7 +281,7 @@ ZTEST(widget_bindings, test_digital_color_binding_applies_rgba_and_resets_withou
     zassert_equal(lv_obj_get_style_text_opa(label, LV_PART_MAIN), fallback.ToLvOpa());
     zassert_equal(lv_color_to_u32(lv_obj_get_style_text_color(label, LV_PART_MAIN)),
         lv_color_to_u32(fallback.ToLvColor()));
-    zassert_equal(widget.GetContainer()->GetChild()->GetObject(), label);
+    zassert_equal(lv_obj_get_child(views_test::WidgetContent(widget), 0), label);
 }
 
 ZTEST(widget_bindings, test_color_store_rejects_invalid_updates_and_accepts_reset) {
@@ -916,7 +916,7 @@ ZTEST(widget_bindings, test_hidden_screen_can_resume_without_reactivating_its_gr
     zassert_equal(screen->GetWidgets()->size(), 1U);
     auto* widget = dynamic_cast<WidgetBase*>(screen->GetWidgets()->front().get());
     zassert_not_null(widget);
-    auto* bar = widget->GetContainer()->GetChild()->GetObject();
+    auto* bar = lv_obj_get_child(views_test::WidgetContent(*widget), 0);
     zassert_false(widget->IsProcessingEligible());
     PublishSensor(SENSOR_ID, 42.0F);
     screen->SetVisibility(true);
@@ -1000,7 +1000,7 @@ ZTEST(widget_bindings, test_hidden_slider_replays_range_and_value_without_publis
     zassert_equal(slider.Render(), 0);
     slider.OnActivated();
     ChangeRequestProbe probe;
-    auto* slider_object = slider.GetContainer()->GetChild()->GetObject();
+    auto* slider_object = lv_obj_get_child(views_test::WidgetContent(slider), 0);
     lv_obj_add_flag(root->GetObject(), LV_OBJ_FLAG_HIDDEN);
     PublishSettingChanged(55.0F);
     PublishSensor("minimum", 50.0F);
@@ -1093,7 +1093,7 @@ ZTEST(widget_bindings, test_suspended_slider_and_toggle_reject_native_input) {
     slider.Configure(configuration);
     zassert_equal(slider.Render(), 0);
     slider.OnActivated();
-    auto* slider_object = slider.GetContainer()->GetChild()->GetObject();
+    auto* slider_object = lv_obj_get_child(views_test::WidgetContent(slider), 0);
     uint32_t key = LV_KEY_RIGHT;
     lv_obj_send_event(slider_object, LV_EVENT_KEY, &key);
     zassert_equal(lv_slider_get_value(slider_object), 7);
@@ -1108,7 +1108,7 @@ ZTEST(widget_bindings, test_suspended_slider_and_toggle_reject_native_input) {
     toggle.Configure(configuration);
     zassert_equal(toggle.Render(), 0);
     toggle.OnActivated();
-    auto* toggle_object = toggle.GetContainer()->GetChild()->GetObject();
+    auto* toggle_object = lv_obj_get_child(views_test::WidgetContent(toggle), 0);
     lv_obj_send_event(toggle_object, LV_EVENT_KEY, &key);
     zassert_false(lv_obj_has_state(toggle_object, LV_STATE_CHECKED));
     lv_obj_add_state(toggle_object, LV_STATE_CHECKED);
@@ -1132,7 +1132,7 @@ ZTEST(widget_bindings, test_indicator_animation_stops_for_each_suspension_condit
         indicator.OnActivated();
         PublishSensor(SENSOR_ID, 80.0F);
         zassert_not_null(lv_anim_get(&indicator, nullptr));
-        auto* bar = indicator.GetContainer()->GetChild()->GetObject();
+        auto* bar = lv_obj_get_child(views_test::WidgetContent(indicator), 0);
         const auto displayed = lv_bar_get_value(bar);
         PublishSensor(OTHER_SENSOR_ID, 0);
         zassert_is_null(lv_anim_get(&indicator, nullptr));
@@ -1163,7 +1163,7 @@ ZTEST(widget_bindings, test_initial_value_replays_after_management_restoration) 
         indicator.Configure(configuration);
         zassert_equal(indicator.Render(), 0);
         indicator.OnActivated();
-        auto* bar = indicator.GetContainer()->GetChild()->GetObject();
+        auto* bar = lv_obj_get_child(views_test::WidgetContent(indicator), 0);
         zassert_equal(lv_bar_get_value(bar), 0);
 
         // There is no value binding: restoration must apply the configured value by itself.
@@ -1189,7 +1189,7 @@ ZTEST(widget_bindings, test_initial_value_replays_after_ancestor_restoration) {
         indicator.Configure(configuration);
         zassert_equal(indicator.Render(), 0);
         indicator.OnActivated();
-        auto* bar = indicator.GetContainer()->GetChild()->GetObject();
+        auto* bar = lv_obj_get_child(views_test::WidgetContent(indicator), 0);
         zassert_equal(lv_bar_get_value(bar), 0);
 
         lv_obj_remove_flag(root->GetObject(), LV_OBJ_FLAG_HIDDEN);
@@ -1214,7 +1214,7 @@ ZTEST(widget_bindings, test_indicator_animation_resumes_after_management_restora
         PublishSensor(SENSOR_ID, 80.0F);
         lv_tick_inc(500);
         lv_anim_refr_now();
-        auto* bar = indicator.GetContainer()->GetChild()->GetObject();
+        auto* bar = lv_obj_get_child(views_test::WidgetContent(indicator), 0);
         const auto displayed = lv_bar_get_value(bar);
         zassert_true(displayed > 0 && displayed < 80);
         PublishSensor(OTHER_SENSOR_ID, 0);
@@ -1248,7 +1248,7 @@ ZTEST(widget_bindings, test_indicator_animation_resumes_after_ancestor_restorati
         PublishSensor(SENSOR_ID, 80.0F);
         lv_tick_inc(500);
         lv_anim_refr_now();
-        auto* bar = indicator.GetContainer()->GetChild()->GetObject();
+        auto* bar = lv_obj_get_child(views_test::WidgetContent(indicator), 0);
         const auto displayed = lv_bar_get_value(bar);
         zassert_true(displayed > 0 && displayed < 80);
         if(hidden)
@@ -1288,7 +1288,7 @@ ZTEST(widget_bindings, test_hidden_digital_value_replays_with_latest_precision) 
             PublishSensor("visibility", false);
         PublishSensor("precision", 2);
         PublishSensor(SENSOR_ID, 12.25F);
-        auto* label = indicator.GetContainer()->GetChild()->GetObject();
+        auto* label = lv_obj_get_child(views_test::WidgetContent(indicator), 0);
         zassert_str_equal(lv_label_get_text(label), "0");
 
         if(group_hidden)
@@ -1313,7 +1313,7 @@ ZTEST(widget_bindings, test_chart_restoration_replays_only_unapplied_samples) {
     indicator.Configure(configuration);
     zassert_equal(indicator.Render(), 0);
     indicator.OnActivated();
-    auto* chart = indicator.GetContainer()->GetChild()->GetObject();
+    auto* chart = lv_obj_get_child(views_test::WidgetContent(indicator), 0);
     auto* series = lv_chart_get_series_next(chart, nullptr);
     zassert_equal(lv_chart_get_x_start_point(chart, series), 0U);
     PublishSensor("visibility", true);

@@ -50,6 +50,10 @@ void CleanTestDisplay(void* fixture) {
         lv_obj_clean(lv_screen_active());
 }
 
+lv_obj_t* WidgetContent(const IWidget& widget) {
+    return widget.GetContainer()->GetChild()->GetObject();
+}
+
 FakeScreen::FakeScreen(
     uint32_t id,
     uint32_t screen_group_id,

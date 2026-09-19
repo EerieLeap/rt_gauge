@@ -20,10 +20,10 @@ BarIndicator::BarIndicator(uint32_t id, std::shared_ptr<Frame> parent, WidgetCon
     : IndicatorBase(id, std::move(parent), std::move(context)) {}
 
 int BarIndicator::DoRender() {
-    auto lv_obj = Create(container_->GetObject(), static_cast<int32_t>(range_start_), static_cast<int32_t>(range_end_));
+    auto lv_obj = Create(content_frame_->GetObject(), static_cast<int32_t>(range_start_), static_cast<int32_t>(range_end_));
     auto child = std::make_shared<Frame>(
         Frame::Create(lv_obj).Build());
-    container_->SetChild(child);
+    content_frame_->SetChild(child);
 
     return 0;
 }

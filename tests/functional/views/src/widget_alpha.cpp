@@ -103,7 +103,7 @@ struct Scene {
     }
 
     lv_obj_t* Outer() const { return widget->GetContainer()->GetObject(); }
-    lv_obj_t* Inner() const { return lv_obj_get_child(Outer(), 0); }
+    lv_obj_t* Inner() const { return lv_obj_get_child(views_test::WidgetContent(*widget), 0); }
     WidgetBase& Base() const { return *dynamic_cast<WidgetBase*>(widget.get()); }
 
     std::unique_ptr<lv_draw_buf_t, decltype(&lv_draw_buf_destroy)> Snapshot() const {
@@ -292,9 +292,9 @@ ZTEST(widget_alpha, test_layered_ancestor_opacity_restores_only_the_latest_hidde
 ZTEST(widget_alpha, test_segment_pixels_use_resolved_alpha_for_both_displayed_states) {
     Scene scene(Configuration(WidgetType::IndicatorSegmentArc));
     // Isolate one stroke: neighboring segments overlap near the center in this small fixture.
-    const auto count = lv_obj_get_child_count(scene.Outer());
+    const auto count = lv_obj_get_child_count(views_test::WidgetContent(*scene.widget));
     for(uint32_t i = 0; i + 1 < count; ++i)
-        lv_obj_add_flag(lv_obj_get_child(scene.Outer(), i), LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(lv_obj_get_child(views_test::WidgetContent(*scene.widget), i), LV_OBJ_FLAG_HIDDEN);
     Publish(WidgetPropertyType::VALUE, 100);
     CheckAlphaMatrix(scene);
     Publish(primary, White(0));
@@ -324,11 +324,11 @@ ZTEST(widget_alpha, test_segment_animation_recolors_displayed_state_without_jump
     lv_anim_refr_now();
     auto* animation = lv_anim_get(&scene.Base(), nullptr);
     zassert_not_null(animation);
-    const auto count = lv_obj_get_child_count(scene.Outer());
+    const auto count = lv_obj_get_child_count(views_test::WidgetContent(*scene.widget));
     std::vector<lv_obj_t*> segments;
     std::vector<bool> active;
     for(uint32_t i = 0; i < count; ++i) {
-        auto* segment = lv_obj_get_child(scene.Outer(), i);
+        auto* segment = lv_obj_get_child(views_test::WidgetContent(*scene.widget), i);
         segments.push_back(segment);
         active.push_back(lv_color_to_u32(lv_obj_get_style_arc_color(segment, LV_PART_INDICATOR))
             == lv_color_to_u32(lv_color_white()));
@@ -341,7 +341,7 @@ ZTEST(widget_alpha, test_segment_animation_recolors_displayed_state_without_jump
     Publish(primary, std::string("#FF000020"));
     zassert_equal(lv_anim_get(&scene.Base(), nullptr), animation);
     for(uint32_t i = 0; i < count; ++i) {
-        zassert_equal(lv_obj_get_child(scene.Outer(), i), segments[i]);
+        zassert_equal(lv_obj_get_child(views_test::WidgetContent(*scene.widget), i), segments[i]);
         zassert_equal(lv_obj_get_style_arc_opa(segments[i], LV_PART_INDICATOR), active[i] ? 32 : 64);
     }
     Publish(opacity, 0);

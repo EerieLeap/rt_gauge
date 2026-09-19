@@ -24,7 +24,7 @@ SegmentArcIndicator::~SegmentArcIndicator() {
 }
 
 int SegmentArcIndicator::DoRender() {
-    Create(container_->GetObject(), static_cast<int32_t>(range_start_), static_cast<int32_t>(range_end_));
+    Create(content_frame_->GetObject(), static_cast<int32_t>(range_start_), static_cast<int32_t>(range_end_));
 
     return 0;
 }

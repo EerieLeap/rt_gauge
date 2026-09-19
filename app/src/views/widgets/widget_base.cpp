@@ -80,6 +80,10 @@ WidgetBase::WidgetBase(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext
         .SetHeight(100, false)
         .Build());
     container_->SetProcessingEnabled(false);
+    content_frame_ = std::make_shared<Frame>(Frame::CreatePresentation(container_->GetObject())
+        .SetProcessingParent(container_)
+        .Build());
+    container_->SetChild(content_frame_);
     lv_display_add_event_cb(lv_obj_get_display(container_->GetObject()), RefreshCallback, LV_EVENT_REFR_START, this);
 }
 
@@ -122,16 +126,7 @@ bool WidgetBase::IsProcessingEligible() const {
         || !parent_->IsProcessingEnabled())
         return false;
 
-    for(auto* object = container_->GetObject(); object != nullptr; object = lv_obj_get_parent(object)) {
-        if(lv_obj_has_flag(object, LV_OBJ_FLAG_HIDDEN)
-            || lv_obj_get_style_opa(object, LV_PART_MAIN) == LV_OPA_TRANSP
-            || lv_obj_get_style_opa_layered(object, LV_PART_MAIN) == LV_OPA_TRANSP
-        ) {
-            return false;
-        }
-    }
-
-    return true;
+    return Frame::IsVisibleInHierarchy(content_frame_->GetObject());
 }
 
 bool WidgetBase::IsAnimationEligible() const {

@@ -53,6 +53,8 @@ protected:
     WidgetSize size_px_;
 
     std::shared_ptr<Frame> parent_;
+    // Stable presentation target beneath the public layout/management container.
+    std::shared_ptr<Frame> content_frame_;
 
     std::vector<AnySubscription> subscriptions_;
     std::vector<OutboundBinding> outbound_bindings_;

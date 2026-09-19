@@ -9,6 +9,7 @@
 #include "views/renderable_base.h"
 #include "views/screens/i_screen.h"
 #include "views/utilitites/frame.h"
+#include "views/widgets/i_widget.h"
 
 namespace views_test {
 
@@ -20,6 +21,9 @@ void EnsureTestDisplay();
 // Frames do not own their lv_obj_t, so a test's objects outlive it as orphaned
 // children of the active screen.
 void CleanTestDisplay(void* fixture);
+
+// The stable presentation object beneath a widget's public layout container.
+lv_obj_t* WidgetContent(const eerie_leap::views::widgets::IWidget& widget);
 
 // The real Screen pulls in a widget tree, a grid layout and a configuration;
 // the group only ever calls the interface below.

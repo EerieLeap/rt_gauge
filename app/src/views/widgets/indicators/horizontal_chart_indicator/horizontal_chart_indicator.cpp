@@ -19,10 +19,10 @@ HorizontalChartIndicator::HorizontalChartIndicator(uint32_t id, std::shared_ptr<
     : IndicatorBase(id, std::move(parent), std::move(context)) { }
 
 int HorizontalChartIndicator::DoRender() {
-    auto chart = Create(container_->GetObject(), static_cast<int32_t>(range_start_), static_cast<int32_t>(range_end_), point_count_, chart_type_);
+    auto chart = Create(content_frame_->GetObject(), static_cast<int32_t>(range_start_), static_cast<int32_t>(range_end_), point_count_, chart_type_);
     auto child = std::make_shared<Frame>(
         Frame::Create(chart).Build());
-    container_->SetChild(child);
+    content_frame_->SetChild(child);
 
     return 0;
 }

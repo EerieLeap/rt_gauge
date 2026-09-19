@@ -9,6 +9,13 @@ namespace eerie_leap::views::utilitites {
 
 using eerie_leap::domain::ui_domain::ScopedLvglLock;
 
+namespace {
+
+// Reserved by Frame for widget presentation nodes; do not reuse for application state.
+constexpr lv_obj_flag_t presentation_flag = LV_OBJ_FLAG_USER_1;
+
+} // namespace
+
 Frame::Frame() : lv_object_(nullptr) { }
 
 Frame::~Frame() {
@@ -70,6 +77,28 @@ Frame Frame::Build() {
     Invalidate();
 
     return std::move(*this);
+}
+
+Frame Frame::CreatePresentation(lv_obj_t* parent) {
+    auto frame = CreateWrapped(parent);
+    lv_obj_add_flag(frame.lv_object_, static_cast<lv_obj_flag_t>(presentation_flag | LV_OBJ_FLAG_GESTURE_BUBBLE));
+    lv_obj_remove_flag(frame.lv_object_, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CLICK_FOCUSABLE
+        | LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_ON_FOCUS));
+    lv_obj_set_style_transform_pivot_x(frame.lv_object_, lv_pct(50), LV_PART_MAIN);
+    lv_obj_set_style_transform_pivot_y(frame.lv_object_, lv_pct(50), LV_PART_MAIN);
+    frame.SetWidth(100, false).SetHeight(100, false);
+    return frame;
+}
+
+bool Frame::IsVisibleInHierarchy(const lv_obj_t* object) {
+    for(; object != nullptr; object = lv_obj_get_parent(object)) {
+        if(lv_obj_has_flag(object, LV_OBJ_FLAG_HIDDEN)
+            || lv_obj_get_style_opa(object, LV_PART_MAIN) == LV_OPA_TRANSP
+            || (!lv_obj_has_flag(object, presentation_flag)
+                && lv_obj_get_style_opa_layered(object, LV_PART_MAIN) == LV_OPA_TRANSP))
+            return false;
+    }
+    return true;
 }
 
 void Frame::ValidateFrame(const lv_obj_t* frame) {

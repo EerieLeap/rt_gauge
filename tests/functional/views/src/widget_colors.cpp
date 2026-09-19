@@ -78,7 +78,7 @@ std::unique_ptr<IWidget> Render(std::shared_ptr<WidgetConfiguration> configurati
 }
 
 lv_obj_t* Inner(const IWidget& widget) {
-    return widget.GetContainer()->GetChild()->GetObject();
+    return lv_obj_get_child(views_test::WidgetContent(widget), 0);
 }
 
 void Publish(WidgetPropertyType type, const EventData& value) {
@@ -302,7 +302,7 @@ ZTEST(widget_colors, test_whole_widget_opacity_survives_render_theme_and_configu
         configuration->properties[WidgetPropertyType::OPACITY] = 128;
         auto widget = Render(configuration);
         auto* outer = widget->GetContainer()->GetObject();
-        auto* inner = lv_obj_get_child(outer, 0);
+        auto* inner = lv_obj_get_child(views_test::WidgetContent(*widget), 0);
         zassert_equal(lv_obj_get_style_opa_layered(outer, LV_PART_MAIN), 128);
         zassert_equal(lv_obj_get_style_opa_layered(inner, LV_PART_MAIN), type == WidgetType::IndicatorHorizontalChart
             ? ThemeManager::GetInstance().GetCurrentTheme().GetPrimaryColor().ToLvOpa() : LV_OPA_COVER);
@@ -310,7 +310,7 @@ ZTEST(widget_colors, test_whole_widget_opacity_survives_render_theme_and_configu
         widget->OnDeactivated();
         widget->OnActivated();
         zassert_equal(lv_obj_get_style_opa_layered(outer, LV_PART_MAIN), 128);
-        zassert_equal(lv_obj_get_child(outer, 0), inner);
+        zassert_equal(lv_obj_get_child(views_test::WidgetContent(*widget), 0), inner);
         configuration->properties[WidgetPropertyType::OPACITY] = 0;
         widget->Configure(configuration);
         zassert_equal(lv_obj_get_style_opa_layered(outer, LV_PART_MAIN), 0);
@@ -584,7 +584,7 @@ ZTEST(widget_colors, test_chart_color_changes_preserve_series_and_samples) {
 
 ZTEST(widget_colors, test_segment_palettes_preserve_displayed_states) {
     auto widget = Render(Configuration(WidgetType::IndicatorSegmentArc));
-    auto* container = widget->GetContainer()->GetObject();
+    auto* container = views_test::WidgetContent(*widget);
     auto* first = lv_obj_get_child(container, 0);
     auto* last = lv_obj_get_child(container, -1);
     Publish(WidgetPropertyType::VALUE, 20);
