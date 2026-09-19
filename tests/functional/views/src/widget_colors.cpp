@@ -9,6 +9,10 @@
 
 #include <zephyr/ztest.h>
 
+#include "subsys/assets/assets_manager.h"
+#include "subsys/device_tree/dt_fs.h"
+#include "subsys/fs/services/fs_service.h"
+#include "domain/ui_domain/models/animation.h"
 #include "domain/sensor_domain/event_bus/sensor_events_channel.h"
 #include "event_bus/event_channel_id.h"
 #include "event_bus/event_channels.h"
@@ -172,6 +176,74 @@ void Clean(void* fixture) {
 } // namespace
 
 ZTEST_SUITE(widget_colors, NULL, Setup, Before, Clean, NULL);
+
+ZTEST(widget_colors, test_animation_simulator_gallery) {
+    eerie_leap::domain::ui_domain::ScopedLvglLock lock;
+    ThemeManager::GetInstance().SetTheme(std::make_shared<DefaultTheme>());
+    const auto baseline = lv_anim_count_running();
+    const std::array types { WidgetType::BasicIcon, WidgetType::BasicIcon,
+        WidgetType::IndicatorDial, WidgetType::ControlButton };
+    const char* names[][3] {
+        { "animation_dot_full", "animation_dot_half", "animation_dot_zero" },
+        { "animation_label_0", "animation_label_45", "animation_label_90" },
+        { "animation_dial_0", "animation_dial_45", "animation_dial_90" },
+        { "animation_button_0", "animation_button_45", "animation_button_90" }
+    };
+    for(size_t index = 0; index < types.size(); ++index) {
+        auto root = std::make_shared<Frame>(
+            Frame::CreateWrapped().SetWidth(96, true).SetHeight(72, true).Build());
+        lv_obj_set_style_bg_color(root->GetObject(), lv_color_hex(0x202428), 0);
+        lv_obj_set_style_bg_opa(root->GetObject(), LV_OPA_COVER, 0);
+        auto configuration = Configuration(types[index], index == 0 ? IconType::Dot : IconType::Label);
+        configuration->bindings.clear();
+        configuration->properties[WidgetPropertyType::LABEL] = std::pmr::string(index == 3 ? "LOG" : "RPM");
+        configuration->properties[WidgetPropertyType::IS_SMOOTHED] = false;
+        configuration->properties[WidgetPropertyType::ANIMATION_TYPE] = static_cast<int>(
+            index == 0 ? Animation::Type::Blinking : Animation::Type::Rotation);
+        configuration->properties[WidgetPropertyType::IS_ANIMATION_ACTIVE] = true;
+        configuration->properties[WidgetPropertyType::ANIMATION_DURATION_MS] = 1000;
+        WidgetContext context;
+        if(index == 2) {
+            using eerie_leap::subsys::device_tree::DtFs;
+            using eerie_leap::subsys::fs::services::FsService;
+            DtFs::InitInternalFs();
+            auto fs = std::make_shared<FsService>(DtFs::GetInternalFsMp());
+            zassert_true(fs->Initialize());
+            context.assets_manager = std::make_shared<AssetsManager>(fs, "animation-gallery");
+            std::array<uint8_t, 8 * 28 * 4> pixels;
+            pixels.fill(255);
+            zassert_true(context.assets_manager->Save("needle.bin", pixels));
+            configuration->properties[WidgetPropertyType::FILE_PATH] = std::pmr::string("needle.bin");
+            configuration->properties[WidgetPropertyType::IMG_WIDTH] = 8;
+            configuration->properties[WidgetPropertyType::IMG_HEIGHT] = 28;
+            configuration->properties[WidgetPropertyType::START_ANGLE] = 180;
+            configuration->properties[WidgetPropertyType::END_ANGLE] = 450;
+            configuration->properties[WidgetPropertyType::VALUE] = 25;
+        }
+        auto widget = WidgetFactory::GetInstance().CreateWidget(configuration, root, context);
+        widget->SetSizePx({ index == 2 ? 48 : 64, index == 2 ? 48 : 24 });
+        widget->SetPositionPx({ index == 2 ? 24 : 16, index == 2 ? 12 : 24 });
+        zassert_equal(widget->Render(), 0);
+        widget->OnActivated();
+        zassert_equal(lv_anim_count_running(), baseline + 1);
+        auto* content = views_test::WidgetContent(*widget);
+        for(int phase = 0; phase < 3; ++phase) {
+            if(phase != 0) {
+                lv_tick_inc(index == 0 ? 250 : 125);
+                lv_anim_refr_now();
+            }
+            if(index == 0)
+                zassert_within(lv_obj_get_style_opa_layered(content, LV_PART_MAIN),
+                    phase == 0 ? 255 : phase == 1 ? 128 : 0, 2);
+            else
+                zassert_equal(lv_obj_get_style_transform_rotation(content, LV_PART_MAIN), phase * 450);
+            GallerySnapshot(root->GetObject(), names[index][phase], index != 0 || phase != 2);
+            zassert_true(static_cast<WidgetBase*>(widget.get())->IsProcessingEligible());
+        }
+        widget.reset();
+        zassert_equal(lv_anim_count_running(), baseline);
+    }
+}
 
 ZTEST(widget_colors, test_simulator_gallery) {
     auto root = std::make_shared<Frame>(

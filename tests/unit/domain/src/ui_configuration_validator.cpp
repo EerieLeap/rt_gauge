@@ -149,11 +149,12 @@ ZTEST(ui_configuration_validator, test_animation_defaults_effects_and_duration_b
     properties[WidgetPropertyType::ANIMATION_DURATION_MS] = Animation::DEFAULT_DURATION_MS;
     zassert_true(Validates(*configuration));
 
+    const int durations[] = { 2, 3, 1000, INT32_MAX };
     for(int type : { 0, 1, 2 }) {
         properties[WidgetPropertyType::ANIMATION_TYPE] = type;
         for(bool active : { false, true }) {
             properties[WidgetPropertyType::IS_ANIMATION_ACTIVE] = active;
-            for(int duration : { 2, 3, 1000, INT32_MAX }) {
+            for(int duration : durations) {
                 properties[WidgetPropertyType::ANIMATION_DURATION_MS] = duration;
                 zassert_true(Validates(*configuration));
             }
@@ -171,6 +172,7 @@ ZTEST(ui_configuration_validator, test_invalid_animation_values_are_rejected_eve
     };
     auto configuration = MakeConfiguration();
     auto& properties = configuration->screen_configurations[0]->widget_configurations[0]->properties;
+    const int invalid_integers[] = { INT32_MIN, -1 };
     for(auto type : { WidgetPropertyType::ANIMATION_TYPE, WidgetPropertyType::ANIMATION_DURATION_MS }) {
         auto reject = [&](const ConfigValue& value) {
             properties[WidgetPropertyType::ANIMATION_TYPE] = 0;
@@ -182,7 +184,7 @@ ZTEST(ui_configuration_validator, test_invalid_animation_values_are_rejected_eve
         };
         for(const auto& value : invalid_numbers)
             reject(value);
-        for(int value : { INT32_MIN, -1 })
+        for(int value : invalid_integers)
             reject(value);
         if(type == WidgetPropertyType::ANIMATION_TYPE) {
             reject(3);

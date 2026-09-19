@@ -1,8 +1,9 @@
 # Widget appearance
 
 Colors, whole-widget opacity, visibility, and event-processing activity are
-independent. Existing configurations without color overrides or opacity changes
-keep their normal appearance. `DotIcon` is static.
+independent. Existing configurations without appearance overrides keep their
+normal appearance. Widgets animate only when explicitly configured; `DotIcon`
+itself remains a static leaf.
 
 ## Configure RGBA and opacity
 
@@ -106,6 +107,81 @@ widget->properties[WidgetPropertyType::COLOR_PRIMARY_ACTIVE] =
 The button synchronizes its child label's pressed state. The toggle's inactive
 track remains underneath its checked indicator during transitions.
 
+## Whole-widget animation
+
+Every public widget supports the following properties, including basic/arc icon
+wrappers, indicators, and controls. They affect the complete rendered widget,
+not its layout rectangle or stored data.
+
+| Property | Default | Accepted configuration value |
+| --- | --- | --- |
+| `ANIMATION_TYPE` | `0` (`None`) | Integer: `0` None, `1` Blinking, `2` Rotation |
+| `IS_ANIMATION_ACTIVE` | `false` | Boolean requested enablement |
+| `ANIMATION_DURATION_MS` | `1000` | Integer milliseconds per complete cycle, 2 through 2147483647 |
+
+`Blinking` is a smooth eased fade: fully visible, transparent, then fully
+visible within one duration. Odd durations give the extra millisecond to the
+return half. `Rotation` turns clockwise once per duration at constant speed,
+around the widget's center. Both repeat indefinitely. Display refresh limits
+visible timing; a 2 ms duration does not promise a 2 ms display update.
+
+For an existing Dot or asymmetric icon configuration:
+
+```cpp
+#include "domain/ui_domain/models/animation.h"
+
+using eerie_leap::domain::ui_domain::models::Animation;
+
+widget->properties[WidgetPropertyType::ANIMATION_TYPE] =
+    static_cast<int>(Animation::Type::Blinking);
+widget->properties[WidgetPropertyType::IS_ANIMATION_ACTIVE] = true;
+widget->properties[WidgetPropertyType::ANIMATION_DURATION_MS] = 1200;
+```
+
+For an existing composite dial configuration, configure only the owner:
+
+```cpp
+dial->properties[WidgetPropertyType::ANIMATION_TYPE] =
+    static_cast<int>(Animation::Type::Rotation);
+dial->properties[WidgetPropertyType::IS_ANIMATION_ACTIVE] = true;
+dial->properties[WidgetPropertyType::ANIMATION_DURATION_MS] = 4000;
+dial->properties[WidgetPropertyType::IS_SMOOTHED] = true;
+```
+
+The dial and needle rotate together once; the needle's value rotation and
+`IS_SMOOTHED` interpolation remain independent. Do not separately enable the
+needle dependency. An independently configured image widget can animate itself.
+Apply configuration through the normal configuration path as described above.
+
+Requested enablement is writable, **not** a running-state indicator. Type None
+or active false leaves neutral presentation. Hidden, inactive, unready, or
+zero-user-opacity widgets stop their generic effect but retain requested
+settings. Restoring eligibility applies pending properties, including `VALUE`,
+then restarts from full opacity/original orientation without hidden-time catch-up.
+Changing type or duration also restarts; identical settings, data/color updates,
+theme changes, and resizing preserve the current phase. Disabling animation
+restores the presentation modifier, not the user's opacity or leaf transforms.
+
+Animation fade multiplies `OPACITY` and existing RGBA alpha as a composed layer.
+Its transparent midpoint does **not** hide or deactivate the widget: tracking,
+dependent processing, focus, and input remain enabled. Use `IS_VISIBLE=false`
+to hide and suspend input. Rotating controls use transformed hit testing;
+external parent clipping still applies.
+
+Animation properties use ordinary bindings and tracking rules: hidden widgets
+retain the latest valid settings; explicit inactivity rejects incoming ordinary
+settings. Type/duration bindings accept signed or in-range unsigned integers,
+not floats, booleans, strings, or overflow. Active bindings accept booleans or
+numeric exactly 0/1. Invalid input leaves the accepted setting unchanged.
+Binding a logging signal to requested enablement requires an explicit binding;
+existing logging visibility/default screens are not automatically migrated.
+
+Only one generic effect runs per widget owner, alongside independent value
+smoothing. Screen animations/transitions, stacking, custom easing, direction,
+pivot, and phase synchronization are not supported. Whole-layer rotation and
+fade require temporary composition buffers; hardware capacity and frame rate
+must be measured for the intended widget sizes and simultaneous effects.
+
 ## Live bindings
 
 Color bindings publish RGBA text, including an empty string for reset. For
@@ -167,7 +243,9 @@ reconstruct every hidden sample. Updates rejected during explicit inactivity
 are never replayed. Inactive controls cannot publish, navigate, or change values.
 
 Persisted IDs 0-33 and CBOR version 1/layout are unchanged. Opacity is ID 34;
-the six colors are IDs 35-40. Older firmware rejects these new IDs. Color
+the six colors are IDs 35-40; animation type, requested active, and duration are
+IDs 41-43. Old configurations load without enabling animations. Older firmware
+rejects these new IDs; this is not downgrade compatibility. Color
 membership/cache indexing uses an explicit list, not consecutive enum IDs.
 
 Migrate old icon configurations that used `IS_ACTIVE=false` to hide:
@@ -259,10 +337,3 @@ PY
 The interactive application remains available with `west build -p auto -b native_sim ./app`
 and `west build -t run` on an SDL-capable display. Its sample configuration is
 independent of the deterministic gallery above.
-
-## Validation limits
-
-See the [implementation checkpoint](../WIDGET_COLOR_PROPERTY_PLAN.md) for exact
-suite results and outstanding failures. Layered opacity uses temporary LVGL
-composition buffers; hardware memory use and rendering performance have not
-been measured. Native snapshots verify rendering, not physical panel output.

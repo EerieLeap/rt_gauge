@@ -30,6 +30,7 @@
 #include "domain/ui_domain/models/icon_type.h"
 #include "domain/ui_domain/models/widget_direction.h"
 #include "domain/ui_domain/models/widget_fill_mode.h"
+#include "domain/ui_domain/models/animation.h"
 #include "domain/settings_domain/models/setting_id.h"
 
 #include "event_bus/event_channel_id.h"
@@ -61,6 +62,7 @@ using eerie_leap::domain::settings_domain::event_bus::SettingsEventsChannel;
 using eerie_leap::subsys::event_bus::CreateScopedSubscription;
 using eerie_leap::utilities::reflection::GetCallerName;
 using eerie_leap::domain::settings_domain::models::SettingId;
+using eerie_leap::domain::ui_domain::models::Animation;
 
 LOG_MODULE_REGISTER(ui_controller_logger);
 
@@ -634,6 +636,9 @@ void UiController::SetupTestConfiguration() {
     widget7->properties[WidgetPropertyType::POSITION_Y] = 0;
     widget7->properties[WidgetPropertyType::POSITION_ANGLE] = 180.0F;
     widget7->properties[WidgetPropertyType::EDGE_OFFSET] = 6;
+    widget7->properties[WidgetPropertyType::IS_ANIMATION_ACTIVE] = true;
+    widget7->properties[WidgetPropertyType::ANIMATION_TYPE] = static_cast<int>(Animation::Type::Blinking);
+    widget7->properties[WidgetPropertyType::ANIMATION_DURATION_MS] = 1000;
     widget7->bindings.push_back(LoggingBinding(WidgetPropertyType::IS_VISIBLE));
     screen_configuration->AddWidget(std::move(widget7));
 
