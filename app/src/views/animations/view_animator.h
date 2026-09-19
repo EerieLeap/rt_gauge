@@ -3,6 +3,7 @@
 #include <lvgl.h>
 
 #include "domain/ui_domain/models/animation.h"
+#include "views/utilitites/frame.h"
 
 namespace eerie_leap::views::animations {
 
@@ -26,7 +27,7 @@ public:
     ViewAnimator(ViewAnimator&&) = delete;
     ViewAnimator& operator=(ViewAnimator&&) = delete;
 
-    bool Attach(lv_obj_t* presentation, lv_obj_t* layout, EligibilityCallback eligible, void* context);
+    bool Attach(utilitites::Frame& presentation, utilitites::Frame& layout, EligibilityCallback eligible, void* context);
     void Synchronize(const Settings& settings);
     void StopAndReset();
     void Detach();

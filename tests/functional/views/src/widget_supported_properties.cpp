@@ -136,7 +136,9 @@ ZTEST(widget_supported_properties, test_widgets_report_exact_color_roles) {
             zassert_equal(Supports(supported, property), Supports(expected.colors, property),
             "widget %d property %d", static_cast<int>(expected.type), static_cast<int>(property));
         }
-        for(auto property : { WidgetPropertyType::IS_ACTIVE, WidgetPropertyType::IS_VISIBLE, WidgetPropertyType::OPACITY })
+        for(auto property : { WidgetPropertyType::IS_ACTIVE, WidgetPropertyType::IS_VISIBLE, WidgetPropertyType::OPACITY,
+                             WidgetPropertyType::ANIMATION_TYPE, WidgetPropertyType::IS_ANIMATION_ACTIVE,
+                             WidgetPropertyType::ANIMATION_DURATION_MS })
             zassert_true(Supports(supported, property));
     }
 }
@@ -151,6 +153,9 @@ ZTEST(widget_supported_properties, test_icon_wrappers_report_only_selected_icon_
         ArcIconWidget arc(2, MakeRoot(), WidgetContext{}, type);
         for(const auto* widget : { static_cast<const IconWidget*>(&basic), static_cast<const IconWidget*>(&arc) }) {
             const auto supported = widget->GetSupportedProperties();
+            for(auto property : { WidgetPropertyType::ANIMATION_TYPE, WidgetPropertyType::IS_ANIMATION_ACTIVE,
+                                 WidgetPropertyType::ANIMATION_DURATION_MS })
+                zassert_equal(std::count(supported.begin(), supported.end(), property), 1);
             zassert_equal(Supports(supported, WidgetPropertyType::COLOR_PRIMARY_ACTIVE), type != IconType::Image);
             zassert_equal(Supports(supported, WidgetPropertyType::COLOR_SECONDARY_ACTIVE), type == IconType::Label);
             for(auto property : { WidgetPropertyType::COLOR_PRIMARY_INACTIVE, WidgetPropertyType::COLOR_SECONDARY_INACTIVE,

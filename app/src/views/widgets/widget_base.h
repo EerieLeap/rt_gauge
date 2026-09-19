@@ -15,6 +15,7 @@
 
 #include "views/renderable_base.h"
 #include "views/widgets/i_widget.h"
+#include "views/widgets/widget_animation.h"
 #include "views/widgets/widget_context.h"
 #include "views/widgets/widget_dispatch_guard.h"
 #include "views/widgets/widget_property_store.h"
@@ -31,6 +32,9 @@ using eerie_leap::subsys::event_bus::EventData;
 using eerie_leap::subsys::event_bus::IEventChannel;
 
 class WidgetBase : public IWidget, public RenderableBase {
+private:
+    WidgetAnimation animation_;
+
 protected:
     using PropertySet = std::bitset<static_cast<size_t>(WidgetPropertyType::COUNT)>;
 
@@ -132,6 +136,7 @@ public:
     WidgetBase(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context);
     ~WidgetBase() override;
 
+    int Render() override;
     uint32_t GetId() const override;
     bool IsSmoothed() const override;
     bool IsVisible() const override;

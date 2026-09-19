@@ -16,6 +16,7 @@
 #include "views/widgets/basic/icon_widget/icon_widget.h"
 #include "views/widgets/basic/icons/dot_icon/dot_icon.h"
 #include "views/widgets/indicators/dial_indicator/dial_indicator.h"
+#include "views/widgets/widget_factory.h"
 #include "domain/ui_domain/utilities/widget_property_validator.h"
 
 #include "views_test_support.h"
@@ -58,7 +59,9 @@ std::shared_ptr<WidgetConfiguration> Configuration(IconType type) {
     auto configuration = std::make_shared<WidgetConfiguration>(std::allocator_arg, std::pmr::get_default_resource());
     configuration->properties[WidgetPropertyType::ICON_TYPE] = static_cast<int>(type);
     for(auto target : { WidgetPropertyType::IS_ACTIVE, WidgetPropertyType::IS_VISIBLE,
-                       WidgetPropertyType::OPACITY, WidgetPropertyType::POSITION_X, WidgetPropertyType::VALUE }) {
+                       WidgetPropertyType::OPACITY, WidgetPropertyType::POSITION_X, WidgetPropertyType::VALUE,
+                       WidgetPropertyType::ANIMATION_TYPE, WidgetPropertyType::IS_ANIMATION_ACTIVE,
+                       WidgetPropertyType::ANIMATION_DURATION_MS, WidgetPropertyType::COLOR_PRIMARY_ACTIVE }) {
         configuration->bindings.push_back(PropertyBinding {
             .target = target,
             .channel = EventChannelId::Sensors,
@@ -133,6 +136,123 @@ void Clean(void* fixture) {
 } // namespace
 
 ZTEST_SUITE(icon_lifecycle, NULL, Setup, NULL, Clean, NULL);
+
+ZTEST(icon_lifecycle, test_all_factory_widgets_support_live_animation_without_rebuilding) {
+    eerie_leap::domain::ui_domain::ScopedLvglLock lock;
+    const auto count = lv_anim_count_running();
+    const auto callbacks = lv_display_get_event_count(lv_display_get_default());
+    auto& factory = WidgetFactory::GetInstance();
+    for(auto type : factory.GetAvailableTypes()) {
+        const auto icons = type == WidgetType::BasicIcon || type == WidgetType::BasicArcIcon
+            ? std::vector<IconType>{ IconType::Dot, IconType::Label, IconType::Rectangle, IconType::TriangleIsosceles,
+                IconType::TriangleRight, IconType::Oval, IconType::Line, IconType::Image }
+            : std::vector<IconType>{ IconType::Dot };
+        for(auto icon : icons) {
+            auto root = MakeRoot();
+            auto configuration = Configuration(icon);
+            if(icon == IconType::Label)
+                configuration->properties[WidgetPropertyType::LABEL] = std::pmr::string("RPM");
+            WidgetContext context;
+            if(icon == IconType::Image || type == WidgetType::IndicatorDial)
+                context = ImageContext(*configuration);
+            auto widget = factory.CreateWidget(type, 1, root, context);
+            const auto supported = widget->GetSupportedProperties();
+            for(auto property : { WidgetPropertyType::ANIMATION_TYPE, WidgetPropertyType::IS_ANIMATION_ACTIVE,
+                                 WidgetPropertyType::ANIMATION_DURATION_MS })
+                zassert_equal(std::count(supported.begin(), supported.end(), property), 1);
+            widget->SetSizePx({ 80, 80 });
+            widget->Configure(configuration);
+            zassert_equal(widget->Render(), 0, "widget type %d icon %d", static_cast<int>(type), static_cast<int>(icon));
+            widget->OnActivated();
+            auto* content = views_test::WidgetContent(*widget);
+            auto* leaf = lv_obj_get_child(content, 0);
+            zassert_equal(lv_anim_count_running(), count);
+            Publish(WidgetPropertyType::ANIMATION_TYPE, 1);
+            zassert_equal(lv_anim_count_running(), count);
+            Publish(WidgetPropertyType::IS_ANIMATION_ACTIVE, true);
+            zassert_equal(lv_anim_count_running(), count + 1);
+            Tick(500);
+            zassert_equal(lv_obj_get_style_opa_layered(content, LV_PART_MAIN), 0);
+            Publish(WidgetPropertyType::VALUE, 42.0F);
+            Publish(WidgetPropertyType::COLOR_PRIMARY_ACTIVE, std::string("#12345680"));
+            ThemeManager::GetInstance().SetTheme(std::make_shared<BlueTheme>());
+            lv_display_send_event(lv_display_get_default(), LV_EVENT_REFR_START, nullptr);
+            zassert_equal(lv_obj_get_style_opa_layered(content, LV_PART_MAIN), 0);
+            zassert_equal(lv_anim_count_running(), count + 1);
+            Publish(WidgetPropertyType::ANIMATION_TYPE, 2);
+            Tick(250);
+            widget->SetSizePx({ 72, 64 });
+            lv_obj_update_layout(root->GetObject());
+            ThemeManager::GetInstance().SetTheme(std::make_shared<DefaultTheme>());
+            zassert_equal(lv_obj_get_style_transform_rotation(content, LV_PART_MAIN), 900);
+            zassert_equal(views_test::WidgetContent(*widget), content);
+            zassert_equal(lv_obj_get_child(content, 0), leaf);
+            Publish(WidgetPropertyType::ANIMATION_DURATION_MS, 2000);
+            zassert_equal(lv_obj_get_style_transform_rotation(content, LV_PART_MAIN), 0);
+            Tick(500);
+            zassert_equal(lv_obj_get_style_transform_rotation(content, LV_PART_MAIN), 900);
+            Publish(WidgetPropertyType::IS_VISIBLE, false);
+            zassert_equal(lv_anim_count_running(), count);
+            Publish(WidgetPropertyType::ANIMATION_TYPE, 1);
+            Publish(WidgetPropertyType::ANIMATION_DURATION_MS, 1000);
+            Publish(WidgetPropertyType::IS_VISIBLE, true);
+            zassert_equal(lv_anim_count_running(), count + 1);
+            Tick(500);
+            zassert_equal(lv_obj_get_style_opa_layered(content, LV_PART_MAIN), 0);
+            widget.reset();
+            zassert_equal(lv_anim_count_running(), count);
+            zassert_equal(lv_display_get_event_count(lv_display_get_default()), callbacks);
+        }
+    }
+}
+
+ZTEST(icon_lifecycle, test_dial_generic_animation_is_owned_once_and_keeps_needle_value_rotation) {
+    eerie_leap::domain::ui_domain::ScopedLvglLock lock;
+    const auto count = lv_anim_count_running();
+    auto configuration = Configuration(IconType::Image);
+    configuration->properties[WidgetPropertyType::ANIMATION_TYPE] = 1;
+    configuration->properties[WidgetPropertyType::IS_ANIMATION_ACTIVE] = true;
+    configuration->properties[WidgetPropertyType::START_ANGLE] = 180;
+    configuration->properties[WidgetPropertyType::END_ANGLE] = 450;
+    auto context = ImageContext(*configuration);
+    TestDial dial(1, MakeRoot(), context);
+    dial.Configure(configuration);
+    zassert_equal(dial.Render(), 0);
+    dial.OnActivated();
+    auto* content = views_test::WidgetContent(dial);
+    auto* needle_content = views_test::WidgetContent(dial.Needle());
+    auto* image = dial.Needle().GetIconContainer()->GetObject();
+    const auto* source = lv_image_get_src(image);
+    zassert_equal(lv_anim_count_running(), count + 1);
+    Tick(500);
+    zassert_equal(lv_obj_get_style_opa_layered(content, LV_PART_MAIN), 0);
+    zassert_equal(lv_obj_get_style_opa_layered(needle_content, LV_PART_MAIN), 255);
+    zassert_true(dial.Needle().IsProcessingEligible());
+    Publish(WidgetPropertyType::VALUE, 50.0F);
+    zassert_equal(lv_image_get_rotation(image), 1350);
+    Publish(WidgetPropertyType::ANIMATION_TYPE, 2);
+    Tick(250);
+    zassert_equal(lv_obj_get_style_transform_rotation(content, LV_PART_MAIN), 900);
+    zassert_equal(lv_obj_get_style_transform_rotation(needle_content, LV_PART_MAIN), 0);
+    zassert_equal(lv_image_get_rotation(image), 1350);
+    Publish(WidgetPropertyType::IS_ACTIVE, false);
+    zassert_false(dial.Needle().IsTrackingEligible());
+    Publish(WidgetPropertyType::VALUE, 80.0F);
+    Publish(WidgetPropertyType::IS_ACTIVE, true);
+    zassert_equal(lv_image_get_rotation(image), 1350);
+    zassert_equal(lv_image_get_src(image), source);
+    zassert_equal(lv_anim_count_running(), count + 1);
+    TestIcon independent(2, MakeRoot(), context);
+    independent.Configure(configuration);
+    zassert_equal(independent.Render(), 0);
+    independent.OnActivated();
+    zassert_equal(lv_anim_count_running(), count + 2);
+    Tick(500);
+    zassert_equal(lv_obj_get_style_opa_layered(views_test::WidgetContent(independent), LV_PART_MAIN), 0);
+    zassert_equal(lv_obj_get_style_opa_layered(needle_content, LV_PART_MAIN), 255);
+    dial.OnDeactivated();
+    zassert_equal(lv_anim_count_running(), count + 1);
+}
 
 ZTEST(icon_lifecycle, test_dot_management_restoration_does_not_start_animation) {
     auto configuration = Configuration(IconType::Dot);

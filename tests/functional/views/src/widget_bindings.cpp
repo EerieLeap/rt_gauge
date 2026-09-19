@@ -121,11 +121,6 @@ private:
         store.Register(WidgetPropertyType::VALUE, ConfigValue { 0.0 }, PropertyChangeEffect::None);
         store.Register(WidgetPropertyType::LABEL, ConfigValue { std::pmr::string { } }, PropertyChangeEffect::None);
 
-        store.Register(WidgetPropertyType::ANIMATION_TYPE,
-            static_cast<int>(Animation::DEFAULT_TYPE), PropertyChangeEffect::None);
-        store.Register(WidgetPropertyType::IS_ANIMATION_ACTIVE, Animation::DEFAULT_ACTIVE, PropertyChangeEffect::None);
-        store.Register(WidgetPropertyType::ANIMATION_DURATION_MS,
-            Animation::DEFAULT_DURATION_MS, PropertyChangeEffect::None);
         for(auto type : color_properties)
             store.Register(type, ConfigValue { std::pmr::string { } }, PropertyChangeEffect::None);
     }
@@ -538,6 +533,8 @@ ZTEST(widget_bindings, test_animation_active_binding_accepts_only_booleans_or_ex
 }
 
 ZTEST(widget_bindings, test_animation_bindings_follow_ordinary_tracking_policy) {
+    eerie_leap::domain::ui_domain::ScopedLvglLock lock;
+    const auto count = lv_anim_count_running();
     auto configuration = MakeConfiguration();
     configuration->bindings.push_back(SensorBinding(WidgetPropertyType::ANIMATION_TYPE, "type"));
     configuration->bindings.push_back(SensorBinding(WidgetPropertyType::IS_ANIMATION_ACTIVE, "enabled"));
@@ -564,7 +561,8 @@ ZTEST(widget_bindings, test_animation_bindings_follow_ordinary_tracking_policy) 
     PublishSensor("duration", 1.5F);
     check(1, true, 333);
     PublishSensor("visible", true);
-    zassert_equal(widget->notified.size(), 3U);
+    zassert_true(widget->notified.empty());
+    zassert_equal(lv_anim_count_running(), count + 1);
     widget->notified.clear();
 
     PublishSensor("opacity", 0);
@@ -572,7 +570,8 @@ ZTEST(widget_bindings, test_animation_bindings_follow_ordinary_tracking_policy) 
     check(2, false, 222);
     zassert_true(widget->notified.empty());
     PublishSensor("opacity", 255);
-    zassert_equal(widget->notified.size(), 3U);
+    zassert_true(widget->notified.empty());
+    zassert_equal(lv_anim_count_running(), count);
     widget->notified.clear();
 
     widget->OnDeactivated();
@@ -580,14 +579,17 @@ ZTEST(widget_bindings, test_animation_bindings_follow_ordinary_tracking_policy) 
     check(1, true, 444);
     zassert_true(widget->notified.empty());
     widget->OnActivated();
+    zassert_equal(lv_anim_count_running(), count + 1);
     widget->notified.clear();
 
     PublishSensor("active", false);
     update(2, false, 555);
     check(1, true, 444);
     zassert_true(widget->notified.empty());
+    zassert_equal(lv_anim_count_running(), count);
     PublishSensor("active", true);
     check(1, true, 444);
+    zassert_equal(lv_anim_count_running(), count + 1);
 }
 
 ZTEST(widget_bindings, test_a_binding_delivers_an_event_value_to_its_property) {
@@ -1115,6 +1117,140 @@ ZTEST(widget_bindings, test_suspended_slider_and_toggle_reject_native_input) {
     lv_obj_send_event(toggle_object, LV_EVENT_VALUE_CHANGED, nullptr);
     zassert_false(lv_obj_has_state(toggle_object, LV_STATE_CHECKED));
     zassert_false(lv_obj_has_state(toggle_object, LV_STATE_DISABLED));
+}
+
+ZTEST(widget_bindings, test_generic_animation_teardown_detaches_waiting_setting_delivery) {
+    const auto count = lv_anim_count_running();
+    const auto callbacks = lv_display_get_event_count(lv_display_get_default());
+    for(int effect : { 1, 2 }) {
+        for(uint32_t elapsed : { 250U, 500U }) {
+            auto root = MakeRoot();
+            auto configuration = MakeConfiguration();
+            configuration->properties[WidgetPropertyType::ANIMATION_TYPE] = effect;
+            configuration->properties[WidgetPropertyType::IS_ANIMATION_ACTIVE] = true;
+            configuration->bindings.push_back(SensorBinding(WidgetPropertyType::ANIMATION_DURATION_MS, SENSOR_ID));
+            auto widget = MakeActiveWidget(configuration, root);
+            auto store = widget->GetStore();
+            auto container = widget->GetContainer();
+            auto* content = views_test::WidgetContent(*widget);
+            const auto content_callbacks = lv_obj_get_event_count(content);
+            k_thread publisher{};
+            k_sem started{};
+            k_sem_init(&started, 0, 1);
+            {
+                eerie_leap::domain::ui_domain::ScopedLvglLock lock;
+                lv_tick_inc(elapsed);
+                lv_anim_refr_now();
+                zassert_equal(lv_anim_count_running(), count + 1);
+                k_thread_create(&publisher, publisher_stack, K_THREAD_STACK_SIZEOF(publisher_stack),
+                    [](void* context, void*, void*) {
+                        k_sem_give(static_cast<k_sem*>(context));
+                        PublishSensor(SENSOR_ID, 2000);
+                    }, &started, nullptr, nullptr, K_PRIO_COOP(0), 0, K_NO_WAIT);
+                zassert_equal(k_sem_take(&started, K_MSEC(DISPATCH_TIMEOUT_MS)), 0);
+                widget.reset();
+                zassert_equal(lv_anim_count_running(), count);
+                zassert_equal(lv_obj_get_style_opa_layered(content, LV_PART_MAIN), 255);
+                zassert_equal(lv_obj_get_style_transform_rotation(content, LV_PART_MAIN), 0);
+                zassert_equal(lv_obj_get_event_count(content), content_callbacks - 1);
+            }
+            zassert_equal(k_thread_join(&publisher, K_MSEC(DISPATCH_TIMEOUT_MS)), 0);
+            zassert_equal(store->GetAs<int>(WidgetPropertyType::ANIMATION_DURATION_MS, -1), 1000);
+            zassert_equal(lv_display_get_event_count(lv_display_get_default()), callbacks);
+            eerie_leap::domain::ui_domain::ScopedLvglLock lock;
+            lv_display_send_event(lv_display_get_default(), LV_EVENT_REFR_START, nullptr);
+            lv_tick_inc(5000);
+            lv_anim_refr_now();
+            zassert_equal(lv_anim_count_running(), count);
+        }
+    }
+}
+
+ZTEST(widget_bindings, test_waiting_animation_binding_checks_activity_under_lvgl_lock) {
+    const auto count = lv_anim_count_running();
+    for(auto gate : { WidgetPropertyType::IS_ACTIVE, WidgetPropertyType::IS_VISIBLE }) {
+        auto configuration = MakeConfiguration();
+        configuration->properties[WidgetPropertyType::ANIMATION_TYPE] = 2;
+        configuration->properties[WidgetPropertyType::IS_ANIMATION_ACTIVE] = true;
+        configuration->bindings.push_back(SensorBinding(WidgetPropertyType::ANIMATION_DURATION_MS, SENSOR_ID));
+        configuration->bindings.push_back(SensorBinding(gate, OTHER_SENSOR_ID));
+        auto widget = MakeActiveWidget(configuration);
+        k_thread publisher{};
+        k_sem started{};
+        k_sem_init(&started, 0, 1);
+        {
+            eerie_leap::domain::ui_domain::ScopedLvglLock lock;
+            k_thread_create(&publisher, publisher_stack, K_THREAD_STACK_SIZEOF(publisher_stack),
+                [](void* context, void*, void*) {
+                    k_sem_give(static_cast<k_sem*>(context));
+                    PublishSensor(SENSOR_ID, 2000);
+                }, &started, nullptr, nullptr, K_PRIO_COOP(0), 0, K_NO_WAIT);
+            zassert_equal(k_sem_take(&started, K_MSEC(DISPATCH_TIMEOUT_MS)), 0);
+            PublishSensor(OTHER_SENSOR_ID, false);
+        }
+        zassert_equal(k_thread_join(&publisher, K_MSEC(DISPATCH_TIMEOUT_MS)), 0);
+        eerie_leap::domain::ui_domain::ScopedLvglLock lock;
+        zassert_equal(lv_anim_count_running(), count);
+        zassert_equal(std::get<int>(widget->Read(WidgetPropertyType::ANIMATION_DURATION_MS)),
+            gate == WidgetPropertyType::IS_ACTIVE ? 1000 : 2000);
+        PublishSensor(OTHER_SENSOR_ID, true);
+        lv_tick_inc(250);
+        lv_anim_refr_now();
+        zassert_equal(lv_obj_get_style_transform_rotation(views_test::WidgetContent(*widget), LV_PART_MAIN),
+            gate == WidgetPropertyType::IS_ACTIVE ? 900 : 450);
+    }
+}
+
+ZTEST(widget_bindings, test_generic_animation_and_value_smoothing_have_independent_lifetimes) {
+    eerie_leap::domain::ui_domain::ScopedLvglLock lock;
+    const auto count = lv_anim_count_running();
+    for(int effect : { 1, 2 }) {
+        auto configuration = MakeConfiguration();
+        configuration->properties[WidgetPropertyType::ANIMATION_TYPE] = effect;
+        configuration->properties[WidgetPropertyType::IS_ANIMATION_ACTIVE] = true;
+        configuration->properties[WidgetPropertyType::IS_SMOOTHED] = true;
+        configuration->bindings.push_back(SensorBinding(WidgetPropertyType::VALUE, SENSOR_ID));
+        configuration->bindings.push_back(SensorBinding(WidgetPropertyType::IS_ANIMATION_ACTIVE, "animation"));
+        configuration->bindings.push_back(SensorBinding(WidgetPropertyType::ANIMATION_TYPE, "type"));
+        configuration->bindings.push_back(SensorBinding(WidgetPropertyType::IS_VISIBLE, "visibility"));
+        eerie_leap::views::widgets::indicators::BarIndicator indicator(1, MakeRoot(), WidgetContext{});
+        indicator.Configure(configuration);
+        zassert_equal(indicator.Render(), 0);
+        indicator.OnActivated();
+        PublishSensor(SENSOR_ID, 80.0F);
+        auto* smoothing = lv_anim_get(&indicator, nullptr);
+        zassert_not_null(smoothing);
+        zassert_equal(lv_anim_count_running(), count + 2);
+        lv_tick_inc(500);
+        lv_anim_refr_now();
+        const auto elapsed = smoothing->act_time;
+        PublishSensor("animation", false);
+        zassert_equal(lv_anim_count_running(), count + 1);
+        zassert_equal(lv_anim_get(&indicator, nullptr), smoothing);
+        zassert_equal(smoothing->act_time, elapsed);
+        PublishSensor("animation", true);
+        PublishSensor("type", effect == 1 ? 2 : 1);
+        zassert_equal(lv_anim_count_running(), count + 2);
+        zassert_equal(lv_anim_get(&indicator, nullptr), smoothing);
+        zassert_equal(smoothing->act_time, elapsed);
+        auto* bar = lv_obj_get_child(views_test::WidgetContent(indicator), 0);
+        const auto displayed = lv_bar_get_value(bar);
+        zassert_true(displayed > 0 && displayed < 80);
+        PublishSensor("visibility", false);
+        zassert_equal(lv_anim_count_running(), count);
+        lv_tick_inc(5000);
+        lv_anim_refr_now();
+        zassert_equal(lv_bar_get_value(bar), displayed);
+        PublishSensor("visibility", true);
+        zassert_equal(lv_anim_count_running(), count + 2);
+        lv_tick_inc(5000);
+        lv_anim_refr_now();
+        zassert_equal(lv_bar_get_value(bar), 80);
+        zassert_is_null(lv_anim_get(&indicator, nullptr));
+        zassert_equal(lv_anim_count_running(), count + 1);
+        indicator.OnDeactivated();
+        zassert_equal(lv_anim_count_running(), count);
+    }
 }
 
 ZTEST(widget_bindings, test_indicator_animation_stops_for_each_suspension_condition) {

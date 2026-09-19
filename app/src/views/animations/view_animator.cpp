@@ -12,14 +12,17 @@ ViewAnimator::~ViewAnimator() {
     Detach();
 }
 
-bool ViewAnimator::Attach(lv_obj_t* presentation, lv_obj_t* layout, EligibilityCallback eligible, void* context) {
-    if(presentation == nullptr || layout == nullptr || eligible == nullptr
-        || lv_obj_get_parent(presentation) != layout)
+bool ViewAnimator::Attach(utilitites::Frame& presentation, utilitites::Frame& layout,
+    EligibilityCallback eligible, void* context) {
+    auto* presentation_object = presentation.GetObject();
+    auto* layout_object = layout.GetObject();
+    if(presentation_object == nullptr || layout_object == nullptr || eligible == nullptr
+        || lv_obj_get_parent(presentation_object) != layout_object)
         return false;
 
     Detach();
-    presentation_ = presentation;
-    layout_ = layout;
+    presentation_ = presentation_object;
+    layout_ = layout_object;
     eligibility_ = eligible;
     context_ = context;
     lv_obj_add_event_cb(presentation_, ObjectEvent, LV_EVENT_ALL, this);

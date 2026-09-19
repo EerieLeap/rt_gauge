@@ -84,6 +84,9 @@ WidgetBase::WidgetBase(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext
         .SetProcessingParent(container_)
         .Build());
     container_->SetChild(content_frame_);
+    animation_.Attach(*content_frame_, *container_, [](void* context) {
+        return static_cast<WidgetBase*>(context)->IsAnimationEligible();
+    }, this);
     lv_display_add_event_cb(lv_obj_get_display(container_->GetObject()), RefreshCallback, LV_EVENT_REFR_START, this);
 }
 
@@ -98,6 +101,20 @@ void WidgetBase::DetachDispatch() {
     ScopedLvglLock lvgl_guard;
     lv_display_remove_event_cb_with_user_data(lv_obj_get_display(container_->GetObject()), RefreshCallback, this);
     dispatch_guard_->Detach();
+    animation_.Detach();
+}
+
+int WidgetBase::Render() {
+    ScopedLvglLock lvgl_guard;
+    is_ready_ = false;
+    animation_.StopAndReset();
+    UpdateProcessingState();
+
+    const int result = RenderableBase::Render();
+    UpdateProcessingState();
+    if(result == 0)
+        ReplayPendingProperties();
+    return result;
 }
 
 void WidgetBase::AddSubscription(AnySubscription subscription) {
@@ -159,6 +176,7 @@ void WidgetBase::RegisterProperties(WidgetPropertyStore& store) const {
     store.Register(WidgetPropertyType::IS_VISIBLE, ConfigValue { true }, PropertyChangeEffect::None);
     store.Register(WidgetPropertyType::OPACITY, ConfigValue { 255 }, PropertyChangeEffect::None);
     store.Register(WidgetPropertyType::IS_SMOOTHED, ConfigValue { false }, PropertyChangeEffect::None);
+    WidgetAnimation::RegisterProperties(store);
 }
 
 void WidgetBase::OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) {
@@ -175,7 +193,7 @@ void WidgetBase::ApplyProperty(WidgetPropertyType type, const ConfigValue& value
     if(WidgetPropertyValidator::IsManagementProperty(type)) {
         WidgetBase::OnPropertyChanged(type, value);
         UpdateProcessingState();
-    } else {
+    } else if(!animation_.ApplyProperty(type, value)) {
         properties_->ApplyColor(type);
         OnPropertyChanged(type, value);
     }
@@ -193,6 +211,9 @@ void WidgetBase::UpdateProcessingState() {
 
     for(auto* dependency : dependencies_)
         dependency->UpdateProcessingState();
+
+    if(!enabled)
+        animation_.Synchronize();
 }
 
 void WidgetBase::OnProcessingSuspended() { }
@@ -237,6 +258,7 @@ void WidgetBase::NotifyPropertyChanged(WidgetPropertyType type, const ConfigValu
     } else if(pending_properties_.none() && IsReady() && IsProcessingEligible()) {
         ApplyProperty(type, value);
         RunEffect(effect);
+        animation_.Synchronize();
         return;
     } else
         pending_properties_.set(static_cast<size_t>(type));
@@ -383,13 +405,17 @@ void WidgetBase::ApplyProperties(const PropertySet& selected) {
     apply(WidgetPropertyType::VALUE);
 
     RunEffect(strongest);
+    animation_.Synchronize();
 }
 
 void WidgetBase::ReplayPendingProperties() {
-    if(pending_properties_.none() || !IsReady() || !IsProcessingEligible())
+    if(!IsReady() || !IsProcessingEligible())
         return;
 
-    ApplyProperties(std::exchange(pending_properties_, {}));
+    if(pending_properties_.any())
+        ApplyProperties(std::exchange(pending_properties_, {}));
+    else
+        animation_.Synchronize();
 }
 
 void WidgetBase::RefreshCallback(lv_event_t* event) {
@@ -410,6 +436,7 @@ void WidgetBase::ConfigureAsPart(std::shared_ptr<WidgetConfiguration> configurat
 void WidgetBase::ApplyConfiguration(std::shared_ptr<WidgetConfiguration> configuration, bool is_owner) {
     ScopedLvglLock lvgl_guard;
     configuration_ = std::move(configuration);
+    animation_.SetOwner(is_owner);
 
     RegisterProperties(*properties_);
 
@@ -420,7 +447,8 @@ void WidgetBase::ApplyConfiguration(std::shared_ptr<WidgetConfiguration> configu
     for(const auto& [type, value] : configuration_->properties) {
         // Parts inherit their owner's management state through the Frame parent. Copying those
         // flags would leave a part independently hidden/inactive after its owner is restored.
-        if(!is_owner && WidgetPropertyValidator::IsManagementProperty(type))
+        if(!is_owner && (WidgetPropertyValidator::IsManagementProperty(type)
+            || WidgetPropertyValidator::IsAnimationProperty(type)))
             continue;
 
         if(!properties_->Set(type, value) && is_owner

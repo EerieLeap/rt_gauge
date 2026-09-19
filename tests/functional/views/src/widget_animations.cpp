@@ -14,6 +14,7 @@
 #include "views/widgets/basic/icons/dot_icon/dot_icon.h"
 #include "views/widgets/controls/button_control/button_control.h"
 #include "views/widgets/controls/slider_control/slider_control.h"
+#include "views/widgets/widget_animation.h"
 #include "views/widgets/widget_base.h"
 
 #include "views_test_support.h"
@@ -47,7 +48,7 @@ struct AnimatorScene {
 
     AnimatorScene() {
         lv_obj_update_layout(layout.GetObject());
-        zassert_true(animator.Attach(presentation.GetObject(), layout.GetObject(), [](void* context) {
+        zassert_true(animator.Attach(presentation, layout, [](void* context) {
             return *static_cast<bool*>(context);
         }, &eligible));
     }
@@ -116,6 +117,70 @@ public:
     using DotIcon::DotIcon;
     using IconBase::IsProcessingEligible;
 };
+
+class LifecycleProbe : public WidgetBase {
+public:
+    using WidgetBase::WidgetBase;
+    ~LifecycleProbe() override { DetachDispatch(); }
+    WidgetType GetType() const override { return WidgetType::BasicIcon; }
+    void Detach() { DetachDispatch(); }
+    int render_result = 0;
+    int theme_result = 0;
+    double applied_value = 0;
+    uint32_t starts_at_value = 0;
+    std::vector<WidgetPropertyType> notified;
+
+protected:
+    void RegisterProperties(WidgetPropertyStore& store) const override {
+        WidgetBase::RegisterProperties(store);
+        store.Register(WidgetPropertyType::VALUE, ConfigValue { 0.0 }, PropertyChangeEffect::None);
+    }
+    void OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) override {
+        notified.push_back(type);
+        if(type == WidgetPropertyType::VALUE) {
+            applied_value = ConfigValueAs<double>(value, 0.0);
+            starts_at_value = animation_start_calls;
+        }
+    }
+    void OnProcessingUpdated(bool) override { }
+    void OnProcessingSuspended() override { }
+    int DoRender() override { return render_result; }
+    int ApplyTheme(const ITheme&) override { return theme_result; }
+};
+
+std::shared_ptr<WidgetConfiguration> AnimationConfiguration(Animation::Type type = Animation::Type::Rotation) {
+    auto configuration = Configuration();
+    configuration->bindings.clear();
+    configuration->properties[WidgetPropertyType::ANIMATION_TYPE] = static_cast<int>(type);
+    configuration->properties[WidgetPropertyType::IS_ANIMATION_ACTIVE] = true;
+    configuration->properties[WidgetPropertyType::ANIMATION_DURATION_MS] = 1000;
+    for(auto target : { WidgetPropertyType::ANIMATION_TYPE, WidgetPropertyType::IS_ANIMATION_ACTIVE,
+                       WidgetPropertyType::ANIMATION_DURATION_MS, WidgetPropertyType::IS_ACTIVE,
+                       WidgetPropertyType::IS_VISIBLE, WidgetPropertyType::OPACITY, WidgetPropertyType::VALUE,
+                       WidgetPropertyType::COLOR_PRIMARY_ACTIVE }) {
+        configuration->bindings.push_back(PropertyBinding {
+            .target = target,
+            .channel = EventChannelId::Sensors,
+            .event_type = std::to_underlying(SensorEventType::DataUpdated),
+            .payload_key = std::to_underlying(SensorPayloadType::Value),
+            .selector_key = std::to_underlying(SensorPayloadType::SensorId),
+            .selector_value = static_cast<int>(target)
+        });
+    }
+    return configuration;
+}
+
+void Publish(WidgetPropertyType target, const eerie_leap::subsys::event_bus::EventData& value) {
+    SensorEventsChannel::GetInstance().Publish({
+        .source_id = 0,
+        .type = SensorEventType::DataUpdated,
+        .payload = {{ SensorPayloadType::SensorId, static_cast<int>(target) }, { SensorPayloadType::Value, value }}
+    });
+}
+
+void Refresh() {
+    lv_display_send_event(lv_display_get_default(), LV_EVENT_REFR_START, nullptr);
+}
 
 class TestButton : public controls::ButtonControl {
 public:
@@ -287,6 +352,216 @@ extern "C" lv_anim_t* __wrap_lv_anim_start(const lv_anim_t* animation) {
 
 ZTEST_SUITE(widget_animations, NULL, Setup, NULL, views_test::CleanTestDisplay, NULL);
 
+ZTEST(widget_animations, test_widget_animation_adapter_stages_properties_until_synchronization) {
+    ScopedLvglLock lock;
+    const auto count = lv_anim_count_running();
+    const auto attempts = animation_start_calls;
+    Frame layout = Frame::CreateWrapped().Build();
+    Frame content = Frame::CreatePresentation(layout.GetObject()).Build();
+    const auto callbacks = lv_obj_get_event_count(content.GetObject());
+    WidgetPropertyStore store;
+    WidgetAnimation::RegisterProperties(store);
+    zassert_equal(store.GetRegisteredTypes().size(), 3);
+    zassert_equal(store.GetAs<int>(WidgetPropertyType::ANIMATION_TYPE, -1), 0);
+    zassert_false(store.GetAs<bool>(WidgetPropertyType::IS_ANIMATION_ACTIVE, true));
+    zassert_equal(store.GetAs<int>(WidgetPropertyType::ANIMATION_DURATION_MS, -1), 1000);
+    WidgetAnimation animation;
+    bool eligible = true;
+    zassert_true(animation.Attach(content, layout, [](void* context) {
+        return *static_cast<bool*>(context);
+    }, &eligible));
+    for(auto type : store.GetRegisteredTypes()) {
+        zassert_equal(store.GetEffect(type), PropertyChangeEffect::None);
+        zassert_true(animation.ApplyProperty(type, store.Get(type)));
+    }
+    zassert_false(animation.ApplyProperty(WidgetPropertyType::VALUE, 42.0));
+    animation.Synchronize();
+    zassert_equal(animation_start_calls, attempts);
+    zassert_true(animation.ApplyProperty(WidgetPropertyType::ANIMATION_TYPE, 2));
+    zassert_true(animation.ApplyProperty(WidgetPropertyType::IS_ANIMATION_ACTIVE, true));
+    zassert_true(animation.ApplyProperty(WidgetPropertyType::ANIMATION_DURATION_MS, 2000));
+    zassert_equal(animation_start_calls, attempts);
+    animation.Synchronize();
+    zassert_equal(animation_start_calls, attempts + 1);
+    Advance(500);
+    zassert_equal(lv_obj_get_style_transform_rotation(content.GetObject(), LV_PART_MAIN), 900);
+    animation.Synchronize();
+    zassert_equal(animation_start_calls, attempts + 1);
+    animation.SetOwner(false);
+    Advance(250);
+    zassert_equal(lv_anim_count_running(), count);
+    zassert_equal(lv_obj_get_style_transform_rotation(content.GetObject(), LV_PART_MAIN), 0);
+    animation.SetOwner(true);
+    animation.Synchronize();
+    zassert_equal(animation_start_calls, attempts + 2);
+    eligible = false;
+    Advance(250);
+    zassert_equal(lv_anim_count_running(), count);
+    eligible = true;
+    animation.Synchronize();
+    zassert_equal(animation_start_calls, attempts + 3);
+    animation.Detach();
+    animation.Detach();
+    animation.StopAndReset();
+    animation.Synchronize();
+    zassert_equal(lv_anim_count_running(), count);
+    zassert_equal(animation_start_calls, attempts + 3);
+    zassert_equal(lv_obj_get_event_count(content.GetObject()), callbacks);
+}
+
+ZTEST(widget_animations, test_widget_animation_render_order_failures_and_recovery) {
+    ScopedLvglLock lock;
+    const auto count = lv_anim_count_running();
+    std::array<int, 3> order { 0, 1, 2 };
+    do {
+        auto root = std::make_shared<Frame>(Frame::CreateWrapped().Build());
+        LifecycleProbe widget(1, root, WidgetContext{});
+        auto configuration = AnimationConfiguration();
+        const auto attempts = animation_start_calls;
+        for(auto step : order) {
+            if(step == 0)
+                widget.Configure(configuration);
+            else if(step == 1)
+                zassert_equal(widget.Render(), 0);
+            else
+                widget.OnActivated();
+        }
+        zassert_equal(animation_start_calls, attempts + 1);
+        zassert_equal(lv_anim_count_running(), count + 1);
+        auto* content = views_test::WidgetContent(widget);
+        Advance(250);
+        zassert_equal(lv_obj_get_style_transform_rotation(content, LV_PART_MAIN), 900);
+        widget.render_result = -1;
+        zassert_equal(widget.Render(), -1);
+        zassert_false(widget.IsReady());
+        zassert_equal(lv_anim_count_running(), count);
+        zassert_equal(lv_obj_get_style_transform_rotation(content, LV_PART_MAIN), 0);
+        Publish(WidgetPropertyType::ANIMATION_DURATION_MS, 2000);
+        widget.render_result = 0;
+        widget.theme_result = -2;
+        zassert_equal(widget.Render(), -2);
+        Refresh();
+        zassert_false(widget.IsReady());
+        zassert_equal(animation_start_calls, attempts + 1);
+        widget.theme_result = 0;
+        zassert_equal(widget.Render(), 0);
+        zassert_equal(animation_start_calls, attempts + 2);
+        zassert_equal(views_test::WidgetContent(widget), content);
+        Advance(500);
+        zassert_equal(lv_obj_get_style_transform_rotation(content, LV_PART_MAIN), 900);
+    } while(std::next_permutation(order.begin(), order.end()));
+    zassert_equal(lv_anim_count_running(), count);
+}
+
+ZTEST(widget_animations, test_widget_animation_runtime_settings_are_base_owned_and_preserve_phase) {
+    ScopedLvglLock lock;
+    const auto count = lv_anim_count_running();
+    auto root = std::make_shared<Frame>(Frame::CreateWrapped().Build());
+    LifecycleProbe widget(1, root, WidgetContext{});
+    widget.Configure(AnimationConfiguration());
+    zassert_equal(widget.Render(), 0);
+    widget.OnActivated();
+    widget.notified.clear();
+    auto* content = views_test::WidgetContent(widget);
+    const auto attempts = animation_start_calls;
+    Advance(250);
+    for(int iteration = 0; iteration < 4; ++iteration) {
+        Publish(WidgetPropertyType::ANIMATION_TYPE, 2);
+        Publish(WidgetPropertyType::IS_ANIMATION_ACTIVE, true);
+        Publish(WidgetPropertyType::ANIMATION_DURATION_MS, 1000);
+        Refresh();
+    }
+    for(auto invalid : { -1, 3 })
+        Publish(WidgetPropertyType::ANIMATION_TYPE, invalid);
+    Publish(WidgetPropertyType::ANIMATION_DURATION_MS, 1.5F);
+    Publish(WidgetPropertyType::IS_ANIMATION_ACTIVE, 2);
+    zassert_equal(animation_start_calls, attempts);
+    zassert_equal(lv_obj_get_style_transform_rotation(content, LV_PART_MAIN), 900);
+    zassert_true(widget.notified.empty());
+    Publish(WidgetPropertyType::ANIMATION_DURATION_MS, 2000);
+    zassert_equal(animation_start_calls, attempts + 1);
+    zassert_equal(lv_obj_get_style_transform_rotation(content, LV_PART_MAIN), 0);
+    Publish(WidgetPropertyType::ANIMATION_TYPE, 1);
+    zassert_equal(animation_start_calls, attempts + 2);
+    Advance(1000);
+    zassert_equal(lv_obj_get_style_opa_layered(content, LV_PART_MAIN), 0);
+    zassert_true(widget.IsProcessingEligible());
+    Publish(WidgetPropertyType::VALUE, 42.0F);
+    zassert_equal(widget.applied_value, 42.0);
+    zassert_equal(animation_start_calls, attempts + 2);
+    Publish(WidgetPropertyType::IS_ANIMATION_ACTIVE, false);
+    zassert_equal(lv_anim_count_running(), count);
+    zassert_equal(lv_obj_get_style_opa_layered(content, LV_PART_MAIN), 255);
+    Publish(WidgetPropertyType::IS_ANIMATION_ACTIVE, true);
+    zassert_equal(animation_start_calls, attempts + 3);
+    Publish(WidgetPropertyType::ANIMATION_TYPE, 0);
+    zassert_equal(lv_anim_count_running(), count);
+    widget.Detach();
+    widget.Detach();
+    Publish(WidgetPropertyType::ANIMATION_TYPE, 2);
+    Refresh();
+    zassert_equal(animation_start_calls, attempts + 3);
+}
+
+ZTEST(widget_animations, test_widget_animation_restoration_batches_settings_and_value_after_all_gates_open) {
+    ScopedLvglLock lock;
+    const auto count = lv_anim_count_running();
+    for(int gate = 0; gate < 8; ++gate) {
+        auto root = std::make_shared<Frame>(Frame::CreateWrapped().Build());
+        LifecycleProbe widget(1, root, WidgetContext{});
+        widget.Configure(AnimationConfiguration());
+        zassert_equal(widget.Render(), 0);
+        widget.OnActivated();
+        auto set_gate = [&](bool enabled) {
+            switch(gate) {
+                case 0: Publish(WidgetPropertyType::IS_VISIBLE, enabled); break;
+                case 1: Publish(WidgetPropertyType::OPACITY, enabled ? 255 : 0); break;
+                case 2: if(enabled) widget.OnActivated(); else widget.OnDeactivated(); break;
+                case 3: lv_obj_set_flag(root->GetObject(), LV_OBJ_FLAG_HIDDEN, !enabled); break;
+                case 4: lv_obj_set_style_opa(root->GetObject(), enabled ? 255 : 0, LV_PART_MAIN); break;
+                case 5: lv_obj_set_style_opa_layered(root->GetObject(), enabled ? 255 : 0, LV_PART_MAIN); break;
+                case 6: root->SetProcessingEnabled(enabled); break;
+                case 7: Publish(WidgetPropertyType::IS_ACTIVE, enabled); break;
+            }
+        };
+        Advance(250);
+        set_gate(false);
+        Advance(1);
+        zassert_equal(lv_anim_count_running(), count);
+        Publish(WidgetPropertyType::IS_VISIBLE, false);
+        Publish(WidgetPropertyType::ANIMATION_TYPE, 1);
+        Publish(WidgetPropertyType::ANIMATION_DURATION_MS, 2000);
+        Publish(WidgetPropertyType::VALUE, 81.0F);
+        Publish(WidgetPropertyType::VALUE, 82.0F);
+        const auto attempts = animation_start_calls;
+        Advance(9000);
+        set_gate(true);
+        Refresh();
+        if(gate != 0) {
+            zassert_equal(lv_anim_count_running(), count);
+            zassert_equal(animation_start_calls, attempts);
+            Publish(WidgetPropertyType::IS_VISIBLE, true);
+        }
+        zassert_equal(animation_start_calls, attempts + 1);
+        zassert_equal(lv_anim_count_running(), count + 1);
+        if(gate != 7) {
+            zassert_equal(widget.applied_value, 82.0);
+            zassert_equal(widget.starts_at_value, attempts);
+        }
+        auto* content = views_test::WidgetContent(widget);
+        zassert_equal(lv_obj_get_style_transform_rotation(content, LV_PART_MAIN), 0);
+        zassert_equal(lv_obj_get_style_opa_layered(content, LV_PART_MAIN), 255);
+        Advance(gate == 7 ? 250 : 1000);
+        if(gate == 7)
+            zassert_equal(lv_obj_get_style_transform_rotation(content, LV_PART_MAIN), 900);
+        else
+            zassert_equal(lv_obj_get_style_opa_layered(content, LV_PART_MAIN), 0);
+        Refresh();
+        zassert_equal(animation_start_calls, attempts + 1);
+    }
+    zassert_equal(lv_anim_count_running(), count);
+}
+
 ZTEST(widget_animations, test_animator_start_failure_stays_neutral_and_retries_only_on_explicit_transitions) {
     ScopedLvglLock lock;
     for(auto type : { Animation::Type::Blinking, Animation::Type::Rotation }) {
@@ -316,7 +591,7 @@ ZTEST(widget_animations, test_animator_start_failure_stays_neutral_and_retries_o
                 scene.animator.Synchronize(settings);
                 scene.eligible = true;
             } else {
-                zassert_true(scene.animator.Attach(scene.presentation.GetObject(), scene.layout.GetObject(),
+                zassert_true(scene.animator.Attach(scene.presentation, scene.layout,
                     [](void* context) { return *static_cast<bool*>(context); }, &scene.eligible));
             }
             scene.animator.Synchronize(settings);
@@ -505,7 +780,7 @@ ZTEST(widget_animations, test_animator_synchronous_first_callback_can_suspend_wi
         int calls = 0;
         bool reject_start = true;
     } eligibility;
-    zassert_true(scene.animator.Attach(scene.presentation.GetObject(), scene.layout.GetObject(), [](void* context) {
+    zassert_true(scene.animator.Attach(scene.presentation, scene.layout, [](void* context) {
         auto* state = static_cast<Eligibility*>(context);
         return ++state->calls != 2 || !state->reject_start;
     }, &eligibility));
@@ -568,12 +843,15 @@ ZTEST(widget_animations, test_animator_live_reattachment_resets_old_target_witho
     second.animator.Synchronize({ Animation::Type::Rotation, true, 1000 });
     Advance(250);
     zassert_equal(lv_anim_count_running(), count + 2);
-    zassert_false(first.animator.Attach(nullptr, first.layout.GetObject(), [](void*) { return true; }, nullptr));
-    zassert_false(first.animator.Attach(first.presentation.GetObject(), second.layout.GetObject(),
+    Frame empty = Frame::Create(nullptr);
+    zassert_false(first.animator.Attach(empty, first.layout, [](void*) { return true; }, nullptr));
+    zassert_false(first.animator.Attach(first.presentation, empty, [](void*) { return true; }, nullptr));
+    zassert_false(first.animator.Attach(first.presentation, first.layout, nullptr, nullptr));
+    zassert_false(first.animator.Attach(first.presentation, second.layout,
         [](void*) { return true; }, nullptr));
     zassert_true(first.animator.IsRunning());
     const auto callbacks = lv_obj_get_event_count(first.layout.GetObject());
-    zassert_true(first.animator.Attach(replacement.GetObject(), first.layout.GetObject(),
+    zassert_true(first.animator.Attach(replacement, first.layout,
         [](void*) { return true; }, nullptr));
     zassert_equal(first.Opacity(), 255);
     zassert_false(first.animator.IsRunning());
@@ -598,15 +876,19 @@ ZTEST(widget_animations, test_animator_target_and_wrapper_deletion_cancel_and_al
         for(bool delete_wrapper : { false, true }) {
             ViewAnimator animator;
             auto layout = std::make_unique<Frame>(Frame::CreateWrapped().SetWidth(64, true).SetHeight(24, true).Build());
-            auto* target = lv_obj_create(layout->GetObject());
+            auto target = std::make_unique<Frame>(Frame::CreatePresentation(layout->GetObject()).Build());
             const auto callbacks = lv_obj_get_event_count(layout->GetObject());
-            zassert_true(animator.Attach(target, layout->GetObject(), [](void*) { return true; }, nullptr));
+            zassert_true(animator.Attach(*target, *layout, [](void*) { return true; }, nullptr));
             animator.Synchronize({ type, true, 1000 });
             Advance(500);
-            if(delete_wrapper)
+            if(delete_wrapper) {
+                lv_obj_add_event_cb(layout->GetObject(), [](lv_event_t* event) {
+                    static_cast<std::unique_ptr<Frame>*>(lv_event_get_user_data(event))->reset();
+                }, LV_EVENT_DELETE, &target);
                 layout.reset();
-            else {
-                lv_obj_delete(target);
+                zassert_is_null(target.get());
+            } else {
+                target.reset();
                 zassert_equal(lv_obj_get_event_count(layout->GetObject()), callbacks);
                 zassert_false(lv_obj_has_flag(layout->GetObject(), LV_OBJ_FLAG_OVERFLOW_VISIBLE));
                 zassert_equal(DrawMargin(layout->GetObject()), 0);
@@ -618,7 +900,7 @@ ZTEST(widget_animations, test_animator_target_and_wrapper_deletion_cancel_and_al
             zassert_false(animator.IsRunning());
             Frame replacement = Frame::CreateWrapped().Build();
             Frame content = Frame::CreatePresentation(replacement.GetObject()).Build();
-            zassert_true(animator.Attach(content.GetObject(), replacement.GetObject(), [](void*) { return true; }, nullptr));
+            zassert_true(animator.Attach(content, replacement, [](void*) { return true; }, nullptr));
             animator.Synchronize({ type, true, 1000 });
             zassert_true(animator.IsRunning());
             animator.Detach();
@@ -645,7 +927,7 @@ ZTEST(widget_animations, test_animator_scope_exit_restores_flags_margins_and_cal
                 const auto content_callbacks = lv_obj_get_event_count(content);
                 {
                     ViewAnimator animator;
-                    zassert_true(animator.Attach(content, layout, [](void*) { return true; }, nullptr));
+                    zassert_true(animator.Attach(scene.presentation, scene.layout, [](void*) { return true; }, nullptr));
                     animator.Synchronize({ type, true, 1000 });
                     Advance(elapsed);
                     zassert_equal(lv_anim_count_running(), count + 1);
@@ -668,7 +950,7 @@ ZTEST(widget_animations, test_animator_rotation_pixels_resize_and_external_clipp
     Scene scene;
     const auto baseline = scene.Pixels();
     ViewAnimator animator;
-    zassert_true(animator.Attach(views_test::WidgetContent(scene.widget), scene.widget.GetContainer()->GetObject(),
+    zassert_true(animator.Attach(*scene.widget.Content(), *scene.widget.GetContainer(),
         [](void*) { return true; }, nullptr));
     const ViewAnimator::Settings settings { Animation::Type::Rotation, true, 1000 };
     animator.Synchronize(settings);
@@ -706,7 +988,7 @@ ZTEST(widget_animations, test_animator_fade_renders_full_mid_zero_and_return_wit
     auto* leaf = lv_obj_get_child(presentation, 0);
     lv_obj_set_style_bg_opa(leaf, 128, LV_PART_MAIN);
     ViewAnimator animator;
-    zassert_true(animator.Attach(presentation, scene.widget.GetContainer()->GetObject(),
+    zassert_true(animator.Attach(*scene.widget.Content(), *scene.widget.GetContainer(),
         [](void*) { return true; }, nullptr));
     animator.Synchronize({ Animation::Type::Blinking, true, 1000 });
     CheckPixel(scene.Pixels(), 20, 40, 64, 0);
@@ -934,6 +1216,44 @@ ZTEST(widget_animations, test_pointer_hits_rotated_button_even_at_zero_presentat
     scene.clip->SetHeight(extent, true);
     styles.Reset();
     lv_obj_update_layout(scene.root->GetObject());
+    pointer.Click(20, 40);
+    zassert_equal(button.clicks, 3);
+}
+
+ZTEST(widget_animations, test_live_animated_button_accepts_transformed_and_transparent_input) {
+    ScopedLvglLock lock;
+    Scene scene;
+    lv_obj_add_flag(scene.widget.GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN);
+    TestButton button(2, scene.clip, WidgetContext{});
+    button.SetPositionPx({ 16, 36 });
+    button.SetSizePx({ 64, 24 });
+    button.Configure(AnimationConfiguration());
+    zassert_equal(button.Render(), 0);
+    button.OnActivated();
+    lv_obj_update_layout(scene.root->GetObject());
+    auto* content = views_test::WidgetContent(button);
+    auto* object = lv_obj_get_child(content, 0);
+    std::unique_ptr<lv_group_t, decltype(&lv_group_delete)> group(lv_group_create(), lv_group_delete);
+    lv_group_add_obj(group.get(), object);
+    Advance(250);
+    const auto attempts = animation_start_calls;
+    Pointer pointer;
+    pointer.Click(48, 22);
+    zassert_equal(button.clicks, 1);
+    zassert_equal(lv_group_get_focused(group.get()), object);
+    pointer.Click(20, 40);
+    zassert_equal(button.clicks, 1);
+    zassert_equal(animation_start_calls, attempts);
+    Publish(WidgetPropertyType::ANIMATION_TYPE, 1);
+    Advance(500);
+    zassert_equal(lv_obj_get_style_opa_layered(content, LV_PART_MAIN), 0);
+    pointer.Click(20, 40);
+    zassert_equal(button.clicks, 2);
+    zassert_equal(animation_start_calls, attempts + 1);
+    Publish(WidgetPropertyType::IS_ACTIVE, false);
+    pointer.Click(20, 40);
+    zassert_equal(button.clicks, 2);
+    Publish(WidgetPropertyType::IS_ACTIVE, true);
     pointer.Click(20, 40);
     zassert_equal(button.clicks, 3);
 }
