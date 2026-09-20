@@ -1,7 +1,9 @@
+#include <algorithm>
 #include <cstdint>
 #include <limits>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <variant>
@@ -108,6 +110,8 @@ public:
     double ReadNumber(WidgetPropertyType type) const { return ConfigValueAs<double>(Read(type), -1); }
     void WriteLocal(WidgetPropertyType type, const ConfigValue& value) { SetPropertyLocal(type, value); }
     std::shared_ptr<WidgetPropertyStore> GetStore() const { return properties_; }
+    size_t SubscriptionCount() const { return subscriptions_.size(); }
+    size_t OutboundBindingCount() const { return outbound_bindings_.size(); }
 
     std::vector<WidgetPropertyType> notified;
 
@@ -253,6 +257,95 @@ void* SetUp() {
 } // namespace
 
 ZTEST_SUITE(widget_bindings, NULL, SetUp, NULL, CleanTestDisplay, NULL);
+
+ZTEST(widget_bindings, test_structural_properties_cannot_be_registered_or_written_in_runtime_store) {
+    WidgetPropertyStore store;
+    ConfigValue children = std::pmr::vector<int>({ 12, 0 }, Mrm::GetExtPmr());
+    bool rejected = false;
+    try {
+        store.Register(WidgetPropertyType::CHILD_WIDGET_IDS, children, PropertyChangeEffect::Rebuild);
+    } catch(const std::invalid_argument&) {
+        rejected = true;
+    }
+    zassert_true(rejected);
+    zassert_false(store.IsRegistered(WidgetPropertyType::CHILD_WIDGET_IDS));
+    zassert_false(store.Set(WidgetPropertyType::CHILD_WIDGET_IDS, children));
+    zassert_true(std::holds_alternative<std::monostate>(store.Get(WidgetPropertyType::CHILD_WIDGET_IDS)));
+}
+
+ZTEST(widget_bindings, test_structural_configuration_is_not_replayed_or_mutated_by_local_updates) {
+    auto configuration = MakeConfiguration();
+    ConfigValue children = std::pmr::vector<int>({ 12, 0 }, Mrm::GetExtPmr());
+    configuration->properties[WidgetPropertyType::CHILD_WIDGET_IDS] = children;
+    ProbeWidget widget(1, MakeRoot());
+    widget.Configure(configuration);
+    zassert_equal(widget.Render(), 0);
+    for(bool active : { true, false }) {
+        if(active)
+            widget.OnActivated();
+        else
+            widget.OnDeactivated();
+        bool rejected = false;
+        try {
+            widget.WriteLocal(WidgetPropertyType::CHILD_WIDGET_IDS, std::pmr::vector<int> { 99 });
+        } catch(const std::invalid_argument&) {
+            rejected = true;
+        }
+        zassert_true(rejected);
+        zassert_true(widget.GetConfiguration()->properties.at(WidgetPropertyType::CHILD_WIDGET_IDS) == children);
+        zassert_false(widget.GetStore()->IsRegistered(WidgetPropertyType::CHILD_WIDGET_IDS));
+        zassert_equal(std::count(widget.notified.begin(), widget.notified.end(), WidgetPropertyType::CHILD_WIDGET_IDS), 0);
+    }
+}
+
+ZTEST(widget_bindings, test_structural_binding_rejection_leaves_no_partial_subscriptions) {
+    for(auto direction : { PropertyBindingDirection::In, PropertyBindingDirection::Out, PropertyBindingDirection::InOut }) {
+        auto configuration = MakeConfiguration();
+        configuration->bindings.push_back(SensorBinding(WidgetPropertyType::VALUE, SENSOR_ID));
+        configuration->bindings.push_back(SettingBinding(PropertyBindingDirection::InOut));
+        auto binding = SensorBinding(WidgetPropertyType::CHILD_WIDGET_IDS, SENSOR_ID);
+        binding.direction = direction;
+        configuration->bindings.push_back(binding);
+        ProbeWidget widget(1, MakeRoot());
+        bool rejected = false;
+        try {
+            widget.Configure(configuration);
+        } catch(const std::invalid_argument&) {
+            rejected = true;
+        }
+        zassert_true(rejected);
+        zassert_equal(widget.SubscriptionCount(), 0);
+        zassert_equal(widget.OutboundBindingCount(), 0);
+    }
+}
+
+ZTEST(widget_bindings, test_anchor_bindings_keep_ordinary_tracking_and_local_updates) {
+    for(auto target : { WidgetPropertyType::ANCHOR_POINT_X, WidgetPropertyType::ANCHOR_POINT_Y }) {
+        auto configuration = MakeConfiguration();
+        configuration->properties[target] = 7;
+        configuration->bindings.push_back(SensorBinding(target, SENSOR_ID));
+        ProbeWidget widget(1, MakeRoot());
+        widget.GetStore()->Register(target, 0, PropertyChangeEffect::None);
+        widget.Configure(configuration);
+        zassert_equal(widget.ReadNumber(target), 7);
+        zassert_equal(widget.Render(), 0);
+        widget.OnActivated();
+        widget.notified.clear();
+        PublishSensor(SENSOR_ID, 13);
+        zassert_equal(widget.ReadNumber(target), 13);
+        zassert_equal(std::count(widget.notified.begin(), widget.notified.end(), target), 1);
+        lv_obj_add_flag(widget.GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN);
+        widget.notified.clear();
+        PublishSensor(SENSOR_ID, 21);
+        zassert_equal(widget.ReadNumber(target), 21);
+        zassert_true(widget.notified.empty());
+        lv_obj_remove_flag(widget.GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN);
+        lv_display_send_event(lv_display_get_default(), LV_EVENT_REFR_START, nullptr);
+        zassert_equal(std::count(widget.notified.begin(), widget.notified.end(), target), 1);
+        widget.WriteLocal(target, 34);
+        zassert_equal(widget.ReadNumber(target), 34);
+    }
+}
 
 ZTEST(widget_bindings, test_digital_color_binding_applies_rgba_and_resets_without_rebuilding) {
     using eerie_leap::views::themes::ThemeManager;

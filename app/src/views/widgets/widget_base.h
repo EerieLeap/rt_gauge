@@ -77,13 +77,13 @@ protected:
     void AddSubscription(AnySubscription subscription);
 
     // Resolves configuration_->bindings against EventChannelRegistry. A binding naming an unknown
-    // channel or an unsupported property is dropped with a warning, never fatal: configuration
-    // outlives the code that reads it.
+    // channel or an unsupported property is dropped with a warning. Structural targets throw
+    // std::invalid_argument before any subscription is created.
     void ResolveBindings();
 
     // User input. Unlike an inbound binding this publishes on the property's outbound bindings,
     // which is the whole of the echo suppression rule - inbound never publishes, so there is no
-    // loop back through the owner.
+    // loop back through the owner. Structural properties throw std::invalid_argument.
     void SetPropertyLocal(WidgetPropertyType type, const ConfigValue& value);
 
     // Declares what this widget understands, base class first. Replay applies VALUE last, after

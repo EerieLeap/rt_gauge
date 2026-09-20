@@ -36,8 +36,8 @@ constexpr std::array all_types = {
     WidgetPropertyType::FILE_PATH,
     WidgetPropertyType::IMG_WIDTH,
     WidgetPropertyType::IMG_HEIGHT,
-    WidgetPropertyType::PIVOT_X,
-    WidgetPropertyType::PIVOT_Y,
+    WidgetPropertyType::ANCHOR_POINT_X,
+    WidgetPropertyType::ANCHOR_POINT_Y,
     WidgetPropertyType::DIRECTION,
     WidgetPropertyType::SETTING_ID,
     WidgetPropertyType::STEP,
@@ -60,7 +60,8 @@ constexpr std::array all_types = {
     WidgetPropertyType::COLOR_TERTIARY_INACTIVE,
     WidgetPropertyType::ANIMATION_TYPE,
     WidgetPropertyType::IS_ANIMATION_ACTIVE,
-    WidgetPropertyType::ANIMATION_DURATION_MS
+    WidgetPropertyType::ANIMATION_DURATION_MS,
+    WidgetPropertyType::CHILD_WIDGET_IDS
 };
 
 } // namespace
@@ -81,8 +82,11 @@ ZTEST(widget_property, test_shape_additions_preserve_persisted_values) {
 
 // Persisted numeric IDs must stay stable when properties are added.
 ZTEST(widget_property, test_property_ids_preserve_persisted_values) {
-    zassert_equal(all_types.size(), 44);
+    zassert_equal(all_types.size(), 45);
     zassert_equal(static_cast<uint16_t>(WidgetPropertyType::COUNT), all_types.size());
+    zassert_equal(static_cast<uint16_t>(WidgetPropertyType::ANCHOR_POINT_X), 19);
+    zassert_equal(static_cast<uint16_t>(WidgetPropertyType::ANCHOR_POINT_Y), 20);
+    zassert_equal(static_cast<uint16_t>(WidgetPropertyType::CHILD_WIDGET_IDS), 44);
     for(size_t index = 0; index < all_types.size(); ++index)
         zassert_equal(static_cast<uint16_t>(all_types[index]), index);
 }

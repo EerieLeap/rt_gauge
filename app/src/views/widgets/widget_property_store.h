@@ -27,7 +27,7 @@ enum class PropertyChangeEffect : uint8_t {
     Rebuild
 };
 
-// Every property a widget declares support for, with its default and its current value.
+// Runtime properties with their defaults and current values; structural data stays in configuration.
 // Subscriptions share its lifetime; WidgetBase guards accepted writes against activity and teardown.
 class WidgetPropertyStore {
 private:
@@ -55,7 +55,7 @@ public:
     WidgetPropertyStore(const WidgetPropertyStore&) = delete;
     WidgetPropertyStore& operator=(const WidgetPropertyStore&) = delete;
 
-    // Re-registering replaces the default, so a derived class can narrow what its base declared.
+    // Re-registering replaces the default; structural properties throw std::invalid_argument.
     void Register(WidgetPropertyType type, ConfigValue default_value, PropertyChangeEffect effect);
 
     void RegisterColor(WidgetPropertyType type);
@@ -70,7 +70,7 @@ public:
     // it, so a publisher cannot change the type a widget reads back.
     size_t GetDeclaredAlternative(WidgetPropertyType type) const;
 
-    // False when unregistered or when management/color validation fails; the previous value is retained.
+    // False for structural/unregistered properties or invalid values; the previous value is retained.
     bool Set(WidgetPropertyType type, const ConfigValue& value);
 
     ConfigValue Get(WidgetPropertyType type) const;

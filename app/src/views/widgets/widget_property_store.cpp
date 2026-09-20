@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <stdexcept>
 #include <utility>
 
 #include "domain/ui_domain/utilities/widget_property_validator.h"
@@ -29,6 +30,9 @@ WidgetPropertyStore::Entry* WidgetPropertyStore::Find(WidgetPropertyType type) {
 }
 
 void WidgetPropertyStore::Register(WidgetPropertyType type, ConfigValue default_value, PropertyChangeEffect effect) {
+    if(WidgetPropertyValidator::IsStructuralProperty(type))
+        throw std::invalid_argument("Structural properties belong to configuration, not the runtime property store.");
+
     ScopedMutex guard(lock_);
 
     auto alternative = static_cast<uint8_t>(default_value.index());
@@ -102,6 +106,9 @@ size_t WidgetPropertyStore::GetDeclaredAlternative(WidgetPropertyType type) cons
 }
 
 bool WidgetPropertyStore::Set(WidgetPropertyType type, const ConfigValue& value) {
+    if(WidgetPropertyValidator::IsStructuralProperty(type))
+        return false;
+
     ScopedMutex guard(lock_);
 
     auto* entry = Find(type);

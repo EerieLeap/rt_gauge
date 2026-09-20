@@ -22,10 +22,14 @@ static constexpr std::size_t max_screen_count = 24;
 enum class PropertyValueKind {
     Numeric,
     Boolean,
-    Text
+    Text,
+    IntegerList
 };
 
 static PropertyValueKind GetPropertyValueKind(WidgetPropertyType type) {
+    if(WidgetPropertyValidator::IsStructuralProperty(type))
+        return PropertyValueKind::IntegerList;
+
     if(WidgetPropertyValidator::IsColorProperty(type))
         return PropertyValueKind::Text;
 
@@ -54,6 +58,9 @@ static bool HoldsPropertyValueKind(const ConfigValue& value, PropertyValueKind k
 
         case PropertyValueKind::Text:
             return std::holds_alternative<std::pmr::string>(value);
+
+        case PropertyValueKind::IntegerList:
+            return std::holds_alternative<std::pmr::vector<int>>(value);
 
         // ConfigValueAs converts between int and double.
         case PropertyValueKind::Numeric:
@@ -375,6 +382,13 @@ void UiConfigurationValidator::ValidateWidgetBindings(const ScreenConfiguration&
                     screen_configuration.id,
                     widget_configuration->id,
                     "Binding names an unknown target property."
+                );
+
+            if(WidgetPropertyValidator::IsStructuralProperty(binding.target))
+                InvalidWidgetConfiguration(
+                    screen_configuration.id,
+                    widget_configuration->id,
+                    "Binding cannot target a structural property; rebuild the screen to change child widgets."
                 );
 
             if(binding.HasSelector() && !IsComparableSelectorValue(binding.selector_value))

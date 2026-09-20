@@ -90,8 +90,8 @@ ZTEST(widget_supported_properties, test_a_widget_reports_the_properties_of_its_d
     zassert_true(Supports(supported, WidgetPropertyType::FILE_PATH));
     zassert_true(Supports(supported, WidgetPropertyType::IMG_WIDTH));
     zassert_true(Supports(supported, WidgetPropertyType::IMG_HEIGHT));
-    zassert_true(Supports(supported, WidgetPropertyType::PIVOT_X));
-    zassert_true(Supports(supported, WidgetPropertyType::PIVOT_Y));
+    zassert_true(Supports(supported, WidgetPropertyType::ANCHOR_POINT_X));
+    zassert_true(Supports(supported, WidgetPropertyType::ANCHOR_POINT_Y));
     zassert_true(Supports(supported, WidgetPropertyType::POSITION_X));
     zassert_true(Supports(supported, WidgetPropertyType::POSITION_Y));
 }

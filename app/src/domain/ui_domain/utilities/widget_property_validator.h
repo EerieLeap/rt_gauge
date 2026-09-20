@@ -17,6 +17,10 @@ using eerie_leap::utilities::type::ConfigValue;
 
 class WidgetPropertyValidator {
 public:
+    static constexpr bool IsStructuralProperty(WidgetPropertyType type) {
+        return type == WidgetPropertyType::CHILD_WIDGET_IDS;
+    }
+
     static constexpr bool IsAnimationProperty(WidgetPropertyType type) {
         return type == WidgetPropertyType::ANIMATION_TYPE
             || type == WidgetPropertyType::IS_ANIMATION_ACTIVE

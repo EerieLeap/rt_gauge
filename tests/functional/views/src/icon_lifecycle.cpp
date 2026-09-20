@@ -106,19 +106,18 @@ void Tick(uint32_t elapsed) {
     lv_anim_refr_now();
 }
 
-WidgetContext ImageContext(WidgetConfiguration& configuration) {
+WidgetContext ImageContext(WidgetConfiguration& configuration, int width = 4, int height = 4) {
     using eerie_leap::subsys::device_tree::DtFs;
     using eerie_leap::subsys::fs::services::FsService;
     DtFs::InitInternalFs();
     auto fs = std::make_shared<FsService>(DtFs::GetInternalFsMp());
     zassert_true(fs->Initialize());
     auto assets = std::make_shared<AssetsManager>(fs, "icon-lifecycle");
-    std::array<uint8_t, 64> pixels;
-    pixels.fill(255);
+    std::vector<uint8_t> pixels(width * height * lv_color_format_get_size(LV_COLOR_FORMAT_NATIVE_WITH_ALPHA), 255);
     zassert_true(assets->Save("needle.bin", pixels));
     configuration.properties[WidgetPropertyType::FILE_PATH] = std::pmr::string("needle.bin");
-    configuration.properties[WidgetPropertyType::IMG_WIDTH] = 4;
-    configuration.properties[WidgetPropertyType::IMG_HEIGHT] = 4;
+    configuration.properties[WidgetPropertyType::IMG_WIDTH] = width;
+    configuration.properties[WidgetPropertyType::IMG_HEIGHT] = height;
     return WidgetContext { .assets_manager = std::move(assets) };
 }
 
@@ -136,6 +135,86 @@ void Clean(void* fixture) {
 } // namespace
 
 ZTEST_SUITE(icon_lifecycle, NULL, Setup, NULL, Clean, NULL);
+
+ZTEST(icon_lifecycle, test_demo_dial_geometry_and_image_rotation_baseline) {
+    ScopedLvglLock lock;
+    for(bool smoothed : { false, true }) {
+        auto configuration = Configuration(IconType::Image);
+        configuration->type = WidgetType::IndicatorDial;
+        configuration->id = 9;
+        configuration->position_grid = { 0, 0 };
+        configuration->size_grid = { 466, 466 };
+        configuration->z_index = 0;
+        configuration->properties[WidgetPropertyType::POSITION_X] = 0;
+        configuration->properties[WidgetPropertyType::POSITION_Y] = -104;
+        configuration->properties[WidgetPropertyType::ANCHOR_POINT_X] = 7;
+        configuration->properties[WidgetPropertyType::ANCHOR_POINT_Y] = 7;
+        configuration->properties[WidgetPropertyType::MIN_VALUE] = 0;
+        configuration->properties[WidgetPropertyType::MAX_VALUE] = 100;
+        configuration->properties[WidgetPropertyType::IS_SMOOTHED] = smoothed;
+        auto context = ImageContext(*configuration, 15, 220);
+        auto root = std::make_shared<Frame>(Frame::CreateWrapped().SetWidth(466, false).SetHeight(466, false).Build());
+        TestDial dial(9, root, context);
+        dial.SetSizePx({ 466, 466 });
+        dial.Configure(configuration);
+        zassert_equal(dial.Render(), 0);
+        dial.OnActivated();
+        lv_obj_update_layout(root->GetObject());
+        auto* image = dial.Needle().GetIconContainer()->GetObject();
+        zassert_true(lv_obj_check_type(image, &lv_image_class));
+        zassert_equal(lv_obj_get_width(dial.GetContainer()->GetObject()), 466);
+        zassert_equal(lv_obj_get_height(dial.GetContainer()->GetObject()), 466);
+        zassert_equal(lv_obj_get_width(image), 15);
+        zassert_equal(lv_obj_get_height(image), 220);
+        zassert_equal(lv_obj_get_x(image), 226, "image x=%d", lv_obj_get_x(image));
+        zassert_equal(lv_obj_get_y(image), 19, "image y=%d", lv_obj_get_y(image));
+        lv_point_t pivot;
+        lv_image_get_pivot(image, &pivot);
+        zassert_equal(pivot.x, 7);
+        zassert_equal(pivot.y, 213);
+        const auto* source = lv_image_get_src(image);
+        const struct {
+            int value;
+            uint32_t mapped_angle;
+            int32_t image_angle;
+        } cases[] = {
+            { 0, UINT32_MAX - 1349U, 2250 },
+            { 50, 0, 0 },
+            { 100, 1350, 1350 }
+        };
+        for(const auto& expected : cases) {
+            zassert_equal(dial.GetAngleForValue(expected.value), expected.mapped_angle);
+            Publish(WidgetPropertyType::VALUE, expected.value);
+            Tick(4001);
+            zassert_equal(lv_image_get_rotation(image), expected.image_angle);
+            zassert_equal(lv_image_get_src(image), source);
+            zassert_equal(lv_obj_get_style_transform_rotation(views_test::WidgetContent(dial), LV_PART_MAIN), 0);
+            zassert_is_null(lv_anim_get(&dial, nullptr));
+        }
+    }
+}
+
+ZTEST(icon_lifecycle, test_dial_custom_angles_and_default_image_pivot_baseline) {
+    ScopedLvglLock lock;
+    auto configuration = Configuration(IconType::Image);
+    configuration->properties[WidgetPropertyType::START_ANGLE] = 180;
+    configuration->properties[WidgetPropertyType::END_ANGLE] = 450;
+    auto context = ImageContext(*configuration, 15, 220);
+    TestDial dial(1, MakeRoot(), context);
+    dial.Configure(configuration);
+    zassert_equal(dial.Render(), 0);
+    dial.OnActivated();
+    auto* image = dial.Needle().GetIconContainer()->GetObject();
+    lv_point_t pivot;
+    lv_image_get_pivot(image, &pivot);
+    zassert_equal(pivot.x, 7);
+    zassert_equal(pivot.y, 220);
+    for(int value : { 0, 50, 100 }) {
+        Publish(WidgetPropertyType::VALUE, value);
+        zassert_equal(dial.GetAngleForValue(value), 27 * value);
+        zassert_equal(lv_image_get_rotation(image), 27 * value);
+    }
+}
 
 ZTEST(icon_lifecycle, test_all_factory_widgets_support_live_animation_without_rebuilding) {
     eerie_leap::domain::ui_domain::ScopedLvglLock lock;

@@ -26,8 +26,8 @@ enum class WidgetPropertyType : std::uint16_t {
     FILE_PATH,              // string
     IMG_WIDTH,              // int
     IMG_HEIGHT,             // int
-    PIVOT_X,                // int
-    PIVOT_Y,                // int
+    ANCHOR_POINT_X,         // int
+    ANCHOR_POINT_Y,         // int
     DIRECTION,              // int (enum)
     SETTING_ID,             // string
     STEP,                   // double
@@ -51,6 +51,7 @@ enum class WidgetPropertyType : std::uint16_t {
     ANIMATION_TYPE = 41,        // int (Animation::Type)
     IS_ANIMATION_ACTIVE = 42,   // bool (requested enablement)
     ANIMATION_DURATION_MS = 43, // int (milliseconds per complete cycle)
+    CHILD_WIDGET_IDS = 44,
     COUNT                  // Sentinel, not a property
 };
 

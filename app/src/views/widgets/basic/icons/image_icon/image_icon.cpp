@@ -19,8 +19,8 @@ void ImageIcon::RegisterProperties(WidgetPropertyStore& store) {
     store.Register(WidgetPropertyType::FILE_PATH, ConfigValue { std::pmr::string { } }, PropertyChangeEffect::Rebuild);
     store.Register(WidgetPropertyType::IMG_WIDTH, ConfigValue { 0 }, PropertyChangeEffect::Rebuild);
     store.Register(WidgetPropertyType::IMG_HEIGHT, ConfigValue { 0 }, PropertyChangeEffect::Rebuild);
-    store.Register(WidgetPropertyType::PIVOT_X, ConfigValue { pivot_centered }, PropertyChangeEffect::Rebuild);
-    store.Register(WidgetPropertyType::PIVOT_Y, ConfigValue { 0 }, PropertyChangeEffect::Rebuild);
+    store.Register(WidgetPropertyType::ANCHOR_POINT_X, ConfigValue { pivot_centered }, PropertyChangeEffect::Rebuild);
+    store.Register(WidgetPropertyType::ANCHOR_POINT_Y, ConfigValue { 0 }, PropertyChangeEffect::Rebuild);
 }
 
 int ImageIcon::ApplyTheme(const ITheme&) {
@@ -98,11 +98,11 @@ void ImageIcon::Configure(std::shared_ptr<WidgetPropertyStore> properties) {
         return;
 
     // A registered property always has a value, so the "centre it" default needs a sentinel.
-    pivot_x_ = properties_->GetAs<int>(WidgetPropertyType::PIVOT_X, pivot_centered);
+    pivot_x_ = properties_->GetAs<int>(WidgetPropertyType::ANCHOR_POINT_X, pivot_centered);
     if(pivot_x_ == pivot_centered)
         pivot_x_ = image_width_ / 2;
 
-    pivot_y_ = image_height_ - properties_->GetAs<int>(WidgetPropertyType::PIVOT_Y, 0);
+    pivot_y_ = image_height_ - properties_->GetAs<int>(WidgetPropertyType::ANCHOR_POINT_Y, 0);
 }
 
 } // namespace eerie_leap::views::widgets::basic::icons

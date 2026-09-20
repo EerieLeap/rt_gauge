@@ -180,14 +180,55 @@ void ui_configuration_parser_CompareUiConfigurations(UiConfiguration& ui_configu
 
 ZTEST(ui_configuration_parser, test_CborSerializeDeserialize) {
     UiConfigurationCborParser ui_configuration_cbor_parser;
+    zassert_equal(UiConfigurationCborParser::configuration_version, 1);
 
     auto ui_configuration = ui_configuration_parser_GetTestUiConfiguration();
 
     auto serialized_ui_configuration = ui_configuration_cbor_parser.Serialize(*ui_configuration);
+    zassert_equal(serialized_ui_configuration->version, 1);
     auto deserialized_ui_configuration = ui_configuration_cbor_parser.Deserialize(Mrm::GetDefaultPmr(), *serialized_ui_configuration.get());
 
     ui_configuration_parser_CompareUiConfigurations(
         *ui_configuration, *deserialized_ui_configuration);
+}
+
+ZTEST(ui_configuration_parser, test_child_ids_and_anchor_keys_reuse_version_one_property_codec) {
+    for(bool empty : { false, true }) {
+        auto configuration = ui_configuration_parser_GetTestUiConfiguration();
+        auto& widget = *configuration->screen_configurations[0]->widget_configurations[0];
+        std::pmr::vector<int> children({ 12, 0, INT32_MAX }, Mrm::GetDefaultPmr());
+        if(empty)
+            children.clear();
+        widget.properties.clear();
+        widget.properties[WidgetPropertyType::CHILD_WIDGET_IDS] = children;
+        widget.properties[WidgetPropertyType::ANCHOR_POINT_X] = 7;
+        widget.properties[WidgetPropertyType::ANCHOR_POINT_Y] = 7;
+        widget.bindings[0].target = WidgetPropertyType::ANCHOR_POINT_X;
+        widget.bindings[1].target = WidgetPropertyType::ANCHOR_POINT_Y;
+
+        UiConfigurationCborParser parser;
+        auto serialized = parser.Serialize(*configuration);
+        zassert_equal(UiConfigurationCborParser::configuration_version, 1);
+        std::vector<uint8_t> payload(cbor_get_size_CborUiConfig(*serialized));
+        size_t encoded_size = 0;
+        zassert_equal(cbor_encode_CborUiConfig(payload.data(), payload.size(), serialized.get(), &encoded_size), 0);
+        zassert_equal(encoded_size, payload.size());
+        auto decoded = make_unique_pmr<CborUiConfig>(Mrm::GetDefaultPmr());
+        size_t decoded_size = 0;
+        zassert_equal(cbor_decode_CborUiConfig(payload.data(), payload.size(), decoded.get(), &decoded_size), 0);
+        zassert_equal(decoded_size, payload.size());
+        zassert_equal(decoded->version, 1);
+        const auto& wire_widget = decoded->CborScreenConfig_m[0].CborWidgetConfig_m[0];
+        zassert_equal(wire_widget.properties.CborPropertyValueType_m.size(), 3);
+        for(const auto& property : wire_widget.properties.CborPropertyValueType_m) {
+            const auto key = property.CborPropertyValueType_m_key;
+            zassert_true(key == 19 || key == 20 || key == 44);
+        }
+        zassert_equal(wire_widget.CborPropertyBinding_m[0].target, 19);
+        zassert_equal(wire_widget.CborPropertyBinding_m[1].target, 20);
+        auto restored = parser.Deserialize(Mrm::GetDefaultPmr(), *decoded);
+        ui_configuration_parser_CompareUiConfigurations(*configuration, *restored);
+    }
 }
 
 ZTEST(ui_configuration_parser, test_shape_properties_and_bindings_round_trip) {

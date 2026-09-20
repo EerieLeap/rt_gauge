@@ -677,8 +677,8 @@ void UiController::SetupTestConfiguration() {
     widget9->properties[WidgetPropertyType::IS_SMOOTHED] = true;
     widget9->properties[WidgetPropertyType::POSITION_X] = 0;
     widget9->properties[WidgetPropertyType::POSITION_Y] = -104;
-    widget9->properties[WidgetPropertyType::PIVOT_X] = 7;
-    widget9->properties[WidgetPropertyType::PIVOT_Y] = 7;
+    widget9->properties[WidgetPropertyType::ANCHOR_POINT_X] = 7;
+    widget9->properties[WidgetPropertyType::ANCHOR_POINT_Y] = 7;
     widget9->properties[WidgetPropertyType::MIN_VALUE] = 0;
     widget9->properties[WidgetPropertyType::MAX_VALUE] = 100;
     widget9->bindings.push_back(SensorBinding("sensor_1"));

@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <array>
 #include <exception>
+#include <stdexcept>
 #include <utility>
 
 #include <zephyr/logging/log.h>
@@ -270,6 +271,9 @@ void WidgetBase::SetPropertyLocal(WidgetPropertyType type, const ConfigValue& va
     static constexpr auto caller = GetCallerName();
     ScopedLvglLock lvgl_guard;
 
+    if(WidgetPropertyValidator::IsStructuralProperty(type))
+        throw std::invalid_argument("Structural properties require screen reconstruction, not a runtime update.");
+
     if(!IsProcessingEligible() || !properties_->Set(type, value))
         return;
 
@@ -290,6 +294,11 @@ void WidgetBase::SetPropertyLocal(WidgetPropertyType type, const ConfigValue& va
 }
 
 void WidgetBase::ResolveBindings() {
+    for(const auto& binding : configuration_->bindings) {
+        if(WidgetPropertyValidator::IsStructuralProperty(binding.target))
+            throw std::invalid_argument("Bindings cannot target structural properties.");
+    }
+
     auto& registry = EventChannelRegistry::GetInstance();
 
     for(const auto& binding : configuration_->bindings) {
@@ -445,6 +454,9 @@ void WidgetBase::ApplyConfiguration(std::shared_ptr<WidgetConfiguration> configu
     auto supported = is_owner ? GetSupportedProperties() : std::vector<WidgetPropertyType> { };
 
     for(const auto& [type, value] : configuration_->properties) {
+        if(WidgetPropertyValidator::IsStructuralProperty(type))
+            continue;
+
         // Parts inherit their owner's management state through the Frame parent. Copying those
         // flags would leave a part independently hidden/inactive after its owner is restored.
         if(!is_owner && (WidgetPropertyValidator::IsManagementProperty(type)

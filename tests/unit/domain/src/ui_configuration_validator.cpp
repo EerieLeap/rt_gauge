@@ -123,6 +123,65 @@ ZTEST(ui_configuration_validator, test_valid_configuration) {
     zassert_true(Validates(*MakeConfiguration()));
 }
 
+ZTEST(ui_configuration_validator, test_only_child_widget_ids_are_structural) {
+    using eerie_leap::domain::ui_domain::utilities::WidgetPropertyValidator;
+    for(uint16_t id = 0; id <= static_cast<uint16_t>(WidgetPropertyType::COUNT); ++id) {
+        const auto type = static_cast<WidgetPropertyType>(id);
+        zassert_equal(WidgetPropertyValidator::IsStructuralProperty(type), type == WidgetPropertyType::CHILD_WIDGET_IDS);
+    }
+    zassert_false(WidgetPropertyValidator::IsStructuralProperty(static_cast<WidgetPropertyType>(UINT16_MAX)));
+}
+
+ZTEST(ui_configuration_validator, test_child_widget_ids_require_exact_integer_list_kind) {
+    auto configuration = MakeConfiguration();
+    auto& properties = configuration->screen_configurations[0]->widget_configurations[0]->properties;
+    properties[WidgetPropertyType::CHILD_WIDGET_IDS] = std::pmr::vector<int>(Mrm::GetDefaultPmr());
+    zassert_true(Validates(*configuration));
+    properties[WidgetPropertyType::CHILD_WIDGET_IDS] = std::pmr::vector<int>({ 12, 0, INT32_MAX }, Mrm::GetDefaultPmr());
+    zassert_true(Validates(*configuration));
+    const ConfigValue invalid[] = {
+        {}, 12, 12.0, true, std::pmr::string("12"),
+        std::pmr::vector<std::pmr::string> { std::pmr::string("12") },
+        std::pmr::unordered_map<std::pmr::string, std::pmr::string> {}
+    };
+    for(const auto& value : invalid) {
+        properties[WidgetPropertyType::CHILD_WIDGET_IDS] = value;
+        zassert_false(Validates(*configuration));
+    }
+}
+
+ZTEST(ui_configuration_validator, test_structural_bindings_are_rejected_in_every_direction) {
+    for(auto direction : { PropertyBindingDirection::In, PropertyBindingDirection::Out, PropertyBindingDirection::InOut }) {
+        auto configuration = MakeConfiguration();
+        auto binding = MakeSensorBinding();
+        binding.target = WidgetPropertyType::CHILD_WIDGET_IDS;
+        binding.direction = direction;
+        AddBinding(*configuration, binding);
+        zassert_false(Validates(*configuration));
+    }
+}
+
+ZTEST(ui_configuration_validator, test_dial_child_requirement_is_not_enabled_yet) {
+    auto configuration = MakeConfiguration();
+    auto& widget = *configuration->screen_configurations[0]->widget_configurations[0];
+    widget.type = WidgetType::IndicatorDial;
+    zassert_true(Validates(*configuration));
+}
+
+ZTEST(ui_configuration_validator, test_anchor_bindings_remain_ordinary_properties) {
+    for(auto target : { WidgetPropertyType::ANCHOR_POINT_X, WidgetPropertyType::ANCHOR_POINT_Y }) {
+        for(auto direction : { PropertyBindingDirection::In, PropertyBindingDirection::Out, PropertyBindingDirection::InOut }) {
+            auto configuration = MakeConfiguration();
+            auto binding = MakeSensorBinding();
+            binding.target = target;
+            binding.direction = direction;
+            AddBinding(*configuration, binding);
+            configuration->screen_configurations[0]->widget_configurations[0]->properties[target] = 7;
+            zassert_true(Validates(*configuration));
+        }
+    }
+}
+
 ZTEST(ui_configuration_validator, test_animation_controls_are_separate_from_management_and_colors) {
     using eerie_leap::domain::ui_domain::utilities::WidgetPropertyValidator;
     for(uint16_t id = 0; id <= static_cast<uint16_t>(WidgetPropertyType::COUNT); ++id) {

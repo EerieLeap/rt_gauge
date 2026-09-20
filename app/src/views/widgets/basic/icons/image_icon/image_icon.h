@@ -24,7 +24,7 @@ private:
     lv_obj_t* Create(lv_obj_t* parent);
 
 public:
-    // Sentinel for PIVOT_X: a registered property always has a value, so "centre it" needs one.
+    // Sentinel for ANCHOR_POINT_X: a registered property always has a value, so "centre it" needs one.
     static constexpr int pivot_centered = -1;
 
     explicit ImageIcon(std::shared_ptr<Frame> parent);
