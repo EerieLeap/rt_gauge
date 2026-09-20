@@ -52,7 +52,7 @@ public:
     LvglColor GetAccentColor() const override { return LvglColor(0x789ABC, 32); }
 };
 
-std::shared_ptr<WidgetConfiguration> Configuration(WidgetType type, IconType icon = IconType::Dot) {
+std::shared_ptr<WidgetConfiguration> Configuration(WidgetType type, IconType icon = IconType::Oval) {
     auto configuration = std::make_shared<WidgetConfiguration>(std::allocator_arg, std::pmr::get_default_resource());
     configuration->id = 1;
     configuration->type = type;
@@ -107,6 +107,11 @@ void CheckColor(lv_color_t actual, LvglColor expected) {
 void CheckBackground(lv_obj_t* object, lv_part_t part, LvglColor expected) {
     CheckColor(lv_obj_get_style_bg_color(object, part), expected);
     zassert_equal(lv_obj_get_style_bg_opa(object, part), expected.ToLvOpa());
+}
+
+void CheckShape(lv_obj_t* object, LvglColor expected) {
+    CheckColor(lv_obj_get_style_image_recolor(object, LV_PART_MAIN), expected);
+    zassert_equal(lv_obj_get_style_opa(object, LV_PART_MAIN), expected.ToLvOpa());
 }
 
 void CheckText(lv_obj_t* object, LvglColor expected) {
@@ -184,7 +189,7 @@ ZTEST(widget_colors, test_animation_simulator_gallery) {
     const std::array types { WidgetType::BasicIcon, WidgetType::BasicIcon,
         WidgetType::IndicatorDial, WidgetType::ControlButton };
     const char* names[][3] {
-        { "animation_dot_full", "animation_dot_half", "animation_dot_zero" },
+        { "animation_oval_full", "animation_oval_half", "animation_oval_zero" },
         { "animation_label_0", "animation_label_45", "animation_label_90" },
         { "animation_dial_0", "animation_dial_45", "animation_dial_90" },
         { "animation_button_0", "animation_button_45", "animation_button_90" }
@@ -194,7 +199,11 @@ ZTEST(widget_colors, test_animation_simulator_gallery) {
             Frame::CreateWrapped().SetWidth(96, true).SetHeight(72, true).Build());
         lv_obj_set_style_bg_color(root->GetObject(), lv_color_hex(0x202428), 0);
         lv_obj_set_style_bg_opa(root->GetObject(), LV_OPA_COVER, 0);
-        auto configuration = Configuration(types[index], index == 0 ? IconType::Dot : IconType::Label);
+        auto configuration = Configuration(types[index], index == 0 ? IconType::Oval : IconType::Label);
+        if(index == 0) {
+            configuration->properties[WidgetPropertyType::WIDTH_PX] = 16;
+            configuration->properties[WidgetPropertyType::HEIGHT_PX] = 16;
+        }
         configuration->bindings.clear();
         configuration->properties[WidgetPropertyType::LABEL] = std::pmr::string(index == 3 ? "LOG" : "RPM");
         configuration->properties[WidgetPropertyType::IS_SMOOTHED] = false;
@@ -401,7 +410,7 @@ ZTEST(widget_colors, test_opacity_binding_restores_retained_colors_after_all_gat
     Publish(WidgetPropertyType::OPACITY, 0);
     Color(primary, "#ABCDEF80");
     Color(primary, "#FEDCBA40");
-    CheckBackground(inner, LV_PART_MAIN, LvglColor(0x123456, 96));
+    CheckShape(inner, LvglColor(0x123456, 96));
     zassert_equal(lv_obj_get_style_opa_layered(outer, LV_PART_MAIN), 0);
     Publish(WidgetPropertyType::IS_VISIBLE, false);
     Publish(WidgetPropertyType::IS_ACTIVE, false);
@@ -410,9 +419,9 @@ ZTEST(widget_colors, test_opacity_binding_restores_retained_colors_after_all_gat
     zassert_equal(lv_obj_get_style_opa_layered(outer, LV_PART_MAIN), 128);
     Publish(WidgetPropertyType::IS_VISIBLE, true);
     Publish(WidgetPropertyType::IS_ACTIVE, true);
-    CheckBackground(inner, LV_PART_MAIN, LvglColor(0x123456, 96));
+    CheckShape(inner, LvglColor(0x123456, 96));
     widget->OnActivated();
-    CheckBackground(inner, LV_PART_MAIN, LvglColor(0xFEDCBA, 64));
+    CheckShape(inner, LvglColor(0xFEDCBA, 64));
     zassert_equal(lv_obj_get_style_opa_layered(outer, LV_PART_MAIN), 128);
     for(const EventData& invalid : { EventData{-1}, EventData{256}, EventData{128.5F}, EventData{true} }) {
         Publish(WidgetPropertyType::OPACITY, invalid);
@@ -581,14 +590,14 @@ ZTEST(widget_colors, test_button_label_tracks_press_release_and_cancel) {
     zassert_false(lv_obj_has_state(label, LV_STATE_PRESSED));
 }
 
-ZTEST(widget_colors, test_dot_label_and_shapes_apply_colors_without_rebuilding) {
-    for(auto type : { IconType::Dot, IconType::Label, IconType::Rectangle, IconType::TriangleIsosceles,
+ZTEST(widget_colors, test_label_and_shapes_apply_colors_without_rebuilding) {
+    for(auto type : { IconType::Label, IconType::Rectangle, IconType::TriangleIsosceles,
                      IconType::TriangleRight, IconType::Oval, IconType::Line }) {
         auto configuration = Configuration(WidgetType::BasicIcon, type);
         configuration->properties[WidgetPropertyType::LABEL] = std::pmr::string("Log");
         auto widget = Render(configuration);
         auto* object = Inner(*widget);
-        const bool shape = type != IconType::Dot && type != IconType::Label;
+        const bool shape = type != IconType::Label;
         const auto* source = shape ? lv_image_get_src(object) : nullptr;
         Color(primary, "#11223380");
         if(shape) {
@@ -617,15 +626,15 @@ ZTEST(widget_colors, test_direct_icon_configuration_applies_parsed_colors) {
     auto root = std::make_shared<Frame>(Frame::CreateWrapped().SetWidth(100, false).SetHeight(100, false).Build());
     auto properties = std::make_shared<WidgetPropertyStore>();
     auto& factory = eerie_leap::views::widgets::basic::icons::IconFactory::GetInstance();
-    factory.RegisterProperties(IconType::Dot, *properties);
+    factory.RegisterProperties(IconType::Oval, *properties);
     zassert_true(properties->Set(primary, std::pmr::string("#11223380")));
-    auto icon = factory.Create(IconType::Dot, properties, root);
+    auto icon = factory.Create(IconType::Oval, properties, root);
     zassert_equal(icon->Render(), 0);
-    CheckBackground(icon->GetContainer()->GetObject(), LV_PART_MAIN, LvglColor(0x112233, 128));
+    CheckShape(icon->GetContainer()->GetObject(), LvglColor(0x112233, 128));
     zassert_true(properties->Set(primary, std::pmr::string("")));
     icon->Configure(properties);
     icon->ApplyTheme(ThemeManager::GetInstance().GetCurrentTheme());
-    CheckBackground(icon->GetContainer()->GetObject(), LV_PART_MAIN,
+    CheckShape(icon->GetContainer()->GetObject(),
         ThemeManager::GetInstance().GetCurrentTheme().GetAccentColor());
 }
 
@@ -681,22 +690,22 @@ ZTEST(widget_colors, test_hidden_colors_replay_latest_and_inactive_colors_are_re
     auto configuration = Configuration(WidgetType::BasicIcon);
     configuration->properties[primary] = std::pmr::string("#112233ff");
     auto widget = Render(configuration);
-    auto* dot = Inner(*widget);
+    auto* oval = Inner(*widget);
     for(auto gate : { WidgetPropertyType::IS_VISIBLE, WidgetPropertyType::OPACITY }) {
         Publish(gate, 0);
         Color(primary, "#ff000080");
         Color(primary, "#00ff0040");
-        CheckBackground(dot, LV_PART_MAIN, LvglColor(0x112233, 255));
+        CheckShape(oval, LvglColor(0x112233, 255));
         ThemeManager::GetInstance().SetTheme(std::make_shared<DarkTheme>());
-        CheckBackground(dot, LV_PART_MAIN, LvglColor(0x112233, 255));
+        CheckShape(oval, LvglColor(0x112233, 255));
         Publish(gate, 1);
-        CheckBackground(dot, LV_PART_MAIN, LvglColor(0x00FF00, 64));
+        CheckShape(oval, LvglColor(0x00FF00, 64));
         Color(primary, "#112233ff");
     }
     Publish(WidgetPropertyType::IS_ACTIVE, false);
     Color(primary, "#ffffffff");
     Publish(WidgetPropertyType::IS_ACTIVE, true);
-    CheckBackground(dot, LV_PART_MAIN, LvglColor(0x112233, 255));
+    CheckShape(oval, LvglColor(0x112233, 255));
     widget->Configure(Configuration(WidgetType::BasicIcon));
-    CheckBackground(dot, LV_PART_MAIN, ThemeManager::GetInstance().GetCurrentTheme().GetAccentColor());
+    CheckShape(oval, ThemeManager::GetInstance().GetCurrentTheme().GetAccentColor());
 }

@@ -66,7 +66,7 @@ std::string White(int alpha) {
     return rgba;
 }
 
-std::shared_ptr<WidgetConfiguration> Configuration(WidgetType type, IconType icon = IconType::Dot) {
+std::shared_ptr<WidgetConfiguration> Configuration(WidgetType type, IconType icon = IconType::Oval) {
     auto configuration = std::make_shared<WidgetConfiguration>(std::allocator_arg, std::pmr::get_default_resource());
     configuration->type = type;
     if(type == WidgetType::BasicIcon)
@@ -256,7 +256,7 @@ ZTEST(widget_alpha, test_shape_masks_compose_coverage_and_alpha_without_rasteriz
     }
 }
 
-ZTEST(widget_alpha, test_static_dot_composes_theme_and_explicit_alpha) {
+ZTEST(widget_alpha, test_static_oval_composes_theme_and_explicit_alpha) {
     Scene scene(Configuration(WidgetType::BasicIcon));
     const auto animations = lv_anim_count_running();
     CheckAlphaMatrix(scene);

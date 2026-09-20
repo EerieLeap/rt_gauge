@@ -147,7 +147,7 @@ ZTEST(widget_supported_properties, test_icon_wrappers_report_only_selected_icon_
     using eerie_leap::domain::ui_domain::models::IconType;
     using eerie_leap::views::widgets::basic::IconWidget;
     using eerie_leap::views::widgets::basic::ArcIconWidget;
-    for(auto type : { IconType::Dot, IconType::Label, IconType::Rectangle, IconType::TriangleIsosceles,
+    for(auto type : { IconType::Label, IconType::Rectangle, IconType::TriangleIsosceles,
                      IconType::TriangleRight, IconType::Oval, IconType::Line, IconType::Image }) {
         IconWidget basic(1, MakeRoot(), WidgetContext{}, type);
         ArcIconWidget arc(2, MakeRoot(), WidgetContext{}, type);

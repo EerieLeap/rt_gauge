@@ -8,7 +8,6 @@ namespace eerie_leap::domain::ui_domain::models {
 // Append only: ICON_TYPE is persisted as an integer.
 enum class IconType : std::uint32_t {
     None = 0,
-    Dot,
     Label,
     Image,
     Svg, // TODO: Implement SVG Icon

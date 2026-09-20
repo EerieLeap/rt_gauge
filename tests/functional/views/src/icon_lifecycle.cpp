@@ -14,7 +14,7 @@
 #include "event_bus/event_channels.h"
 #include "views/themes/default_theme.h"
 #include "views/widgets/basic/icon_widget/icon_widget.h"
-#include "views/widgets/basic/icons/dot_icon/dot_icon.h"
+#include "views/widgets/basic/icons/shape_icon/oval_icon/oval_icon.h"
 #include "views/widgets/indicators/dial_indicator/dial_indicator.h"
 #include "views/widgets/widget_factory.h"
 #include "domain/ui_domain/utilities/widget_property_validator.h"
@@ -37,7 +37,7 @@ namespace {
 class TestIcon : public IconWidget {
 public:
     using IconWidget::IconWidget;
-    icons::DotIcon* Dot() const { return dynamic_cast<icons::DotIcon*>(icon_.get()); }
+    icons::OvalIcon* Oval() const { return dynamic_cast<icons::OvalIcon*>(icon_.get()); }
     ConfigValue Read(WidgetPropertyType type) const { return properties_->Get(type); }
 };
 
@@ -98,7 +98,7 @@ lv_obj_t* Inner(const IconWidget& widget) {
 }
 
 lv_anim_t* Pulse(const TestIcon& widget) {
-    return lv_anim_get(widget.Dot(), nullptr);
+    return lv_anim_get(widget.Oval(), nullptr);
 }
 
 void Tick(uint32_t elapsed) {
@@ -144,9 +144,9 @@ ZTEST(icon_lifecycle, test_all_factory_widgets_support_live_animation_without_re
     auto& factory = WidgetFactory::GetInstance();
     for(auto type : factory.GetAvailableTypes()) {
         const auto icons = type == WidgetType::BasicIcon || type == WidgetType::BasicArcIcon
-            ? std::vector<IconType>{ IconType::Dot, IconType::Label, IconType::Rectangle, IconType::TriangleIsosceles,
+            ? std::vector<IconType>{ IconType::Label, IconType::Rectangle, IconType::TriangleIsosceles,
                 IconType::TriangleRight, IconType::Oval, IconType::Line, IconType::Image }
-            : std::vector<IconType>{ IconType::Dot };
+            : std::vector<IconType>{ IconType::Oval };
         for(auto icon : icons) {
             auto root = MakeRoot();
             auto configuration = Configuration(icon);
@@ -254,8 +254,8 @@ ZTEST(icon_lifecycle, test_dial_generic_animation_is_owned_once_and_keeps_needle
     zassert_equal(lv_anim_count_running(), count + 1);
 }
 
-ZTEST(icon_lifecycle, test_dot_management_restoration_does_not_start_animation) {
-    auto configuration = Configuration(IconType::Dot);
+ZTEST(icon_lifecycle, test_oval_management_restoration_does_not_start_animation) {
+    auto configuration = Configuration(IconType::Oval);
     configuration->properties[WidgetPropertyType::IS_ACTIVE] = false;
     configuration->properties[WidgetPropertyType::IS_VISIBLE] = false;
     configuration->properties[WidgetPropertyType::OPACITY] = 0;
@@ -275,16 +275,17 @@ ZTEST(icon_lifecycle, test_dot_management_restoration_does_not_start_animation) 
     zassert_false(widget.IsProcessingEligible());
     Publish(WidgetPropertyType::OPACITY, 128);
     zassert_is_null(Pulse(widget));
-    zassert_equal(lv_obj_get_style_opa(Inner(widget), LV_PART_MAIN), LV_OPA_COVER);
+    zassert_equal(lv_obj_get_style_opa(Inner(widget), LV_PART_MAIN), 128);
     zassert_true(widget.IsProcessingEligible());
     Tick(200);
-    zassert_equal(lv_obj_get_style_opa(Inner(widget), LV_PART_MAIN), LV_OPA_COVER);
+    zassert_equal(lv_obj_get_style_opa(Inner(widget), LV_PART_MAIN), 128);
 }
 
-ZTEST(icon_lifecycle, test_dot_management_changes_keep_static_appearance) {
+ZTEST(icon_lifecycle, test_oval_management_changes_keep_static_appearance) {
     for(auto target : { WidgetPropertyType::IS_ACTIVE, WidgetPropertyType::IS_VISIBLE, WidgetPropertyType::OPACITY }) {
+        ThemeManager::GetInstance().SetTheme(std::make_shared<DefaultTheme>());
         TestIcon widget(1, MakeRoot(), WidgetContext{});
-        widget.Configure(Configuration(IconType::Dot));
+        widget.Configure(Configuration(IconType::Oval));
         zassert_equal(widget.Render(), 0);
         zassert_is_null(Pulse(widget));
         widget.OnActivated();
@@ -301,23 +302,22 @@ ZTEST(icon_lifecycle, test_dot_management_changes_keep_static_appearance) {
         zassert_equal(lv_obj_get_style_opa(Inner(widget), LV_PART_MAIN), opacity);
         ThemeManager::GetInstance().SetTheme(std::make_shared<BlueTheme>());
         zassert_is_null(Pulse(widget));
-        zassert_equal(lv_obj_get_style_opa(Inner(widget), LV_PART_MAIN), opacity);
-        zassert_equal(lv_obj_get_style_bg_opa(Inner(widget), LV_PART_MAIN), 128);
+        zassert_equal(lv_obj_get_style_opa(Inner(widget), LV_PART_MAIN), 128);
         Publish(target, 1);
         zassert_is_null(Pulse(widget));
         zassert_true(widget.IsProcessingEligible());
         zassert_false(lv_obj_has_flag(widget.GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN));
-        zassert_equal(lv_obj_get_style_opa(Inner(widget), LV_PART_MAIN), opacity);
+        zassert_equal(lv_obj_get_style_opa(Inner(widget), LV_PART_MAIN), 128);
         Tick(100);
-        zassert_equal(lv_obj_get_style_opa(Inner(widget), LV_PART_MAIN), opacity);
+        zassert_equal(lv_obj_get_style_opa(Inner(widget), LV_PART_MAIN), 128);
     }
 }
 
-ZTEST(icon_lifecycle, test_dot_ancestor_suspension_keeps_static_appearance) {
+    ZTEST(icon_lifecycle, test_oval_ancestor_suspension_keeps_static_appearance) {
     for(int gate : { 0, 1, 2 }) {
         auto root = MakeRoot();
         TestIcon widget(1, root, WidgetContext{});
-        widget.Configure(Configuration(IconType::Dot));
+        widget.Configure(Configuration(IconType::Oval));
         zassert_equal(widget.Render(), 0);
         widget.OnActivated();
         Tick(200);
@@ -345,36 +345,36 @@ ZTEST(icon_lifecycle, test_dot_ancestor_suspension_keeps_static_appearance) {
 }
 
 ZTEST(icon_lifecycle, test_icon_eligibility_uses_ancestor_layered_opacity_but_not_color_alpha) {
-    class TestDot : public icons::DotIcon {
+    class TestOval : public icons::OvalIcon {
     public:
-        using DotIcon::DotIcon;
+        using OvalIcon::OvalIcon;
         using IconBase::IsProcessingEligible;
     };
     auto root = MakeRoot();
     auto properties = std::make_shared<WidgetPropertyStore>();
-    TestDot::RegisterProperties(*properties);
+    TestOval::RegisterProperties(*properties);
     zassert_true(properties->Set(WidgetPropertyType::COLOR_PRIMARY_ACTIVE, std::pmr::string("#FFFFFF00")));
-    TestDot dot(root);
-    dot.Configure(properties);
-    zassert_equal(dot.Render(), 0);
-    dot.SetProcessingEnabled(true);
-    zassert_true(dot.IsProcessingEligible());
+    TestOval oval(root);
+    oval.Configure(properties);
+    zassert_equal(oval.Render(), 0);
+    oval.SetProcessingEnabled(true);
+    zassert_true(oval.IsProcessingEligible());
     lv_obj_set_style_opa_layered(root->GetObject(), 0, LV_PART_MAIN);
-    zassert_false(dot.IsProcessingEligible());
+    zassert_false(oval.IsProcessingEligible());
     lv_obj_set_style_opa_layered(root->GetObject(), 128, LV_PART_MAIN);
-    zassert_true(dot.IsProcessingEligible());
+    zassert_true(oval.IsProcessingEligible());
 }
 
-ZTEST(icon_lifecycle, test_dot_group_lifecycle_and_teardown_do_not_start_animation) {
+ZTEST(icon_lifecycle, test_oval_group_lifecycle_and_teardown_do_not_start_animation) {
     const auto callbacks = lv_display_get_event_count(lv_display_get_default());
-    icons::DotIcon* target = nullptr;
+    icons::OvalIcon* target = nullptr;
     for(bool suspended : { false, true }) {
         {
             TestIcon widget(1, MakeRoot(), WidgetContext{});
-            widget.Configure(Configuration(IconType::Dot));
+            widget.Configure(Configuration(IconType::Oval));
             zassert_equal(widget.Render(), 0);
             widget.OnActivated();
-            target = widget.Dot();
+            target = widget.Oval();
             zassert_is_null(Pulse(widget));
             widget.OnDeactivated();
             zassert_is_null(Pulse(widget));
@@ -393,7 +393,7 @@ ZTEST(icon_lifecycle, test_dot_group_lifecycle_and_teardown_do_not_start_animati
 }
 
 ZTEST(icon_lifecycle, test_logging_visibility_keeps_tracking_and_does_not_override_activity) {
-    auto configuration = Configuration(IconType::Dot);
+    auto configuration = Configuration(IconType::Oval);
     configuration->properties[WidgetPropertyType::IS_VISIBLE] = false;
     configuration->bindings.push_back(PropertyBinding {
         .target = WidgetPropertyType::IS_VISIBLE,
@@ -430,6 +430,60 @@ ZTEST(icon_lifecycle, test_logging_visibility_keeps_tracking_and_does_not_overri
     zassert_is_null(Pulse(widget));
     Tick(2000);
     zassert_equal(lv_obj_get_style_opa(Inner(widget), LV_PART_MAIN), LV_OPA_COVER);
+}
+
+ZTEST(icon_lifecycle, test_logging_oval_on_arc_preserves_size_position_and_blinking) {
+    eerie_leap::domain::ui_domain::ScopedLvglLock lock;
+    const auto animations = lv_anim_count_running();
+    auto root = MakeRoot();
+    auto configuration = Configuration(IconType::Oval);
+    configuration->type = WidgetType::BasicArcIcon;
+    configuration->properties[WidgetPropertyType::WIDTH_PX] = 16;
+    configuration->properties[WidgetPropertyType::HEIGHT_PX] = 16;
+    configuration->properties[WidgetPropertyType::IS_VISIBLE] = false;
+    configuration->properties[WidgetPropertyType::POSITION_ANGLE] = 180.0F;
+    configuration->properties[WidgetPropertyType::EDGE_OFFSET] = 6;
+    configuration->properties[WidgetPropertyType::IS_ANIMATION_ACTIVE] = true;
+    configuration->properties[WidgetPropertyType::ANIMATION_TYPE] = static_cast<int>(Animation::Type::Blinking);
+    configuration->properties[WidgetPropertyType::ANIMATION_DURATION_MS] = 1000;
+    configuration->bindings.push_back(PropertyBinding {
+        .target = WidgetPropertyType::IS_VISIBLE,
+        .channel = EventChannelId::Logging,
+        .event_type = std::to_underlying(LoggingEventType::StatusUpdated),
+        .payload_key = std::to_underlying(LoggingPayloadType::IsActive)
+    });
+    auto widget = WidgetFactory::GetInstance().CreateWidget(configuration, root, WidgetContext{});
+    widget->SetSizePx({ 100, 100 });
+    zassert_equal(widget->Render(), 0);
+    widget->OnActivated();
+    zassert_equal(lv_anim_count_running(), animations);
+    zassert_true(lv_obj_has_flag(widget->GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN));
+
+    PublishLogging(true);
+    auto* icon = static_cast<IconWidget*>(widget.get())->GetIconContainer()->GetObject();
+    auto* content = views_test::WidgetContent(*widget);
+    lv_obj_update_layout(root->GetObject());
+    zassert_equal(lv_obj_get_width(icon), 16);
+    zassert_equal(lv_obj_get_height(icon), 16);
+    zassert_within(lv_obj_get_style_x(icon, LV_PART_MAIN), 0, 1);
+    zassert_within(lv_obj_get_style_y(icon, LV_PART_MAIN), -36, 1);
+    const auto* mask = static_cast<const lv_image_dsc_t*>(lv_image_get_src(icon));
+    zassert_not_null(mask);
+    zassert_within(mask->data[8 * mask->header.stride + 8], LV_OPA_COVER, 1);
+    zassert_equal(mask->data[0], LV_OPA_TRANSP);
+    zassert_false(lv_obj_has_flag(widget->GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN));
+    zassert_equal(lv_anim_count_running(), animations + 1);
+    Tick(500);
+    zassert_equal(lv_obj_get_style_opa_layered(content, LV_PART_MAIN), LV_OPA_TRANSP);
+    Tick(500);
+    zassert_equal(lv_obj_get_style_opa_layered(content, LV_PART_MAIN), LV_OPA_COVER);
+    PublishLogging(false);
+    zassert_true(lv_obj_has_flag(widget->GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN));
+    zassert_equal(lv_anim_count_running(), animations);
+    PublishLogging(true);
+    zassert_equal(lv_anim_count_running(), animations + 1);
+    widget.reset();
+    zassert_equal(lv_anim_count_running(), animations);
 }
 
 ZTEST(icon_lifecycle, test_inactive_label_keeps_the_normal_palette) {

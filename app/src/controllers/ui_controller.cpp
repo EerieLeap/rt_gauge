@@ -630,7 +630,9 @@ void UiController::SetupTestConfiguration() {
     widget7->size_grid.width = 466;
     widget7->size_grid.height = 466;
     widget7->z_index = 0;
-    widget7->properties[WidgetPropertyType::ICON_TYPE] = static_cast<int>(IconType::Dot);
+    widget7->properties[WidgetPropertyType::ICON_TYPE] = static_cast<int>(IconType::Oval);
+    widget7->properties[WidgetPropertyType::WIDTH_PX] = 16;
+    widget7->properties[WidgetPropertyType::HEIGHT_PX] = 16;
     widget7->properties[WidgetPropertyType::IS_VISIBLE] = false;
     widget7->properties[WidgetPropertyType::POSITION_X] = 0;
     widget7->properties[WidgetPropertyType::POSITION_Y] = 0;
@@ -759,6 +761,9 @@ void UiController::SetupTestConfiguration() {
     widget1_1->properties[WidgetPropertyType::CORNER_RAD_PX] = 10;
     widget1_1->properties[WidgetPropertyType::FILL_MODE] = static_cast<int>(WidgetFillMode::Outline);
     widget1_1->properties[WidgetPropertyType::STROKE_PX] = 6;
+    widget1_1->properties[WidgetPropertyType::IS_ANIMATION_ACTIVE] = true;
+    widget1_1->properties[WidgetPropertyType::ANIMATION_TYPE] = static_cast<int>(Animation::Type::Rotation);
+    widget1_1->properties[WidgetPropertyType::ANIMATION_DURATION_MS] = 1000;
     screen_configuration_1->AddWidget(std::move(widget1_1));
 
     ui_configuration->screen_configurations.push_back(std::move(screen_configuration_1));

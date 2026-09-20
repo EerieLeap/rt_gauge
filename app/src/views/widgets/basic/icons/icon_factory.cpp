@@ -1,4 +1,3 @@
-#include "views/widgets/basic/icons/dot_icon/dot_icon.h"
 #include "views/widgets/basic/icons/label_icon/label_icon.h"
 #include "views/widgets/basic/icons/image_icon/image_icon.h"
 #include "views/widgets/basic/icons/shape_icon/rectangle_icon/rectangle_icon.h"
@@ -61,7 +60,6 @@ std::vector<IconType> IconFactory::GetAvailableTypes() const {
 }
 
 void IconFactory::RegisterTypes() {
-    Register<DotIcon>(IconType::Dot);
     Register<LabelIcon>(IconType::Label);
     Register<ImageIcon>(IconType::Image);
 

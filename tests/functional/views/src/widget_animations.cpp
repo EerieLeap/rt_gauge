@@ -11,7 +11,7 @@
 #include "event_bus/event_channel_id.h"
 #include "event_bus/event_channels.h"
 #include "views/animations/view_animator.h"
-#include "views/widgets/basic/icons/dot_icon/dot_icon.h"
+#include "views/widgets/basic/icons/shape_icon/oval_icon/oval_icon.h"
 #include "views/widgets/controls/button_control/button_control.h"
 #include "views/widgets/controls/slider_control/slider_control.h"
 #include "views/widgets/widget_animation.h"
@@ -112,9 +112,9 @@ protected:
     int ApplyTheme(const ITheme&) override { return 0; }
 };
 
-class TestDot : public basic::icons::DotIcon {
+class TestOval : public basic::icons::OvalIcon {
 public:
-    using DotIcon::DotIcon;
+    using OvalIcon::OvalIcon;
     using IconBase::IsProcessingEligible;
 };
 
@@ -1049,15 +1049,15 @@ ZTEST(widget_animations, test_presentation_opacity_preserves_widget_icon_and_des
     zassert_equal(descendant.Render(), 0);
     descendant.OnActivated();
     auto properties = std::make_shared<WidgetPropertyStore>();
-    TestDot::RegisterProperties(*properties);
-    TestDot dot(scene.widget.Content());
-    dot.Configure(properties);
-    zassert_equal(dot.Render(), 0);
-    dot.SetProcessingEnabled(true);
+    TestOval::RegisterProperties(*properties);
+    TestOval oval(scene.widget.Content());
+    oval.Configure(properties);
+    zassert_equal(oval.Render(), 0);
+    oval.SetProcessingEnabled(true);
     auto check = [&](bool eligible) {
         zassert_equal(scene.widget.IsProcessingEligible(), eligible);
         zassert_equal(descendant.IsProcessingEligible(), eligible);
-        zassert_equal(dot.IsProcessingEligible(), eligible);
+        zassert_equal(oval.IsProcessingEligible(), eligible);
     };
     auto* presentation = views_test::WidgetContent(scene.widget);
     lv_obj_set_style_opa_layered(presentation, 0, 0);
