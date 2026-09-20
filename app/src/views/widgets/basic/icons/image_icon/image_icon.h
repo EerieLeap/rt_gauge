@@ -15,8 +15,6 @@ private:
     std::pmr::string file_path_;
     int image_width_ = 0;
     int image_height_ = 0;
-    int pivot_x_;
-    int pivot_y_;
 
     lv_image_dsc_t lv_image_descriptor_;
     std::optional<std::pmr::vector<uint8_t>> image_data_;
@@ -24,9 +22,6 @@ private:
     lv_obj_t* Create(lv_obj_t* parent);
 
 public:
-    // Sentinel for ANCHOR_POINT_X: a registered property always has a value, so "centre it" needs one.
-    static constexpr int pivot_centered = -1;
-
     explicit ImageIcon(std::shared_ptr<Frame> parent);
     virtual ~ImageIcon() = default;
 
@@ -35,6 +30,7 @@ public:
     int ApplyTheme(const ITheme& theme) override;
     int DoRender() override;
     void Configure(std::shared_ptr<WidgetPropertyStore> properties) override;
+    void SetAnchorPoint(const lv_point_t& point) override;
 
     [[nodiscard]] IconType GetIconType() const override { return IconType::Image; }
 };

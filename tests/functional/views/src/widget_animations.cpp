@@ -157,7 +157,8 @@ std::shared_ptr<WidgetConfiguration> AnimationConfiguration(Animation::Type type
     for(auto target : { WidgetPropertyType::ANIMATION_TYPE, WidgetPropertyType::IS_ANIMATION_ACTIVE,
                        WidgetPropertyType::ANIMATION_DURATION_MS, WidgetPropertyType::IS_ACTIVE,
                        WidgetPropertyType::IS_VISIBLE, WidgetPropertyType::OPACITY, WidgetPropertyType::VALUE,
-                       WidgetPropertyType::COLOR_PRIMARY_ACTIVE }) {
+                       WidgetPropertyType::COLOR_PRIMARY_ACTIVE, WidgetPropertyType::ANCHOR_POINT_X,
+                       WidgetPropertyType::ANCHOR_POINT_Y }) {
         configuration->bindings.push_back(PropertyBinding {
             .target = target,
             .channel = EventChannelId::Sensors,
@@ -1093,6 +1094,81 @@ ZTEST(widget_animations, test_presentation_opacity_preserves_widget_icon_and_des
     check(true);
 }
 
+ZTEST(widget_animations, test_widget_local_anchor_survives_animation_reset_resize_and_nested_widgets) {
+    ScopedLvglLock lock;
+    auto root = std::make_shared<Frame>(Frame::CreateWrapped().SetWidth(466, true).SetHeight(466, true).Build());
+    PresentationProbe parent(1, root, {});
+    parent.SetSizePx({ 20, 200 });
+    parent.SetPositionPx({ 11, 13 });
+    parent.Configure(AnimationConfiguration());
+    zassert_equal(parent.Render(), 0);
+    parent.OnActivated();
+    auto* content = parent.Content()->GetObject();
+    zassert_equal(lv_obj_get_style_transform_pivot_x(content, LV_PART_MAIN), 10);
+    zassert_equal(lv_obj_get_style_transform_pivot_y(content, LV_PART_MAIN), 100);
+
+    auto child_configuration = Configuration();
+    child_configuration->bindings.clear();
+    child_configuration->properties[WidgetPropertyType::ANCHOR_POINT_X] = 4;
+    child_configuration->properties[WidgetPropertyType::ANCHOR_POINT_Y] = 5;
+    PresentationProbe child(2, parent.Content(), {});
+    child.SetSizePx({ 12, 40 });
+    child.Configure(child_configuration);
+    zassert_equal(child.Render(), 0);
+    child.OnActivated();
+
+    Advance(250);
+    const auto angle = lv_obj_get_style_transform_rotation(content, LV_PART_MAIN);
+    const auto starts = animation_start_calls;
+    Publish(WidgetPropertyType::ANCHOR_POINT_X, 7);
+    Publish(WidgetPropertyType::ANCHOR_POINT_Y, 180);
+    zassert_equal(lv_obj_get_style_transform_rotation(content, LV_PART_MAIN), angle);
+    zassert_equal(animation_start_calls, starts);
+    zassert_equal(lv_obj_get_style_transform_pivot_x(content, LV_PART_MAIN), 7);
+    zassert_equal(lv_obj_get_style_transform_pivot_y(content, LV_PART_MAIN), 20);
+    zassert_equal(lv_obj_get_style_transform_pivot_x(child.Content()->GetObject(), LV_PART_MAIN), 4);
+    zassert_equal(lv_obj_get_style_transform_pivot_y(child.Content()->GetObject(), LV_PART_MAIN), 35);
+
+    Publish(WidgetPropertyType::IS_ANIMATION_ACTIVE, false);
+    zassert_equal(lv_obj_get_style_transform_rotation(content, LV_PART_MAIN), 0);
+    zassert_equal(lv_obj_get_style_transform_pivot_x(content, LV_PART_MAIN), 7);
+    zassert_equal(lv_obj_get_style_transform_pivot_y(content, LV_PART_MAIN), 20);
+    Publish(WidgetPropertyType::ANIMATION_TYPE, static_cast<int>(Animation::Type::Blinking));
+    Publish(WidgetPropertyType::IS_ANIMATION_ACTIVE, true);
+    Advance(250);
+    zassert_equal(lv_obj_get_style_transform_pivot_x(content, LV_PART_MAIN), 7);
+    zassert_equal(lv_obj_get_style_transform_pivot_y(content, LV_PART_MAIN), 20);
+    Publish(WidgetPropertyType::ANCHOR_POINT_Y, -1);
+    parent.SetSizePx({ 40, 180 });
+    zassert_equal(lv_obj_get_style_transform_pivot_x(content, LV_PART_MAIN), 7);
+    zassert_equal(lv_obj_get_style_transform_pivot_y(content, LV_PART_MAIN), 90);
+    parent.OnDeactivated();
+    parent.OnActivated();
+    zassert_equal(lv_obj_get_style_transform_pivot_x(content, LV_PART_MAIN), 7);
+    zassert_equal(lv_obj_get_style_transform_pivot_y(content, LV_PART_MAIN), 90);
+}
+
+ZTEST(widget_animations, test_control_anchor_uses_its_own_presentation_size) {
+    ScopedLvglLock lock;
+    auto root = std::make_shared<Frame>(Frame::CreateWrapped().SetWidth(466, true).SetHeight(466, true).Build());
+    TestButton button(1, root, {});
+    button.SetSizePx({ 20, 200 });
+    button.Configure(AnimationConfiguration(Animation::Type::None));
+    zassert_equal(button.Render(), 0);
+    button.OnActivated();
+    auto* content = views_test::WidgetContent(button);
+    zassert_equal(lv_obj_get_style_transform_pivot_x(content, LV_PART_MAIN), 10);
+    zassert_equal(lv_obj_get_style_transform_pivot_y(content, LV_PART_MAIN), 100);
+    Publish(WidgetPropertyType::ANCHOR_POINT_X, 25);
+    Publish(WidgetPropertyType::ANCHOR_POINT_Y, 10);
+    zassert_equal(lv_obj_get_style_transform_pivot_y(content, LV_PART_MAIN), 190);
+    button.SetSizePx({ 40, 80 });
+    zassert_equal(lv_obj_get_style_transform_pivot_x(content, LV_PART_MAIN), 25);
+    zassert_equal(lv_obj_get_style_transform_pivot_y(content, LV_PART_MAIN), 70);
+    Publish(WidgetPropertyType::ANCHOR_POINT_Y, -1);
+    zassert_equal(lv_obj_get_style_transform_pivot_y(content, LV_PART_MAIN), 40);
+}
+
 ZTEST(widget_animations, test_asymmetric_subtree_rotates_without_internal_clipping_and_resets) {
     ScopedLvglLock lock;
     Scene scene;
@@ -1113,8 +1189,8 @@ ZTEST(widget_animations, test_asymmetric_subtree_rotates_without_internal_clippi
     CheckPixel(rotated, 59, 68, 0, 255);
     zassert_equal(lv_obj_get_width(scene.widget.GetContainer()->GetObject()), 64);
     zassert_equal(lv_obj_get_height(scene.widget.GetContainer()->GetObject()), 24);
-    zassert_equal(lv_obj_get_style_transform_pivot_x(presentation, LV_PART_MAIN), lv_pct(50));
-    zassert_equal(lv_obj_get_style_transform_pivot_y(presentation, LV_PART_MAIN), lv_pct(50));
+    zassert_equal(lv_obj_get_style_transform_pivot_x(presentation, LV_PART_MAIN), 32);
+    zassert_equal(lv_obj_get_style_transform_pivot_y(presentation, LV_PART_MAIN), 12);
     styles.Reset();
     const auto restored = scene.Pixels();
     zassert_mem_equal(baseline.data(), restored.data(), baseline.size() * sizeof(lv_color32_t));

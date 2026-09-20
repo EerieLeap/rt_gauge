@@ -182,6 +182,33 @@ ZTEST(ui_configuration_validator, test_anchor_bindings_remain_ordinary_propertie
     }
 }
 
+ZTEST(ui_configuration_validator, test_anchor_values_are_strict_local_pixel_coordinates) {
+    using eerie_leap::domain::ui_domain::utilities::WidgetPropertyValidator;
+    auto configuration = MakeConfiguration();
+    auto& properties = configuration->screen_configurations[0]->widget_configurations[0]->properties;
+    const int valid[] = { -1, 0, 10, 100, 2000, WidgetPropertyValidator::max_anchor_coordinate };
+    const ConfigValue invalid[] = {
+        {}, true, false, -2, static_cast<int>(INT32_MIN), static_cast<int>(INT32_MAX),
+        WidgetPropertyValidator::max_anchor_coordinate + 1,
+        -1.0, 10.0, 1.5, std::pmr::string("10"), std::pmr::vector<int> { 10 },
+        std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()
+    };
+    for(auto type : { WidgetPropertyType::ANCHOR_POINT_X, WidgetPropertyType::ANCHOR_POINT_Y }) {
+        for(int coordinate : valid) {
+            properties[type] = coordinate;
+            zassert_true(WidgetPropertyValidator::IsValidAnchorValue(type, properties[type]));
+            zassert_true(Validates(*configuration));
+        }
+        for(const auto& value : invalid) {
+            properties[type] = value;
+            zassert_false(WidgetPropertyValidator::IsValidAnchorValue(type, value));
+            zassert_false(Validates(*configuration));
+        }
+        properties.erase(type);
+    }
+    zassert_false(WidgetPropertyValidator::IsValidAnchorValue(WidgetPropertyType::POSITION_X, 10));
+}
+
 ZTEST(ui_configuration_validator, test_animation_controls_are_separate_from_management_and_colors) {
     using eerie_leap::domain::ui_domain::utilities::WidgetPropertyValidator;
     for(uint16_t id = 0; id <= static_cast<uint16_t>(WidgetPropertyType::COUNT); ++id) {

@@ -2,6 +2,8 @@
 #include "domain/ui_domain/models/widget_property.h"
 #include "views/themes/theme_manager.h"
 
+#include <misc/cache/instance/lv_image_cache.h>
+
 #include "image_icon.h"
 
 namespace eerie_leap::views::widgets::basic::icons {
@@ -19,8 +21,6 @@ void ImageIcon::RegisterProperties(WidgetPropertyStore& store) {
     store.Register(WidgetPropertyType::FILE_PATH, ConfigValue { std::pmr::string { } }, PropertyChangeEffect::Rebuild);
     store.Register(WidgetPropertyType::IMG_WIDTH, ConfigValue { 0 }, PropertyChangeEffect::Rebuild);
     store.Register(WidgetPropertyType::IMG_HEIGHT, ConfigValue { 0 }, PropertyChangeEffect::Rebuild);
-    store.Register(WidgetPropertyType::ANCHOR_POINT_X, ConfigValue { pivot_centered }, PropertyChangeEffect::Rebuild);
-    store.Register(WidgetPropertyType::ANCHOR_POINT_Y, ConfigValue { 0 }, PropertyChangeEffect::Rebuild);
 }
 
 int ImageIcon::ApplyTheme(const ITheme&) {
@@ -76,15 +76,12 @@ lv_obj_t* ImageIcon::Create(lv_obj_t* parent) {
     lv_obj_set_height(lv_image, LV_SIZE_CONTENT);
     lv_obj_set_align(lv_image, LV_ALIGN_CENTER);
 
-    lv_image_set_pivot(lv_image, pivot_x_, pivot_y_);
-    // NOTE: lv_image_set_pivot is meant to work along with lv_image_set_rotation,
-    // but it does not work as expected out of the box. There is a patch applyed to LVGL
-    // in order to fix that bug. Transform is another option here, but it adds artifacts
-    // around an image when rotated.
-    // lv_obj_set_style_transform_pivot_x(lv_image, pivot_x_, LV_PART_MAIN | LV_STATE_DEFAULT);
-    // lv_obj_set_style_transform_pivot_y(lv_image, pivot_y_, LV_PART_MAIN | LV_STATE_DEFAULT);
-
     return lv_image;
+}
+
+void ImageIcon::SetAnchorPoint(const lv_point_t& point) {
+    IconBase::SetAnchorPoint(point);
+    lv_image_set_pivot(container_->GetObject(), point.x, point.y);
 }
 
 void ImageIcon::Configure(std::shared_ptr<WidgetPropertyStore> properties) {
@@ -94,15 +91,21 @@ void ImageIcon::Configure(std::shared_ptr<WidgetPropertyStore> properties) {
     image_width_ = properties_->GetAs<int>(WidgetPropertyType::IMG_WIDTH, 0);
     image_height_ = properties_->GetAs<int>(WidgetPropertyType::IMG_HEIGHT, 0);
 
-    if(image_width_ <= 0 || image_height_ <= 0)
+    if(!IsReady() || image_width_ <= 0 || image_height_ <= 0
+        || image_width_ > UINT16_MAX || image_height_ > UINT16_MAX
+        || (lv_image_descriptor_.header.w == image_width_ && lv_image_descriptor_.header.h == image_height_))
         return;
 
-    // A registered property always has a value, so the "centre it" default needs a sentinel.
-    pivot_x_ = properties_->GetAs<int>(WidgetPropertyType::ANCHOR_POINT_X, pivot_centered);
-    if(pivot_x_ == pivot_centered)
-        pivot_x_ = image_width_ / 2;
+    const uint64_t required_bytes = static_cast<uint64_t>(image_width_) * image_height_
+        * lv_color_format_get_size(LV_COLOR_FORMAT_NATIVE_WITH_ALPHA);
+    if(!image_data_.has_value() || required_bytes > image_data_->size())
+        return;
 
-    pivot_y_ = image_height_ - properties_->GetAs<int>(WidgetPropertyType::ANCHOR_POINT_Y, 0);
+    lv_image_cache_drop(&lv_image_descriptor_);
+    lv_image_descriptor_.header.w = image_width_;
+    lv_image_descriptor_.header.h = image_height_;
+    lv_image_descriptor_.header.stride = 0;
+    lv_image_set_src(container_->GetObject(), &lv_image_descriptor_);
 }
 
 } // namespace eerie_leap::views::widgets::basic::icons

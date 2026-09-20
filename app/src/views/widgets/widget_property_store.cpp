@@ -137,6 +137,10 @@ bool WidgetPropertyStore::Set(WidgetPropertyType type, const ConfigValue& value)
         && !WidgetPropertyValidator::IsValidAnimationValue(type, value))
         return false;
 
+    if(WidgetPropertyValidator::IsAnchorProperty(type)
+        && !WidgetPropertyValidator::IsValidAnchorValue(type, value))
+        return false;
+
     entry->value = value;
 
     return true;

@@ -99,6 +99,10 @@ static std::string GetWidgetPropertyValidationError(WidgetPropertyType type, con
         && !WidgetPropertyValidator::IsValidAnimationValue(type, value))
         return "Invalid value for property ID: " + std::to_string(static_cast<uint16_t>(type)) + ".";
 
+    if(WidgetPropertyValidator::IsAnchorProperty(type)
+        && !WidgetPropertyValidator::IsValidAnchorValue(type, value))
+        return "Invalid anchor coordinate for property ID: " + std::to_string(static_cast<uint16_t>(type)) + ".";
+
     if(type == WidgetPropertyType::FILL_MODE && !IsValidFillMode(value))
         return "Invalid value for property 'FILL_MODE'.";
 

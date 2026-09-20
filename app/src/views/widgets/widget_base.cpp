@@ -29,6 +29,8 @@ using eerie_leap::utilities::string::StringHelpers;
 
 LOG_MODULE_REGISTER(widget_base_logger);
 
+static_assert(WidgetPropertyValidator::max_anchor_coordinate == LV_COORD_MAX);
+
 namespace {
 
 // Configuration names a selector by the readable id it shares with the rest of the system;
@@ -88,6 +90,7 @@ WidgetBase::WidgetBase(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext
     animation_.Attach(*content_frame_, *container_, [](void* context) {
         return static_cast<WidgetBase*>(context)->IsAnimationEligible();
     }, this);
+    lv_obj_add_event_cb(content_frame_->GetObject(), AnchorGeometryCallback, LV_EVENT_ALL, this);
     lv_display_add_event_cb(lv_obj_get_display(container_->GetObject()), RefreshCallback, LV_EVENT_REFR_START, this);
 }
 
@@ -100,6 +103,8 @@ WidgetBase::~WidgetBase() {
 
 void WidgetBase::DetachDispatch() {
     ScopedLvglLock lvgl_guard;
+    DetachAnchorObject();
+    lv_obj_remove_event_cb_with_user_data(content_frame_->GetObject(), AnchorGeometryCallback, this);
     lv_display_remove_event_cb_with_user_data(lv_obj_get_display(container_->GetObject()), RefreshCallback, this);
     dispatch_guard_->Detach();
     animation_.Detach();
@@ -107,11 +112,14 @@ void WidgetBase::DetachDispatch() {
 
 int WidgetBase::Render() {
     ScopedLvglLock lvgl_guard;
+    DetachAnchorObject();
     is_ready_ = false;
     animation_.StopAndReset();
     UpdateProcessingState();
 
     const int result = RenderableBase::Render();
+    if(result == 0)
+        UpdateAnchor();
     UpdateProcessingState();
     if(result == 0)
         ReplayPendingProperties();
@@ -177,7 +185,74 @@ void WidgetBase::RegisterProperties(WidgetPropertyStore& store) const {
     store.Register(WidgetPropertyType::IS_VISIBLE, ConfigValue { true }, PropertyChangeEffect::None);
     store.Register(WidgetPropertyType::OPACITY, ConfigValue { 255 }, PropertyChangeEffect::None);
     store.Register(WidgetPropertyType::IS_SMOOTHED, ConfigValue { false }, PropertyChangeEffect::None);
+    store.Register(WidgetPropertyType::ANCHOR_POINT_X, ConfigValue { -1 }, PropertyChangeEffect::Repaint);
+    store.Register(WidgetPropertyType::ANCHOR_POINT_Y, ConfigValue { -1 }, PropertyChangeEffect::Repaint);
     WidgetAnimation::RegisterProperties(store);
+}
+
+lv_obj_t* WidgetBase::GetAnchorObject() const {
+    return content_frame_->GetObject();
+}
+
+void WidgetBase::ApplyResolvedAnchor(const lv_point_t&) { }
+
+void WidgetBase::DetachAnchorObject() {
+    if(anchor_object_ != nullptr && anchor_object_ != content_frame_->GetObject())
+        lv_obj_remove_event_cb_with_user_data(anchor_object_, AnchorGeometryCallback, this);
+    anchor_object_ = nullptr;
+}
+
+void WidgetBase::AnchorGeometryCallback(lv_event_t* event) {
+    ScopedLvglLock lvgl_guard;
+    auto* widget = static_cast<WidgetBase*>(lv_event_get_user_data(event));
+    const auto code = lv_event_get_code(event);
+    if(code == LV_EVENT_DELETE) {
+        if(lv_event_get_target_obj(event) == widget->anchor_object_)
+            widget->anchor_object_ = nullptr;
+    } else if(code == LV_EVENT_SIZE_CHANGED || code == LV_EVENT_STYLE_CHANGED) {
+        widget->UpdateAnchor();
+    }
+}
+
+void WidgetBase::UpdateAnchor() {
+    if(!IsReady() || updating_anchor_)
+        return;
+    auto* bounds = GetAnchorObject();
+    if(bounds == nullptr)
+        return;
+    auto* presentation = content_frame_->GetObject();
+    if(bounds != anchor_object_) {
+        DetachAnchorObject();
+        anchor_object_ = bounds;
+        if(bounds != presentation)
+            lv_obj_add_event_cb(bounds, AnchorGeometryCallback, LV_EVENT_ALL, this);
+    }
+
+    updating_anchor_ = true;
+    lv_obj_update_layout(presentation);
+    const lv_point_t local {
+        anchor_point_.x == -1 ? lv_obj_get_width(bounds) / 2 : anchor_point_.x,
+        anchor_point_.y == -1 ? lv_obj_get_height(bounds) / 2 : lv_obj_get_height(bounds) - anchor_point_.y
+    };
+    lv_area_t bounds_area;
+    lv_area_t presentation_area;
+    lv_obj_get_coords(bounds, &bounds_area);
+    lv_obj_get_coords(presentation, &presentation_area);
+    const int64_t translated_x = static_cast<int64_t>(local.x) + bounds_area.x1 - presentation_area.x1;
+    const int64_t translated_y = static_cast<int64_t>(local.y) + bounds_area.y1 - presentation_area.y1;
+    if(translated_x < LV_COORD_MIN || translated_x > LV_COORD_MAX
+        || translated_y < LV_COORD_MIN || translated_y > LV_COORD_MAX) {
+        LOG_WRN("Widget %u anchor cannot be represented in presentation coordinates.", id_);
+        updating_anchor_ = false;
+        return;
+    }
+    if(lv_obj_get_style_transform_pivot_x(presentation, LV_PART_MAIN) != translated_x)
+        lv_obj_set_style_transform_pivot_x(presentation, static_cast<int32_t>(translated_x), LV_PART_MAIN);
+    if(lv_obj_get_style_transform_pivot_y(presentation, LV_PART_MAIN) != translated_y)
+        lv_obj_set_style_transform_pivot_y(presentation, static_cast<int32_t>(translated_y), LV_PART_MAIN);
+    ApplyResolvedAnchor(local);
+    lv_obj_refresh_ext_draw_size(container_->GetObject());
+    updating_anchor_ = false;
 }
 
 void WidgetBase::OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) {
@@ -195,8 +270,14 @@ void WidgetBase::ApplyProperty(WidgetPropertyType type, const ConfigValue& value
         WidgetBase::OnPropertyChanged(type, value);
         UpdateProcessingState();
     } else if(!animation_.ApplyProperty(type, value)) {
+        if(type == WidgetPropertyType::ANCHOR_POINT_X)
+            anchor_point_.x = std::get<int>(value);
+        else if(type == WidgetPropertyType::ANCHOR_POINT_Y)
+            anchor_point_.y = std::get<int>(value);
         properties_->ApplyColor(type);
         OnPropertyChanged(type, value);
+        if(properties_->GetEffect(type) != PropertyChangeEffect::None)
+            UpdateAnchor();
     }
 }
 
@@ -276,6 +357,9 @@ void WidgetBase::SetPropertyLocal(WidgetPropertyType type, const ConfigValue& va
 
     if(!IsProcessingEligible() || !properties_->Set(type, value))
         return;
+
+    if(WidgetPropertyValidator::IsAnchorProperty(type))
+        NotifyPropertyChanged(type, value, properties_->GetEffect(type));
 
     for(const auto& binding : outbound_bindings_) {
         if(binding.target != type)
@@ -421,6 +505,7 @@ void WidgetBase::ReplayPendingProperties() {
     if(!IsReady() || !IsProcessingEligible())
         return;
 
+    UpdateAnchor();
     if(pending_properties_.any())
         ApplyProperties(std::exchange(pending_properties_, {}));
     else
@@ -432,6 +517,7 @@ void WidgetBase::RefreshCallback(lv_event_t* event) {
     auto* widget = static_cast<WidgetBase*>(lv_event_get_user_data(event));
     widget->UpdateProcessingState();
     widget->ReplayPendingProperties();
+    widget->UpdateAnchor();
 }
 
 void WidgetBase::Configure(std::shared_ptr<WidgetConfiguration> configuration) {
@@ -517,10 +603,12 @@ WidgetSize WidgetBase::GetSizePx() const {
 }
 
 void WidgetBase::SetSizePx(const WidgetSize& size_px) {
+    ScopedLvglLock lvgl_guard;
     size_px_ = size_px;
 
     container_->SetHeight(size_px.height, true)
         .SetWidth(size_px.width, true);
+    UpdateAnchor();
 }
 
 } // namespace eerie_leap::views::widgets

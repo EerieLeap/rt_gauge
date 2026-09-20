@@ -17,6 +17,18 @@ using eerie_leap::utilities::type::ConfigValue;
 
 class WidgetPropertyValidator {
 public:
+    static constexpr int max_anchor_coordinate = (1 << 29) - 1;
+
+    static constexpr bool IsAnchorProperty(WidgetPropertyType type) {
+        return type == WidgetPropertyType::ANCHOR_POINT_X || type == WidgetPropertyType::ANCHOR_POINT_Y;
+    }
+
+    static bool IsValidAnchorValue(WidgetPropertyType type, const ConfigValue& value) {
+        const auto* coordinate = std::get_if<int>(&value);
+        return IsAnchorProperty(type) && coordinate != nullptr
+            && *coordinate >= -1 && *coordinate <= max_anchor_coordinate;
+    }
+
     static constexpr bool IsStructuralProperty(WidgetPropertyType type) {
         return type == WidgetPropertyType::CHILD_WIDGET_IDS;
     }

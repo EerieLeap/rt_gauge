@@ -509,11 +509,18 @@ ZTEST(shape_icons, test_arc_repositions_when_shape_height_changes) {
     widget->Configure(configuration);
     zassert_equal(widget->Render(), 0);
     widget->OnActivated();
-    int before = lv_obj_get_y(ImageObject(*widget));
+    lv_obj_update_layout(widget->GetContainer()->GetObject());
+    const int before_offset = lv_obj_get_style_y(ImageObject(*widget), LV_PART_MAIN);
+    zassert_within(before_offset, 84, 1, "Initial arc offset: %d", before_offset);
+    zassert_equal(lv_obj_get_y(ImageObject(*widget)), 84 + before_offset);
     Publish(64);
+    lv_obj_update_layout(widget->GetContainer()->GetObject());
     zassert_equal(Mask(*widget).header.h, 64);
-    zassert_equal(std::abs(lv_obj_get_y(ImageObject(*widget)) - before), 16);
+    const int after_offset = lv_obj_get_style_y(ImageObject(*widget), LV_PART_MAIN);
+    zassert_within(after_offset, 68, 1, "Resized arc offset: %d", after_offset);
+    zassert_equal(lv_obj_get_y(ImageObject(*widget)), 68 + after_offset);
     zassert_equal(lv_obj_get_style_transform_pivot_y(ImageObject(*widget), LV_PART_MAIN), 32);
+    zassert_equal(lv_obj_get_style_transform_pivot_y(views_test::WidgetContent(*widget), LV_PART_MAIN), 100 + after_offset);
 }
 
 ZTEST(shape_icons, test_arc_position_angle_and_edge_offset_remain_leaf_owned) {

@@ -61,7 +61,8 @@ std::shared_ptr<WidgetConfiguration> Configuration(IconType type) {
     for(auto target : { WidgetPropertyType::IS_ACTIVE, WidgetPropertyType::IS_VISIBLE,
                        WidgetPropertyType::OPACITY, WidgetPropertyType::POSITION_X, WidgetPropertyType::VALUE,
                        WidgetPropertyType::ANIMATION_TYPE, WidgetPropertyType::IS_ANIMATION_ACTIVE,
-                       WidgetPropertyType::ANIMATION_DURATION_MS, WidgetPropertyType::COLOR_PRIMARY_ACTIVE }) {
+                       WidgetPropertyType::ANIMATION_DURATION_MS, WidgetPropertyType::COLOR_PRIMARY_ACTIVE,
+                       WidgetPropertyType::ANCHOR_POINT_X, WidgetPropertyType::ANCHOR_POINT_Y }) {
         configuration->bindings.push_back(PropertyBinding {
             .target = target,
             .channel = EventChannelId::Sensors,
@@ -136,6 +137,202 @@ void Clean(void* fixture) {
 
 ZTEST_SUITE(icon_lifecycle, NULL, Setup, NULL, Clean, NULL);
 
+ZTEST(icon_lifecycle, test_anchor_uses_drawable_size_and_placement_not_screen_size) {
+    ScopedLvglLock lock;
+    for(auto type : { IconType::Image, IconType::TriangleIsosceles }) {
+        for(int extent : { 300, 466 }) {
+            auto root = MakeRoot();
+            root->SetWidth(extent, true).SetHeight(extent, true);
+            auto configuration = Configuration(type);
+            configuration->properties[WidgetPropertyType::WIDTH_PX] = 20;
+            configuration->properties[WidgetPropertyType::HEIGHT_PX] = 200;
+            configuration->properties[WidgetPropertyType::POSITION_X] = 13;
+            configuration->properties[WidgetPropertyType::POSITION_Y] = -17;
+            const auto context = type == IconType::Image ? ImageContext(*configuration, 20, 200) : WidgetContext{};
+            TestIcon widget(1, root, context);
+            widget.Configure(configuration);
+            zassert_equal(widget.Render(), 0);
+            widget.OnActivated();
+            auto* image = Inner(widget);
+            auto* presentation = views_test::WidgetContent(widget);
+            zassert_equal(lv_obj_get_style_transform_pivot_x(image, LV_PART_MAIN), 10);
+            zassert_equal(lv_obj_get_style_transform_pivot_y(image, LV_PART_MAIN), 100);
+            zassert_equal(lv_obj_get_style_transform_pivot_x(presentation, LV_PART_MAIN), extent / 2 + 13);
+            zassert_equal(lv_obj_get_style_transform_pivot_y(presentation, LV_PART_MAIN), extent / 2 - 17);
+            if(type == IconType::Image) {
+                lv_point_t pivot;
+                lv_image_get_pivot(image, &pivot);
+                zassert_equal(pivot.x, 10);
+                zassert_equal(pivot.y, 100);
+            }
+            Publish(WidgetPropertyType::ANCHOR_POINT_X, 0);
+            for(int coordinate : { 0, 200 }) {
+                Publish(WidgetPropertyType::ANCHOR_POINT_Y, coordinate);
+                zassert_equal(lv_obj_get_style_transform_pivot_x(image, LV_PART_MAIN), 0);
+                zassert_equal(lv_obj_get_style_transform_pivot_y(image, LV_PART_MAIN), 200 - coordinate);
+                zassert_equal(lv_obj_get_style_transform_pivot_x(presentation, LV_PART_MAIN), extent / 2 + 3);
+                zassert_equal(lv_obj_get_style_transform_pivot_y(presentation, LV_PART_MAIN), extent / 2 + 83 - coordinate);
+                if(type == IconType::Image) {
+                    lv_point_t pivot;
+                    lv_image_get_pivot(image, &pivot);
+                    zassert_equal(pivot.x, 0);
+                    zassert_equal(pivot.y, 200 - coordinate);
+                }
+            }
+            Publish(WidgetPropertyType::ANCHOR_POINT_Y, -1);
+            Publish(WidgetPropertyType::ANCHOR_POINT_X, 3);
+            zassert_equal(lv_obj_get_style_transform_pivot_x(image, LV_PART_MAIN), 3);
+            zassert_equal(lv_obj_get_style_transform_pivot_y(image, LV_PART_MAIN), 100);
+            zassert_equal(lv_obj_get_style_transform_pivot_x(presentation, LV_PART_MAIN), extent / 2 + 6);
+            Publish(WidgetPropertyType::ANCHOR_POINT_X, -1);
+            Publish(WidgetPropertyType::ANCHOR_POINT_Y, 230);
+            zassert_equal(lv_obj_get_style_transform_pivot_x(image, LV_PART_MAIN), 10);
+            zassert_equal(lv_obj_get_style_transform_pivot_y(image, LV_PART_MAIN), -30);
+            zassert_equal(lv_obj_get_style_transform_pivot_y(presentation, LV_PART_MAIN), extent / 2 - 147);
+            if(type == IconType::Image) {
+                lv_point_t pivot;
+                lv_image_get_pivot(image, &pivot);
+                zassert_equal(pivot.y, -30);
+            }
+        }
+    }
+}
+
+ZTEST(icon_lifecycle, test_anchor_binding_preserves_angles_and_replays_after_suspension_and_rerender) {
+    ScopedLvglLock lock;
+    auto configuration = Configuration(IconType::Image);
+    configuration->properties[WidgetPropertyType::ANIMATION_TYPE] = static_cast<int>(Animation::Type::Rotation);
+    configuration->properties[WidgetPropertyType::IS_ANIMATION_ACTIVE] = true;
+    configuration->properties[WidgetPropertyType::ANIMATION_DURATION_MS] = 1000;
+    auto context = ImageContext(*configuration, 20, 200);
+    auto root = MakeRoot();
+    TestIcon widget(1, root, context);
+    widget.Configure(configuration);
+    Publish(WidgetPropertyType::ANCHOR_POINT_X, 3);
+    Publish(WidgetPropertyType::ANCHOR_POINT_Y, 170);
+    widget.OnActivated();
+    zassert_equal(widget.Render(), 0);
+    auto* image = Inner(widget);
+    auto* presentation = views_test::WidgetContent(widget);
+    zassert_equal(lv_obj_get_style_transform_pivot_x(image, LV_PART_MAIN), 3);
+    zassert_equal(lv_obj_get_style_transform_pivot_y(image, LV_PART_MAIN), 30);
+    const auto* source = lv_image_get_src(image);
+    const auto callbacks = lv_obj_get_event_count(image);
+    lv_image_set_rotation(image, 900);
+    Tick(250);
+    const auto angle = lv_obj_get_style_transform_rotation(presentation, LV_PART_MAIN);
+    const auto animations = lv_anim_count_running();
+    zassert_true(angle > 0);
+    Publish(WidgetPropertyType::ANCHOR_POINT_X, uint32_t { 25 });
+    Publish(WidgetPropertyType::ANCHOR_POINT_Y, 211);
+    zassert_equal(lv_obj_get_style_transform_rotation(presentation, LV_PART_MAIN), angle);
+    zassert_equal(lv_image_get_rotation(image), 900);
+    zassert_equal(lv_anim_count_running(), animations);
+    zassert_equal(Inner(widget), image);
+    zassert_equal(lv_image_get_src(image), source);
+    lv_point_t pivot;
+    lv_image_get_pivot(image, &pivot);
+    zassert_equal(pivot.x, 25);
+    zassert_equal(pivot.y, -11);
+    const EventData invalid[] = { -2, static_cast<int>(INT32_MAX), uint32_t { UINT32_MAX }, 10.0F, true, std::string("10") };
+    for(const auto& value : invalid) {
+        Publish(WidgetPropertyType::ANCHOR_POINT_X, value);
+        zassert_equal(std::get<int>(widget.Read(WidgetPropertyType::ANCHOR_POINT_X)), 25);
+        zassert_equal(lv_image_get_rotation(image), 900);
+    }
+    lv_obj_add_flag(root->GetObject(), LV_OBJ_FLAG_HIDDEN);
+    lv_display_send_event(lv_display_get_default(), LV_EVENT_REFR_START, nullptr);
+    Publish(WidgetPropertyType::ANCHOR_POINT_X, 17);
+    Publish(WidgetPropertyType::ANCHOR_POINT_Y, 191);
+    lv_display_send_event(lv_display_get_default(), LV_EVENT_REFR_START, nullptr);
+    lv_image_get_pivot(image, &pivot);
+    zassert_equal(pivot.x, 25);
+    zassert_equal(pivot.y, -11);
+    lv_obj_remove_flag(root->GetObject(), LV_OBJ_FLAG_HIDDEN);
+    lv_display_send_event(lv_display_get_default(), LV_EVENT_REFR_START, nullptr);
+    lv_image_get_pivot(image, &pivot);
+    zassert_equal(pivot.x, 17);
+    zassert_equal(pivot.y, 9);
+    zassert_equal(lv_image_get_rotation(image), 900);
+    zassert_equal(widget.Render(), 0);
+    image = Inner(widget);
+    lv_image_get_pivot(image, &pivot);
+    zassert_equal(pivot.x, 17);
+    zassert_equal(pivot.y, 9);
+    zassert_equal(lv_obj_get_event_count(image), callbacks);
+}
+
+ZTEST(icon_lifecycle, test_shape_anchor_tracks_live_geometry_and_placement) {
+    ScopedLvglLock lock;
+    auto configuration = Configuration(IconType::TriangleIsosceles);
+    configuration->properties[WidgetPropertyType::WIDTH_PX] = 20;
+    configuration->properties[WidgetPropertyType::HEIGHT_PX] = 200;
+    for(auto target : { WidgetPropertyType::WIDTH_PX, WidgetPropertyType::HEIGHT_PX }) {
+        auto binding = configuration->bindings.front();
+        binding.target = target;
+        binding.selector_value = static_cast<int>(target);
+        configuration->bindings.push_back(binding);
+    }
+    TestIcon widget(1, MakeRoot(), {});
+    widget.Configure(configuration);
+    zassert_equal(widget.Render(), 0);
+    widget.OnActivated();
+    auto* shape = Inner(widget);
+    lv_obj_set_style_transform_rotation(shape, 900, LV_PART_MAIN);
+    Publish(WidgetPropertyType::WIDTH_PX, 40);
+    Publish(WidgetPropertyType::HEIGHT_PX, 80);
+    zassert_equal(Inner(widget), shape);
+    zassert_equal(lv_obj_get_style_transform_pivot_x(shape, LV_PART_MAIN), 20);
+    zassert_equal(lv_obj_get_style_transform_pivot_y(shape, LV_PART_MAIN), 40);
+    Publish(WidgetPropertyType::ANCHOR_POINT_X, 5);
+    Publish(WidgetPropertyType::WIDTH_PX, 60);
+    Publish(WidgetPropertyType::POSITION_X, 12);
+    zassert_equal(lv_obj_get_style_transform_pivot_x(shape, LV_PART_MAIN), 5);
+    zassert_equal(lv_obj_get_style_transform_pivot_y(shape, LV_PART_MAIN), 40);
+    zassert_equal(lv_obj_get_style_transform_pivot_x(views_test::WidgetContent(widget), LV_PART_MAIN), 37);
+    zassert_equal(lv_obj_get_style_transform_rotation(shape, LV_PART_MAIN), 900);
+}
+
+ZTEST(icon_lifecycle, test_image_anchor_tracks_live_dimensions_without_reloading_or_resetting_angle) {
+    ScopedLvglLock lock;
+    auto configuration = Configuration(IconType::Image);
+    auto context = ImageContext(*configuration, 20, 200);
+    for(auto target : { WidgetPropertyType::IMG_WIDTH, WidgetPropertyType::IMG_HEIGHT }) {
+        auto binding = configuration->bindings.front();
+        binding.target = target;
+        binding.selector_value = static_cast<int>(target);
+        configuration->bindings.push_back(binding);
+    }
+    TestIcon widget(1, MakeRoot(), context);
+    widget.Configure(configuration);
+    zassert_equal(widget.Render(), 0);
+    widget.OnActivated();
+    auto* image = Inner(widget);
+    const auto* source = static_cast<const lv_image_dsc_t*>(lv_image_get_src(image));
+    const auto* pixels = source->data;
+    lv_image_set_rotation(image, 900);
+    Publish(WidgetPropertyType::IMG_HEIGHT, 100);
+    Publish(WidgetPropertyType::IMG_WIDTH, 40);
+    lv_point_t pivot;
+    lv_image_get_pivot(image, &pivot);
+    zassert_equal(pivot.x, 20);
+    zassert_equal(pivot.y, 50);
+    zassert_equal(lv_obj_get_width(image), 40);
+    zassert_equal(lv_obj_get_height(image), 100);
+    Publish(WidgetPropertyType::ANCHOR_POINT_Y, 90);
+    Publish(WidgetPropertyType::IMG_WIDTH, 20);
+    lv_image_get_pivot(image, &pivot);
+    zassert_equal(pivot.x, 10);
+    zassert_equal(pivot.y, 10);
+    Publish(WidgetPropertyType::IMG_HEIGHT, 150);
+    lv_image_get_pivot(image, &pivot);
+    zassert_equal(pivot.y, 60);
+    zassert_equal(Inner(widget), image);
+    zassert_equal(lv_image_get_src(image), source);
+    zassert_equal(source->data, pixels);
+    zassert_equal(lv_image_get_rotation(image), 900);
+}
+
 ZTEST(icon_lifecycle, test_demo_dial_geometry_and_image_rotation_baseline) {
     ScopedLvglLock lock;
     for(bool smoothed : { false, true }) {
@@ -208,7 +405,7 @@ ZTEST(icon_lifecycle, test_dial_custom_angles_and_default_image_pivot_baseline) 
     lv_point_t pivot;
     lv_image_get_pivot(image, &pivot);
     zassert_equal(pivot.x, 7);
-    zassert_equal(pivot.y, 220);
+    zassert_equal(pivot.y, 110);
     for(int value : { 0, 50, 100 }) {
         Publish(WidgetPropertyType::VALUE, value);
         zassert_equal(dial.GetAngleForValue(value), 27 * value);
@@ -237,7 +434,8 @@ ZTEST(icon_lifecycle, test_all_factory_widgets_support_live_animation_without_re
             auto widget = factory.CreateWidget(type, 1, root, context);
             const auto supported = widget->GetSupportedProperties();
             for(auto property : { WidgetPropertyType::ANIMATION_TYPE, WidgetPropertyType::IS_ANIMATION_ACTIVE,
-                                 WidgetPropertyType::ANIMATION_DURATION_MS })
+                                 WidgetPropertyType::ANIMATION_DURATION_MS, WidgetPropertyType::ANCHOR_POINT_X,
+                                 WidgetPropertyType::ANCHOR_POINT_Y })
                 zassert_equal(std::count(supported.begin(), supported.end(), property), 1);
             widget->SetSizePx({ 80, 80 });
             widget->Configure(configuration);

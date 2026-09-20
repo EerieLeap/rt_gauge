@@ -27,6 +27,16 @@ using eerie_leap::utilities::type::ConfigValue;
 // Monostate means the value cannot fill that property, and the event is dropped.
 inline ConfigValue CoerceToConfigValue(
     const EventData& value, size_t alternative, WidgetPropertyType type = WidgetPropertyType::NONE) {
+    if(WidgetPropertyValidator::IsAnchorProperty(type)) {
+        ConfigValue converted;
+        if(const auto* coordinate = std::get_if<int>(&value))
+            converted = *coordinate;
+        else if(const auto* coordinate = std::get_if<uint32_t>(&value);
+            coordinate != nullptr && *coordinate <= WidgetPropertyValidator::max_anchor_coordinate)
+            converted = static_cast<int>(*coordinate);
+        return WidgetPropertyValidator::IsValidAnchorValue(type, converted) ? converted : ConfigValue{};
+    }
+
     if(type == WidgetPropertyType::IS_ACTIVE || type == WidgetPropertyType::IS_VISIBLE
         || type == WidgetPropertyType::IS_ANIMATION_ACTIVE) {
         return std::visit([](const auto& argument) -> ConfigValue {

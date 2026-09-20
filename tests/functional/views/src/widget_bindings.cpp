@@ -180,7 +180,7 @@ void PublishSensor(const char* sensor_id, const EventData& value) {
     });
 }
 
-void PublishSettingChanged(float value) {
+void PublishSettingChanged(const EventData& value) {
     SettingsEventsChannel::GetInstance().Publish({
         .source_id = 0,
         .type = SettingsEventType::Changed,
@@ -325,7 +325,6 @@ ZTEST(widget_bindings, test_anchor_bindings_keep_ordinary_tracking_and_local_upd
         configuration->properties[target] = 7;
         configuration->bindings.push_back(SensorBinding(target, SENSOR_ID));
         ProbeWidget widget(1, MakeRoot());
-        widget.GetStore()->Register(target, 0, PropertyChangeEffect::None);
         widget.Configure(configuration);
         zassert_equal(widget.ReadNumber(target), 7);
         zassert_equal(widget.Render(), 0);
@@ -344,6 +343,38 @@ ZTEST(widget_bindings, test_anchor_bindings_keep_ordinary_tracking_and_local_upd
         zassert_equal(std::count(widget.notified.begin(), widget.notified.end(), target), 1);
         widget.WriteLocal(target, 34);
         zassert_equal(widget.ReadNumber(target), 34);
+        auto* content = views_test::WidgetContent(widget);
+        if(target == WidgetPropertyType::ANCHOR_POINT_X)
+            zassert_equal(lv_obj_get_style_transform_pivot_x(content, LV_PART_MAIN), 34);
+        else
+            zassert_equal(lv_obj_get_style_transform_pivot_y(content, LV_PART_MAIN), lv_obj_get_height(content) - 34);
+        const ConfigValue invalid[] = { -2, static_cast<int>(INT32_MAX), 10.0, true, std::pmr::string("10") };
+        for(const auto& value : invalid) {
+            zassert_false(widget.GetStore()->Set(target, value));
+            widget.WriteLocal(target, value);
+            zassert_equal(widget.ReadNumber(target), 34);
+        }
+    }
+}
+
+ZTEST(widget_bindings, test_inbound_anchor_binding_does_not_publish_and_inactive_updates_are_rejected) {
+    for(auto target : { WidgetPropertyType::ANCHOR_POINT_X, WidgetPropertyType::ANCHOR_POINT_Y }) {
+        auto configuration = MakeConfiguration();
+        auto binding = SettingBinding(PropertyBindingDirection::InOut);
+        binding.target = target;
+        configuration->bindings.push_back(binding);
+        configuration->bindings.push_back(SensorBinding(WidgetPropertyType::IS_ACTIVE, SENSOR_ID));
+        auto widget = MakeActiveWidget(configuration);
+        ChangeRequestProbe probe;
+        PublishSettingChanged(23);
+        zassert_equal(widget->ReadNumber(target), 23);
+        zassert_true(probe.WaitForNoRequest());
+        zassert_equal(probe.Calls(), 0);
+        PublishSensor(SENSOR_ID, false);
+        PublishSettingChanged(45);
+        zassert_equal(widget->ReadNumber(target), 23);
+        PublishSensor(SENSOR_ID, true);
+        zassert_equal(widget->ReadNumber(target), 23);
     }
 }
 

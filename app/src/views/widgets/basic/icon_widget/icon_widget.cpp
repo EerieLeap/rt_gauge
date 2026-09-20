@@ -27,6 +27,15 @@ std::shared_ptr<Frame> IconWidget::GetIconContainer() const {
     return icon_ != nullptr && icon_->IsReady() ? icon_->GetContainer() : nullptr;
 }
 
+lv_obj_t* IconWidget::GetAnchorObject() const {
+    const auto frame = GetIconContainer();
+    return frame != nullptr ? frame->GetObject() : nullptr;
+}
+
+void IconWidget::ApplyResolvedAnchor(const lv_point_t& point) {
+    icon_->SetAnchorPoint(point);
+}
+
 int IconWidget::DoRender() {
     auto lv_obj = Create();
     if(lv_obj == nullptr)
@@ -107,6 +116,8 @@ void IconWidget::OnPropertyChanged(WidgetPropertyType type, const ConfigValue& v
 
         case WidgetPropertyType::WIDTH_PX:
         case WidgetPropertyType::HEIGHT_PX:
+        case WidgetPropertyType::IMG_WIDTH:
+        case WidgetPropertyType::IMG_HEIGHT:
         case WidgetPropertyType::STROKE_PX:
         case WidgetPropertyType::CORNER_RAD_PX:
         case WidgetPropertyType::FILL_MODE:

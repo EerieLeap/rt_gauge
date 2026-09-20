@@ -31,6 +31,7 @@ public:
     void SetAssetsManager(std::shared_ptr<AssetsManager> ui_assets_manager) override;
 
     void SetProcessingEnabled(bool enabled) override;
+    void SetAnchorPoint(const lv_point_t& point) override;
     void Configure(std::shared_ptr<WidgetPropertyStore> properties) override;
 };
 

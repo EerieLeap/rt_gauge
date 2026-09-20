@@ -34,6 +34,12 @@ using eerie_leap::subsys::event_bus::IEventChannel;
 class WidgetBase : public IWidget, public RenderableBase {
 private:
     WidgetAnimation animation_;
+    lv_point_t anchor_point_ { -1, -1 };
+    lv_obj_t* anchor_object_ = nullptr;
+    bool updating_anchor_ = false;
+
+    void DetachAnchorObject();
+    static void AnchorGeometryCallback(lv_event_t* event);
 
 protected:
     using PropertySet = std::bitset<static_cast<size_t>(WidgetPropertyType::COUNT)>;
@@ -93,6 +99,10 @@ protected:
     // Reacts to one property. A derived override handles its own keys and delegates the rest.
     // Runs before the LVGL objects exist, so it may only touch members and the container.
     virtual void OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value);
+
+    virtual lv_obj_t* GetAnchorObject() const;
+    virtual void ApplyResolvedAnchor(const lv_point_t& point);
+    void UpdateAnchor();
 
     void ApplyProperty(WidgetPropertyType type, const ConfigValue& value);
     void ApplyProperties(const PropertySet& selected);
