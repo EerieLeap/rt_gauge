@@ -29,8 +29,6 @@ public:
     std::shared_ptr<Frame> GetIconContainer() const;
 
 protected:
-    lv_obj_t* GetAnchorObject() const override;
-    void ApplyResolvedAnchor(const lv_point_t& point) override;
     void OnProcessingUpdated(bool enabled) override;
     void RegisterProperties(WidgetPropertyStore& store) const override;
     void OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) override;

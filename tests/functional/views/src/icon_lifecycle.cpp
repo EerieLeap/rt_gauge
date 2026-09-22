@@ -114,12 +114,41 @@ WidgetContext ImageContext(WidgetConfiguration& configuration, int width = 4, in
     auto fs = std::make_shared<FsService>(DtFs::GetInternalFsMp());
     zassert_true(fs->Initialize());
     auto assets = std::make_shared<AssetsManager>(fs, "icon-lifecycle");
-    std::vector<uint8_t> pixels(width * height * lv_color_format_get_size(LV_COLOR_FORMAT_NATIVE_WITH_ALPHA), 255);
+    // RGB565A8 reports the RGB plane's two bytes per pixel; append the separate alpha plane.
+    const int bytes_per_pixel = lv_color_format_get_size(LV_COLOR_FORMAT_NATIVE_WITH_ALPHA)
+        + (LV_COLOR_FORMAT_NATIVE_WITH_ALPHA == LV_COLOR_FORMAT_RGB565A8 ? 1 : 0);
+    std::vector<uint8_t> pixels(width * height * bytes_per_pixel, 255);
     zassert_true(assets->Save("needle.bin", pixels));
     configuration.properties[WidgetPropertyType::FILE_PATH] = std::pmr::string("needle.bin");
     configuration.properties[WidgetPropertyType::IMG_WIDTH] = width;
     configuration.properties[WidgetPropertyType::IMG_HEIGHT] = height;
     return WidgetContext { .assets_manager = std::move(assets) };
+}
+
+constexpr std::array native_rotation_icons {
+    IconType::Image, IconType::Rectangle, IconType::TriangleIsosceles,
+    IconType::TriangleRight, IconType::Oval, IconType::Line
+};
+
+std::shared_ptr<WidgetConfiguration> RotationConfiguration(IconType type) {
+    auto configuration = Configuration(type);
+    std::erase_if(configuration->bindings, [](const auto& binding) {
+        return binding.target == WidgetPropertyType::ANIMATION_TYPE;
+    });
+    configuration->properties[WidgetPropertyType::WIDTH_PX] = 20;
+    configuration->properties[WidgetPropertyType::HEIGHT_PX] = 60;
+    return configuration;
+}
+
+void CheckRotation(const IconWidget& widget, int angle, int x, int y) {
+    zassert_equal(lv_image_get_rotation(Inner(widget)), angle);
+    lv_point_t pivot;
+    lv_image_get_pivot(Inner(widget), &pivot);
+    zassert_equal(pivot.x, x);
+    zassert_equal(pivot.y, y);
+    // Native rotation must not also rotate either surrounding layer.
+    zassert_equal(lv_obj_get_style_transform_rotation(Inner(widget), LV_PART_MAIN), 0);
+    zassert_equal(lv_obj_get_style_transform_rotation(views_test::WidgetContent(widget), LV_PART_MAIN), 0);
 }
 
 void* Setup() {
@@ -136,6 +165,268 @@ void Clean(void* fixture) {
 } // namespace
 
 ZTEST_SUITE(icon_lifecycle, NULL, Setup, NULL, Clean, NULL);
+
+ZTEST(icon_lifecycle, test_rotation_retains_signed_angles_anchors_and_rerender) {
+    ScopedLvglLock lock;
+    for(auto type : native_rotation_icons) {
+        auto configuration = RotationConfiguration(type);
+        configuration->properties[WidgetPropertyType::POSITION_X] = 13;
+        configuration->properties[WidgetPropertyType::POSITION_Y] = -17;
+        auto context = type == IconType::Image ? ImageContext(*configuration, 20, 60) : WidgetContext{};
+        TestIcon widget(1, MakeRoot(), context);
+        widget.Configure(configuration);
+        IWidget& abstract_widget = widget;
+        IWidget* rotation = &abstract_widget;
+        zassert_true(rotation->SetRotation(-4500));
+        zassert_equal(widget.Render(), 0);
+        CheckRotation(widget, 2700, 10, 30);
+        widget.OnActivated();
+        CheckRotation(widget, 2700, 10, 30);
+        for(int32_t angle : { 0, -1, 4500, -7200, INT32_MIN, INT32_MAX }) {
+            zassert_true(rotation->SetRotation(angle));
+            CheckRotation(widget, (angle % 3600 + 3600) % 3600, 10, 30);
+        }
+        zassert_true(rotation->SetRotation(900));
+        Publish(WidgetPropertyType::ANCHOR_POINT_X, 3);
+        Publish(WidgetPropertyType::ANCHOR_POINT_Y, 7);
+        CheckRotation(widget, 900, 3, 53);
+        auto* presentation = views_test::WidgetContent(widget);
+        const int x = lv_obj_get_x(Inner(widget));
+        const int y = lv_obj_get_y(Inner(widget));
+        zassert_equal(lv_obj_get_style_transform_pivot_x(presentation, LV_PART_MAIN), x + 3);
+        zassert_equal(lv_obj_get_style_transform_pivot_y(presentation, LV_PART_MAIN), y + 53);
+        zassert_equal(widget.Render(), 0);
+        CheckRotation(widget, 900, 3, 53);
+        Publish(WidgetPropertyType::ANCHOR_POINT_X, -1);
+        Publish(WidgetPropertyType::ANCHOR_POINT_Y, 75);
+        CheckRotation(widget, 900, 10, -15);
+    }
+}
+
+ZTEST(icon_lifecycle, test_rotation_replays_suspended_updates_and_blinking) {
+    ScopedLvglLock lock;
+    for(auto type : native_rotation_icons) {
+        auto configuration = RotationConfiguration(type);
+        configuration->properties[WidgetPropertyType::ANIMATION_TYPE] = static_cast<int>(Animation::Type::Blinking);
+        configuration->properties[WidgetPropertyType::IS_ANIMATION_ACTIVE] = true;
+        configuration->properties[WidgetPropertyType::ANIMATION_DURATION_MS] = 1000;
+        auto context = type == IconType::Image ? ImageContext(*configuration, 20, 60) : WidgetContext{};
+        TestIcon widget(1, MakeRoot(), context);
+        widget.Configure(configuration);
+        IWidget* rotation = &widget;
+        zassert_equal(widget.Render(), 0);
+        widget.OnActivated();
+        zassert_true(rotation->SetRotation(900));
+        Tick(250);
+        CheckRotation(widget, 900, 10, 30);
+        zassert_true(lv_obj_get_style_opa_layered(views_test::WidgetContent(widget), LV_PART_MAIN) < LV_OPA_COVER);
+        Publish(WidgetPropertyType::IS_VISIBLE, false);
+        zassert_true(rotation->SetRotation(-900));
+        Publish(WidgetPropertyType::ANCHOR_POINT_Y, 5);
+        CheckRotation(widget, 900, 10, 30);
+        Publish(WidgetPropertyType::IS_VISIBLE, true);
+        CheckRotation(widget, 2700, 10, 55);
+        widget.OnDeactivated();
+        zassert_true(rotation->SetRotation(450));
+        CheckRotation(widget, 2700, 10, 55);
+        zassert_equal(widget.Render(), 0);
+        CheckRotation(widget, 450, 10, 55);
+        widget.OnActivated();
+        CheckRotation(widget, 450, 10, 55);
+        Publish(WidgetPropertyType::IS_ANIMATION_ACTIVE, false);
+        zassert_equal(widget.Render(), 0);
+        CheckRotation(widget, 450, 10, 55);
+    }
+}
+
+ZTEST(icon_lifecycle, test_rotation_resize_preserves_angle_and_resolves_new_bounds) {
+    ScopedLvglLock lock;
+    for(auto type : native_rotation_icons) {
+        auto configuration = RotationConfiguration(type);
+        auto context = type == IconType::Image ? ImageContext(*configuration, 20, 60) : WidgetContext{};
+        const auto width = type == IconType::Image ? WidgetPropertyType::IMG_WIDTH : WidgetPropertyType::WIDTH_PX;
+        const auto height = type == IconType::Image ? WidgetPropertyType::IMG_HEIGHT : WidgetPropertyType::HEIGHT_PX;
+        for(auto target : { width, height }) {
+            auto binding = configuration->bindings.front();
+            binding.target = target;
+            binding.selector_value = static_cast<int>(target);
+            configuration->bindings.push_back(binding);
+        }
+        TestIcon widget(1, MakeRoot(), context);
+        widget.Configure(configuration);
+        IWidget* rotation = &widget;
+        zassert_equal(widget.Render(), 0);
+        widget.OnActivated();
+        zassert_true(rotation->SetRotation(1350));
+        Publish(width, 10);
+        Publish(height, 30);
+        CheckRotation(widget, 1350, 5, 15);
+        Publish(WidgetPropertyType::ANCHOR_POINT_Y, 7);
+        Publish(height, 40);
+        CheckRotation(widget, 1350, 5, 33);
+    }
+}
+
+ZTEST(icon_lifecycle, test_rotation_survives_failed_image_render) {
+    ScopedLvglLock lock;
+    auto configuration = RotationConfiguration(IconType::Image);
+    auto context = ImageContext(*configuration, 20, 60);
+    configuration->properties[WidgetPropertyType::FILE_PATH] = std::pmr::string();
+    TestIcon widget(1, MakeRoot(), context);
+    widget.Configure(configuration);
+    IWidget* rotation = &widget;
+    zassert_true(rotation->SetRotation(-900));
+    widget.OnActivated();
+    zassert_not_equal(widget.Render(), 0);
+    zassert_true(rotation->SetRotation(450));
+    configuration->properties[WidgetPropertyType::FILE_PATH] = std::pmr::string("needle.bin");
+    widget.Configure(configuration);
+    zassert_equal(widget.Render(), 0);
+    CheckRotation(widget, 450, 10, 30);
+}
+
+ZTEST(icon_lifecycle, test_rotation_rejects_conflicting_animation) {
+    ScopedLvglLock lock;
+    for(auto type : { IconType::Label, IconType::Image, IconType::TriangleIsosceles }) {
+        for(bool active : { false, true }) {
+            auto configuration = RotationConfiguration(type);
+            configuration->properties[WidgetPropertyType::ANIMATION_TYPE] = static_cast<int>(Animation::Type::Rotation);
+            configuration->properties[WidgetPropertyType::IS_ANIMATION_ACTIVE] = active;
+            TestIcon widget(1, MakeRoot(), WidgetContext{});
+            widget.Configure(configuration);
+            zassert_false(static_cast<IWidget&>(widget).SetRotation(900));
+        }
+        TestIcon widget(1, MakeRoot(), WidgetContext{});
+        widget.Configure(RotationConfiguration(type));
+        IWidget& rotation = widget;
+        zassert_true(rotation.SetRotation(450));
+        // An inbound animation-type binding could select a conflicting rotation later.
+        widget.Configure(Configuration(type));
+        zassert_false(rotation.SetRotation(900));
+    }
+}
+
+ZTEST(icon_lifecycle, test_every_factory_widget_and_icon_supports_direct_rotation) {
+    ScopedLvglLock lock;
+    const auto animations = lv_anim_count_running();
+    auto& factory = WidgetFactory::GetInstance();
+    for(auto type : factory.GetAvailableTypes()) {
+        const bool is_icon = type == WidgetType::BasicIcon || type == WidgetType::BasicArcIcon;
+        const auto icons = is_icon
+            ? std::vector<IconType>{ IconType::Label, IconType::Image, IconType::Rectangle,
+                IconType::TriangleIsosceles, IconType::TriangleRight, IconType::Oval, IconType::Line }
+            : std::vector<IconType>{ IconType::Label };
+        for(auto icon : icons) {
+            auto configuration = RotationConfiguration(icon);
+            configuration->properties[WidgetPropertyType::LABEL] = std::pmr::string("RPM");
+            configuration->properties[WidgetPropertyType::ANCHOR_POINT_X] = 3;
+            configuration->properties[WidgetPropertyType::ANCHOR_POINT_Y] = 7;
+            configuration->properties[WidgetPropertyType::ANIMATION_TYPE] = static_cast<int>(Animation::Type::Blinking);
+            configuration->properties[WidgetPropertyType::ANIMATION_DURATION_MS] = 1000;
+            WidgetContext context;
+            if(icon == IconType::Image || type == WidgetType::IndicatorDial)
+                context = ImageContext(*configuration, 20, 60);
+            auto widget = factory.CreateWidget(type, 1, MakeRoot(), context);
+            widget->SetSizePx({ 80, 80 });
+            zassert_true(widget->SetRotation(-4500));
+            widget->Configure(configuration);
+            zassert_equal(widget->Render(), 0);
+            const bool native = is_icon && icon != IconType::Label;
+            auto angle = [&] {
+                auto* content = views_test::WidgetContent(*widget);
+                return native ? lv_image_get_rotation(lv_obj_get_child(content, 0))
+                    : lv_obj_get_style_transform_rotation(content, LV_PART_MAIN);
+            };
+            zassert_equal(angle(), 2700, "widget %d icon %d", static_cast<int>(type), static_cast<int>(icon));
+            widget->OnActivated();
+            for(int32_t value : { INT32_MIN, INT32_MAX, -1, 0, 4500 }) {
+                zassert_true(widget->SetRotation(value));
+                zassert_equal(angle(), (value % 3600 + 3600) % 3600);
+            }
+            Publish(WidgetPropertyType::IS_ANIMATION_ACTIVE, true);
+            Tick(250);
+            zassert_equal(angle(), 900);
+            Publish(WidgetPropertyType::IS_VISIBLE, false);
+            zassert_true(widget->SetRotation(450));
+            zassert_equal(angle(), 900);
+            Publish(WidgetPropertyType::IS_VISIBLE, true);
+            zassert_equal(angle(), 450);
+            Publish(WidgetPropertyType::ANCHOR_POINT_X, 11);
+            widget->SetSizePx({ 72, 64 });
+            zassert_equal(angle(), 450);
+            Publish(WidgetPropertyType::IS_ANIMATION_ACTIVE, false);
+            zassert_equal(angle(), 450);
+            zassert_equal(widget->Render(), 0);
+            zassert_equal(angle(), 450);
+            zassert_true(widget->SetRotation(0));
+            zassert_equal(angle(), 0);
+        }
+    }
+    zassert_equal(lv_anim_count_running(), animations);
+}
+
+ZTEST(icon_lifecycle, test_rotation_pixels_clipping_and_parent_animation) {
+    ScopedLvglLock lock;
+    using eerie_leap::views::animations::ViewAnimator;
+    for(auto type : { IconType::Image, IconType::TriangleIsosceles }) {
+        auto root = MakeRoot();
+        root->SetWidth(96, true).SetHeight(96, true);
+        lv_obj_set_style_bg_color(root->GetObject(), lv_color_black(), 0);
+        lv_obj_set_style_bg_opa(root->GetObject(), LV_OPA_COVER, 0);
+        auto frame = [](const std::shared_ptr<Frame>& parent) {
+            return std::make_shared<Frame>(Frame::CreateWrapped(parent->GetObject())
+                .SetWidth(96, true).SetHeight(96, true).Build());
+        };
+        auto clip = frame(root);
+        auto layout = frame(clip);
+        auto presentation = frame(layout);
+        lv_obj_set_style_transform_pivot_x(presentation->GetObject(), 48, 0);
+        lv_obj_set_style_transform_pivot_y(presentation->GetObject(), 48, 0);
+        auto configuration = RotationConfiguration(type);
+        configuration->properties[WidgetPropertyType::WIDTH_PX] = 10;
+        configuration->properties[WidgetPropertyType::HEIGHT_PX] = 40;
+        configuration->properties[WidgetPropertyType::ANCHOR_POINT_Y] = 5;
+        configuration->properties[WidgetPropertyType::COLOR_PRIMARY_ACTIVE] = std::pmr::string("#FFFFFFFF");
+        auto context = type == IconType::Image ? ImageContext(*configuration, 10, 40) : WidgetContext{};
+        TestIcon widget(1, presentation, context);
+        widget.Configure(configuration);
+        zassert_equal(widget.Render(), 0);
+        widget.OnActivated();
+        IWidget* rotation = &widget;
+        int sample = 0;
+        auto check_pixel = [&](int x, int y, bool lit) {
+            ++sample;
+            lv_obj_update_layout(root->GetObject());
+            std::unique_ptr<lv_draw_buf_t, decltype(&lv_draw_buf_destroy)> snapshot(
+                lv_snapshot_take(root->GetObject(), LV_COLOR_FORMAT_ARGB8888), lv_draw_buf_destroy);
+            zassert_not_null(snapshot);
+            auto* row = reinterpret_cast<const lv_color32_t*>(snapshot->data + y * snapshot->header.stride);
+            zassert_equal(row[x].red > 200, lit, "type %u sample %d pixel %d,%d = %u",
+                static_cast<unsigned>(type), sample, x, y, row[x].red);
+        };
+        zassert_true(rotation->SetRotation(0));
+        check_pixel(48, 35, true);
+        zassert_true(rotation->SetRotation(900));
+        check_pixel(48, 35, false);
+        check_pixel(68, 63, true); // Outside the original 10-pixel drawable width.
+        clip->SetWidth(65, true);
+        check_pixel(68, 63, false);
+        check_pixel(60, 63, true);
+        clip->SetWidth(96, true);
+        ViewAnimator animator;
+        zassert_true(animator.Attach(*presentation, *layout, [](void*) { return true; }, nullptr));
+        animator.Synchronize({ Animation::Type::Rotation, true, 1000 });
+        Tick(250);
+        zassert_within(lv_obj_get_style_transform_rotation(presentation->GetObject(), LV_PART_MAIN), 900, 5);
+        CheckRotation(widget, 900, 5, 35);
+        check_pixel(33, 68, true);
+        check_pixel(68, 63, false);
+        animator.StopAndReset();
+        check_pixel(68, 63, true);
+        zassert_equal(widget.Render(), 0);
+        check_pixel(68, 63, true);
+    }
+}
 
 ZTEST(icon_lifecycle, test_anchor_uses_drawable_size_and_placement_not_screen_size) {
     ScopedLvglLock lock;

@@ -53,13 +53,8 @@ void ViewAnimator::Synchronize(const Settings& settings) {
 }
 
 void ViewAnimator::Start() {
-    if(settings_.type == Animation::Type::Rotation) {
-        layout_overflow_ = lv_obj_has_flag(layout_, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
-        presentation_overflow_ = lv_obj_has_flag(presentation_, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
-        rotation_prepared_ = true;
-        lv_obj_add_flag(layout_, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
-        lv_obj_add_flag(presentation_, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
-    }
+    if(settings_.type == Animation::Type::Rotation)
+        PrepareRotation();
 
     lv_anim_t animation;
     lv_anim_init(&animation);
@@ -105,15 +100,38 @@ void ViewAnimator::Cancel() {
 }
 
 void ViewAnimator::ResetPresentation() {
-    if(presentation_ != nullptr) {
+    if(presentation_ != nullptr)
         lv_obj_set_style_opa_layered(presentation_, LV_OPA_COVER, LV_PART_MAIN);
-        lv_obj_set_style_transform_rotation(presentation_, 0, LV_PART_MAIN);
-        if(rotation_prepared_)
+    ApplyRotation(rotation_);
+}
+
+void ViewAnimator::PrepareRotation() {
+    if(rotation_prepared_ || layout_ == nullptr || presentation_ == nullptr)
+        return;
+    layout_overflow_ = lv_obj_has_flag(layout_, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+    presentation_overflow_ = lv_obj_has_flag(presentation_, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+    rotation_prepared_ = true;
+    lv_obj_add_flag(layout_, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+    lv_obj_add_flag(presentation_, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+}
+
+void ViewAnimator::SetRotation(int32_t angle) {
+    rotation_ = angle;
+    ApplyRotation(angle);
+}
+
+void ViewAnimator::ApplyRotation(int32_t angle) {
+    if(presentation_ != nullptr)
+        lv_obj_set_style_transform_rotation(presentation_, angle, LV_PART_MAIN);
+    if(angle != 0) {
+        PrepareRotation();
+    } else if(rotation_prepared_) {
+        if(presentation_ != nullptr)
             lv_obj_set_flag(presentation_, LV_OBJ_FLAG_OVERFLOW_VISIBLE, presentation_overflow_);
+        if(layout_ != nullptr)
+            lv_obj_set_flag(layout_, LV_OBJ_FLAG_OVERFLOW_VISIBLE, layout_overflow_);
+        rotation_prepared_ = false;
     }
-    if(rotation_prepared_ && layout_ != nullptr)
-        lv_obj_set_flag(layout_, LV_OBJ_FLAG_OVERFLOW_VISIBLE, layout_overflow_);
-    rotation_prepared_ = false;
     RefreshDrawMargin();
 }
 
@@ -129,6 +147,7 @@ void ViewAnimator::StopAndReset() {
 }
 
 void ViewAnimator::Detach() {
+    rotation_ = 0;
     StopAndReset();
     if(presentation_ != nullptr)
         lv_obj_remove_event_cb_with_user_data(presentation_, ObjectEvent, this);
@@ -166,6 +185,7 @@ void ViewAnimator::Deleted(lv_anim_t* animation) {
 }
 
 void ViewAnimator::OnObjectDeleted(lv_obj_t* object) {
+    rotation_ = 0;
     if(object == layout_) {
         layout_ = nullptr;
         if(presentation_ != nullptr)

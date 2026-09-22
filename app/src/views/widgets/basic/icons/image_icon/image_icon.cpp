@@ -79,11 +79,6 @@ lv_obj_t* ImageIcon::Create(lv_obj_t* parent) {
     return lv_image;
 }
 
-void ImageIcon::SetAnchorPoint(const lv_point_t& point) {
-    IconBase::SetAnchorPoint(point);
-    lv_image_set_pivot(container_->GetObject(), point.x, point.y);
-}
-
 void ImageIcon::Configure(std::shared_ptr<WidgetPropertyStore> properties) {
     IconBase::Configure(std::move(properties));
 

@@ -29,6 +29,9 @@ public:
 
     bool Attach(utilitites::Frame& presentation, utilitites::Frame& layout, EligibilityCallback eligible, void* context);
     void Synchronize(const Settings& settings);
+    // Retained absolute rotation, independent of blinking and animation resets.
+    // The widget rejects a competing rotation animation before calling this.
+    void SetRotation(int32_t angle);
     void StopAndReset();
     void Detach();
     bool IsRunning() const;
@@ -47,8 +50,11 @@ private:
     bool rotation_prepared_ = false;
     bool layout_overflow_ = false;
     bool presentation_overflow_ = false;
+    int32_t rotation_ = 0;
 
     void Start();
+    void PrepareRotation();
+    void ApplyRotation(int32_t angle);
     void Cancel();
     void ResetPresentation();
     void RefreshDrawMargin();

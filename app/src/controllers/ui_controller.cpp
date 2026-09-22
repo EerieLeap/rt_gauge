@@ -761,9 +761,9 @@ void UiController::SetupTestConfiguration() {
     widget1_1->properties[WidgetPropertyType::CORNER_RAD_PX] = 10;
     widget1_1->properties[WidgetPropertyType::FILL_MODE] = static_cast<int>(WidgetFillMode::Outline);
     widget1_1->properties[WidgetPropertyType::STROKE_PX] = 6;
-    widget1_1->properties[WidgetPropertyType::IS_ANIMATION_ACTIVE] = true;
-    widget1_1->properties[WidgetPropertyType::ANIMATION_TYPE] = static_cast<int>(Animation::Type::Rotation);
-    widget1_1->properties[WidgetPropertyType::ANIMATION_DURATION_MS] = 1000;
+    // widget1_1->properties[WidgetPropertyType::IS_ANIMATION_ACTIVE] = true;
+    // widget1_1->properties[WidgetPropertyType::ANIMATION_TYPE] = static_cast<int>(Animation::Type::Rotation);
+    // widget1_1->properties[WidgetPropertyType::ANIMATION_DURATION_MS] = 1000;
     screen_configuration_1->AddWidget(std::move(widget1_1));
 
     ui_configuration->screen_configurations.push_back(std::move(screen_configuration_1));

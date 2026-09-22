@@ -27,21 +27,13 @@ std::shared_ptr<Frame> IconWidget::GetIconContainer() const {
     return icon_ != nullptr && icon_->IsReady() ? icon_->GetContainer() : nullptr;
 }
 
-lv_obj_t* IconWidget::GetAnchorObject() const {
-    const auto frame = GetIconContainer();
-    return frame != nullptr ? frame->GetObject() : nullptr;
-}
-
-void IconWidget::ApplyResolvedAnchor(const lv_point_t& point) {
-    icon_->SetAnchorPoint(point);
-}
-
 int IconWidget::DoRender() {
     auto lv_obj = Create();
     if(lv_obj == nullptr)
         return -1;
 
     content_frame_->SetChild(icon_->GetContainer());
+    transform_.SetTargetFrame(icon_->GetContainer());
 
     return 0;
 }

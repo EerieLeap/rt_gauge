@@ -28,14 +28,6 @@ void IconBase::SetProcessingEnabled(bool enabled) {
     is_processing_enabled_ = enabled;
 }
 
-void IconBase::SetAnchorPoint(const lv_point_t& point) {
-    auto* object = container_->GetObject();
-    if(lv_obj_get_style_transform_pivot_x(object, LV_PART_MAIN) != point.x)
-        lv_obj_set_style_transform_pivot_x(object, point.x, LV_PART_MAIN);
-    if(lv_obj_get_style_transform_pivot_y(object, LV_PART_MAIN) != point.y)
-        lv_obj_set_style_transform_pivot_y(object, point.y, LV_PART_MAIN);
-}
-
 bool IconBase::IsProcessingEligible() const {
     ScopedLvglLock lvgl_guard;
     if(!IsReady() || !is_processing_enabled_ || !parent_->IsProcessingEnabled())

@@ -51,6 +51,11 @@ void WidgetAnimation::SetOwner(bool is_owner) {
     is_owner_ = is_owner;
 }
 
+void WidgetAnimation::SetRotation(int32_t angle) {
+    if(animator_)
+        animator_->SetRotation(angle);
+}
+
 void WidgetAnimation::Synchronize() {
     if(animator_)
         animator_->Synchronize(settings_);

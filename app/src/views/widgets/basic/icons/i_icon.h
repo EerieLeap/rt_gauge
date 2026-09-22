@@ -30,7 +30,6 @@ public:
     virtual void Configure(std::shared_ptr<WidgetPropertyStore> properties) = 0;
     // Processing eligibility is supplied by the owner; it never selects the icon's appearance.
     virtual void SetProcessingEnabled(bool enabled) = 0;
-    virtual void SetAnchorPoint(const lv_point_t& point) = 0;
 };
 
 } // namespace eerie_leap::views::widgets::basic::icons

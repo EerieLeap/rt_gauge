@@ -1169,6 +1169,32 @@ ZTEST(widget_animations, test_control_anchor_uses_its_own_presentation_size) {
     zassert_equal(lv_obj_get_style_transform_pivot_y(content, LV_PART_MAIN), 40);
 }
 
+ZTEST(widget_animations, test_direct_widget_rotation_preserves_pixels_clipping_and_reset) {
+    ScopedLvglLock lock;
+    Scene scene;
+    IWidget& widget = scene.widget;
+    const auto baseline = scene.Pixels();
+    zassert_true(widget.SetRotation(900));
+    auto pixels = scene.Pixels();
+    CheckPixel(pixels, 56, 20, 255, 0);
+    CheckPixel(pixels, 42, 70, 0, 255);
+    scene.clip->SetHeight(48, true);
+    pixels = scene.Pixels();
+    CheckPixel(pixels, 56, 20, 255, 0);
+    CheckPixel(pixels, 42, 70, 0, 0);
+    zassert_true(widget.SetRotation(450));
+    pixels = scene.Pixels();
+    CheckPixel(pixels, 34, 23, 255, 0);
+    CheckPixel(pixels, 59, 68, 0, 0);
+    scene.clip->SetHeight(extent, true);
+    zassert_true(widget.SetRotation(0));
+    const auto restored = scene.Pixels();
+    zassert_mem_equal(baseline.data(), restored.data(), baseline.size() * sizeof(lv_color32_t));
+    zassert_false(lv_obj_has_flag(views_test::WidgetContent(widget), LV_OBJ_FLAG_OVERFLOW_VISIBLE));
+    zassert_false(lv_obj_has_flag(widget.GetContainer()->GetObject(), LV_OBJ_FLAG_OVERFLOW_VISIBLE));
+    zassert_false(lv_obj_has_flag(scene.clip->GetObject(), LV_OBJ_FLAG_OVERFLOW_VISIBLE));
+}
+
 ZTEST(widget_animations, test_asymmetric_subtree_rotates_without_internal_clipping_and_resets) {
     ScopedLvglLock lock;
     Scene scene;

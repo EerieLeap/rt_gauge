@@ -15,10 +15,10 @@
 
 #include "views/renderable_base.h"
 #include "views/widgets/i_widget.h"
-#include "views/widgets/widget_animation.h"
 #include "views/widgets/widget_context.h"
 #include "views/widgets/widget_dispatch_guard.h"
 #include "views/widgets/widget_property_store.h"
+#include "views/widgets/widget_transform.h"
 
 namespace eerie_leap::views::widgets {
 
@@ -32,15 +32,6 @@ using eerie_leap::subsys::event_bus::EventData;
 using eerie_leap::subsys::event_bus::IEventChannel;
 
 class WidgetBase : public IWidget, public RenderableBase {
-private:
-    WidgetAnimation animation_;
-    lv_point_t anchor_point_ { -1, -1 };
-    lv_obj_t* anchor_object_ = nullptr;
-    bool updating_anchor_ = false;
-
-    void DetachAnchorObject();
-    static void AnchorGeometryCallback(lv_event_t* event);
-
 protected:
     using PropertySet = std::bitset<static_cast<size_t>(WidgetPropertyType::COUNT)>;
 
@@ -65,6 +56,7 @@ protected:
     std::shared_ptr<Frame> parent_;
     // Stable presentation target beneath the public layout/management container.
     std::shared_ptr<Frame> content_frame_;
+    WidgetTransform transform_;
 
     std::vector<AnySubscription> subscriptions_;
     std::vector<OutboundBinding> outbound_bindings_;
@@ -99,10 +91,6 @@ protected:
     // Reacts to one property. A derived override handles its own keys and delegates the rest.
     // Runs before the LVGL objects exist, so it may only touch members and the container.
     virtual void OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value);
-
-    virtual lv_obj_t* GetAnchorObject() const;
-    virtual void ApplyResolvedAnchor(const lv_point_t& point);
-    void UpdateAnchor();
 
     void ApplyProperty(WidgetPropertyType type, const ConfigValue& value);
     void ApplyProperties(const PropertySet& selected);
@@ -147,6 +135,7 @@ public:
     ~WidgetBase() override;
 
     int Render() override;
+    bool SetRotation(int32_t angle) final;
     uint32_t GetId() const override;
     bool IsSmoothed() const override;
     bool IsVisible() const override;

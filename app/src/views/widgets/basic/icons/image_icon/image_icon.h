@@ -30,7 +30,6 @@ public:
     int ApplyTheme(const ITheme& theme) override;
     int DoRender() override;
     void Configure(std::shared_ptr<WidgetPropertyStore> properties) override;
-    void SetAnchorPoint(const lv_point_t& point) override;
 
     [[nodiscard]] IconType GetIconType() const override { return IconType::Image; }
 };

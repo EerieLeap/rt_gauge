@@ -17,6 +17,7 @@ public:
     static void RegisterProperties(WidgetPropertyStore& store);
     bool ApplyProperty(WidgetPropertyType type, const ConfigValue& value);
     void SetOwner(bool is_owner);
+    void SetRotation(int32_t angle);
     void Synchronize();
     void StopAndReset();
     void Detach();

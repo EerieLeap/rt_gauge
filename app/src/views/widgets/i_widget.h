@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -27,6 +28,10 @@ public:
     virtual WidgetType GetType() const = 0;
     virtual uint32_t GetId() const = 0;
     virtual bool IsVisible() const = 0;
+
+    // Absolute signed tenths of a degree; full turns wrap. Retained before rendering
+    // and while suspended. False rejects a conflicting rotation animation configuration.
+    virtual bool SetRotation(int32_t angle) = 0;
 
     // Lifecycle - a widget on a hidden screen group must not animate or repaint.
     virtual void OnActivated() = 0;
