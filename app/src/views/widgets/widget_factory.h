@@ -53,7 +53,12 @@ public:
     void ValidateChildren(const WidgetConfiguration& owner, std::span<const WidgetConfiguration* const> children) const;
 
     std::unique_ptr<IWidget> CreateWidget(const WidgetType type, const uint32_t id, std::shared_ptr<Frame> parent, const WidgetContext& context);
+    // Childless convenience path: constructs and configures one widget.
     std::unique_ptr<IWidget> CreateWidget(std::shared_ptr<WidgetConfiguration> configuration, std::shared_ptr<Frame> parent, const WidgetContext& context);
+
+    // Injects children, already configured under the widget's child mount in
+    // CHILD_WIDGET_IDS order, then configures the receiving widget once.
+    void ConfigureWidget(IWidget& widget, std::shared_ptr<WidgetConfiguration> configuration, IWidget::Children children) const;
 
     std::vector<WidgetType> GetAvailableTypes() const;
 };

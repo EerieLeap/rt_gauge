@@ -57,9 +57,17 @@ std::unique_ptr<IWidget> WidgetFactory::CreateWidget(const WidgetType type, cons
 
 std::unique_ptr<IWidget> WidgetFactory::CreateWidget(std::shared_ptr<WidgetConfiguration> configuration, std::shared_ptr<Frame> parent, const WidgetContext& context) {
     auto widget = CreateWidget(configuration->type, configuration->id, std::move(parent), context);
-    widget->Configure(configuration);
+    ConfigureWidget(*widget, std::move(configuration), {});
 
     return widget;
+}
+
+void WidgetFactory::ConfigureWidget(IWidget& widget, std::shared_ptr<WidgetConfiguration> configuration, IWidget::Children children) const {
+    // Leaves and the legacy dial path never receive an injection call.
+    if(!children.empty())
+        widget.SetChildren(std::move(children));
+
+    widget.Configure(std::move(configuration));
 }
 
 std::vector<WidgetType> WidgetFactory::GetAvailableTypes() const {
