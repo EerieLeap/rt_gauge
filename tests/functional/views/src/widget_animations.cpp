@@ -123,7 +123,6 @@ public:
     using WidgetBase::WidgetBase;
     ~LifecycleProbe() override { DetachDispatch(); }
     WidgetType GetType() const override { return WidgetType::BasicIcon; }
-    void Detach() { DetachDispatch(); }
     int render_result = 0;
     int theme_result = 0;
     double applied_value = 0;

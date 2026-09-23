@@ -19,6 +19,8 @@ constexpr lv_obj_flag_t presentation_flag = LV_OBJ_FLAG_USER_1;
 Frame::Frame() : lv_object_(nullptr) { }
 
 Frame::~Frame() {
+    ScopedLvglLock lvgl_guard;
+
     child_.reset();
 
     if(lv_object_ != nullptr) {
@@ -38,6 +40,8 @@ Frame::Frame(Frame&& other) noexcept
 }
 
 Frame& Frame::operator=(Frame&& other) noexcept {
+    ScopedLvglLock lvgl_guard;
+
     if(this == &other)
         return *this;
 

@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <exception>
 #include <stdexcept>
 #include <utility>
@@ -108,34 +109,184 @@ WidgetBase::WidgetBase(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext
 }
 
 WidgetBase::~WidgetBase() {
-    DetachDispatch();
+    ScopedLvglLock lvgl_guard;
 
-    // Before any other member goes: each entry unsubscribes as it is destroyed.
-    subscriptions_.clear();
+    DetachDispatch();
+    // Destroy descendants under the LVGL lock while their mounts are still alive.
+    children_.clear();
+}
+
+void WidgetBase::Detach() {
+    DetachDispatch();
 }
 
 void WidgetBase::DetachDispatch() {
     ScopedLvglLock lvgl_guard;
 
+    if(std::exchange(detached_, true))
+        return;
+
+    is_ready_ = false;
+    is_group_active_ = false;
+    container_->SetTrackingEnabled(false);
+    container_->SetProcessingEnabled(false);
+    content_frame_->SetProcessingEnabled(false);
+    OnProcessingSuspended();
+    OnProcessingUpdated(false);
+    was_processing_ = false;
     transform_.Detach();
+    lv_obj_remove_event_cb_with_user_data(content_frame_->GetObject(), ChildMountGeometryCallback, this);
     lv_display_remove_event_cb_with_user_data(lv_obj_get_display(container_->GetObject()), RefreshCallback, this);
+    ThemeManager::GetInstance().UnregisterObserver(this);
     dispatch_guard_->Detach();
+    subscriptions_.clear();
+    outbound_bindings_.clear();
+    for(auto& child : children_)
+        child->Detach();
+}
+
+std::shared_ptr<Frame> WidgetBase::GetChildMount() const {
+    return content_frame_;
+}
+
+std::span<const std::unique_ptr<IWidget>> WidgetBase::GetChildren() const {
+    return children_;
+}
+
+void WidgetBase::SetChildren(Children children) {
+    ScopedLvglLock lvgl_guard;
+
+    if(detached_ || children_injected_ || configuration_ != nullptr || IsReady())
+        throw std::logic_error("Children must be injected once, before configuring the owner.");
+
+    if(!dependencies_.empty())
+        throw std::logic_error("Legacy shared-configuration parts cannot be mixed with owned children.");
+
+    for(size_t i = 0; i < children.size(); ++i) {
+        const auto& child = children[i];
+        if(child == nullptr || child.get() == this)
+            throw std::invalid_argument("An owned child must be a distinct widget instance.");
+
+        const auto configuration = child->GetConfiguration();
+        if(configuration == nullptr || configuration->id != child->GetId() || configuration->type != child->GetType())
+            throw std::invalid_argument("Each child must be independently configured with its own identity.");
+
+        if(lv_obj_get_parent(child->GetContainer()->GetObject()) != content_frame_->GetObject())
+            throw std::invalid_argument("Children must be constructed under the owner's child mount.");
+
+        for(size_t j = 0; j < i; ++j) {
+            if(children[j]->GetId() == child->GetId())
+                throw std::invalid_argument("Owned children must have distinct IDs.");
+        }
+    }
+
+    OnChildrenAttached(children);
+    children_ = std::move(children);
+    children_injected_ = true;
+
+    if(!children_.empty())
+        lv_obj_add_event_cb(content_frame_->GetObject(), ChildMountGeometryCallback, LV_EVENT_SIZE_CHANGED, this);
+
+    for(auto& child : children_)
+        child->OnParentAttached();
+
+    UpdateChildrenLayout();
+}
+
+void WidgetBase::OnChildrenAttached(std::span<const std::unique_ptr<IWidget>> children) {
+    if(!children.empty())
+        throw std::invalid_argument("This widget does not accept owned children.");
+}
+
+void WidgetBase::OnParentAttached() {
+    ScopedLvglLock lvgl_guard;
+    is_owned_ = true;
+    lv_display_remove_event_cb_with_user_data(lv_obj_get_display(container_->GetObject()), RefreshCallback, this);
+}
+
+void WidgetBase::LayoutChildren() { }
+
+void WidgetBase::UpdateChildrenLayout() {
+    if(detached_ || children_.empty() || laying_out_children_)
+        return;
+    laying_out_children_ = true;
+    try {
+        lv_obj_update_layout(content_frame_->GetObject());
+        LayoutChildren();
+    } catch(...) {
+        laying_out_children_ = false;
+        throw;
+    }
+    laying_out_children_ = false;
+}
+
+void WidgetBase::ChildMountGeometryCallback(lv_event_t* event) {
+    ScopedLvglLock lvgl_guard;
+    auto* widget = static_cast<WidgetBase*>(lv_event_get_user_data(event));
+    try {
+        widget->UpdateChildrenLayout();
+    } catch(const std::exception& error) {
+        LOG_ERR("Widget %u child layout failed: %s", widget->id_, error.what());
+    } catch(...) {
+        LOG_ERR("Widget %u child layout failed.", widget->id_);
+    }
 }
 
 int WidgetBase::Render() {
     ScopedLvglLock lvgl_guard;
 
+    if(detached_)
+        return -EINVAL;
+
     is_ready_ = false;
     transform_.BeforeRender();
     UpdateProcessingState();
-
-    const int result = RenderableBase::Render();
-    if(result == 0)
-        transform_.OnRendered();
-    UpdateProcessingState();
-    if(result == 0)
-        ReplayPendingProperties();
+    int result = 0;
+    try {
+        UpdateChildrenLayout();
+        for(auto& child : children_) {
+            result = child->Render();
+            if(result != 0)
+                break;
+        }
+        if(result == 0)
+            result = RenderableBase::Render();
+        if(result == 0)
+            transform_.OnRendered();
+        UpdateProcessingState();
+        if(result == 0)
+            ReplayPendingProperties();
+    } catch(...) {
+        is_ready_ = false;
+        UpdateProcessingState();
+        if(!is_owned_ || parent_->IsProcessingEnabled()) {
+            for(auto& child : children_)
+                child->Synchronize();
+        }
+        throw;
+    }
+    // During recursive rendering, the root releases the processing gate and
+    // synchronizes the whole subtree once, including siblings after a failure.
+    if(!is_owned_ || parent_->IsProcessingEnabled()) {
+        for(auto& child : children_)
+            child->Synchronize();
+    }
     return result;
+}
+
+void WidgetBase::Synchronize() {
+    ScopedLvglLock lvgl_guard;
+
+    if(detached_)
+        return;
+
+    UpdateProcessingState();
+    UpdateChildrenLayout();
+    ReplayPendingProperties();
+    transform_.UpdateAnchor();
+
+    for(auto& child : children_)
+        child->Synchronize();
 }
 
 void WidgetBase::AddSubscription(AnySubscription subscription) {
@@ -153,13 +304,13 @@ bool WidgetBase::IsActive() const {
 
 bool WidgetBase::IsTrackingEligible() const {
     ScopedLvglLock lvgl_guard;
-    return IsActive() && parent_->IsTrackingEnabled();
+    return !detached_ && IsActive() && parent_->IsTrackingEnabled();
 }
 
 bool WidgetBase::IsProcessingEligible() const {
     ScopedLvglLock lvgl_guard;
 
-    if(!is_group_active_ || !IsActive() || !IsVisible()
+    if(detached_ || !is_group_active_ || !IsActive() || !IsVisible()
         || properties_->GetAs<int>(WidgetPropertyType::OPACITY, 255) == 0
         || !parent_->IsProcessingEnabled())
         return false;
@@ -175,6 +326,9 @@ bool WidgetBase::IsAnimationEligible() const {
 void WidgetBase::OnActivated() {
     ScopedLvglLock lvgl_guard;
 
+    if(detached_)
+        return;
+
     is_group_active_ = true;
     UpdateProcessingState();
 
@@ -183,15 +337,25 @@ void WidgetBase::OnActivated() {
 
     for(auto* dependency : dependencies_)
         dependency->OnActivated();
+
+    for(auto& child : children_)
+        child->OnActivated();
 }
 
 void WidgetBase::OnDeactivated() {
     ScopedLvglLock lvgl_guard;
 
+    if(detached_)
+        return;
+
     is_group_active_ = false;
     UpdateProcessingState();
+
     for(auto* dependency : dependencies_)
         dependency->OnDeactivated();
+
+    for(auto& child : children_)
+        child->OnDeactivated();
 }
 
 void WidgetBase::RegisterProperties(WidgetPropertyStore& store) const {
@@ -229,6 +393,11 @@ void WidgetBase::ApplyProperty(WidgetPropertyType type, const ConfigValue& value
 }
 
 void WidgetBase::UpdateProcessingState() {
+    if(detached_)
+        return;
+
+    // A partially rendered composite must not let descendants process or animate.
+    content_frame_->SetProcessingEnabled(children_.empty() || IsReady());
     container_->SetTrackingEnabled(IsActive());
     container_->SetProcessingEnabled(is_group_active_ && IsActive() && IsVisible()
         && properties_->GetAs<int>(WidgetPropertyType::OPACITY, 255) > 0);
@@ -294,6 +463,11 @@ void WidgetBase::NotifyPropertyChanged(WidgetPropertyType type, const ConfigValu
         pending_properties_.set(static_cast<size_t>(type));
 
     ReplayPendingProperties();
+
+    if(WidgetPropertyValidator::IsManagementProperty(type)) {
+        for(auto& child : children_)
+            child->Synchronize();
+    }
 }
 
 void WidgetBase::SetPropertyLocal(WidgetPropertyType type, const ConfigValue& value) {
@@ -464,12 +638,38 @@ void WidgetBase::RefreshCallback(lv_event_t* event) {
     ScopedLvglLock lvgl_guard;
 
     auto* widget = static_cast<WidgetBase*>(lv_event_get_user_data(event));
-    widget->UpdateProcessingState();
-    widget->ReplayPendingProperties();
-    widget->transform_.UpdateAnchor();
+    widget->Synchronize();
 }
 
 void WidgetBase::Configure(std::shared_ptr<WidgetConfiguration> configuration) {
+    ScopedLvglLock lvgl_guard;
+
+    if(detached_)
+        throw std::logic_error("A detached widget cannot be configured.");
+
+    if((children_injected_ || is_owned_) && configuration_ != nullptr)
+        throw std::logic_error("Owned composition requires reconstruction to change configuration.");
+
+    if(children_injected_) {
+        if(configuration == nullptr || configuration->id != id_ || configuration->type != GetType())
+            throw std::invalid_argument("The owner must retain its configured identity.");
+
+        const auto it = configuration->properties.find(WidgetPropertyType::CHILD_WIDGET_IDS);
+        const auto* ids = it != configuration->properties.end()
+            ? std::get_if<std::pmr::vector<int>>(&it->second)
+            : nullptr;
+
+        if((ids == nullptr && !children_.empty()) || (ids != nullptr && ids->size() != children_.size()))
+            throw std::invalid_argument("Injected children must match CHILD_WIDGET_IDS in order.");
+
+        for(size_t i = 0; i < children_.size(); ++i) {
+            if((*ids)[i] < 0 || static_cast<uint32_t>((*ids)[i]) != children_[i]->GetId())
+                throw std::invalid_argument("Injected children must match CHILD_WIDGET_IDS in order.");
+        }
+    } else {
+        OnChildrenAttached({});
+    }
+
     ApplyConfiguration(std::move(configuration), true);
 }
 
@@ -560,6 +760,8 @@ void WidgetBase::SetSizePx(const WidgetSize& size_px) {
 
     container_->SetHeight(size_px.height, true)
         .SetWidth(size_px.width, true);
+
+    UpdateChildrenLayout();
     transform_.UpdateAnchor();
 }
 

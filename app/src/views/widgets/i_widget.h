@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <vector>
 
 #include <lvgl.h>
@@ -23,6 +24,8 @@ using eerie_leap::domain::ui_domain::models::WidgetType;
 
 class IWidget : public virtual IRenderable {
 public:
+    using Children = std::vector<std::unique_ptr<IWidget>>;
+
     virtual ~IWidget() = default;
 
     virtual WidgetType GetType() const = 0;
@@ -36,15 +39,27 @@ public:
     // Lifecycle - a widget on a hidden screen group must not animate or repaint.
     virtual void OnActivated() = 0;
     virtual void OnDeactivated() = 0;
+    // A root refreshes its owned subtree. Adoption removes the child's independent
+    // display refresh; Detach permanently stops dispatch before destruction.
+    virtual void Synchronize() = 0;
+    virtual void OnParentAttached() = 0;
+    virtual void Detach() = 0;
+
+    // After configuration preflight, build children directly under this stable
+    // mount and configure them separately. Transfer ownership once, before
+    // configuring/rendering the receiver; later changes require reconstruction.
+    virtual std::shared_ptr<Frame> GetChildMount() const = 0;
+    virtual void SetChildren(Children children) = 0;
+    virtual std::span<const std::unique_ptr<IWidget>> GetChildren() const = 0;
 
     // Configuration
     virtual void Configure(std::shared_ptr<WidgetConfiguration> configuration) = 0;
     virtual std::shared_ptr<WidgetConfiguration> GetConfiguration() const = 0;
     virtual bool IsSmoothed() const = 0;
 
-    // Every property a configuration for this widget may carry: what it reads itself, plus what it
-    // forwards to a part it builds. Answers "what can I configure here?" without an instance
-    // having been configured, and is derived from the registration itself so it cannot drift.
+    // Configurable keys for this widget, without requiring configuration first.
+    // Owned children expose their own keys independently; composites additionally
+    // report CHILD_WIDGET_IDS as structural metadata. Legacy dial parts still share keys.
     virtual std::vector<WidgetPropertyType> GetSupportedProperties() const = 0;
 
     // Layout

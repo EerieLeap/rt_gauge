@@ -33,6 +33,16 @@ using eerie_leap::subsys::event_bus::EventData;
 using eerie_leap::subsys::event_bus::IEventChannel;
 
 class WidgetBase : public IWidget, public RenderableBase {
+private:
+    Children children_;
+    bool children_injected_ = false;
+    bool is_owned_ = false;
+    bool detached_ = false;
+    bool laying_out_children_ = false;
+
+    void UpdateChildrenLayout();
+    static void ChildMountGeometryCallback(lv_event_t* event);
+
 protected:
     using PropertySet = std::bitset<static_cast<size_t>(WidgetPropertyType::COUNT)>;
 
@@ -51,8 +61,8 @@ protected:
 
     std::shared_ptr<WidgetConfiguration> configuration_;
     std::shared_ptr<WidgetPropertyStore> properties_;
-    WidgetPosition position_px_;
-    WidgetSize size_px_;
+    WidgetPosition position_px_ {};
+    WidgetSize size_px_ {};
 
     std::shared_ptr<Frame> parent_;
     // Stable presentation target beneath the public layout/management container.
@@ -61,6 +71,7 @@ protected:
 
     std::vector<AnySubscription> subscriptions_;
     std::vector<OutboundBinding> outbound_bindings_;
+    // Legacy dial parts share configuration until Step 8; owned children never use this path.
     std::vector<WidgetBase*> dependencies_;
     // Stored properties that still need visual application, including initial state and
     // interrupted animation targets as well as updates received while suspended.
@@ -104,6 +115,14 @@ protected:
     // property changes again - subscriptions above all.
     virtual void OnConfigured();
 
+    // Check the receiver's runtime count/order before caching named interface
+    // handles. Throw before caching on rejection; these handles live with the owner.
+    // Configuration validation remains at the acceptance boundary.
+    virtual void OnChildrenAttached(std::span<const std::unique_ptr<IWidget>> children);
+    // Children default to filling the mount. Composites can apply local geometry;
+    // this hook never changes semantic child order or LVGL sibling stacking order.
+    virtual void LayoutChildren();
+
     // Reacts to a value already written to the store. The caller holds the LVGL lock and the
     // dispatch guard, in that order.
     void NotifyPropertyChanged(WidgetPropertyType type, const ConfigValue& value, PropertyChangeEffect effect);
@@ -140,7 +159,13 @@ public:
     WidgetBase(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context);
     ~WidgetBase() override;
 
-    int Render() override;
+    int Render() final;
+    std::shared_ptr<Frame> GetChildMount() const final;
+    void SetChildren(Children children) final;
+    std::span<const std::unique_ptr<IWidget>> GetChildren() const final;
+    void Synchronize() final;
+    void OnParentAttached() final;
+    void Detach() final;
     bool SetRotation(int32_t angle) final;
     uint32_t GetId() const override;
     bool IsSmoothed() const override;
