@@ -10,6 +10,7 @@
 #include "utilities/memory/memory_resource_manager.h"
 
 #include "domain/ui_domain/models/ui_configuration.h"
+#include "domain/ui_domain/models/widget_composition.h"
 #include "domain/ui_domain/models/widget_type.h"
 #include "domain/ui_domain/models/widget_property.h"
 #include "domain/ui_domain/models/widget_fill_mode.h"
@@ -701,4 +702,273 @@ ZTEST(ui_configuration_validator, test_undefined_ui_properties_are_invalid) {
 
         zassert_false(Validates(*configuration), "Accepted undefined UI property ID %u.", static_cast<unsigned>(type));
     }
+}
+
+namespace {
+
+std::shared_ptr<ScreenConfiguration> MakeCompositionScreen(std::initializer_list<uint32_t> ids) {
+    auto screen = MakeScreen(42, 1);
+    screen->widget_configurations.clear();
+    for(auto id : ids)
+        screen->widget_configurations.push_back(MakeWidget(id));
+    return screen;
+}
+
+void SetChildren(WidgetConfiguration& widget, std::initializer_list<int> ids) {
+    widget.properties[WidgetPropertyType::CHILD_WIDGET_IDS] =
+        std::pmr::vector<int>(ids, widget.properties.get_allocator().resource());
+}
+
+void ExpectCompositionError(const ScreenConfiguration& screen, std::initializer_list<const char*> fragments) {
+    std::string message;
+    try {
+        UiConfigurationValidator::Validate(screen);
+    } catch(const std::invalid_argument& error) {
+        message = error.what();
+    }
+    zassert_false(message.empty(), "Expected composition rejection");
+    zassert_true(message.find("Screen ID: 42") != std::string::npos, "%s", message.c_str());
+    for(const auto* fragment : fragments)
+        zassert_true(message.find(fragment) != std::string::npos, "Missing '%s' in '%s'", fragment, message.c_str());
+}
+
+} // namespace
+
+ZTEST(ui_configuration_validator, test_composition_empty_screen_and_empty_child_list) {
+    auto screen = MakeCompositionScreen({});
+    UiConfigurationValidator::Validate(*screen);
+    auto empty = WidgetComposition::Build(*screen);
+    zassert_true(empty.nodes.empty());
+    zassert_true(empty.children.empty());
+    zassert_true(empty.roots.empty());
+    zassert_true(empty.postorder.empty());
+    screen->AddWidget(MakeWidget(0));
+    SetChildren(*screen->widget_configurations[0], {});
+    UiConfigurationValidator::Validate(*screen);
+    auto single = WidgetComposition::Build(*screen);
+    zassert_equal(single.roots.size(), 1);
+    zassert_equal(single.roots[0], 0);
+    zassert_equal(single.postorder[0], 0);
+    zassert_false(single.nodes[0].parent.has_value());
+}
+
+ZTEST(ui_configuration_validator, test_composition_forward_references_preserve_order_and_id_boundaries) {
+    auto screen = MakeCompositionScreen({ 12, 7, 9, 0, UINT32_MAX, INT32_MAX });
+    SetChildren(*screen->widget_configurations[2], { INT32_MAX, 7, 0 });
+    SetChildren(*screen->widget_configurations[1], { 12 });
+    // Neither IDs nor z-order define the owner's semantic child order.
+    screen->widget_configurations[5]->z_index = 100;
+    screen->widget_configurations[1]->z_index = -100;
+    UiConfigurationValidator::Validate(*screen);
+    auto graph = WidgetComposition::Build(*screen);
+    zassert_equal(graph.roots.size(), 2);
+    zassert_equal(graph.roots[0], 2);
+    zassert_equal(graph.roots[1], 4);
+    const size_t expected_children[] = { 5, 1, 3 };
+    const size_t expected_postorder[] = { 5, 0, 1, 3, 2, 4 };
+    zassert_equal(graph.GetChildren(2).size(), std::size(expected_children));
+    for(size_t i = 0; i < std::size(expected_children); ++i)
+        zassert_equal(graph.GetChildren(2)[i], expected_children[i]);
+    zassert_equal(graph.postorder.size(), std::size(expected_postorder));
+    for(size_t i = 0; i < std::size(expected_postorder); ++i)
+        zassert_equal(graph.postorder[i], expected_postorder[i]);
+    zassert_equal(*graph.nodes[0].parent, 1);
+    zassert_equal(*graph.nodes[1].parent, 2);
+}
+
+ZTEST(ui_configuration_validator, test_composition_rejects_duplicate_definitions) {
+    auto screen = MakeCompositionScreen({ 0, 0 });
+    ExpectCompositionError(*screen, { "Widget ID: 0", "duplicate widget IDs" });
+}
+
+ZTEST(ui_configuration_validator, test_composition_rejects_signed_and_missing_references) {
+    auto screen = MakeCompositionScreen({ 9, UINT32_MAX });
+    for(int id : { -1, INT32_MIN }) {
+        SetChildren(*screen->widget_configurations[0], { id });
+        ExpectCompositionError(*screen, { "Widget ID: 9", "Child index 0", "between 0 and INT32_MAX" });
+    }
+    SetChildren(*screen->widget_configurations[0], { 12 });
+    // A definition in another screen cannot satisfy the reference.
+    auto other_screen = MakeCompositionScreen({ 12 });
+    UiConfigurationValidator::Validate(*other_screen);
+    ExpectCompositionError(*screen, { "Widget ID: 9", "Child index 0, ID 12", "this screen" });
+}
+
+ZTEST(ui_configuration_validator, test_composition_rejects_wrong_reference_kinds_without_coercion) {
+    auto screen = MakeCompositionScreen({ 9 });
+    for(const ConfigValue& value : { ConfigValue { 9 }, ConfigValue { 9.0 }, ConfigValue { true },
+        ConfigValue { std::pmr::string("9") }, ConfigValue {} }) {
+        screen->widget_configurations[0]->properties[WidgetPropertyType::CHILD_WIDGET_IDS] = value;
+        ExpectCompositionError(*screen, { "Widget ID: 9", "integer list" });
+    }
+}
+
+ZTEST(ui_configuration_validator, test_composition_rejects_self_duplicate_and_shared_children) {
+    auto screen = MakeCompositionScreen({ 9, 12, 3 });
+    auto& first = *screen->widget_configurations[0];
+    SetChildren(first, { 9 });
+    ExpectCompositionError(*screen, { "Widget ID: 9", "Child index 0, ID 9", "self-reference" });
+    SetChildren(first, { 12, 12 });
+    ExpectCompositionError(*screen, { "Widget ID: 9", "Child index 1, ID 12", "duplicate reference" });
+    SetChildren(first, { 12 });
+    SetChildren(*screen->widget_configurations[2], { 12 });
+    ExpectCompositionError(*screen, { "Widget ID: 3", "Child index 0, ID 12", "already owned by widget 9" });
+}
+
+ZTEST(ui_configuration_validator, test_composition_finds_cycles_with_and_without_unrelated_roots) {
+    for(bool with_root : { false, true }) {
+        auto screen = MakeCompositionScreen({ 9, 12, 3 });
+        SetChildren(*screen->widget_configurations[0], { 12 });
+        SetChildren(*screen->widget_configurations[1], { 3 });
+        SetChildren(*screen->widget_configurations[2], { 9 });
+        if(with_root)
+            screen->widget_configurations.insert(screen->widget_configurations.begin(), MakeWidget(99));
+        ExpectCompositionError(*screen, { "Widget ID: 3", "Child index 0, ID 9", "cycle 9 -> 12 -> 3 -> 9" });
+    }
+}
+
+ZTEST(ui_configuration_validator, test_composition_accepts_exact_node_and_edge_limits) {
+    auto screen = MakeCompositionScreen({ 0 });
+    std::pmr::vector<int> children(Mrm::GetDefaultPmr());
+    for(size_t i = 1; i < WidgetComposition::max_nodes; ++i) {
+        screen->widget_configurations.push_back(MakeWidget(i));
+        children.push_back(i);
+    }
+    screen->widget_configurations[0]->properties[WidgetPropertyType::CHILD_WIDGET_IDS] = std::move(children);
+    UiConfigurationValidator::Validate(*screen);
+    auto graph = WidgetComposition::Build(*screen);
+    zassert_equal(graph.nodes.size(), 32);
+    zassert_equal(graph.children.size(), 31);
+    zassert_equal(graph.GetChildren(0).size(), 31);
+    zassert_equal(graph.roots.size(), 1);
+    zassert_equal(graph.postorder.back(), 0);
+    // Even an invalid 32nd edge is rejected by the resource limit before graph traversal.
+    std::get<std::pmr::vector<int>>(screen->widget_configurations[0]->properties[WidgetPropertyType::CHILD_WIDGET_IDS])
+        .push_back(1);
+    ExpectCompositionError(*screen, { "Widget ID: 0", "31 edges" });
+    screen->AddWidget(MakeWidget(32));
+    ExpectCompositionError(*screen, { "32 nodes" });
+}
+
+ZTEST(ui_configuration_validator, test_composition_depth_counts_root_and_is_independent_of_definition_order) {
+    for(bool reversed : { false, true }) {
+        auto screen = MakeCompositionScreen({});
+        for(size_t i = 0; i < WidgetComposition::max_depth; ++i) {
+            auto widget = MakeWidget(i);
+            if(i + 1 < WidgetComposition::max_depth)
+                SetChildren(*widget, { static_cast<int>(i + 1) });
+            screen->widget_configurations.push_back(widget);
+        }
+        if(reversed)
+            std::reverse(screen->widget_configurations.begin(), screen->widget_configurations.end());
+        UiConfigurationValidator::Validate(*screen);
+        auto graph = WidgetComposition::Build(*screen);
+        zassert_equal(graph.postorder.size(), 8);
+        auto root = MakeWidget(99);
+        SetChildren(*root, { 0 });
+        screen->widget_configurations.push_back(root);
+        ExpectCompositionError(*screen, { "Widget ID: 99", "8 levels", "root is level 1" });
+    }
+}
+
+ZTEST(ui_configuration_validator, test_composition_separates_root_grid_and_child_local_geometry) {
+    auto screen = MakeCompositionScreen({ 9, 12 });
+    SetChildren(*screen->widget_configurations[0], { 12 });
+    auto& child = *screen->widget_configurations[1];
+    child.position_grid = { -100, 500 };
+    child.size_grid = { 0, 999 };
+    child.properties[WidgetPropertyType::ANCHOR_POINT_X] = 2000;
+    UiConfigurationValidator::Validate(*screen); // The owner's view contract decides local layout.
+    child.properties[WidgetPropertyType::ANCHOR_POINT_X] = -2;
+    ExpectCompositionError(*screen, { "Widget ID: 12", "anchor coordinate" });
+    child.properties.clear();
+    auto& root = *screen->widget_configurations[0];
+    root.size_grid = { 0, 1 };
+    ExpectCompositionError(*screen, { "Widget ID: 9", "size must be greater than 0" });
+    root.size_grid = { 4, 1 };
+    ExpectCompositionError(*screen, { "Widget ID: 9", "width cannot exceed" });
+    root.size_grid = { 1, 4 };
+    ExpectCompositionError(*screen, { "Widget ID: 9", "height cannot exceed" });
+    root.size_grid = { 1, 1 };
+    root.position_grid = { -1, 0 };
+    ExpectCompositionError(*screen, { "Widget ID: 9", "position cannot be negative" });
+    root.position_grid = { 3, 0 };
+    ExpectCompositionError(*screen, { "Widget ID: 9", "position X" });
+    root.position_grid = { 0, 3 };
+    ExpectCompositionError(*screen, { "Widget ID: 9", "position Y" });
+}
+
+ZTEST(ui_configuration_validator, test_composition_checks_child_types_properties_and_bindings) {
+    auto screen = MakeCompositionScreen({ 9, 12 });
+    SetChildren(*screen->widget_configurations[0], { 12 });
+    auto& child = *screen->widget_configurations[1];
+    child.type = static_cast<WidgetType>(255);
+    ExpectCompositionError(*screen, { "Widget ID: 12", "Invalid widget type" });
+    child.type = WidgetType::IndicatorDial; // Domain graph has no widget-specific count rule.
+    UiConfigurationValidator::Validate(*screen);
+    for(auto direction : { PropertyBindingDirection::In, PropertyBindingDirection::Out, PropertyBindingDirection::InOut }) {
+        auto binding = MakeSensorBinding();
+        binding.target = WidgetPropertyType::CHILD_WIDGET_IDS;
+        binding.direction = direction;
+        child.bindings = { binding };
+        ExpectCompositionError(*screen, { "Widget ID: 12", "structural property" });
+    }
+}
+
+ZTEST(ui_configuration_validator, test_composition_propagates_screen_allocator) {
+    std::array<std::byte, 2048> storage;
+    std::pmr::monotonic_buffer_resource resource(storage.data(), storage.size(), std::pmr::null_memory_resource());
+    auto screen = make_shared_pmr<ScreenConfiguration>(&resource);
+    screen->id = 42;
+    screen->grid = { .width = 3, .height = 3 };
+    screen->widget_configurations.push_back(MakeWidget(9));
+    screen->widget_configurations.push_back(MakeWidget(12));
+    SetChildren(*screen->widget_configurations[0], { 12 });
+    UiConfigurationValidator::Validate(*screen);
+    auto graph = WidgetComposition::Build(*screen);
+    auto moved = std::move(graph);
+    zassert_equal(moved.nodes.get_allocator().resource(), &resource);
+    zassert_equal(moved.children.get_allocator().resource(), &resource);
+    zassert_equal(moved.roots.get_allocator().resource(), &resource);
+    zassert_equal(moved.postorder.get_allocator().resource(), &resource);
+    zassert_equal(moved.GetChildren(0)[0], 1);
+}
+
+ZTEST(ui_configuration_validator, test_composition_rejects_null_definitions_and_zero_grid) {
+    auto screen = MakeCompositionScreen({ 9 });
+    screen->widget_configurations.push_back(nullptr);
+    ExpectCompositionError(*screen, { "null widget definition" });
+    screen->widget_configurations.pop_back();
+    screen->grid.width = 0;
+    ExpectCompositionError(*screen, { "Grid dimensions" });
+}
+
+ZTEST(ui_configuration_validator, test_composition_size_limits_are_checked_before_graph_allocation) {
+    class AllocationGate : public std::pmr::memory_resource {
+        void* do_allocate(size_t bytes, size_t alignment) override {
+            if(reject_allocations)
+                throw std::bad_alloc();
+            return std::pmr::new_delete_resource()->allocate(bytes, alignment);
+        }
+        void do_deallocate(void* pointer, size_t bytes, size_t alignment) override {
+            std::pmr::new_delete_resource()->deallocate(pointer, bytes, alignment);
+        }
+        bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override {
+            return this == &other;
+        }
+    public:
+        bool reject_allocations = false;
+    } resource;
+
+    auto screen = make_shared_pmr<ScreenConfiguration>(&resource);
+    screen->id = 42;
+    screen->grid = { .width = 3, .height = 3 };
+    for(size_t i = 0; i < 33; ++i)
+        screen->widget_configurations.push_back(MakeWidget(i));
+    resource.reject_allocations = true;
+    ExpectCompositionError(*screen, { "32 nodes" });
+    screen->widget_configurations.pop_back();
+    screen->widget_configurations[0]->properties[WidgetPropertyType::CHILD_WIDGET_IDS] =
+        std::pmr::vector<int>(32, 1, Mrm::GetDefaultPmr());
+    ExpectCompositionError(*screen, { "Widget ID: 0", "Child index 31, ID 1", "31 edges" });
 }

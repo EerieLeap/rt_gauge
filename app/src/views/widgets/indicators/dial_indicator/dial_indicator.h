@@ -36,6 +36,11 @@ public:
     uint32_t GetAngleForValue(float value);
 
 public:
+    // Index 0 is the driven needle. Its outer geometry is a fill-slot placeholder:
+    // position (0, 0), size (1, 1); renderer dimensions/offsets/anchors stay local.
+    static void ValidateChildren(const WidgetConfiguration& configuration,
+        std::span<const WidgetConfiguration* const> children);
+
     explicit DialIndicator(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context);
     ~DialIndicator() override;
 

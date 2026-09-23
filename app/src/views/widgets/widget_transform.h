@@ -46,6 +46,8 @@ public:
     bool ApplyProperty(WidgetPropertyType type, const ConfigValue& value);
     void Synchronize();
     bool SetRotation(int32_t angle);
+    // Object-free check for a composite that will drive this widget's rotation.
+    static bool CanSetRotation(const WidgetConfiguration& configuration);
     // Optional drawable bounds; otherwise anchors use the presentation frame.
     // Renderers supply this after rendering. BeforeRender releases the old target.
     void SetTargetFrame(std::shared_ptr<Frame> target);

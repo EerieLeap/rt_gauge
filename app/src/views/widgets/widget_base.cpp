@@ -70,6 +70,16 @@ bool SelectorMatches(const EventData& selector, const EventData& candidate) {
 
 } // namespace
 
+void WidgetBase::ValidateChildren(
+    const WidgetConfiguration&,
+    std::span<const WidgetConfiguration* const> children
+) {
+    if(!children.empty()) {
+        throw std::invalid_argument("Leaf widget expects 0 children; child index 0, ID "
+            + std::to_string(children.front()->id) + " is not allowed.");
+    }
+}
+
 WidgetBase::WidgetBase(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context)
     : id_(id), properties_(std::make_shared<WidgetPropertyStore>()), parent_(std::move(parent)),
     dispatch_guard_(std::make_shared<WidgetDispatchGuard>(this)),

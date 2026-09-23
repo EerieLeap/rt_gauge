@@ -1,9 +1,13 @@
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <variant>
 
+#include "domain/ui_domain/models/widget_composition.h"
 #include "domain/ui_domain/models/widget_direction.h"
 #include "domain/ui_domain/models/widget_fill_mode.h"
 #include "domain/ui_domain/models/widget_property.h"
@@ -182,6 +186,149 @@ void UiConfigurationValidator::Validate(const UiConfiguration& configuration) {
     ValidateScreens(configuration);
 }
 
+void UiConfigurationValidator::Validate(const ScreenConfiguration& configuration, const ChildValidator& validate_children) {
+    const auto& definitions = configuration.widget_configurations;
+    if(definitions.size() > WidgetComposition::max_nodes)
+        InvalidScreenConfiguration(configuration.id, "Composition exceeds the limit of 32 nodes.");
+
+    // Bound all graph storage and work before allocating the index or traversal plan.
+    size_t edge_count = 0;
+    for(const auto& definition : definitions) {
+        if(definition == nullptr)
+            InvalidScreenConfiguration(configuration.id, "Composition contains a null widget definition.");
+        auto it = definition->properties.find(WidgetPropertyType::CHILD_WIDGET_IDS);
+        if(it == definition->properties.end())
+            continue;
+        const auto* ids = std::get_if<std::pmr::vector<int>>(&it->second);
+        if(ids == nullptr)
+            InvalidWidgetConfiguration(configuration.id, definition->id, "CHILD_WIDGET_IDS must be an integer list.");
+        if(ids->size() > WidgetComposition::max_edges - edge_count) {
+            const auto slot = WidgetComposition::max_edges - edge_count;
+            InvalidWidgetConfiguration(configuration.id, definition->id,
+                "Child index " + std::to_string(slot) + ", ID " + std::to_string((*ids)[slot])
+                + ": composition exceeds the limit of 31 edges.");
+        }
+        edge_count += ids->size();
+    }
+
+    if(configuration.grid.width == 0 || configuration.grid.height == 0)
+        InvalidScreenConfiguration(configuration.id, "Grid dimensions must be greater than 0.");
+    ValidateWidgetType(configuration);
+    ValidateWidgetProperties(configuration);
+    ValidateWidgetBindings(configuration);
+
+    auto* resource = definitions.get_allocator().resource();
+    // Validation uses temporary ownership/traversal state, not a reusable composition.
+    std::array<std::optional<size_t>, WidgetComposition::max_nodes> parents {};
+    std::array<std::span<const int>, WidgetComposition::max_nodes> child_ids {};
+    std::pmr::unordered_map<uint32_t, size_t> indices(resource);
+    indices.reserve(definitions.size());
+    for(size_t i = 0; i < definitions.size(); ++i) {
+        if(!indices.emplace(definitions[i]->id, i).second)
+            InvalidWidgetConfiguration(configuration.id, definitions[i]->id, "Screen cannot contain duplicate widget IDs.");
+    }
+
+    for(size_t i = 0; i < definitions.size(); ++i) {
+        const auto& owner = *definitions[i];
+        auto it = owner.properties.find(WidgetPropertyType::CHILD_WIDGET_IDS);
+        if(it == owner.properties.end())
+            continue;
+        const auto& ids = std::get<std::pmr::vector<int>>(it->second);
+        child_ids[i] = ids;
+        for(size_t slot = 0; slot < ids.size(); ++slot) {
+            const auto id = ids[slot];
+            const auto edge = "Child index " + std::to_string(slot) + ", ID " + std::to_string(id) + ": ";
+            if(id < 0 || static_cast<uint64_t>(id) > INT32_MAX)
+                InvalidWidgetConfiguration(configuration.id, owner.id, edge + "ID must be between 0 and INT32_MAX.");
+            auto child = indices.find(static_cast<uint32_t>(id));
+            if(child == indices.end())
+                InvalidWidgetConfiguration(configuration.id, owner.id, edge + "target does not exist in this screen.");
+            if(child->second == i)
+                InvalidWidgetConfiguration(configuration.id, owner.id, edge + "self-reference is not allowed.");
+            auto& parent = parents[child->second];
+            if(parent.has_value()) {
+                if(*parent == i)
+                    InvalidWidgetConfiguration(configuration.id, owner.id, edge + "duplicate reference in this owner.");
+                InvalidWidgetConfiguration(configuration.id, owner.id,
+                    edge + "already owned by widget " + std::to_string(definitions[*parent]->id) + ".");
+            }
+            parent = i;
+        }
+    }
+
+    // Iterative DFS also visits components with no roots. A hostile cycle cannot
+    // recurse through a Zephyr stack, and forward definition order does not affect depth.
+    struct Visit { size_t index; size_t next_child; };
+    std::array<Visit, WidgetComposition::max_nodes> stack;
+    std::array<uint8_t, WidgetComposition::max_nodes> state {};
+    std::array<size_t, WidgetComposition::max_nodes> height {};
+    auto visit = [&](size_t start) {
+        if(state[start] != 0)
+            return;
+        size_t stack_size = 1;
+        stack[0] = { start, 0 };
+        state[start] = 1;
+        while(stack_size != 0) {
+            auto& current = stack[stack_size - 1];
+            const auto children = child_ids[current.index];
+            if(current.next_child < children.size()) {
+                const size_t slot = current.next_child++;
+                const size_t child = indices.at(static_cast<uint32_t>(children[slot]));
+                if(state[child] == 1) {
+                    std::string path;
+                    bool in_cycle = false;
+                    for(size_t j = 0; j < stack_size; ++j) {
+                        in_cycle |= stack[j].index == child;
+                        if(in_cycle)
+                            path += std::to_string(definitions[stack[j].index]->id) + " -> ";
+                    }
+                    path += std::to_string(definitions[child]->id);
+                    InvalidWidgetConfiguration(configuration.id, definitions[current.index]->id,
+                        "Child index " + std::to_string(slot) + ", ID " + std::to_string(definitions[child]->id)
+                        + ": cycle " + path + ".");
+                }
+                if(state[child] == 0) {
+                    state[child] = 1;
+                    stack[stack_size++] = { child, 0 };
+                }
+            } else {
+                size_t depth = 1;
+                for(size_t slot = 0; slot < children.size(); ++slot) {
+                    const auto child = indices.at(static_cast<uint32_t>(children[slot]));
+                    depth = std::max(depth, height[child] + 1);
+                    if(depth > WidgetComposition::max_depth)
+                        InvalidWidgetConfiguration(configuration.id, definitions[current.index]->id,
+                            "Child index " + std::to_string(slot) + ", ID " + std::to_string(definitions[child]->id)
+                            + ": composition exceeds 8 levels of nesting (root is level 1).");
+                }
+                height[current.index] = depth;
+                state[current.index] = 2;
+                --stack_size;
+            }
+        }
+    };
+    for(size_t i = 0; i < definitions.size(); ++i)
+        visit(i);
+
+    const auto ownership = std::span(parents).first(definitions.size());
+    ValidateWidgetSize(configuration, ownership);
+    ValidateWidgetPosition(configuration, ownership);
+
+    if(validate_children) {
+        std::array<const WidgetConfiguration*, WidgetComposition::max_edges> children;
+        for(size_t i = 0; i < definitions.size(); ++i) {
+            const auto ids = child_ids[i];
+            for(size_t slot = 0; slot < ids.size(); ++slot)
+                children[slot] = definitions[indices.at(static_cast<uint32_t>(ids[slot]))].get();
+            try {
+                validate_children(*definitions[i], std::span(children).first(ids.size()));
+            } catch(const std::invalid_argument& error) {
+                InvalidWidgetConfiguration(configuration.id, definitions[i]->id, error.what());
+            }
+        }
+    }
+}
+
 void UiConfigurationValidator::ValidateScreenCount(const UiConfiguration& configuration) {
     if(configuration.screen_configurations.size() > max_screen_count)
         InvalidUiConfiguration("Configuration cannot contain more than " + std::to_string(max_screen_count) + " screens.");
@@ -292,8 +439,12 @@ void UiConfigurationValidator::ValidateWidgetType(const ScreenConfiguration& scr
     }
 }
 
-void UiConfigurationValidator::ValidateWidgetSize(const ScreenConfiguration& screen_configuration) {
-    for(const auto& widget_configuration : screen_configuration.widget_configurations) {
+void UiConfigurationValidator::ValidateWidgetSize(const ScreenConfiguration& screen_configuration,
+    std::span<const std::optional<size_t>> parents) {
+    for(size_t i = 0; i < screen_configuration.widget_configurations.size(); ++i) {
+        if(!parents.empty() && parents[i].has_value())
+            continue;
+        const auto& widget_configuration = screen_configuration.widget_configurations[i];
         if(widget_configuration->size_grid.width == 0 || widget_configuration->size_grid.height == 0)
             InvalidWidgetConfiguration(
                 screen_configuration.id,
@@ -317,8 +468,12 @@ void UiConfigurationValidator::ValidateWidgetSize(const ScreenConfiguration& scr
     }
 }
 
-void UiConfigurationValidator::ValidateWidgetPosition(const ScreenConfiguration& screen_configuration) {
-    for(const auto& widget_configuration : screen_configuration.widget_configurations) {
+void UiConfigurationValidator::ValidateWidgetPosition(const ScreenConfiguration& screen_configuration,
+    std::span<const std::optional<size_t>> parents) {
+    for(size_t i = 0; i < screen_configuration.widget_configurations.size(); ++i) {
+        if(!parents.empty() && parents[i].has_value())
+            continue;
+        const auto& widget_configuration = screen_configuration.widget_configurations[i];
         if(widget_configuration->position_grid.x < 0 || widget_configuration->position_grid.y < 0)
             InvalidWidgetConfiguration(
                 screen_configuration.id,

@@ -1,3 +1,6 @@
+#include <stdexcept>
+#include <string>
+
 #include <zephyr/kernel.h>
 
 #include "domain/ui_domain/models/widget_property.h"
@@ -12,6 +15,21 @@ namespace eerie_leap::views::widgets::indicators {
 using namespace eerie_leap::utilities::type;
 using namespace eerie_leap::domain::ui_domain::models;
 using namespace eerie_leap::views::utilitites;
+
+void DialIndicator::ValidateChildren(const WidgetConfiguration&,
+    std::span<const WidgetConfiguration* const> children) {
+    if(children.size() != 1)
+        throw std::invalid_argument("Dial expects exactly 1 child: index 0 is the needle; received "
+            + std::to_string(children.size()) + ".");
+
+    const auto& needle = *children.front();
+    const auto prefix = "Child index 0, ID " + std::to_string(needle.id) + " (needle): ";
+    if(needle.position_grid.x != 0 || needle.position_grid.y != 0
+        || needle.size_grid.width != 1 || needle.size_grid.height != 1)
+        throw std::invalid_argument(prefix + "fill slot requires position (0, 0) and size (1, 1).");
+    if(!WidgetTransform::CanSetRotation(needle))
+        throw std::invalid_argument(prefix + "driven rotation conflicts with a rotation animation or inbound ANIMATION_TYPE binding.");
+}
 
 DialIndicator::DialIndicator(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context)
     : IndicatorBase(id, std::move(parent), std::move(context)) {

@@ -3,6 +3,7 @@
 #include <bitset>
 #include <memory>
 #include <optional>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -131,6 +132,11 @@ protected:
     void DetachDispatch();
 
 public:
+    // Object-free composition contract. Leaves accept absent/empty child lists.
+    // Composites hide this with their own count, order, and local-layout checks.
+    static void ValidateChildren(const WidgetConfiguration& configuration,
+        std::span<const WidgetConfiguration* const> children);
+
     WidgetBase(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context);
     ~WidgetBase() override;
 

@@ -1,3 +1,6 @@
+#include <stdexcept>
+#include <string>
+
 #include "views/widgets/basic/icon_widget/icon_widget.h"
 #include "views/widgets/basic/arc_icon_widget/arc_icon_widget.h"
 
@@ -30,23 +33,26 @@ WidgetFactory& WidgetFactory::GetInstance() {
     return instance;
 }
 
-template<typename T>
-void WidgetFactory::RegisterWidget(const WidgetType type) {
-    creators_[type] = [](const uint32_t id, std::shared_ptr<Frame> parent, const WidgetContext& context) -> std::unique_ptr<IWidget> {
-        return std::make_unique<T>(id, std::move(parent), context);
-    };
+void WidgetFactory::RegisterWidget(const WidgetType type, WidgetCreator creator, ChildValidator validator) {
+    registrations_[type] = { std::move(creator), validator ? std::move(validator) : WidgetBase::ValidateChildren };
 }
 
-void WidgetFactory::RegisterWidget(const WidgetType type, WidgetCreator creator) {
-    creators_[type] = std::move(creator);
+void WidgetFactory::ValidateChildren(
+    const WidgetConfiguration& owner,
+    std::span<const WidgetConfiguration* const> children
+) const {
+    const auto it = registrations_.find(owner.type);
+    if(it == registrations_.end())
+        throw std::invalid_argument("Unknown widget type.");
+    it->second.validate_children(owner, children);
 }
 
 std::unique_ptr<IWidget> WidgetFactory::CreateWidget(const WidgetType type, const uint32_t id, std::shared_ptr<Frame> parent, const WidgetContext& context) {
-    auto it = creators_.find(type);
-    if (it == creators_.end())
+    auto it = registrations_.find(type);
+    if (it == registrations_.end())
         throw std::runtime_error("Unknown widget type");
 
-    return it->second(id, std::move(parent), context);
+    return it->second.create(id, std::move(parent), context);
 }
 
 std::unique_ptr<IWidget> WidgetFactory::CreateWidget(std::shared_ptr<WidgetConfiguration> configuration, std::shared_ptr<Frame> parent, const WidgetContext& context) {
@@ -58,9 +64,9 @@ std::unique_ptr<IWidget> WidgetFactory::CreateWidget(std::shared_ptr<WidgetConfi
 
 std::vector<WidgetType> WidgetFactory::GetAvailableTypes() const {
     std::vector<WidgetType> types;
-    types.reserve(creators_.size());
+    types.reserve(registrations_.size());
 
-    for (const auto& [type, creator] : creators_)
+    for (const auto& [type, registration] : registrations_)
         types.push_back(type);
 
     return types;

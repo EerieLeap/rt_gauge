@@ -112,23 +112,34 @@ void WidgetTransform::OnProcessingUpdated(bool enabled) {
         UpdateAnchor();
 }
 
-bool WidgetTransform::CanSetRotation() const {
-    if(properties_ == nullptr)
-        return false;
+namespace {
 
-    if(properties_->GetAs<int>(WidgetPropertyType::ANIMATION_TYPE, 0) == static_cast<int>(Animation::Type::Rotation))
-        return false;
-
-    if(configuration_ != nullptr) {
-        for(const auto& binding : configuration_->bindings) {
-            // An inbound type binding could select a competing rotation later.
-            if(binding.target == WidgetPropertyType::ANIMATION_TYPE
-                && binding.direction != PropertyBindingDirection::Out)
-                return false;
-        }
+bool HasRotationBinding(const WidgetConfiguration& configuration) {
+    for(const auto& binding : configuration.bindings) {
+        // An inbound type binding could select a competing rotation later.
+        if(binding.target == WidgetPropertyType::ANIMATION_TYPE
+            && binding.direction != PropertyBindingDirection::Out)
+            return true;
     }
+    return false;
+}
 
-    return true;
+} // namespace
+
+bool WidgetTransform::CanSetRotation(const WidgetConfiguration& configuration) {
+    const auto it = configuration.properties.find(WidgetPropertyType::ANIMATION_TYPE);
+    if(it != configuration.properties.end()) {
+        const auto* type = std::get_if<int>(&it->second);
+        if(type == nullptr || *type == static_cast<int>(Animation::Type::Rotation))
+            return false;
+    }
+    return !HasRotationBinding(configuration);
+}
+
+bool WidgetTransform::CanSetRotation() const {
+    return properties_ != nullptr
+        && properties_->GetAs<int>(WidgetPropertyType::ANIMATION_TYPE, 0) != static_cast<int>(Animation::Type::Rotation)
+        && (configuration_ == nullptr || !HasRotationBinding(*configuration_));
 }
 
 bool WidgetTransform::SetRotation(int32_t angle) {
