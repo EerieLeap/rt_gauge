@@ -1,6 +1,9 @@
 #include <array>
+#include <iterator>
 #include <memory>
+#include <memory_resource>
 #include <string>
+#include <utility>
 #include <vector>
 #include <stdexcept>
 
@@ -15,6 +18,7 @@
 #include "configuration/cbor/cbor_ui_config/cbor_ui_config_size.h"
 
 #include "domain/ui_domain/models/ui_configuration.h"
+#include "domain/ui_domain/models/widget_composition.h"
 #include "domain/ui_domain/models/widget_type.h"
 #include "domain/ui_domain/models/widget_property.h"
 #include "domain/ui_domain/models/animation.h"
@@ -735,4 +739,188 @@ ZTEST(ui_configuration_parser, test_serialize_rejects_undefined_ui_properties) {
     }
 
     zassert_true(threw);
+}
+
+namespace {
+
+// A version 1 config with dial 9 and its BasicIcon needle 12 at the fill-slot placeholder.
+// Hand-encoded, like WidgetPropertyPayload, to pin the unchanged screen and widget records.
+std::vector<uint8_t> CompositionPayload(std::initializer_list<uint8_t> dial_properties) {
+    std::vector<uint8_t> payload = {
+        0x83, 0x01, 0x03, 0x81,
+        0x88, 0x08, 0x03, 0x02, 0x00, 0xf5, 0xf4, 0x84, 0xf5, 0x03, 0x03, 0x00, 0x82,
+        0x87, 0x1a, 0x00, 0x02, 0x00, 0x69, 0x09,
+        0x82, 0x00, 0x00, 0x82, 0x01, 0x01, 0x00
+    };
+    payload.insert(payload.end(), dial_properties.begin(), dial_properties.end());
+    const uint8_t needle[] = {
+        0x80, // The dial has no bindings.
+        0x87, 0x1a, 0x00, 0x01, 0x00, 0x01, 0x0c,
+        0x82, 0x00, 0x00, 0x82, 0x01, 0x01, 0x00,
+        0xa2, 0x13, 0x07, 0x14, 0x07, // {ANCHOR_POINT_X: 7, ANCHOR_POINT_Y: 7}
+        0x80
+    };
+    payload.insert(payload.end(), std::begin(needle), std::end(needle));
+    return payload;
+}
+
+pmr_unique_ptr<CborUiConfig> Decode(const std::vector<uint8_t>& payload) {
+    auto decoded = make_unique_pmr<CborUiConfig>(Mrm::GetDefaultPmr());
+    size_t decoded_size = 0;
+    if(cbor_decode_CborUiConfig(payload.data(), payload.size(), decoded.get(), &decoded_size) != 0
+        || decoded_size != payload.size())
+        return nullptr;
+    return decoded;
+}
+
+// Through the actual wire bytes, not only the intermediate CBOR structs.
+pmr_unique_ptr<UiConfiguration> RoundTrip(UiConfigurationCborParser& parser, const UiConfiguration& configuration) {
+    auto serialized = parser.Serialize(configuration);
+    std::vector<uint8_t> payload(cbor_get_size_CborUiConfig(*serialized));
+    size_t encoded_size = 0;
+    zassert_equal(cbor_encode_CborUiConfig(payload.data(), payload.size(), serialized.get(), &encoded_size), 0);
+    payload.resize(encoded_size);
+    auto decoded = Decode(payload);
+    zassert_not_null(decoded.get());
+    zassert_equal(decoded->version, 1);
+    return parser.Deserialize(Mrm::GetDefaultPmr(), *decoded);
+}
+
+std::shared_ptr<WidgetConfiguration> Leaf(uint32_t id, int32_t z_index = 0) {
+    auto widget = make_shared_pmr<WidgetConfiguration>(Mrm::GetDefaultPmr());
+    widget->type = WidgetType::IndicatorDigital;
+    widget->id = id;
+    widget->position_grid = { 0, 0 };
+    widget->size_grid = { 1, 1 };
+    widget->z_index = z_index;
+    return widget;
+}
+
+std::string DeserializeError(const CborUiConfig& config) {
+    try {
+        UiConfigurationCborParser().Deserialize(Mrm::GetDefaultPmr(), config);
+    } catch(const std::invalid_argument& error) {
+        return error.what();
+    }
+    return {};
+}
+
+} // namespace
+
+ZTEST(ui_configuration_parser, test_version_one_composition_payload_keeps_record_layout_and_values) {
+    auto decoded = Decode(CompositionPayload({ 0xa1, 0x18, 0x2c, 0x81, 0x0c })); // {CHILD_WIDGET_IDS: [12]}
+    zassert_not_null(decoded.get());
+    zassert_equal(decoded->version, 1);
+
+    std::vector<std::pair<uint32_t, size_t>> checked;
+    UiConfigurationCborParser parser([&](const auto& owner, auto children) {
+        checked.emplace_back(owner.id, children.size());
+    });
+    auto configuration = parser.Deserialize(Mrm::GetDefaultPmr(), *decoded);
+    const auto& screen = *configuration->screen_configurations[0];
+    zassert_equal(screen.widget_configurations.size(), 2);
+    const auto& dial = *screen.widget_configurations[0];
+    const auto& needle = *screen.widget_configurations[1];
+    zassert_equal(dial.type, WidgetType::IndicatorDial);
+    zassert_true(std::get<std::pmr::vector<int>>(dial.properties.at(WidgetPropertyType::CHILD_WIDGET_IDS))
+        == std::pmr::vector<int>({ 12 }));
+    zassert_equal(dial.properties.size(), 1, "Loading injects no anchors, defaults, or image properties");
+    zassert_equal(needle.properties.size(), 2);
+    zassert_equal(std::get<int>(needle.properties.at(WidgetPropertyType::ANCHOR_POINT_X)), 7);
+    zassert_equal(std::get<int>(needle.properties.at(WidgetPropertyType::ANCHOR_POINT_Y)), 7);
+    const std::vector<std::pair<uint32_t, size_t>> expected_checks { { 9, 1 }, { 12, 0 } };
+    zassert_true(checked == expected_checks);
+    const auto composition = WidgetComposition::Build(screen);
+    zassert_equal(composition.roots.size(), 1);
+    zassert_equal(composition.roots[0], 0);
+    zassert_equal(composition.GetChildren(0)[0], 1);
+
+    auto serialized = parser.Serialize(*configuration);
+    const auto& wire = serialized->CborScreenConfig_m[0].CborWidgetConfig_m;
+    zassert_equal(serialized->version, 1);
+    zassert_equal(wire.size(), 2);
+    zassert_equal(wire[0].properties.CborPropertyValueType_m.size(), 1);
+    zassert_equal(wire[0].properties.CborPropertyValueType_m[0].CborPropertyValueType_m_key, 44);
+    auto round_tripped = RoundTrip(parser, *configuration);
+    ui_configuration_parser_CompareUiConfigurations(*configuration, *round_tripped);
+}
+
+ZTEST(ui_configuration_parser, test_child_id_order_and_empty_lists_survive_z_ordering_on_load) {
+    auto configuration = ui_configuration_parser_GetTestUiConfiguration();
+    auto& screen = *configuration->screen_configurations[0];
+    screen.widget_configurations.clear();
+    auto owner = Leaf(1);
+    owner->properties[WidgetPropertyType::CHILD_WIDGET_IDS] = std::pmr::vector<int>({ 7, 3, 5 }, Mrm::GetDefaultPmr());
+    auto empty = Leaf(5);
+    empty->properties[WidgetPropertyType::CHILD_WIDGET_IDS] = std::pmr::vector<int>(Mrm::GetDefaultPmr());
+    for(auto widget : { Leaf(7, 5), owner, Leaf(3, -5), empty })
+        screen.AddWidget(widget);
+
+    UiConfigurationCborParser parser;
+    auto restored = RoundTrip(parser, *configuration);
+    const auto& definitions = restored->screen_configurations[0]->widget_configurations;
+    std::vector<uint32_t> definition_ids;
+    for(const auto& definition : definitions)
+        definition_ids.push_back(definition->id);
+    zassert_true((definition_ids == std::vector<uint32_t> { 3, 1, 5, 7 }), "Definitions reload in z-order");
+    const auto& restored_owner = *definitions[1];
+    zassert_true(std::get<std::pmr::vector<int>>(restored_owner.properties.at(WidgetPropertyType::CHILD_WIDGET_IDS))
+        == std::pmr::vector<int>({ 7, 3, 5 }), "Reference order is neither sorted nor deduplicated");
+    zassert_true(std::get<std::pmr::vector<int>>(definitions[2]->properties.at(WidgetPropertyType::CHILD_WIDGET_IDS))
+        .empty(), "An empty list stays present");
+    const auto composition = WidgetComposition::Build(*restored->screen_configurations[0]);
+    std::vector<uint32_t> child_ids;
+    for(auto child : composition.GetChildren(1))
+        child_ids.push_back(definitions[child]->id);
+    zassert_true((child_ids == std::vector<uint32_t> { 7, 3, 5 }));
+}
+
+ZTEST(ui_configuration_parser, test_decoded_child_ids_use_the_requested_memory_resource) {
+    auto decoded = Decode(CompositionPayload({ 0xa1, 0x18, 0x2c, 0x81, 0x0c }));
+    zassert_not_null(decoded.get());
+    std::pmr::monotonic_buffer_resource resource;
+    {
+        auto configuration = UiConfigurationCborParser().Deserialize(&resource, *decoded);
+        const auto& screen = *configuration->screen_configurations[0];
+        const auto& dial = *screen.widget_configurations[0];
+        const auto& ids = std::get<std::pmr::vector<int>>(dial.properties.at(WidgetPropertyType::CHILD_WIDGET_IDS));
+        zassert_equal(screen.widget_configurations.get_allocator().resource(), &resource);
+        zassert_equal(dial.properties.get_allocator().resource(), &resource);
+        zassert_equal(ids.get_allocator().resource(), &resource);
+    }
+}
+
+ZTEST(ui_configuration_parser, test_child_ids_outside_the_signed_range_are_rejected_without_narrowing) {
+    // 2^31 does not fit the persisted int32 list, so decoding fails instead of wrapping to a negative ID.
+    zassert_is_null(Decode(CompositionPayload({ 0xa1, 0x18, 0x2c, 0x81, 0x1a, 0x80, 0x00, 0x00, 0x00 })).get());
+
+    auto negative = Decode(CompositionPayload({ 0xa1, 0x18, 0x2c, 0x81, 0x20 })); // [-1]
+    zassert_not_null(negative.get());
+    const auto error = DeserializeError(*negative);
+    for(const auto* fragment : { "Screen ID: 8, Widget ID: 9", "Child index 0, ID -1", "between 0 and INT32_MAX" })
+        zassert_true(error.find(fragment) != std::string::npos, "Missing '%s' in '%s'", fragment, error.c_str());
+
+    auto largest = Decode(CompositionPayload({ 0xa1, 0x18, 0x2c, 0x81, 0x1a, 0x7f, 0xff, 0xff, 0xff }));
+    zassert_not_null(largest.get());
+    zassert_true(DeserializeError(*largest).find("ID 2147483647: target does not exist") != std::string::npos,
+        "INT32_MAX decodes as a real reference, not a narrowed one");
+}
+
+ZTEST(ui_configuration_parser, test_anchor_coordinates_persist_exactly_without_conversion) {
+    const std::array<std::pair<int, int>, 5> anchors { {
+        { -1, -1 }, { 0, 0 }, { 7, 7 }, { 7, 213 }, { -1, 536870911 }
+    } };
+    UiConfigurationCborParser parser;
+    for(const auto& [x, y] : anchors) {
+        auto configuration = ui_configuration_parser_GetTestUiConfiguration();
+        auto& properties = configuration->screen_configurations[0]->widget_configurations[0]->properties;
+        properties.clear();
+        properties[WidgetPropertyType::ANCHOR_POINT_X] = x;
+        properties[WidgetPropertyType::ANCHOR_POINT_Y] = y;
+        auto restored = RoundTrip(parser, *configuration);
+        const auto& restored_properties = restored->screen_configurations[0]->widget_configurations[0]->properties;
+        zassert_equal(restored_properties.size(), 2);
+        zassert_equal(std::get<int>(restored_properties.at(WidgetPropertyType::ANCHOR_POINT_X)), x);
+        zassert_equal(std::get<int>(restored_properties.at(WidgetPropertyType::ANCHOR_POINT_Y)), y);
+    }
 }

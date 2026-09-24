@@ -5,8 +5,10 @@
 
 #include <zephyr/ztest.h>
 
+#include "domain/ui_domain/configuration/parsers/ui_configuration_cbor_parser.h"
 #include "domain/ui_domain/configuration/parsers/ui_configuration_validator.h"
 #include "domain/ui_domain/models/animation.h"
+#include "domain/ui_domain/models/ui_configuration.h"
 #include "domain/ui_domain/models/widget_composition.h"
 #include "views/widgets/basic/arc_icon_widget/arc_icon_widget.h"
 #include "views/widgets/indicators/dial_indicator/dial_indicator.h"
@@ -311,4 +313,50 @@ ZTEST(widget_composition, test_build_uses_validated_configuration_without_repeat
     zassert_equal(composition.GetChildren(1)[0], 0);
     zassert_equal(composition.postorder[0], 0);
     zassert_equal(composition.postorder[1], 1);
+}
+
+// A dial persisted before child composition kept its image on the dial itself.
+ZTEST(widget_composition, test_a_legacy_dial_is_neither_saved_nor_loaded_under_widget_rules) {
+    auto configuration = std::make_shared<UiConfiguration>(std::allocator_arg, std::pmr::get_default_resource());
+    configuration->active_screen_group_id = 0;
+    auto screen = Screen();
+    screen->screen_group_id = 0;
+    screen->type = ScreenType::Gauge;
+    auto dial = Widget(9, WidgetType::IndicatorDial);
+    dial->properties[WidgetPropertyType::FILE_PATH] = std::pmr::string("ui_img_arrow_al88.bin");
+    dial->properties[WidgetPropertyType::IMG_WIDTH] = 15;
+    dial->properties[WidgetPropertyType::IMG_HEIGHT] = 220;
+    dial->properties[WidgetPropertyType::POSITION_Y] = -104;
+    dial->properties[WidgetPropertyType::ANCHOR_POINT_X] = 7;
+    dial->properties[WidgetPropertyType::ANCHOR_POINT_Y] = 7;
+    screen->widget_configurations = { dial };
+    configuration->screen_configurations.push_back(screen);
+
+    // Domain rules alone keep it as stored: no implicit needle, moved image, or converted anchor.
+    UiConfigurationCborParser domain_only;
+    auto encoded = domain_only.Serialize(*configuration);
+    auto decoded = domain_only.Deserialize(std::pmr::get_default_resource(), *encoded);
+    const auto& definitions = decoded->screen_configurations[0]->widget_configurations;
+    zassert_equal(definitions.size(), 1);
+    zassert_false(definitions[0]->properties.contains(WidgetPropertyType::CHILD_WIDGET_IDS));
+    zassert_true(definitions[0]->properties.contains(WidgetPropertyType::FILE_PATH));
+    zassert_equal(std::get<int>(definitions[0]->properties.at(WidgetPropertyType::ANCHOR_POINT_Y)), 7);
+
+    UiConfigurationCborParser with_widget_rules([](const auto& owner, auto children) {
+        WidgetFactory::GetInstance().ValidateChildren(owner, children);
+    });
+    auto error_of = [](auto&& action) -> std::string {
+        try {
+            action();
+        } catch(const std::invalid_argument& error) {
+            return error.what();
+        }
+        return {};
+    };
+    for(const auto& error : {
+            error_of([&] { with_widget_rules.Serialize(*configuration); }),
+            error_of([&] { with_widget_rules.Deserialize(std::pmr::get_default_resource(), *encoded); }) }) {
+        for(const auto* fragment : { "Screen ID: 42, Widget ID: 9", "exactly 1 child", "received 0" })
+            zassert_true(error.find(fragment) != std::string::npos, "Missing '%s' in '%s'", fragment, error.c_str());
+    }
 }
