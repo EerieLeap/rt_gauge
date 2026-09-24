@@ -12,6 +12,7 @@ namespace eerie_leap::views::widgets::controls {
 class ToggleControl : public ControlBase {
 private:
     lv_obj_t* lv_switch_ = nullptr;
+    bool shown_checked_ = false;
 
     void UpdateSwitch();
 
@@ -20,6 +21,7 @@ private:
 
 protected:
     void OnControlEvent(lv_event_code_t code) override;
+    void RestoreShownValue() override;
     void RegisterProperties(WidgetPropertyStore& store) const override;
     void OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) override;
 

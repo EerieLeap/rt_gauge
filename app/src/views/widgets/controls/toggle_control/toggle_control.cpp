@@ -81,7 +81,15 @@ void ToggleControl::UpdateSwitch() {
     if(lv_switch_ == nullptr)
         return;
 
-    if(properties_->GetAs<bool>(WidgetPropertyType::VALUE, false))
+    shown_checked_ = properties_->GetAs<bool>(WidgetPropertyType::VALUE, false);
+    RestoreShownValue();
+}
+
+void ToggleControl::RestoreShownValue() {
+    if(lv_switch_ == nullptr)
+        return;
+
+    if(shown_checked_)
         lv_obj_add_state(lv_switch_, LV_STATE_CHECKED);
     else
         lv_obj_remove_state(lv_switch_, LV_STATE_CHECKED);

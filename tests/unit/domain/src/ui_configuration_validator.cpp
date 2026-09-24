@@ -822,7 +822,7 @@ ZTEST(ui_configuration_validator, test_composition_rejects_duplicate_definitions
 
 ZTEST(ui_configuration_validator, test_composition_rejects_signed_and_missing_references) {
     auto screen = MakeCompositionScreen({ 9, UINT32_MAX });
-    for(int id : { -1, INT32_MIN }) {
+    for(int id : { -1, std::numeric_limits<int>::min() }) {
         SetChildren(*screen->widget_configurations[0], { id });
         ExpectCompositionError(*screen, { "Widget ID: 9", "Child index 0", "between 0 and INT32_MAX" });
     }

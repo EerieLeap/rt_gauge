@@ -495,8 +495,12 @@ ZTEST(widget_bindings, test_opacity_store_rejects_invalid_updates_without_changi
 
 ZTEST(widget_bindings, test_color_bindings_preserve_exact_rgba_and_reject_invalid_input) {
     const EventData invalid_values[] = {
-        0, uint32_t{255}, 128.0F, true, false, std::string("#3366FF"), std::string("3366FF80"),
+        true, false, std::string("#3366FF"), std::string("3366FF80"),
         std::string("#3366FF8G"), std::string("#3366FF80\0", 10)
+    };
+    // Numbers are 0xRRGGBB values and bind as opaque colors.
+    const std::pair<EventData, const char*> numbers[] = {
+        { 0x3366FF, "#3366FFFF" }, { uint32_t{255}, "#0000FFFF" }, { 128.0F, "#000080FF" }
     };
     for(auto type : color_properties) {
         auto configuration = MakeConfiguration();
@@ -512,6 +516,12 @@ ZTEST(widget_bindings, test_color_bindings_preserve_exact_rgba_and_reject_invali
                 zassert_true(std::get<std::pmr::string>(widget->Read(type)) == text);
                 zassert_true(widget->notified.empty());
             }
+        }
+        for(const auto& [value, expected] : numbers) {
+            PublishSensor(SENSOR_ID, value);
+            zassert_true(std::get<std::pmr::string>(widget->Read(type)) == expected);
+            zassert_equal(widget->notified.size(), 1U);
+            widget->notified.clear();
         }
     }
 }
@@ -1277,7 +1287,8 @@ ZTEST(widget_bindings, test_generic_animation_teardown_detaches_waiting_setting_
                 zassert_equal(lv_anim_count_running(), count);
                 zassert_equal(lv_obj_get_style_opa_layered(content, LV_PART_MAIN), 255);
                 zassert_equal(lv_obj_get_style_transform_rotation(content, LV_PART_MAIN), 0);
-                zassert_equal(lv_obj_get_event_count(content), content_callbacks - 1);
+                zassert_true(content_callbacks > 0);
+                zassert_equal(lv_obj_get_event_count(content), 0);
             }
             zassert_equal(k_thread_join(&publisher, K_MSEC(DISPATCH_TIMEOUT_MS)), 0);
             zassert_equal(store->GetAs<int>(WidgetPropertyType::ANIMATION_DURATION_MS, -1), 1000);

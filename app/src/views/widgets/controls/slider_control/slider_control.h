@@ -18,6 +18,7 @@ private:
     double max_ = 0;
     double step_ = 1;
     int32_t step_count_ = 1;
+    int32_t shown_index_ = 0;
 
     int32_t ToIndex(double value) const;
     double ToValue(int32_t index) const;
@@ -29,6 +30,7 @@ private:
 
 protected:
     void OnControlEvent(lv_event_code_t code) override;
+    void RestoreShownValue() override;
 
 public:
     explicit SliderControl(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context);

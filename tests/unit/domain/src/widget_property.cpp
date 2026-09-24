@@ -67,8 +67,9 @@ constexpr std::array all_types = {
 } // namespace
 
 ZTEST(widget_property, test_shape_additions_preserve_persisted_values) {
-    zassert_equal(static_cast<int>(IconType::Image), 3);
-    zassert_equal(static_cast<int>(IconType::Svg), 4);
+    // Removing the dot icon deliberately renumbered the icon types after Label.
+    zassert_equal(static_cast<int>(IconType::Image), 2);
+    zassert_equal(static_cast<int>(IconType::Svg), 3);
     zassert_equal(static_cast<int>(WidgetPropertyType::NAVIGATION_INTENT), 28);
     zassert_equal(static_cast<int>(WidgetPropertyType::DIRECTION), 21);
     zassert_equal(static_cast<int>(WidgetDirection::None), 0);

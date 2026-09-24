@@ -1,11 +1,29 @@
 / {
+	chosen {
+		zephyr,display = &dummy_dc;
+		zephyr,bt-hci = &bt_hci_uart;
+	};
+
 	aliases {
-		lfs1 = &lfs1;
+		intfs0 = &intfs0;
+		can0 = &can_loopback0;
+	};
+
+	can_loopback0: can_loopback0 {
+		compatible = "zephyr,can-loopback";
+		status = "okay";
+	};
+
+	// QEMU has no display controller; LVGL renders into a discarding dummy one.
+	dummy_dc: dummy_dc {
+		compatible = "zephyr,dummy-dc";
+		height = <466>;
+		width = <466>;
 	};
 
 	fstab {
 		compatible = "zephyr,fstab";
-		lfs1: lfs1 {
+		intfs0: intfs0 {
 			compatible = "zephyr,fstab,littlefs";
 			read-size = <16>;
 			prog-size = <16>;
@@ -13,7 +31,7 @@
 			lookahead-size = <32>;
 			block-cycles = <512>;
 			partition = <&lfs1_partition>;
-			mount-point = "/lfs1";
+			mount-point = "/intfs0";
 			automount;
 		};
 	};
@@ -44,5 +62,11 @@
                 };
 			};
 		};
+	};
+};
+
+&uart1 {
+	bt_hci_uart: bt_hci_uart {
+		compatible = "zephyr,bt-hci-uart";
 	};
 };

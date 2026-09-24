@@ -2,8 +2,9 @@
 
 Colors, whole-widget opacity, visibility, and event-processing activity are
 independent. Existing configurations without appearance overrides keep their
-normal appearance. Widgets animate only when explicitly configured; `DotIcon`
-itself remains a static leaf.
+normal appearance. Widgets animate only when explicitly configured. Use `OvalIcon`
+with equal `WIDTH_PX` and `HEIGHT_PX` values for a circular indicator; blinking is
+configured through the shared widget animation properties.
 
 ## Configure RGBA and opacity
 
@@ -87,7 +88,7 @@ the selected widget/icon's usable keys.
 | Horizontal chart | Active series | - | - | Theme primary, line and bar |
 | Bar / filled arc | Active fill | Active track | - | Theme secondary fill; transparent track |
 | Segmented arc | Stroke pair | - | - | Displayed on/off; secondary/transparent |
-| Dot / shapes | Active fill or stroke | - | - | Theme accent |
+| Shapes (including oval) | Active fill or stroke | - | - | Theme accent |
 | Label icon | Active background | Active text | - | Accent/primary |
 | Slider | Filled-track pair | Background pair | Knob pair | Pressed/idle; primary/surface/accent |
 | Toggle | Track pair | Knob pair | - | Checked/unchecked; primary/surface track, accent knob |
@@ -122,7 +123,7 @@ not its layout rectangle or stored data.
 `Blinking` is a smooth eased fade: fully visible, transparent, then fully
 visible within one duration. Odd durations give the extra millisecond to the
 return half. `Rotation` turns clockwise once per duration at constant speed,
-around the widget's center. Both repeat indefinitely. Display refresh limits
+around the widget's anchor (`ANCHOR_POINT_X/Y`, centered by default. Both repeat indefinitely. Display refresh limits
 visible timing; a 2 ms duration does not promise a 2 ms display update.
 
 For an existing Dot or asymmetric icon configuration:
@@ -138,7 +139,7 @@ widget->properties[WidgetPropertyType::IS_ANIMATION_ACTIVE] = true;
 widget->properties[WidgetPropertyType::ANIMATION_DURATION_MS] = 1200;
 ```
 
-For an existing composite dial configuration, configure only the owner:
+For an existing dial configuration, configure the dial, not its needle:
 
 ```cpp
 dial->properties[WidgetPropertyType::ANIMATION_TYPE] =
@@ -148,9 +149,12 @@ dial->properties[WidgetPropertyType::ANIMATION_DURATION_MS] = 4000;
 dial->properties[WidgetPropertyType::IS_SMOOTHED] = true;
 ```
 
-The dial and needle rotate together once; the needle's value rotation and
-`IS_SMOOTHED` interpolation remain independent. Do not separately enable the
-needle dependency. An independently configured image widget can animate itself.
+The dial and its needle rotate together once; the needle's value rotation and
+`IS_SMOOTHED` interpolation remain independent. The needle is a separately
+configured child widget. It
+may blink, but configuration checks reject a needle rotation animation because
+the dial already drives its rotation. An image widget that is not a needle can
+animate itself.
 Apply configuration through the normal configuration path as described above.
 
 Requested enablement is writable, **not** a running-state indicator. Type None
@@ -178,7 +182,7 @@ existing logging visibility/default screens are not automatically migrated.
 
 Only one generic effect runs per widget owner, alongside independent value
 smoothing. Screen animations/transitions, stacking, custom easing, direction,
-pivot, and phase synchronization are not supported. Whole-layer rotation and
+and phase synchronization are not supported. Whole-layer rotation and
 fade require temporary composition buffers; hardware capacity and frame rate
 must be measured for the intended widget sizes and simultaneous effects.
 

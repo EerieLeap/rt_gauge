@@ -143,7 +143,13 @@ void SliderControl::UpdateSlider() {
     if(lv_obj_has_state(lv_slider_, LV_STATE_PRESSED))
         return;
 
-    lv_slider_set_value(lv_slider_, ToIndex(properties_->GetAs<double>(WidgetPropertyType::VALUE, 0)), LV_ANIM_OFF);
+    shown_index_ = ToIndex(properties_->GetAs<double>(WidgetPropertyType::VALUE, 0));
+    lv_slider_set_value(lv_slider_, shown_index_, LV_ANIM_OFF);
+}
+
+void SliderControl::RestoreShownValue() {
+    if(lv_slider_ != nullptr)
+        lv_slider_set_value(lv_slider_, shown_index_, LV_ANIM_OFF);
 }
 
 } // namespace eerie_leap::views::widgets::controls

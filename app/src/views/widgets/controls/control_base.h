@@ -30,6 +30,8 @@ protected:
     void AttachEvents(lv_obj_t* object, std::initializer_list<lv_event_code_t> codes);
 
     virtual void OnControlEvent(lv_event_code_t code);
+    // Undoes native input without applying a VALUE that is still pending.
+    virtual void RestoreShownValue();
     void OnProcessingSuspended() override;
 
 public:

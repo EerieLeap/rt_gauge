@@ -218,7 +218,7 @@ ZTEST(icon_lifecycle, test_rotation_retains_signed_angles_anchors_and_rerender) 
         CheckRotation(widget, 2700, 10, 30);
         widget.OnActivated();
         CheckRotation(widget, 2700, 10, 30);
-        for(int32_t angle : { 0, -1, 4500, -7200, INT32_MIN, INT32_MAX }) {
+        for(int32_t angle : std::initializer_list<int32_t> { 0, -1, 4500, -7200, INT32_MIN, INT32_MAX }) {
             zassert_true(rotation->SetRotation(angle));
             CheckRotation(widget, (angle % 3600 + 3600) % 3600, 10, 30);
         }
@@ -376,7 +376,7 @@ ZTEST(icon_lifecycle, test_every_factory_widget_and_icon_supports_direct_rotatio
             };
             zassert_equal(angle(), 2700, "widget %d icon %d", static_cast<int>(type), static_cast<int>(icon));
             widget->OnActivated();
-            for(int32_t value : { INT32_MIN, INT32_MAX, -1, 0, 4500 }) {
+            for(int32_t value : std::initializer_list<int32_t> { INT32_MIN, INT32_MAX, -1, 0, 4500 }) {
                 zassert_true(widget->SetRotation(value));
                 zassert_equal(angle(), (value % 3600 + 3600) % 3600);
             }

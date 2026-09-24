@@ -90,7 +90,13 @@ void ControlBase::OnProcessingSuspended() {
         return;
 
     lv_obj_remove_state(event_object_, LV_STATE_PRESSED);
-    OnPropertyChanged(WidgetPropertyType::VALUE, properties_->Get(WidgetPropertyType::VALUE));
+    // A pending value was accepted while suspended; replay shows it once processing resumes.
+    if(pending_properties_.test(static_cast<size_t>(WidgetPropertyType::VALUE)))
+        RestoreShownValue();
+    else
+        OnPropertyChanged(WidgetPropertyType::VALUE, properties_->Get(WidgetPropertyType::VALUE));
 }
+
+void ControlBase::RestoreShownValue() { }
 
 } // namespace eerie_leap::views::widgets::controls
