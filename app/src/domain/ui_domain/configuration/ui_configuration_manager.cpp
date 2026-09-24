@@ -15,11 +15,12 @@ using namespace eerie_leap::configuration::services;
 LOG_MODULE_REGISTER(ui_config_ctrl_logger);
 
 UiConfigurationManager::UiConfigurationManager(
-    std::unique_ptr<CborConfigurationService<CborUiConfig>> cbor_configuration_service)
+    std::unique_ptr<CborConfigurationService<CborUiConfig>> cbor_configuration_service,
+    UiConfigurationValidator::ChildValidator validate_children)
         : cbor_configuration_service_(std::move(cbor_configuration_service)),
         configuration_(nullptr) {
 
-    cbor_parser_ = std::make_unique<UiConfigurationCborParser>();
+    cbor_parser_ = std::make_unique<UiConfigurationCborParser>(std::move(validate_children));
     std::shared_ptr<UiConfiguration> configuration = nullptr;
 
     try {
@@ -48,8 +49,11 @@ bool UiConfigurationManager::ApplyCborConfiguration(std::span<const uint8_t> cbo
     try {
         auto configuration = cbor_parser_->Deserialize(Mrm::GetExtPmr(), *cbor_config);
 
-        if(!Update(*configuration))
+        // Decoding validated the import, so the received encoding is stored as is.
+        if(!cbor_configuration_service_->Save(cbor_config.get()))
             return false;
+
+        configuration_ = std::make_shared<UiConfiguration>(std::move(*configuration));
     } catch(const std::exception& e) {
         LOG_ERR("Failed to deserialize CBOR configuration. %s", e.what());
         return false;
@@ -66,9 +70,9 @@ std::pmr::vector<uint8_t> UiConfigurationManager::GetCborConfiguration() {
     return cbor_configuration_service_->Serialize(*cbor_config);
 }
 
-bool UiConfigurationManager::Update(const UiConfiguration& configuration) {
+bool UiConfigurationManager::Update(std::shared_ptr<UiConfiguration> configuration) {
     try {
-        auto cbor_config = cbor_parser_->Serialize(configuration);
+        auto cbor_config = cbor_parser_->Serialize(*configuration);
 
         if(!cbor_configuration_service_->Save(cbor_config.get()))
             return false;
@@ -77,7 +81,9 @@ bool UiConfigurationManager::Update(const UiConfiguration& configuration) {
         return false;
     }
 
-    return Get(true) != nullptr;
+    configuration_ = std::move(configuration);
+
+    return true;
 }
 
 std::shared_ptr<UiConfiguration> UiConfigurationManager::Get(bool force_load) {
@@ -97,9 +103,7 @@ std::shared_ptr<UiConfiguration> UiConfigurationManager::Get(bool force_load) {
 }
 
 bool UiConfigurationManager::CreateDefaultConfiguration() {
-    auto configuration = make_unique_pmr<UiConfiguration>(Mrm::GetExtPmr());
-
-    return Update(*configuration);
+    return Update(make_shared_pmr<UiConfiguration>(Mrm::GetExtPmr()));
 }
 
 } // namespace eerie_leap::domain::ui_domain::configuration

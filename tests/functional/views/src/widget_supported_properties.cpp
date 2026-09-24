@@ -76,24 +76,32 @@ ZTEST(widget_supported_properties, test_a_widget_does_not_report_another_widgets
     zassert_false(Supports(supported, WidgetPropertyType::SETTING_ID));
 }
 
-// The dial builds an IconWidget for its needle and declares it as a dependency, so those
-// properties are configurable on a dial even though the dial never reads them itself.
-ZTEST(widget_supported_properties, test_a_widget_reports_the_properties_of_its_dependencies) {
+// The needle is a separately configured child, so its image properties belong only to it.
+ZTEST(widget_supported_properties, test_a_dial_and_its_needle_report_separate_properties) {
+    using eerie_leap::domain::ui_domain::models::IconType;
+    using eerie_leap::views::widgets::basic::IconWidget;
     DialIndicator dial(1, MakeRoot(), WidgetContext { });
+    IconWidget needle(2, MakeRoot(), WidgetContext { }, IconType::Image);
 
     auto supported = dial.GetSupportedProperties();
+    const auto needle_supported = needle.GetSupportedProperties();
 
     zassert_true(Supports(supported, WidgetPropertyType::START_ANGLE));
     zassert_true(Supports(supported, WidgetPropertyType::END_ANGLE));
     zassert_true(Supports(supported, WidgetPropertyType::VALUE));
+    zassert_equal(std::count(supported.begin(), supported.end(), WidgetPropertyType::CHILD_WIDGET_IDS), 1);
+    zassert_false(Supports(needle_supported, WidgetPropertyType::CHILD_WIDGET_IDS));
+    zassert_false(Supports(needle_supported, WidgetPropertyType::START_ANGLE));
 
-    zassert_true(Supports(supported, WidgetPropertyType::FILE_PATH));
-    zassert_true(Supports(supported, WidgetPropertyType::IMG_WIDTH));
-    zassert_true(Supports(supported, WidgetPropertyType::IMG_HEIGHT));
-    zassert_true(Supports(supported, WidgetPropertyType::ANCHOR_POINT_X));
-    zassert_true(Supports(supported, WidgetPropertyType::ANCHOR_POINT_Y));
-    zassert_true(Supports(supported, WidgetPropertyType::POSITION_X));
-    zassert_true(Supports(supported, WidgetPropertyType::POSITION_Y));
+    for(auto type : { WidgetPropertyType::FILE_PATH, WidgetPropertyType::IMG_WIDTH, WidgetPropertyType::IMG_HEIGHT,
+                     WidgetPropertyType::POSITION_X, WidgetPropertyType::POSITION_Y }) {
+        zassert_false(Supports(supported, type));
+        zassert_true(Supports(needle_supported, type));
+    }
+    for(auto type : { WidgetPropertyType::ANCHOR_POINT_X, WidgetPropertyType::ANCHOR_POINT_Y }) {
+        zassert_equal(std::count(supported.begin(), supported.end(), type), 1);
+        zassert_equal(std::count(needle_supported.begin(), needle_supported.end(), type), 1);
+    }
 }
 
 ZTEST(widget_supported_properties, test_every_reported_property_is_a_valid_type) {

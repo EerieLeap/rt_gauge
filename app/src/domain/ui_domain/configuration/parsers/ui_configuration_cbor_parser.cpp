@@ -214,8 +214,11 @@ void ValueTypeToCborPropertyValueType(
 
 } // namespace
 
+UiConfigurationCborParser::UiConfigurationCborParser(UiConfigurationValidator::ChildValidator validate_children)
+    : validate_children_(std::move(validate_children)) {}
+
 pmr_unique_ptr<CborUiConfig> UiConfigurationCborParser::Serialize(const UiConfiguration& configuration) {
-    UiConfigurationValidator::Validate(configuration);
+    UiConfigurationValidator::Validate(configuration, validate_children_);
 
     auto config = make_unique_pmr<CborUiConfig>(Mrm::GetExtPmr());
 
@@ -329,7 +332,7 @@ pmr_unique_ptr<UiConfiguration> UiConfigurationCborParser::Deserialize(
         configuration->screen_configurations.push_back(std::move(screen_configuration));
     }
 
-    UiConfigurationValidator::Validate(*configuration);
+    UiConfigurationValidator::Validate(*configuration, validate_children_);
 
     return configuration;
 }

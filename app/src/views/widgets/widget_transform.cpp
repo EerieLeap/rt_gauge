@@ -53,9 +53,8 @@ bool WidgetTransform::Attach(
     return true;
 }
 
-void WidgetTransform::Configure(const WidgetConfiguration& configuration, bool is_owner) {
+void WidgetTransform::Configure(const WidgetConfiguration& configuration) {
     configuration_ = &configuration;
-    animation_.SetOwner(is_owner);
 }
 
 void WidgetTransform::Detach() {
@@ -213,7 +212,8 @@ void WidgetTransform::UpdateAnchor() {
             lv_obj_set_style_transform_pivot_y(bounds, local.y, LV_PART_MAIN);
     }
     // Images and rasterized shapes share LVGL's native image transform, which
-    // allows rotated pixels outside the drawable's original bounds.
+    // allows rotated pixels outside the drawable's original bounds. The pivot relies
+    // on the local LVGL patch; a style transform instead leaves artifacts around images.
     const bool is_image = lv_obj_check_type(bounds, &lv_image_class);
     if(is_image)
         lv_image_set_pivot(bounds, local.x, local.y);

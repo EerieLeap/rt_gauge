@@ -102,6 +102,7 @@ float AppendPolygon(lv_vector_path_t* path, const Polygon& vertices, float radiu
 Polygon InsetPolygon(const Polygon& vertices, float stroke) {
     Polygon inset = vertices;
     Polygon clipped;
+
     // Clip against each edge shifted inward by the stroke width. Unlike scaling
     // around a center, this keeps the stroke uniform for any convex polygon and
     // also handles edges disappearing as the outline gets thicker.
@@ -110,12 +111,15 @@ Polygon InsetPolygon(const Polygon& vertices, float stroke) {
         auto b = vertices[(i + 1) % vertices.size()];
         double offset = stroke * Distance(a, b);
         clipped.clear();
+
         auto append = [&](lv_fpoint_t point) {
             if(clipped.empty() || Distance(clipped.back(), point) > geometry_epsilon)
                 clipped.push_back(point);
         };
+
         auto previous = inset.back();
         double previous_distance = Cross(a, b, previous) - offset;
+
         for(auto point : inset) {
             double distance = Cross(a, b, point) - offset;
             if((distance >= 0) != (previous_distance >= 0)) {
@@ -125,8 +129,10 @@ Polygon InsetPolygon(const Polygon& vertices, float stroke) {
                     static_cast<float>(previous.y + (point.y - previous.y) * ratio)
                 });
             }
+
             if(distance >= 0)
                 append(point);
+
             previous = point;
             previous_distance = distance;
         }
@@ -134,8 +140,10 @@ Polygon InsetPolygon(const Polygon& vertices, float stroke) {
             clipped.pop_back();
         inset.swap(clipped);
     }
+
     if(!NormalizeConvexPolygon(inset))
         inset.clear();
+
     return inset;
 }
 
@@ -154,14 +162,18 @@ bool PolygonIconBase::ReadGeometry() {
 
 float PolygonIconBase::BuildPath(lv_vector_path_t* path, float width, float height) const {
     auto vertices = GetVertices(width, height);
+
     if(!NormalizeConvexPolygon(vertices))
         return 0;
+
     float radius = AppendPolygon(path, vertices, corner_radius_px_);
+
     if(fill_mode_ == WidgetFillMode::Outline) {
         auto inset = InsetPolygon(vertices, stroke_px_);
         if(!inset.empty())
             AppendPolygon(path, inset, std::max(0.0F, radius - stroke_px_));
     }
+
     return 0;
 }
 

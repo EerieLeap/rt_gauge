@@ -1,12 +1,10 @@
+#include <cstdlib>
 #include <stdexcept>
 #include <string>
-
-#include <zephyr/kernel.h>
 
 #include "domain/ui_domain/models/widget_property.h"
 
 #include "views/widgets/indicators/indicator_base.h"
-#include "views/themes/theme_manager.h"
 
 #include "dial_indicator.h"
 
@@ -16,64 +14,67 @@ using namespace eerie_leap::utilities::type;
 using namespace eerie_leap::domain::ui_domain::models;
 using namespace eerie_leap::views::utilitites;
 
+namespace {
+
+std::string NeedleCountError(size_t count) {
+    return "Dial expects exactly 1 child: index 0 is the needle; received " + std::to_string(count) + ".";
+}
+
+std::string NeedleError(uint32_t id, const char* reason) {
+    return "Child index 0, ID " + std::to_string(id) + " (needle): " + reason;
+}
+
+constexpr const char* rotation_conflict =
+    "driven rotation conflicts with a rotation animation or inbound ANIMATION_TYPE binding.";
+
+} // namespace
+
 void DialIndicator::ValidateChildren(const WidgetConfiguration&,
     std::span<const WidgetConfiguration* const> children) {
     if(children.size() != 1)
-        throw std::invalid_argument("Dial expects exactly 1 child: index 0 is the needle; received "
-            + std::to_string(children.size()) + ".");
+        throw std::invalid_argument(NeedleCountError(children.size()));
 
     const auto& needle = *children.front();
-    const auto prefix = "Child index 0, ID " + std::to_string(needle.id) + " (needle): ";
     if(needle.position_grid.x != 0 || needle.position_grid.y != 0
         || needle.size_grid.width != 1 || needle.size_grid.height != 1)
-        throw std::invalid_argument(prefix + "fill slot requires position (0, 0) and size (1, 1).");
+        throw std::invalid_argument(NeedleError(needle.id, "fill slot requires position (0, 0) and size (1, 1)."));
     if(!WidgetTransform::CanSetRotation(needle))
-        throw std::invalid_argument(prefix + "driven rotation conflicts with a rotation animation or inbound ANIMATION_TYPE binding.");
+        throw std::invalid_argument(NeedleError(needle.id, rotation_conflict));
 }
 
 DialIndicator::DialIndicator(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context)
-    : IndicatorBase(id, std::move(parent), std::move(context)) {
-
-    // Built here rather than in Create() so it is declarable as a dependency before any render.
-    needle_icon_ = std::make_unique<IconWidget>(id_, content_frame_, context_, IconType::Image);
-
-    AddDependency(*needle_icon_);
-}
+    : IndicatorBase(id, std::move(parent), std::move(context)) {}
 
 DialIndicator::~DialIndicator() {
-    ScopedLvglLock lvgl_guard;
     DetachDispatch();
-    OnProcessingSuspended();
-    content_frame_->SetChild(nullptr);
-    needle_icon_.reset();
-    dependencies_.clear();
+}
+
+void DialIndicator::OnChildrenAttached(std::span<const std::unique_ptr<IWidget>> children) {
+    if(children.size() != 1)
+        throw std::invalid_argument(NeedleCountError(children.size()));
+
+    const auto& needle = *children.front();
+    if(!WidgetTransform::CanSetRotation(*needle.GetConfiguration()))
+        throw std::invalid_argument(NeedleError(needle.GetId(), rotation_conflict));
+
+    needle_ = children.front().get();
+}
+
+std::vector<WidgetPropertyType> DialIndicator::GetSupportedProperties() const {
+    auto supported = IndicatorBase::GetSupportedProperties();
+    supported.push_back(WidgetPropertyType::CHILD_WIDGET_IDS);
+    return supported;
 }
 
 int DialIndicator::DoRender() {
-    auto lv_obj = Create();
-    if(lv_obj == nullptr)
-        return -1;
-
-    // Share the needle's Frame; a second wrapper would also own/delete the same LVGL object.
-    content_frame_->SetChild(needle_icon_->GetContainer());
-
-    return 0;
-}
-
-int DialIndicator::ApplyTheme(const ITheme& theme) {
-    needle_icon_->ApplyTheme(theme);
-
-    return 0;
-}
-
-lv_obj_t* DialIndicator::Create() {
-    if(needle_icon_->Render() != 0)
-        return nullptr;
-
-    lv_needle_icon_ = needle_icon_->GetIconContainer()->GetObject();
+    // Children render before their owner, so the needle already exists.
     UpdateIndicator(range_start_);
 
-    return needle_icon_->GetContainer()->GetObject();
+    return 0;
+}
+
+int DialIndicator::ApplyTheme(const ITheme&) {
+    return 0;
 }
 
 uint32_t DialIndicator::GetAngleForValue(float value) {
@@ -84,18 +85,8 @@ uint32_t DialIndicator::GetAngleForValue(float value) {
 }
 
 void DialIndicator::UpdateIndicator(float value) {
-    lv_image_set_rotation(
-        lv_needle_icon_,
-        GetAngleForValue(value));
-
-    // NOTE: lv_image_set_pivot is meant to work along with lv_image_set_rotation,
-    // but it does not work as expected out of the box. There is a patch applyed to LVGL
-    // in order to fix that bug. Transform is another option here, but it adds artifacts
-    // around the image when rotated.
-    // lv_obj_set_style_transform_rotation(
-    //     lv_needle_icon_,
-    //     GetAngleForValue(value),
-    //     LV_PART_MAIN | LV_STATE_DEFAULT);
+    // Angles below zero wrap as unsigned here; SetRotation normalizes full turns.
+    needle_->SetRotation(static_cast<int32_t>(GetAngleForValue(value)));
 }
 
 void DialIndicator::RegisterProperties(WidgetPropertyStore& store) const {

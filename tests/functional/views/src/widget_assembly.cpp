@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cerrno>
 #include <cstdint>
 #include <memory>
 #include <memory_resource>
@@ -13,6 +14,7 @@
 #include "domain/ui_domain/configuration/parsers/ui_configuration_validator.h"
 #include "domain/ui_domain/models/widget_composition.h"
 #include "event_bus/event_channels.h"
+#include "views/screens/screen.h"
 #include "views/screens/widget_assembly.h"
 #include "views/utilitites/grid_layout.h"
 #include "views/widgets/basic/arc_icon_widget/arc_icon_widget.h"
@@ -40,6 +42,7 @@ struct Journal {
     int live = 0;
     std::optional<uint32_t> fail_construction;
     std::optional<uint32_t> fail_configuration;
+    std::optional<uint32_t> fail_render;
 };
 
 Journal journal;
@@ -76,7 +79,7 @@ public:
 
 protected:
     int DoRender() override {
-        return 0;
+        return journal.fail_render == id_ ? -EIO : 0;
     }
 
     void RegisterProperties(WidgetPropertyStore& store) const override {
@@ -548,4 +551,80 @@ ZTEST(widget_assembly, test_staging_metadata_is_bounded_and_released_at_the_grap
         owner = owner->GetChildren()[0].get();
     zassert_equal(owner->GetId(), 7);
     zassert_equal(owner->GetChildren().size(), WidgetComposition::max_nodes - 7);
+}
+
+ZTEST(widget_assembly, test_screen_replaces_its_tree_only_after_the_candidate_assembles) {
+    auto container = Container();
+    eerie_leap::views::screens::Screen screen(42, container, WidgetContext {});
+    auto first = Screen();
+    Add(*first, 1, WidgetType::BasicArcIcon, { 2 });
+    Add(*first, 2, WidgetType::IndicatorDigital);
+    Add(*first, 3, WidgetType::IndicatorDigital);
+    Validate(*first);
+    screen.Configure(first);
+    const auto roots = screen.GetWidgets();
+    zassert_true((Ids(*roots) == std::vector<uint32_t> { 1, 3 }), "Referenced children are not roots");
+    zassert_equal(Parent(*(*roots)[0]->GetChildren()[0]), (*roots)[0]->GetChildMount()->GetObject());
+    zassert_equal(journal.live, 3);
+    auto* screen_object = screen.GetContainer()->GetObject();
+    zassert_equal(lv_obj_get_child_count(screen_object), 1);
+
+    auto rejected = [&](std::shared_ptr<ScreenConfiguration> candidate, const char* mode) {
+        const auto constructed = journal.constructed.size();
+        bool failed = false;
+        try {
+            screen.Configure(std::move(candidate));
+        } catch(const std::exception&) {
+            failed = true;
+        }
+        zassert_true(failed, "%s", mode);
+        zassert_true(journal.constructed.size() > constructed, "%s failed before assembly", mode);
+        zassert_equal(screen.GetWidgets(), roots, "%s", mode);
+        zassert_equal(roots->size(), 2, "%s", mode);
+        zassert_equal(screen.GetConfiguration(), first, "%s", mode);
+        zassert_equal(journal.live, 3, "%s", mode);
+        zassert_equal(lv_obj_get_child_count(screen_object), 1, "%s", mode);
+    };
+    // The screen does not repeat preflight; the receiving widget still enforces its count.
+    auto miscounted = Screen();
+    Add(*miscounted, 10, WidgetType::BasicIcon, { 11 });
+    Add(*miscounted, 11, WidgetType::IndicatorDigital);
+    rejected(miscounted, "Widget-owned child count at injection");
+    auto runtime = Screen();
+    Add(*runtime, 10, WidgetType::BasicArcIcon, { 11 });
+    Add(*runtime, 11, WidgetType::IndicatorDigital);
+    Validate(*runtime);
+    journal.fail_configuration = 10;
+    rejected(runtime, "Runtime configuration failure");
+    journal.fail_configuration.reset();
+
+    screen.Configure(runtime);
+    zassert_true(roots->empty(), "The previous tree is released after replacement");
+    zassert_true((Ids(*screen.GetWidgets()) == std::vector<uint32_t> { 10 }));
+    zassert_equal(screen.GetConfiguration(), runtime);
+    zassert_equal(journal.live, 2);
+    zassert_equal(lv_obj_get_child_count(screen_object), 1);
+}
+
+ZTEST(widget_assembly, test_screen_render_reports_failures_without_skipping_other_roots) {
+    auto container = Container();
+    eerie_leap::views::screens::Screen screen(42, container, WidgetContext {});
+    auto configuration = Screen();
+    Add(*configuration, 1, WidgetType::BasicArcIcon, { 2 });
+    Add(*configuration, 2, WidgetType::IndicatorDigital);
+    Add(*configuration, 3, WidgetType::IndicatorDigital);
+    Validate(*configuration);
+    screen.Configure(configuration);
+    const auto& roots = *screen.GetWidgets();
+
+    journal.fail_render = 2;
+    zassert_equal(screen.Render(), -EIO);
+    zassert_false(screen.IsReady());
+    zassert_false(roots[0]->IsReady(), "A composite with a failed child is not ready");
+    zassert_true(roots[1]->IsReady(), "Later roots still render");
+
+    journal.fail_render.reset();
+    zassert_equal(screen.Render(), 0);
+    zassert_true(screen.IsReady());
+    zassert_true(roots[0]->IsReady());
 }

@@ -159,9 +159,6 @@ void WidgetBase::SetChildren(Children children) {
     if(detached_ || children_injected_ || configuration_ != nullptr || IsReady())
         throw std::logic_error("Children must be injected once, before configuring the owner.");
 
-    if(!dependencies_.empty())
-        throw std::logic_error("Legacy shared-configuration parts cannot be mixed with owned children.");
-
     for(size_t i = 0; i < children.size(); ++i) {
         const auto& child = children[i];
         if(child == nullptr || child.get() == this)
@@ -335,9 +332,6 @@ void WidgetBase::OnActivated() {
     if(IsReady() && IsProcessingEligible())
         ReplayProperties();
 
-    for(auto* dependency : dependencies_)
-        dependency->OnActivated();
-
     for(auto& child : children_)
         child->OnActivated();
 }
@@ -350,9 +344,6 @@ void WidgetBase::OnDeactivated() {
 
     is_group_active_ = false;
     UpdateProcessingState();
-
-    for(auto* dependency : dependencies_)
-        dependency->OnDeactivated();
 
     for(auto& child : children_)
         child->OnDeactivated();
@@ -408,9 +399,6 @@ void WidgetBase::UpdateProcessingState() {
     OnProcessingUpdated(enabled);
     transform_.OnProcessingUpdated(enabled);
 
-    for(auto* dependency : dependencies_)
-        dependency->UpdateProcessingState();
-
     if(!enabled)
         transform_.Synchronize();
 }
@@ -421,25 +409,12 @@ void WidgetBase::OnProcessingUpdated(bool) { }
 
 void WidgetBase::OnConfigured() { }
 
-void WidgetBase::AddDependency(WidgetBase& dependency) {
-    dependencies_.push_back(&dependency);
-}
-
 std::vector<WidgetPropertyType> WidgetBase::GetSupportedProperties() const {
     WidgetPropertyStore declared;
 
     RegisterProperties(declared);
 
-    auto supported = declared.GetRegisteredTypes();
-
-    for(const auto* dependency : dependencies_) {
-        for(auto type : dependency->GetSupportedProperties()) {
-            if(std::find(supported.begin(), supported.end(), type) == supported.end())
-                supported.push_back(type);
-        }
-    }
-
-    return supported;
+    return declared.GetRegisteredTypes();
 }
 
 void WidgetBase::RunEffect(PropertyChangeEffect effect) {
@@ -670,49 +645,25 @@ void WidgetBase::Configure(std::shared_ptr<WidgetConfiguration> configuration) {
         OnChildrenAttached({});
     }
 
-    ApplyConfiguration(std::move(configuration), true);
-}
-
-void WidgetBase::ConfigureAsPart(std::shared_ptr<WidgetConfiguration> configuration) {
-    ApplyConfiguration(std::move(configuration), false);
-}
-
-void WidgetBase::ApplyConfiguration(std::shared_ptr<WidgetConfiguration> configuration, bool is_owner) {
-    ScopedLvglLock lvgl_guard;
-
     configuration_ = std::move(configuration);
-    transform_.Configure(*configuration_, is_owner);
+    transform_.Configure(*configuration_);
 
     RegisterProperties(*properties_);
 
-    // A dependency reads its own store, so its properties are configurable here but legitimately
-    // absent from this one.
-    auto supported = is_owner ? GetSupportedProperties() : std::vector<WidgetPropertyType> { };
+    const auto supported = GetSupportedProperties();
 
     for(const auto& [type, value] : configuration_->properties) {
         if(WidgetPropertyValidator::IsStructuralProperty(type))
             continue;
 
-        // Parts inherit their owner's management state through the Frame parent. Copying those
-        // flags would leave a part independently hidden/inactive after its owner is restored.
-        if(!is_owner && (WidgetPropertyValidator::IsManagementProperty(type)
-            || WidgetPropertyValidator::IsAnimationProperty(type)))
-            continue;
-
-        if(!properties_->Set(type, value) && is_owner
+        if(!properties_->Set(type, value)
             && std::find(supported.begin(), supported.end(), type) == supported.end())
             LOG_WRN("Widget %u does not support property %u.", id_, static_cast<unsigned>(type));
     }
 
     ReplayProperties();
-
-    for(auto* dependency : dependencies_)
-        dependency->ConfigureAsPart(configuration_);
-
     OnConfigured();
-
-    if(is_owner)
-        ResolveBindings();
+    ResolveBindings();
 }
 
 std::shared_ptr<WidgetConfiguration> WidgetBase::GetConfiguration() const {

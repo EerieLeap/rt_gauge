@@ -12,7 +12,7 @@ bool WidgetAnimation::Attach(utilitites::Frame& presentation, utilitites::Frame&
         animator_.emplace();
     if(!animator_->Attach(presentation, layout, [](void* context) {
         auto* animation = static_cast<WidgetAnimation*>(context);
-        return animation->is_owner_ && animation->eligibility_(animation->context_);
+        return animation->eligibility_(animation->context_);
     }, this))
         return false;
 
@@ -45,10 +45,6 @@ bool WidgetAnimation::ApplyProperty(WidgetPropertyType type, const ConfigValue& 
     }
 
     return true;
-}
-
-void WidgetAnimation::SetOwner(bool is_owner) {
-    is_owner_ = is_owner;
 }
 
 void WidgetAnimation::SetRotation(int32_t angle) {

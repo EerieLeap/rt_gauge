@@ -16,7 +16,6 @@ public:
         EligibilityCallback eligible, void* context);
     static void RegisterProperties(WidgetPropertyStore& store);
     bool ApplyProperty(WidgetPropertyType type, const ConfigValue& value);
-    void SetOwner(bool is_owner);
     void SetRotation(int32_t angle);
     void Synchronize();
     void StopAndReset();
@@ -27,7 +26,6 @@ private:
     animations::ViewAnimator::Settings settings_;
     EligibilityCallback eligibility_ = nullptr;
     void* context_ = nullptr;
-    bool is_owner_ = true;
 };
 
 } // namespace eerie_leap::views::widgets

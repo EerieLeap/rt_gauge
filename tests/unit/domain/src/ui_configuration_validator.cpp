@@ -2,7 +2,9 @@
 #include <limits>
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <utility>
+#include <vector>
 
 #include <zephyr/ztest.h>
 #include <eerie_memory.hpp>
@@ -135,10 +137,13 @@ ZTEST(ui_configuration_validator, test_only_child_widget_ids_are_structural) {
 
 ZTEST(ui_configuration_validator, test_child_widget_ids_require_exact_integer_list_kind) {
     auto configuration = MakeConfiguration();
-    auto& properties = configuration->screen_configurations[0]->widget_configurations[0]->properties;
+    auto& screen = *configuration->screen_configurations[0];
+    auto& properties = screen.widget_configurations[0]->properties;
     properties[WidgetPropertyType::CHILD_WIDGET_IDS] = std::pmr::vector<int>(Mrm::GetDefaultPmr());
     zassert_true(Validates(*configuration));
-    properties[WidgetPropertyType::CHILD_WIDGET_IDS] = std::pmr::vector<int>({ 12, 0, INT32_MAX }, Mrm::GetDefaultPmr());
+    for(uint32_t id : { 12U, static_cast<uint32_t>(INT32_MAX) })
+        screen.AddWidget(MakeWidget(id));
+    properties[WidgetPropertyType::CHILD_WIDGET_IDS] = std::pmr::vector<int>({ 12, INT32_MAX }, Mrm::GetDefaultPmr());
     zassert_true(Validates(*configuration));
     const ConfigValue invalid[] = {
         {}, 12, 12.0, true, std::pmr::string("12"),
@@ -162,11 +167,45 @@ ZTEST(ui_configuration_validator, test_structural_bindings_are_rejected_in_every
     }
 }
 
-ZTEST(ui_configuration_validator, test_dial_child_requirement_is_not_enabled_yet) {
+// Child counts belong to widgets; the domain-only form cannot know that a dial needs a needle.
+ZTEST(ui_configuration_validator, test_domain_only_validation_leaves_dial_child_rules_to_widgets) {
     auto configuration = MakeConfiguration();
     auto& widget = *configuration->screen_configurations[0]->widget_configurations[0];
     widget.type = WidgetType::IndicatorDial;
     zassert_true(Validates(*configuration));
+}
+
+ZTEST(ui_configuration_validator, test_whole_configuration_runs_each_screen_preflight_with_child_rules) {
+    auto configuration = MakeConfiguration();
+    configuration->screen_configurations.push_back(MakeScreen(1, 1));
+    auto& owner = *configuration->screen_configurations[1]->widget_configurations[0];
+    auto child = MakeWidget(7);
+    child->size_grid = { 9, 9 }; // Child-local geometry is not checked against the screen grid.
+    configuration->screen_configurations[1]->AddWidget(child);
+    owner.properties[WidgetPropertyType::CHILD_WIDGET_IDS] = std::pmr::vector<int>({ 7 }, Mrm::GetDefaultPmr());
+    std::vector<std::pair<uint32_t, size_t>> checked;
+    UiConfigurationValidator::Validate(*configuration, [&](const auto& widget, auto children) {
+        checked.emplace_back(widget.id, children.size());
+        if(!children.empty())
+            zassert_equal(children[0], child.get());
+    });
+    const std::vector<std::pair<uint32_t, size_t>> expected { { 0, 0 }, { 0, 1 }, { 7, 0 } };
+    zassert_true(checked == expected);
+
+    std::string message;
+    try {
+        UiConfigurationValidator::Validate(*configuration, [](const auto& widget, auto) {
+            if(widget.id == 7)
+                throw std::invalid_argument("Widget rule rejected.");
+        });
+    } catch(const std::invalid_argument& error) {
+        message = error.what();
+    }
+    zassert_true(message.find("Screen ID: 1, Widget ID: 7") != std::string::npos, "%s", message.c_str());
+    zassert_true(message.find("Widget rule rejected.") != std::string::npos, "%s", message.c_str());
+
+    owner.properties[WidgetPropertyType::CHILD_WIDGET_IDS] = std::pmr::vector<int>({ 8 }, Mrm::GetDefaultPmr());
+    zassert_false(Validates(*configuration), "Graph checks run without child rules too");
 }
 
 ZTEST(ui_configuration_validator, test_anchor_bindings_remain_ordinary_properties) {

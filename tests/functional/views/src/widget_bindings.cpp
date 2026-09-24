@@ -1031,6 +1031,7 @@ ZTEST(widget_bindings, test_hidden_screen_can_resume_without_reactivating_its_gr
     screen_configuration->is_visible = false;
     auto configuration = MakeConfiguration();
     configuration->type = WidgetType::IndicatorBar;
+    configuration->position_grid = { 0, 0 };
     configuration->size_grid.width = 1;
     configuration->size_grid.height = 1;
     configuration->bindings.push_back(SensorBinding(WidgetPropertyType::VALUE, SENSOR_ID));

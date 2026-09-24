@@ -212,6 +212,7 @@ ZTEST(widget_colors, test_animation_simulator_gallery) {
         configuration->properties[WidgetPropertyType::IS_ANIMATION_ACTIVE] = true;
         configuration->properties[WidgetPropertyType::ANIMATION_DURATION_MS] = 1000;
         WidgetContext context;
+        std::shared_ptr<WidgetConfiguration> needle;
         if(index == 2) {
             using eerie_leap::subsys::device_tree::DtFs;
             using eerie_leap::subsys::fs::services::FsService;
@@ -222,14 +223,22 @@ ZTEST(widget_colors, test_animation_simulator_gallery) {
             std::array<uint8_t, 8 * 28 * 4> pixels;
             pixels.fill(255);
             zassert_true(context.assets_manager->Save("needle.bin", pixels));
-            configuration->properties[WidgetPropertyType::FILE_PATH] = std::pmr::string("needle.bin");
-            configuration->properties[WidgetPropertyType::IMG_WIDTH] = 8;
-            configuration->properties[WidgetPropertyType::IMG_HEIGHT] = 28;
+            needle = views_test::NeedleConfiguration(2, IconType::Image);
+            needle->properties[WidgetPropertyType::FILE_PATH] = std::pmr::string("needle.bin");
+            needle->properties[WidgetPropertyType::IMG_WIDTH] = 8;
+            needle->properties[WidgetPropertyType::IMG_HEIGHT] = 28;
             configuration->properties[WidgetPropertyType::START_ANGLE] = 180;
             configuration->properties[WidgetPropertyType::END_ANGLE] = 450;
             configuration->properties[WidgetPropertyType::VALUE] = 25;
         }
-        auto widget = WidgetFactory::GetInstance().CreateWidget(configuration, root, context);
+        std::unique_ptr<IWidget> widget;
+        if(needle != nullptr) {
+            widget = WidgetFactory::GetInstance().CreateWidget(configuration->type, configuration->id, root, context);
+            views_test::InjectChildren(*widget, *configuration, { needle }, context);
+            widget->Configure(configuration);
+        } else {
+            widget = WidgetFactory::GetInstance().CreateWidget(configuration, root, context);
+        }
         widget->SetSizePx({ index == 2 ? 48 : 64, index == 2 ? 48 : 24 });
         widget->SetPositionPx({ index == 2 ? 24 : 16, index == 2 ? 12 : 24 });
         zassert_equal(widget->Render(), 0);

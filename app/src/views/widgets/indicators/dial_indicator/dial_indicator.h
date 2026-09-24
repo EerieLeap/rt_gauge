@@ -1,13 +1,11 @@
 #pragma once
 
-#include <lvgl.h>
+#include <span>
+#include <vector>
 
-#include "views/widgets/basic/icon_widget/icon_widget.h"
 #include "views/widgets/indicators/indicator_base.h"
 
 namespace eerie_leap::views::widgets::indicators {
-
-using eerie_leap::views::widgets::basic::IconWidget;
 
 class DialIndicator : public IndicatorBase {
 private:
@@ -17,12 +15,10 @@ private:
     static constexpr int DEFAULT_START_ANGLE = 45;
     static constexpr int DEFAULT_END_ANGLE = 315;
 
-    lv_obj_t* lv_needle_icon_;
-    std::unique_ptr<IconWidget> needle_icon_;
+    // Child index 0, owned by WidgetBase; any widget type can serve as the needle.
+    IWidget* needle_ = nullptr;
 
     void UpdateIndicator(float value) override;
-
-    lv_obj_t* Create();
 
     int DoRender() override;
     int ApplyTheme(const ITheme& theme) override;
@@ -30,6 +26,7 @@ private:
 protected:
     void RegisterProperties(WidgetPropertyStore& store) const override;
     void OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) override;
+    void OnChildrenAttached(std::span<const std::unique_ptr<IWidget>> children) override;
 
 public:
 
@@ -43,6 +40,8 @@ public:
 
     explicit DialIndicator(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context);
     ~DialIndicator() override;
+
+    std::vector<WidgetPropertyType> GetSupportedProperties() const override;
 
     [[nodiscard]] WidgetType GetType() const override { return WidgetType::IndicatorDial; }
 };

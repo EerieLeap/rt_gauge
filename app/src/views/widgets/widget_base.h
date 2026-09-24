@@ -71,8 +71,6 @@ protected:
 
     std::vector<AnySubscription> subscriptions_;
     std::vector<OutboundBinding> outbound_bindings_;
-    // Legacy dial parts share configuration until Step 8; owned children never use this path.
-    std::vector<WidgetBase*> dependencies_;
     // Stored properties that still need visual application, including initial state and
     // interrupted animation targets as well as updates received while suspended.
     PropertySet pending_properties_;
@@ -134,17 +132,6 @@ protected:
     static void RefreshCallback(lv_event_t* event);
 
     void RunEffect(PropertyChangeEffect effect);
-
-    // A widget this one builds and drives from the same configuration. Declaring it is enough:
-    // the base seeds it, reports its properties as configurable here, and keeps the bindings to
-    // itself. Nothing about what the dependency reads belongs in the widget that owns it.
-    void AddDependency(WidgetBase& dependency);
-
-    void ApplyConfiguration(std::shared_ptr<WidgetConfiguration> configuration, bool is_owner);
-
-    // A dependency shares its owner's configuration, so it neither resolves the bindings - which
-    // would subscribe and publish twice - nor reports the owner's properties as unsupported.
-    void ConfigureAsPart(std::shared_ptr<WidgetConfiguration> configuration);
 
     // Every destructor that runs before ~WidgetBase must call this first, or a
     // dispatch already in flight can reach members that have just been destroyed.

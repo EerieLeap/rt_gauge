@@ -39,6 +39,7 @@
 #include "views/themes/theme_manager.h"
 #include "views/themes/dark_bw_theme.h"
 #include "views/widgets/indicators/horizontal_chart_indicator/horizontal_chart_indicator.h"
+#include "views/widgets/widget_factory.h"
 #include "views/assets/images/images_register.h"
 
 #include "ui_controller.h"
@@ -55,6 +56,7 @@ using namespace eerie_leap::views::assets::images;
 
 namespace config_services = eerie_leap::configuration::services;
 
+using eerie_leap::views::widgets::WidgetFactory;
 using eerie_leap::domain::ui_domain::ScopedLvglLock;
 using eerie_leap::domain::ui_domain::event_bus::NavigationEventType;
 using eerie_leap::domain::ui_domain::event_bus::NavigationPayloadType;
@@ -190,7 +192,9 @@ int UiController::Initialize() {
     auto cbor_ui_config_service = std::make_unique<config_services::CborConfigurationService<CborUiConfig>>(
         UI_CONFIGURATION_NAME, fs_service_, config_work_queue_thread_);
     ui_configuration_manager_ = std::make_shared<UiConfigurationManager>(
-        std::move(cbor_ui_config_service));
+        std::move(cbor_ui_config_service),
+        [](const auto& owner, auto children) {
+            WidgetFactory::GetInstance().ValidateChildren(owner, children); });
 
     if(configuration_service_ != nullptr)
         configuration_service_->RegisterCborConfigurationManager(
@@ -662,7 +666,7 @@ void UiController::SetupTestConfiguration() {
     // widget8->bindings.push_back(LoggingBinding(WidgetPropertyType::IS_VISIBLE));
     // screen_configuration->AddWidget(std::move(widget8));
 
-    // Widget: IndicatorDial
+    // Widget: IndicatorDial, driving needle widget 12 (CHILD_WIDGET_IDS index 0)
     auto widget9 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
     widget9->type = WidgetType::IndicatorDial;
     widget9->id = 9;
@@ -671,20 +675,34 @@ void UiController::SetupTestConfiguration() {
     widget9->size_grid.width = 466;
     widget9->size_grid.height = 466;
     widget9->z_index = 0;
-    widget9->properties[WidgetPropertyType::FILE_PATH] = "ui_img_arrow_al88.bin";
-    widget9->properties[WidgetPropertyType::IMG_WIDTH] = 15;
-    widget9->properties[WidgetPropertyType::IMG_HEIGHT] = 220;
+    widget9->properties[WidgetPropertyType::CHILD_WIDGET_IDS] = std::pmr::vector<int>({ 12 }, Mrm::GetExtPmr());
     widget9->properties[WidgetPropertyType::IS_SMOOTHED] = true;
-    widget9->properties[WidgetPropertyType::POSITION_X] = 0;
-    widget9->properties[WidgetPropertyType::POSITION_Y] = -104;
-    widget9->properties[WidgetPropertyType::ANCHOR_POINT_X] = 7;
-    widget9->properties[WidgetPropertyType::ANCHOR_POINT_Y] = 7;
     widget9->properties[WidgetPropertyType::MIN_VALUE] = 0;
     widget9->properties[WidgetPropertyType::MAX_VALUE] = 100;
     widget9->bindings.push_back(SensorBinding("sensor_1"));
     // widget9->properties[WidgetPropertyType::START_ANGLE] = 0;
     // widget9->properties[WidgetPropertyType::END_ANGLE] = 360;
     screen_configuration->AddWidget(std::move(widget9));
+
+    // Widget 12: BasicIcon - Dial needle. It fills the dial, so its outer grid geometry
+    // is the (0, 0) / (1, 1) placeholder; image offset and anchors stay local.
+    auto widget12 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
+    widget12->type = WidgetType::BasicIcon;
+    widget12->id = 12;
+    widget12->position_grid.x = 0;
+    widget12->position_grid.y = 0;
+    widget12->size_grid.width = 1;
+    widget12->size_grid.height = 1;
+    widget12->z_index = 0;
+    widget12->properties[WidgetPropertyType::ICON_TYPE] = static_cast<int>(IconType::Image);
+    widget12->properties[WidgetPropertyType::FILE_PATH] = "ui_img_arrow_al88.bin";
+    widget12->properties[WidgetPropertyType::IMG_WIDTH] = 15;
+    widget12->properties[WidgetPropertyType::IMG_HEIGHT] = 220;
+    widget12->properties[WidgetPropertyType::POSITION_X] = 0;
+    widget12->properties[WidgetPropertyType::POSITION_Y] = -104;
+    widget12->properties[WidgetPropertyType::ANCHOR_POINT_X] = 7;
+    widget12->properties[WidgetPropertyType::ANCHOR_POINT_Y] = 7;
+    screen_configuration->AddWidget(std::move(widget12));
 
     // Widget: IndicatorBar - Horizontal Left to right
     auto widget10 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
@@ -867,7 +885,7 @@ void UiController::SetupTestConfiguration() {
 
     ui_configuration->screen_configurations.push_back(std::move(screen_configuration_3));
 
-    ui_configuration_manager_->Update(*ui_configuration);
+    ui_configuration_manager_->Update(std::move(ui_configuration));
 }
 
 void UiController::SetupTestAssets() {

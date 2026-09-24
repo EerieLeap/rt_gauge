@@ -1,10 +1,7 @@
-#include <stdexcept>
-
 #include <zephyr/logging/log.h>
 #include <lvgl.h>
 
 #include "domain/ui_domain/lvgl_lock.h"
-#include "views/widgets/widget_factory.h"
 
 #include "screen.h"
 
@@ -30,10 +27,18 @@ Screen::Screen(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context
 }
 
 int Screen::DoRender() {
-    for(auto& widget : *widgets_)
-        widget->Render();
+    // Render every root so one failed asset does not hide the rest; report the first failure.
+    int result = 0;
+    for(auto& widget : *widgets_) {
+        const int res = widget->Render();
+        if(res != 0) {
+            LOG_ERR("Failed to render widget %u on screen %u.", widget->GetId(), id_);
+            if(result == 0)
+                result = res;
+        }
+    }
 
-    return 0;
+    return result;
 }
 
 int Screen::ApplyTheme(const ITheme& theme) {
@@ -41,24 +46,17 @@ int Screen::ApplyTheme(const ITheme& theme) {
 }
 
 void Screen::Configure(std::shared_ptr<ScreenConfiguration> configuration) {
+    ScopedLvglLock lvgl_guard;
+
+    auto assembly = WidgetAssembly::Assemble(configuration, container_, context_);
+    assembly.Commit();
+
+    // Replacing the assembly destroys the previous tree only after the new one exists.
+    assembly_ = std::move(assembly);
+    widgets_ = assembly_->GetRoots();
     configuration_ = std::move(configuration);
 
-    auto layout = GridLayout::FromActiveScreen(configuration_->grid);
-
     SetVisibility(IsVisible());
-
-    widgets_->clear();
-
-    for(const auto& widget_config : configuration_->widget_configurations) {
-        try {
-            auto widget = WidgetFactory::GetInstance().CreateWidget(widget_config, container_, context_);
-            UpdateWidgetGeometry(*widget, layout);
-
-            widgets_->push_back(std::move(widget));
-        } catch(const std::exception& e) {
-            LOG_ERR("Failed to create widget with ID: %d. %s", widget_config->id, e.what());
-        }
-    }
 }
 
 std::shared_ptr<ScreenConfiguration> Screen::GetConfiguration() const {
@@ -103,14 +101,6 @@ void Screen::OnDeactivated() {
 
 std::shared_ptr<std::vector<std::unique_ptr<IWidget>>> Screen::GetWidgets() const {
     return widgets_;
-}
-
-void Screen::UpdateWidgetGeometry(IWidget& widget, const GridLayout& layout) {
-    const auto& widget_config = widget.GetConfiguration();
-
-    auto size_px = layout.ToPx(widget_config->size_grid);
-    widget.SetSizePx(size_px);
-    widget.SetPositionPx(layout.ToPx(widget_config->position_grid, size_px));
 }
 
 } // namespace eerie_leap::views::screens

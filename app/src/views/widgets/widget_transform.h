@@ -38,7 +38,7 @@ public:
     bool Attach(uint32_t id, std::shared_ptr<Frame> presentation,
         std::shared_ptr<Frame> layout,
         const WidgetPropertyStore& properties, Callbacks callbacks, void* context);
-    void Configure(const WidgetConfiguration& configuration, bool is_owner);
+    void Configure(const WidgetConfiguration& configuration);
     void Detach();
     static void RegisterProperties(WidgetPropertyStore& store);
     // True consumes animation properties. Anchors also retain ordinary widget

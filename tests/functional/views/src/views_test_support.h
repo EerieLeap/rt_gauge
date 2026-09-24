@@ -1,15 +1,19 @@
 #pragma once
 
 #include <cstdint>
+#include <initializer_list>
 #include <memory>
 #include <vector>
 
 #include <lvgl.h>
 
+#include "domain/ui_domain/models/icon_type.h"
+#include "domain/ui_domain/models/widget_configuration.h"
 #include "views/renderable_base.h"
 #include "views/screens/i_screen.h"
 #include "views/utilitites/frame.h"
 #include "views/widgets/i_widget.h"
+#include "views/widgets/widget_context.h"
 
 namespace views_test {
 
@@ -24,6 +28,19 @@ void CleanTestDisplay(void* fixture);
 
 // The stable presentation object beneath a widget's public layout container.
 lv_obj_t* WidgetContent(const eerie_leap::views::widgets::IWidget& widget);
+
+// A fill-slot BasicIcon needle for a dial. Labels get text so they can render.
+std::shared_ptr<eerie_leap::domain::ui_domain::models::WidgetConfiguration> NeedleConfiguration(
+    uint32_t id,
+    eerie_leap::domain::ui_domain::models::IconType type = eerie_leap::domain::ui_domain::models::IconType::Label);
+
+// Builds each child through the factory under the owner's mount, records their IDs
+// on the owner's configuration in order, and injects them. Configure the owner next.
+void InjectChildren(
+    eerie_leap::views::widgets::IWidget& owner,
+    eerie_leap::domain::ui_domain::models::WidgetConfiguration& owner_configuration,
+    std::initializer_list<std::shared_ptr<eerie_leap::domain::ui_domain::models::WidgetConfiguration>> children,
+    const eerie_leap::views::widgets::WidgetContext& context = {});
 
 // The real Screen pulls in a widget tree, a grid layout and a configuration;
 // the group only ever calls the interface below.

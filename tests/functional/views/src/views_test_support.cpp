@@ -3,14 +3,22 @@
 
 #include <lvgl.h>
 
+#include "views/widgets/widget_factory.h"
+
 #include "views_test_support.h"
 
 namespace views_test {
 
+using eerie_leap::domain::ui_domain::models::IconType;
 using eerie_leap::domain::ui_domain::models::ScreenConfiguration;
+using eerie_leap::domain::ui_domain::models::WidgetConfiguration;
+using eerie_leap::domain::ui_domain::models::WidgetPropertyType;
+using eerie_leap::domain::ui_domain::models::WidgetType;
 using eerie_leap::views::themes::ITheme;
 using eerie_leap::views::utilitites::Frame;
 using eerie_leap::views::widgets::IWidget;
+using eerie_leap::views::widgets::WidgetContext;
+using eerie_leap::views::widgets::WidgetFactory;
 
 namespace {
 
@@ -52,6 +60,35 @@ void CleanTestDisplay(void* fixture) {
 
 lv_obj_t* WidgetContent(const IWidget& widget) {
     return widget.GetContainer()->GetChild()->GetObject();
+}
+
+std::shared_ptr<WidgetConfiguration> NeedleConfiguration(uint32_t id, IconType type) {
+    auto needle = std::make_shared<WidgetConfiguration>(std::allocator_arg, std::pmr::get_default_resource());
+    needle->id = id;
+    needle->type = WidgetType::BasicIcon;
+    needle->position_grid = { 0, 0 };
+    needle->size_grid = { 1, 1 };
+    needle->properties[WidgetPropertyType::ICON_TYPE] = static_cast<int>(type);
+    if(type == IconType::Label)
+        needle->properties[WidgetPropertyType::LABEL] = std::pmr::string("|");
+    return needle;
+}
+
+void InjectChildren(
+    IWidget& owner,
+    WidgetConfiguration& owner_configuration,
+    std::initializer_list<std::shared_ptr<WidgetConfiguration>> children,
+    const WidgetContext& context) {
+
+    auto& factory = WidgetFactory::GetInstance();
+    std::pmr::vector<int> ids(owner_configuration.properties.get_allocator().resource());
+    IWidget::Children widgets;
+    for(const auto& child : children) {
+        ids.push_back(static_cast<int>(child->id));
+        widgets.push_back(factory.CreateWidget(child, owner.GetChildMount(), context));
+    }
+    owner_configuration.properties[WidgetPropertyType::CHILD_WIDGET_IDS] = std::move(ids);
+    owner.SetChildren(std::move(widgets));
 }
 
 FakeScreen::FakeScreen(

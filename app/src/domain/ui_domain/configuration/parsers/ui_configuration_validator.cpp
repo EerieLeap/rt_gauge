@@ -171,7 +171,7 @@ static void InvalidWidgetConfiguration(uint32_t screen_id, uint32_t widget_id, s
         + std::string(message));
 }
 
-void UiConfigurationValidator::Validate(const UiConfiguration& configuration) {
+void UiConfigurationValidator::Validate(const UiConfiguration& configuration, const ChildValidator& validate_children) {
     for(const auto& [type, value] : configuration.properties) {
         if(!IsValidUiPropertyType(type))
             InvalidUiConfiguration("Unknown UI property ID: " + std::to_string(static_cast<uint16_t>(type)) + ".");
@@ -183,7 +183,7 @@ void UiConfigurationValidator::Validate(const UiConfiguration& configuration) {
     ValidateScreenGrid(configuration);
     ValidateActiveScreenGroupId(configuration);
 
-    ValidateScreens(configuration);
+    ValidateScreens(configuration, validate_children);
 }
 
 void UiConfigurationValidator::Validate(const ScreenConfiguration& configuration, const ChildValidator& validate_children) {
@@ -383,33 +383,9 @@ void UiConfigurationValidator::ValidateActiveScreenGroupId(const UiConfiguration
     InvalidUiConfiguration("Active screen group ID does not match any screen.");
 }
 
-void UiConfigurationValidator::ValidateScreens(const UiConfiguration& configuration) {
+void UiConfigurationValidator::ValidateScreens(const UiConfiguration& configuration, const ChildValidator& validate_children) {
     for(const auto& screen_configuration : configuration.screen_configurations)
-        ValidateWidgets(*screen_configuration);
-}
-
-void UiConfigurationValidator::ValidateWidgets(const ScreenConfiguration& screen_configuration) {
-    ValidateWidgetId(screen_configuration);
-    ValidateWidgetType(screen_configuration);
-    ValidateWidgetSize(screen_configuration);
-    ValidateWidgetPosition(screen_configuration);
-    ValidateWidgetProperties(screen_configuration);
-    ValidateWidgetBindings(screen_configuration);
-}
-
-void UiConfigurationValidator::ValidateWidgetId(const ScreenConfiguration& screen_configuration) {
-    std::unordered_set<uint32_t> widget_ids;
-
-    for(const auto& widget_configuration : screen_configuration.widget_configurations) {
-        if(widget_ids.contains(widget_configuration->id))
-            InvalidWidgetConfiguration(
-                screen_configuration.id,
-                widget_configuration->id,
-                "Screen cannot contain duplicate widget IDs."
-            );
-
-        widget_ids.insert(widget_configuration->id);
-    }
+        Validate(*screen_configuration, validate_children);
 }
 
 void UiConfigurationValidator::ValidateWidgetType(const ScreenConfiguration& screen_configuration) {
@@ -442,7 +418,7 @@ void UiConfigurationValidator::ValidateWidgetType(const ScreenConfiguration& scr
 void UiConfigurationValidator::ValidateWidgetSize(const ScreenConfiguration& screen_configuration,
     std::span<const std::optional<size_t>> parents) {
     for(size_t i = 0; i < screen_configuration.widget_configurations.size(); ++i) {
-        if(!parents.empty() && parents[i].has_value())
+        if(parents[i].has_value())
             continue;
         const auto& widget_configuration = screen_configuration.widget_configurations[i];
         if(widget_configuration->size_grid.width == 0 || widget_configuration->size_grid.height == 0)
@@ -471,7 +447,7 @@ void UiConfigurationValidator::ValidateWidgetSize(const ScreenConfiguration& scr
 void UiConfigurationValidator::ValidateWidgetPosition(const ScreenConfiguration& screen_configuration,
     std::span<const std::optional<size_t>> parents) {
     for(size_t i = 0; i < screen_configuration.widget_configurations.size(); ++i) {
-        if(!parents.empty() && parents[i].has_value())
+        if(parents[i].has_value())
             continue;
         const auto& widget_configuration = screen_configuration.widget_configurations[i];
         if(widget_configuration->position_grid.x < 0 || widget_configuration->position_grid.y < 0)

@@ -1,5 +1,6 @@
 #include <array>
 #include <memory>
+#include <string>
 #include <vector>
 #include <stdexcept>
 
@@ -195,7 +196,18 @@ ZTEST(ui_configuration_parser, test_CborSerializeDeserialize) {
 ZTEST(ui_configuration_parser, test_child_ids_and_anchor_keys_reuse_version_one_property_codec) {
     for(bool empty : { false, true }) {
         auto configuration = ui_configuration_parser_GetTestUiConfiguration();
-        auto& widget = *configuration->screen_configurations[0]->widget_configurations[0];
+        auto& screen = *configuration->screen_configurations[0];
+        auto& widget = *screen.widget_configurations[0];
+        // The owner gives up ID 0 so that zero is also exercised as a real child reference.
+        widget.id = 5;
+        for(uint32_t id : { 12U, 0U, static_cast<uint32_t>(INT32_MAX) }) {
+            auto child = make_shared_pmr<WidgetConfiguration>(Mrm::GetDefaultPmr());
+            child->type = WidgetType::IndicatorDigital;
+            child->id = id;
+            child->position_grid = { 0, 0 };
+            child->size_grid = { 1, 1 };
+            screen.AddWidget(std::move(child));
+        }
         std::pmr::vector<int> children({ 12, 0, INT32_MAX }, Mrm::GetDefaultPmr());
         if(empty)
             children.clear();
@@ -229,6 +241,33 @@ ZTEST(ui_configuration_parser, test_child_ids_and_anchor_keys_reuse_version_one_
         auto restored = parser.Deserialize(Mrm::GetDefaultPmr(), *decoded);
         ui_configuration_parser_CompareUiConfigurations(*configuration, *restored);
     }
+}
+
+ZTEST(ui_configuration_parser, test_widget_child_rules_guard_save_and_load) {
+    auto configuration = ui_configuration_parser_GetTestUiConfiguration();
+    auto serialized = UiConfigurationCborParser().Serialize(*configuration);
+    bool reject = false;
+    int checks = 0;
+    UiConfigurationCborParser parser([&](const auto& widget, auto) {
+        ++checks;
+        if(reject && widget.id == 1)
+            throw std::invalid_argument("Widget rule rejected.");
+    });
+    zassert_not_null(parser.Serialize(*configuration).get());
+    zassert_not_null(parser.Deserialize(Mrm::GetDefaultPmr(), *serialized).get());
+    zassert_equal(checks, 6, "Each of three widgets is checked on save and on load");
+
+    reject = true;
+    auto rejected = [](auto&& action) {
+        try {
+            action();
+        } catch(const std::invalid_argument& error) {
+            return std::string(error.what()).find("Widget rule rejected.") != std::string::npos;
+        }
+        return false;
+    };
+    zassert_true(rejected([&] { parser.Serialize(*configuration); }));
+    zassert_true(rejected([&] { parser.Deserialize(Mrm::GetDefaultPmr(), *serialized); }));
 }
 
 ZTEST(ui_configuration_parser, test_shape_properties_and_bindings_round_trip) {

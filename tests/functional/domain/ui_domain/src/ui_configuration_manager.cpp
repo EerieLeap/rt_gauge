@@ -130,7 +130,7 @@ ZTEST(ui_configuration_manager, test_UiConfigurationManager_Save_config_successf
         std::move(cbor_ui_configuration_service));
 
     auto ui_configuration = ui_configuration_manager_test_SetupTestUiConfiguration();
-    bool result = ui_configuration_manager->Update(*ui_configuration);
+    bool result = ui_configuration_manager->Update(ui_configuration);
     zassert_true(result);
 }
 
@@ -145,7 +145,7 @@ ZTEST(ui_configuration_manager, test_UiConfigurationManager_Save_config_and_Load
         std::move(cbor_ui_configuration_service));
 
     auto ui_configuration = ui_configuration_manager_test_SetupTestUiConfiguration();
-    bool result = ui_configuration_manager->Update(*ui_configuration);
+    bool result = ui_configuration_manager->Update(ui_configuration);
     zassert_true(result);
 
     auto saved_ui_configuration = ui_configuration_manager->Get(true);
@@ -194,6 +194,35 @@ ZTEST(ui_configuration_manager, test_UiConfigurationManager_Save_config_and_Load
             }
         }
     }
+}
+
+ZTEST(ui_configuration_manager, test_UiConfigurationManager_validates_once_per_boundary) {
+    DtFs::InitInternalFs();
+    auto fs_service = std::make_shared<FsService>(DtFs::GetInternalFsMp());
+
+    fs_service->Format();
+
+    size_t checks = 0;
+    auto ui_configuration_manager = std::make_shared<UiConfigurationManager>(
+        std::make_unique<CborConfigurationService<CborUiConfig>>("ui_config", fs_service),
+        [&](const auto&, auto) { ++checks; });
+    auto ui_configuration = ui_configuration_manager_test_SetupTestUiConfiguration();
+    const auto widget_count = ui_configuration->screen_configurations[0]->widget_configurations.size();
+
+    checks = 0;
+    zassert_true(ui_configuration_manager->Update(ui_configuration));
+    zassert_equal(checks, widget_count, "Saving validates once and keeps the configuration");
+    zassert_equal(ui_configuration_manager->Get().get(), ui_configuration.get());
+
+    const auto exported = ui_configuration_manager->GetCborConfiguration();
+    checks = 0;
+    zassert_true(ui_configuration_manager->ApplyCborConfiguration(exported));
+    zassert_equal(checks, widget_count, "Importing validates once, while decoding");
+    zassert_not_equal(ui_configuration_manager->Get().get(), ui_configuration.get());
+
+    checks = 0;
+    zassert_not_null(ui_configuration_manager->Get(true).get());
+    zassert_equal(checks, widget_count, "Loading from storage validates once");
 }
 
 ZTEST(ui_configuration_manager, test_UiConfigurationManager_falls_back_when_the_stored_version_is_stale) {

@@ -13,6 +13,9 @@ using eerie_leap::domain::ui_domain::models::ScreenConfiguration;
 using eerie_leap::domain::ui_domain::models::WidgetConfiguration;
 
 class UiConfigurationValidator {
+public:
+    using ChildValidator = std::function<void(const WidgetConfiguration&, std::span<const WidgetConfiguration* const>)>;
+
 private:
     static void ValidateScreenCount(const UiConfiguration& configuration);
     static void ValidateScreenId(const UiConfiguration& configuration);
@@ -20,27 +23,24 @@ private:
     static void ValidateScreenGrid(const UiConfiguration& configuration);
     static void ValidateActiveScreenGroupId(const UiConfiguration& configuration);
 
-    static void ValidateScreens(const UiConfiguration& configuration);
+    static void ValidateScreens(const UiConfiguration& configuration, const ChildValidator& validate_children);
 
-    static void ValidateWidgets(const ScreenConfiguration& screen_configuration);
-    static void ValidateWidgetId(const ScreenConfiguration& screen_configuration);
     static void ValidateWidgetType(const ScreenConfiguration& screen_configuration);
     static void ValidateWidgetSize(
         const ScreenConfiguration& screen_configuration,
-        std::span<const std::optional<size_t>> parents = {});
+        std::span<const std::optional<size_t>> parents);
     static void ValidateWidgetPosition(
         const ScreenConfiguration& screen_configuration,
-        std::span<const std::optional<size_t>> parents = {});
+        std::span<const std::optional<size_t>> parents);
     static void ValidateWidgetProperties(const ScreenConfiguration& screen_configuration);
     static void ValidateWidgetBindings(const ScreenConfiguration& screen_configuration);
 
 public:
-    static void Validate(const UiConfiguration& configuration);
-    using ChildValidator = std::function<void(const WidgetConfiguration&, std::span<const WidgetConfiguration* const>)>;
+    // Widget-owned child rules come from the view layer (the widget factory). Omitting
+    // them runs only the domain checks, including the composition graph.
+    static void Validate(const UiConfiguration& configuration, const ChildValidator& validate_children = {});
 
     // Checks a screen and invokes the supplied widget-owned child rules once.
-    // The domain-only form omits those rules. Production adopts this preflight in
-    // Step 8; the existing whole-UI overload retains legacy geometry until then.
     static void Validate(const ScreenConfiguration& configuration, const ChildValidator& validate_children = {});
 };
 

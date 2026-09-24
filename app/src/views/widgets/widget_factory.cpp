@@ -63,7 +63,7 @@ std::unique_ptr<IWidget> WidgetFactory::CreateWidget(std::shared_ptr<WidgetConfi
 }
 
 void WidgetFactory::ConfigureWidget(IWidget& widget, std::shared_ptr<WidgetConfiguration> configuration, IWidget::Children children) const {
-    // Leaves and the legacy dial path never receive an injection call.
+    // Injection fixes a widget's configuration, so childless widgets skip it and stay reconfigurable.
     if(!children.empty())
         widget.SetChildren(std::move(children));
 

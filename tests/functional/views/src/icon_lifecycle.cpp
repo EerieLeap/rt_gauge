@@ -1,6 +1,8 @@
 #include <algorithm>
 #include <array>
 #include <memory>
+#include <stdexcept>
+#include <string>
 #include <utility>
 
 #include <zephyr/ztest.h>
@@ -10,8 +12,10 @@
 #include "subsys/fs/services/fs_service.h"
 #include "domain/logging_domain/event_bus/logging_events_channel.h"
 #include "domain/sensor_domain/event_bus/sensor_events_channel.h"
+#include "domain/ui_domain/configuration/parsers/ui_configuration_validator.h"
 #include "event_bus/event_channel_id.h"
 #include "event_bus/event_channels.h"
+#include "views/screens/screen.h"
 #include "views/themes/default_theme.h"
 #include "views/widgets/basic/icon_widget/icon_widget.h"
 #include "views/widgets/basic/icons/shape_icon/oval_icon/oval_icon.h"
@@ -28,6 +32,7 @@ using namespace eerie_leap::views::themes;
 using namespace eerie_leap::domain::sensor_domain::event_bus;
 using namespace eerie_leap::domain::logging_domain::event_bus;
 using eerie_leap::event_bus::EventChannelId;
+using eerie_leap::domain::ui_domain::configuration::parsers::UiConfigurationValidator;
 using eerie_leap::event_bus::InitializeEventChannels;
 using eerie_leap::subsys::event_bus::EventData;
 using eerie_leap::views::utilitites::Frame;
@@ -44,7 +49,13 @@ public:
 class TestDial : public indicators::DialIndicator {
 public:
     using DialIndicator::DialIndicator;
-    IconWidget& Needle() const { return *static_cast<IconWidget*>(dependencies_.front()); }
+    IconWidget& Needle() const { return static_cast<IconWidget&>(*GetChildren().front()); }
+
+    void Assemble(std::shared_ptr<WidgetConfiguration> dial, std::shared_ptr<WidgetConfiguration> needle,
+        const WidgetContext& context) {
+        views_test::InjectChildren(*this, *dial, { std::move(needle) }, context);
+        Configure(std::move(dial));
+    }
 };
 
 class BlueTheme : public DefaultTheme {
@@ -73,6 +84,31 @@ std::shared_ptr<WidgetConfiguration> Configuration(IconType type) {
         });
     }
     return configuration;
+}
+
+// The dial keeps the shared test bindings; image properties belong to its needle.
+std::shared_ptr<WidgetConfiguration> DialConfiguration(uint32_t id = 1) {
+    auto configuration = Configuration(IconType::Image);
+    configuration->properties.erase(WidgetPropertyType::ICON_TYPE);
+    configuration->type = WidgetType::IndicatorDial;
+    configuration->id = id;
+    return configuration;
+}
+
+// Factory-built dials need a needle before they are configured.
+void InjectTestNeedle(IWidget& widget, WidgetConfiguration& configuration) {
+    if(widget.GetType() != WidgetType::IndicatorDial)
+        return;
+    configuration.id = widget.GetId();
+    configuration.type = widget.GetType();
+    views_test::InjectChildren(widget, configuration, { views_test::NeedleConfiguration(widget.GetId() + 1) });
+}
+
+// Screens build only what UiConfigurationManager already validated with these rules.
+void ValidateScreen(const ScreenConfiguration& screen) {
+    UiConfigurationValidator::Validate(screen, [](const auto& owner, auto children) {
+        WidgetFactory::GetInstance().ValidateChildren(owner, children);
+    });
 }
 
 void Publish(WidgetPropertyType type, const EventData& value) {
@@ -324,11 +360,12 @@ ZTEST(icon_lifecycle, test_every_factory_widget_and_icon_supports_direct_rotatio
             configuration->properties[WidgetPropertyType::ANIMATION_TYPE] = static_cast<int>(Animation::Type::Blinking);
             configuration->properties[WidgetPropertyType::ANIMATION_DURATION_MS] = 1000;
             WidgetContext context;
-            if(icon == IconType::Image || type == WidgetType::IndicatorDial)
+            if(icon == IconType::Image)
                 context = ImageContext(*configuration, 20, 60);
             auto widget = factory.CreateWidget(type, 1, MakeRoot(), context);
             widget->SetSizePx({ 80, 80 });
             zassert_true(widget->SetRotation(-4500));
+            InjectTestNeedle(*widget, *configuration);
             widget->Configure(configuration);
             zassert_equal(widget->Render(), 0);
             const bool native = is_icon && icon != IconType::Label;
@@ -627,24 +664,23 @@ ZTEST(icon_lifecycle, test_image_anchor_tracks_live_dimensions_without_reloading
 ZTEST(icon_lifecycle, test_demo_dial_geometry_and_image_rotation_baseline) {
     ScopedLvglLock lock;
     for(bool smoothed : { false, true }) {
-        auto configuration = Configuration(IconType::Image);
-        configuration->type = WidgetType::IndicatorDial;
-        configuration->id = 9;
+        auto configuration = DialConfiguration(9);
         configuration->position_grid = { 0, 0 };
         configuration->size_grid = { 466, 466 };
         configuration->z_index = 0;
-        configuration->properties[WidgetPropertyType::POSITION_X] = 0;
-        configuration->properties[WidgetPropertyType::POSITION_Y] = -104;
-        configuration->properties[WidgetPropertyType::ANCHOR_POINT_X] = 7;
-        configuration->properties[WidgetPropertyType::ANCHOR_POINT_Y] = 7;
         configuration->properties[WidgetPropertyType::MIN_VALUE] = 0;
         configuration->properties[WidgetPropertyType::MAX_VALUE] = 100;
         configuration->properties[WidgetPropertyType::IS_SMOOTHED] = smoothed;
-        auto context = ImageContext(*configuration, 15, 220);
+        auto needle = views_test::NeedleConfiguration(12, IconType::Image);
+        needle->properties[WidgetPropertyType::POSITION_X] = 0;
+        needle->properties[WidgetPropertyType::POSITION_Y] = -104;
+        needle->properties[WidgetPropertyType::ANCHOR_POINT_X] = 7;
+        needle->properties[WidgetPropertyType::ANCHOR_POINT_Y] = 7;
+        auto context = ImageContext(*needle, 15, 220);
         auto root = std::make_shared<Frame>(Frame::CreateWrapped().SetWidth(466, false).SetHeight(466, false).Build());
         TestDial dial(9, root, context);
         dial.SetSizePx({ 466, 466 });
-        dial.Configure(configuration);
+        dial.Assemble(configuration, needle, context);
         zassert_equal(dial.Render(), 0);
         dial.OnActivated();
         lv_obj_update_layout(root->GetObject());
@@ -684,12 +720,13 @@ ZTEST(icon_lifecycle, test_demo_dial_geometry_and_image_rotation_baseline) {
 
 ZTEST(icon_lifecycle, test_dial_custom_angles_and_default_image_pivot_baseline) {
     ScopedLvglLock lock;
-    auto configuration = Configuration(IconType::Image);
+    auto configuration = DialConfiguration();
     configuration->properties[WidgetPropertyType::START_ANGLE] = 180;
     configuration->properties[WidgetPropertyType::END_ANGLE] = 450;
-    auto context = ImageContext(*configuration, 15, 220);
+    auto needle = views_test::NeedleConfiguration(2, IconType::Image);
+    auto context = ImageContext(*needle, 15, 220);
     TestDial dial(1, MakeRoot(), context);
-    dial.Configure(configuration);
+    dial.Assemble(configuration, needle, context);
     zassert_equal(dial.Render(), 0);
     dial.OnActivated();
     auto* image = dial.Needle().GetIconContainer()->GetObject();
@@ -702,6 +739,197 @@ ZTEST(icon_lifecycle, test_dial_custom_angles_and_default_image_pivot_baseline) 
         zassert_equal(dial.GetAngleForValue(value), 27 * value);
         zassert_equal(lv_image_get_rotation(image), 27 * value);
     }
+}
+
+ZTEST(icon_lifecycle, test_the_same_dial_drives_image_shape_and_label_needles) {
+    ScopedLvglLock lock;
+    for(auto type : { IconType::Image, IconType::TriangleIsosceles, IconType::Label }) {
+        auto configuration = DialConfiguration();
+        configuration->properties[WidgetPropertyType::START_ANGLE] = 180;
+        configuration->properties[WidgetPropertyType::END_ANGLE] = 450;
+        auto needle = views_test::NeedleConfiguration(2, type);
+        needle->properties[WidgetPropertyType::ANCHOR_POINT_X] = 3;
+        needle->properties[WidgetPropertyType::ANCHOR_POINT_Y] = 7;
+        if(type == IconType::TriangleIsosceles) {
+            needle->properties[WidgetPropertyType::WIDTH_PX] = 20;
+            needle->properties[WidgetPropertyType::HEIGHT_PX] = 60;
+        }
+        auto context = type == IconType::Image ? ImageContext(*needle, 20, 60) : WidgetContext{};
+        TestDial dial(1, MakeRoot(), context);
+        dial.Assemble(configuration, needle, context);
+        zassert_equal(dial.Render(), 0);
+        dial.OnActivated();
+        for(int value : { 0, 50, 100 }) {
+            Publish(WidgetPropertyType::VALUE, value);
+            if(type == IconType::Label)
+                zassert_equal(lv_obj_get_style_transform_rotation(
+                    views_test::WidgetContent(dial.Needle()), LV_PART_MAIN), 27 * value);
+            else
+                CheckRotation(dial.Needle(), 27 * value, 3, 53);
+            zassert_equal(lv_obj_get_style_transform_rotation(views_test::WidgetContent(dial), LV_PART_MAIN), 0);
+        }
+    }
+}
+
+ZTEST(icon_lifecycle, test_dial_and_needle_keep_isolated_properties_and_bindings) {
+    ScopedLvglLock lock;
+    auto configuration = DialConfiguration();
+    configuration->properties[WidgetPropertyType::START_ANGLE] = 180;
+    configuration->properties[WidgetPropertyType::END_ANGLE] = 450;
+    auto needle = views_test::NeedleConfiguration(2, IconType::TriangleIsosceles);
+    needle->properties[WidgetPropertyType::WIDTH_PX] = 20;
+    needle->properties[WidgetPropertyType::HEIGHT_PX] = 60;
+    constexpr uint32_t needle_visibility = 1000;
+    needle->bindings.push_back(PropertyBinding {
+        .target = WidgetPropertyType::IS_VISIBLE,
+        .channel = EventChannelId::Sensors,
+        .event_type = std::to_underlying(SensorEventType::DataUpdated),
+        .payload_key = std::to_underlying(SensorPayloadType::Value),
+        .selector_key = std::to_underlying(SensorPayloadType::SensorId),
+        .selector_value = static_cast<int>(needle_visibility)
+    });
+    auto set_needle_visible = [](bool visible) {
+        SensorEventsChannel::GetInstance().Publish({
+            .source_id = 0,
+            .type = SensorEventType::DataUpdated,
+            .payload = {
+                { SensorPayloadType::SensorId, static_cast<int>(needle_visibility) },
+                { SensorPayloadType::Value, visible }
+            }
+        });
+    };
+    TestDial dial(1, MakeRoot(), WidgetContext{});
+    dial.Assemble(configuration, needle, WidgetContext{});
+    zassert_equal(dial.Render(), 0);
+    dial.OnActivated();
+    auto& owned = dial.Needle();
+    zassert_equal(owned.GetConfiguration(), needle);
+
+    Publish(WidgetPropertyType::ANCHOR_POINT_X, 3);
+    zassert_equal(lv_obj_get_style_transform_pivot_x(views_test::WidgetContent(dial), LV_PART_MAIN), 3);
+    Publish(WidgetPropertyType::VALUE, 50);
+    CheckRotation(owned, 1350, 10, 30);
+
+    set_needle_visible(false);
+    zassert_false(owned.IsVisible());
+    zassert_true(dial.IsVisible());
+    zassert_true(dial.IsProcessingEligible());
+    Publish(WidgetPropertyType::VALUE, 100);
+    CheckRotation(owned, 1350, 10, 30);
+    set_needle_visible(true);
+    CheckRotation(owned, 2700, 10, 30);
+}
+
+ZTEST(icon_lifecycle, test_screen_builds_the_demo_dial_from_a_separate_needle_definition) {
+    ScopedLvglLock lock;
+    auto screen_configuration = std::make_shared<ScreenConfiguration>(std::allocator_arg, std::pmr::get_default_resource());
+    screen_configuration->id = 0;
+    screen_configuration->type = ScreenType::Gauge;
+    screen_configuration->grid = { .snap_enabled = true, .width = 466, .height = 466, .spacing_px = 0 };
+    auto needle = views_test::NeedleConfiguration(12, IconType::Image);
+    needle->properties[WidgetPropertyType::POSITION_X] = 0;
+    needle->properties[WidgetPropertyType::POSITION_Y] = -104;
+    needle->properties[WidgetPropertyType::ANCHOR_POINT_X] = 7;
+    needle->properties[WidgetPropertyType::ANCHOR_POINT_Y] = 7;
+    auto context = ImageContext(*needle, 15, 220);
+    auto dial = DialConfiguration(9);
+    dial->position_grid = { 0, 0 };
+    dial->size_grid = { 466, 466 };
+    dial->properties[WidgetPropertyType::MIN_VALUE] = 0;
+    dial->properties[WidgetPropertyType::MAX_VALUE] = 100;
+    dial->properties[WidgetPropertyType::CHILD_WIDGET_IDS] = std::pmr::vector<int> { 12 };
+    // A forward reference: the needle is defined before its owner.
+    screen_configuration->AddWidget(needle);
+    screen_configuration->AddWidget(dial);
+    ValidateScreen(*screen_configuration);
+    auto root = std::make_shared<Frame>(Frame::CreateWrapped().SetWidth(466, true).SetHeight(466, true).Build());
+    eerie_leap::views::screens::Screen screen(0, root, context);
+    screen.Configure(screen_configuration);
+
+    const auto& roots = *screen.GetWidgets();
+    zassert_equal(roots.size(), 1, "The needle is not a root");
+    zassert_equal(roots[0]->GetConfiguration(), dial);
+    const auto children = roots[0]->GetChildren();
+    zassert_equal(children.size(), 1);
+    zassert_equal(children[0]->GetConfiguration(), needle);
+    zassert_equal(screen.Render(), 0);
+    screen.OnActivated();
+    lv_obj_update_layout(root->GetObject());
+    zassert_equal(lv_obj_get_width(roots[0]->GetContainer()->GetObject()), 466);
+    zassert_equal(lv_obj_get_height(roots[0]->GetContainer()->GetObject()), 466);
+    auto* image = static_cast<const IconWidget&>(*children[0]).GetIconContainer()->GetObject();
+    zassert_equal(lv_obj_get_width(image), 15);
+    zassert_equal(lv_obj_get_height(image), 220);
+    zassert_equal(lv_obj_get_x(image), 226, "image x=%d", lv_obj_get_x(image));
+    zassert_equal(lv_obj_get_y(image), 19, "image y=%d", lv_obj_get_y(image));
+    lv_point_t pivot;
+    lv_image_get_pivot(image, &pivot);
+    zassert_equal(pivot.x, 7);
+    zassert_equal(pivot.y, 213);
+    const struct { int value; int32_t angle; } cases[] = { { 0, 2250 }, { 50, 0 }, { 100, 1350 } };
+    for(const auto& expected : cases) {
+        Publish(WidgetPropertyType::VALUE, expected.value);
+        zassert_equal(lv_image_get_rotation(image), expected.angle);
+    }
+}
+
+ZTEST(icon_lifecycle, test_a_dial_without_its_needle_is_rejected_at_every_boundary) {
+    ScopedLvglLock lock;
+    auto error_of = [](auto&& action) -> std::string {
+        try {
+            action();
+        } catch(const std::invalid_argument& error) {
+            return error.what();
+        }
+        return {};
+    };
+    auto contains = [](const std::string& text, const char* fragment) {
+        return text.find(fragment) != std::string::npos;
+    };
+
+    TestDial direct(1, MakeRoot(), WidgetContext{});
+    zassert_true(contains(error_of([&] { direct.Configure(DialConfiguration()); }), "exactly 1 child"));
+    zassert_true(contains(error_of([&] {
+        WidgetFactory::GetInstance().CreateWidget(DialConfiguration(), MakeRoot(), WidgetContext{});
+    }), "exactly 1 child"));
+
+    TestDial conflicted(1, MakeRoot(), WidgetContext{});
+    auto rotating = views_test::NeedleConfiguration(2);
+    rotating->properties[WidgetPropertyType::ANIMATION_TYPE] = static_cast<int>(Animation::Type::Rotation);
+    zassert_true(contains(error_of([&] { conflicted.Assemble(DialConfiguration(), rotating, WidgetContext{}); }),
+        "driven rotation conflicts"));
+
+    auto screen_configuration = std::make_shared<ScreenConfiguration>(std::allocator_arg, std::pmr::get_default_resource());
+    screen_configuration->id = 0;
+    screen_configuration->grid = { .snap_enabled = true, .width = 1, .height = 1, .spacing_px = 0 };
+    auto dial = DialConfiguration(9);
+    dial->position_grid = { 0, 0 };
+    dial->size_grid = { 1, 1 };
+    dial->properties[WidgetPropertyType::CHILD_WIDGET_IDS] = std::pmr::vector<int> { 12 };
+    screen_configuration->AddWidget(dial);
+    screen_configuration->AddWidget(views_test::NeedleConfiguration(12));
+    ValidateScreen(*screen_configuration);
+    eerie_leap::views::screens::Screen screen(0, MakeRoot(), WidgetContext{});
+    screen.Configure(screen_configuration);
+    const auto roots = screen.GetWidgets();
+
+    auto legacy = std::make_shared<ScreenConfiguration>(std::allocator_arg, std::pmr::get_default_resource());
+    legacy->id = 0;
+    legacy->grid = screen_configuration->grid;
+    auto legacy_dial = DialConfiguration(9);
+    legacy_dial->position_grid = { 0, 0 };
+    legacy_dial->size_grid = { 1, 1 };
+    legacy->AddWidget(legacy_dial);
+    const auto validation_error = error_of([&] { ValidateScreen(*legacy); });
+    for(const auto* fragment : { "Screen ID: 0", "Widget ID: 9", "exactly 1 child", "received 0" })
+        zassert_true(contains(validation_error, fragment), "Missing '%s' in '%s'", fragment, validation_error.c_str());
+    // Screens trust validated input, but the dial itself still refuses to configure without a needle.
+    const auto error = error_of([&] { screen.Configure(legacy); });
+    zassert_true(contains(error, "exactly 1 child") && contains(error, "received 0"), "%s", error.c_str());
+    zassert_equal(screen.GetWidgets(), roots);
+    zassert_equal(roots->size(), 1);
+    zassert_equal((*roots)[0]->GetChildren().size(), 1);
+    zassert_equal(screen.GetConfiguration(), screen_configuration);
 }
 
 ZTEST(icon_lifecycle, test_all_factory_widgets_support_live_animation_without_rebuilding) {
@@ -720,7 +948,7 @@ ZTEST(icon_lifecycle, test_all_factory_widgets_support_live_animation_without_re
             if(icon == IconType::Label)
                 configuration->properties[WidgetPropertyType::LABEL] = std::pmr::string("RPM");
             WidgetContext context;
-            if(icon == IconType::Image || type == WidgetType::IndicatorDial)
+            if(icon == IconType::Image)
                 context = ImageContext(*configuration);
             auto widget = factory.CreateWidget(type, 1, root, context);
             const auto supported = widget->GetSupportedProperties();
@@ -729,6 +957,7 @@ ZTEST(icon_lifecycle, test_all_factory_widgets_support_live_animation_without_re
                                  WidgetPropertyType::ANCHOR_POINT_Y })
                 zassert_equal(std::count(supported.begin(), supported.end(), property), 1);
             widget->SetSizePx({ 80, 80 });
+            InjectTestNeedle(*widget, *configuration);
             widget->Configure(configuration);
             zassert_equal(widget->Render(), 0, "widget type %d icon %d", static_cast<int>(type), static_cast<int>(icon));
             widget->OnActivated();
@@ -777,14 +1006,15 @@ ZTEST(icon_lifecycle, test_all_factory_widgets_support_live_animation_without_re
 ZTEST(icon_lifecycle, test_dial_generic_animation_is_owned_once_and_keeps_needle_value_rotation) {
     eerie_leap::domain::ui_domain::ScopedLvglLock lock;
     const auto count = lv_anim_count_running();
-    auto configuration = Configuration(IconType::Image);
+    auto configuration = DialConfiguration();
     configuration->properties[WidgetPropertyType::ANIMATION_TYPE] = 1;
     configuration->properties[WidgetPropertyType::IS_ANIMATION_ACTIVE] = true;
     configuration->properties[WidgetPropertyType::START_ANGLE] = 180;
     configuration->properties[WidgetPropertyType::END_ANGLE] = 450;
-    auto context = ImageContext(*configuration);
+    auto needle = views_test::NeedleConfiguration(2, IconType::Image);
+    auto context = ImageContext(*needle);
     TestDial dial(1, MakeRoot(), context);
-    dial.Configure(configuration);
+    dial.Assemble(configuration, needle, context);
     zassert_equal(dial.Render(), 0);
     dial.OnActivated();
     auto* content = views_test::WidgetContent(dial);
@@ -810,8 +1040,12 @@ ZTEST(icon_lifecycle, test_dial_generic_animation_is_owned_once_and_keeps_needle
     zassert_equal(lv_image_get_rotation(image), 1350);
     zassert_equal(lv_image_get_src(image), source);
     zassert_equal(lv_anim_count_running(), count + 1);
-    TestIcon independent(2, MakeRoot(), context);
-    independent.Configure(configuration);
+    auto icon_configuration = Configuration(IconType::Image);
+    icon_configuration->properties[WidgetPropertyType::ANIMATION_TYPE] = 1;
+    icon_configuration->properties[WidgetPropertyType::IS_ANIMATION_ACTIVE] = true;
+    auto icon_context = ImageContext(*icon_configuration);
+    TestIcon independent(2, MakeRoot(), icon_context);
+    independent.Configure(icon_configuration);
     zassert_equal(independent.Render(), 0);
     independent.OnActivated();
     zassert_equal(lv_anim_count_running(), count + 2);
@@ -1094,18 +1328,22 @@ ZTEST(icon_lifecycle, test_dial_needle_inherits_live_owner_state_and_has_one_fra
     const auto callbacks = lv_display_get_event_count(lv_display_get_default());
     for(auto target : { WidgetPropertyType::IS_ACTIVE, WidgetPropertyType::IS_VISIBLE, WidgetPropertyType::OPACITY }) {
         {
-            auto configuration = Configuration(IconType::Image);
+            auto configuration = DialConfiguration();
             configuration->properties[target] = target == WidgetPropertyType::OPACITY ? ConfigValue{0} : ConfigValue{false};
             configuration->properties[WidgetPropertyType::VALUE] = 50.0;
-            TestDial dial(1, MakeRoot(), ImageContext(*configuration));
-            dial.Configure(configuration);
+            auto needle_configuration = views_test::NeedleConfiguration(2, IconType::Image);
+            auto context = ImageContext(*needle_configuration);
+            TestDial dial(1, MakeRoot(), context);
+            dial.Assemble(configuration, needle_configuration, context);
             zassert_equal(dial.Render(), 0);
             dial.OnActivated();
             auto& needle = dial.Needle();
             zassert_true(needle.IsActive());
             zassert_true(needle.IsVisible());
             zassert_false(needle.IsProcessingEligible());
-            zassert_equal(dial.GetContainer()->GetChild()->GetChild().get(), needle.GetContainer().get());
+            // The mount wraps no second owner; the needle's frame stays its only owner.
+            zassert_is_null(dial.GetChildMount()->GetChild().get());
+            zassert_equal(lv_obj_get_parent(needle.GetContainer()->GetObject()), dial.GetChildMount()->GetObject());
             auto* image = needle.GetIconContainer()->GetObject();
             const auto* source = lv_image_get_src(image);
             Publish(target, 1);
@@ -1127,12 +1365,14 @@ ZTEST(icon_lifecycle, test_dial_needle_inherits_live_owner_state_and_has_one_fra
 
 ZTEST(icon_lifecycle, test_dial_value_still_rotates_image_under_owner_presentation_transform) {
     ScopedLvglLock lock;
-    auto configuration = Configuration(IconType::Image);
+    auto configuration = DialConfiguration();
     configuration->properties[WidgetPropertyType::START_ANGLE] = 180;
     configuration->properties[WidgetPropertyType::END_ANGLE] = 450;
-    TestDial dial(1, MakeRoot(), ImageContext(*configuration));
+    auto needle = views_test::NeedleConfiguration(2, IconType::Image);
+    auto context = ImageContext(*needle);
+    TestDial dial(1, MakeRoot(), context);
+    dial.Assemble(configuration, needle, context);
     zassert_is_null(dial.Needle().GetIconContainer());
-    dial.Configure(configuration);
     zassert_equal(dial.Render(), 0);
     dial.OnActivated();
     auto* image = dial.Needle().GetIconContainer()->GetObject();
@@ -1159,18 +1399,22 @@ ZTEST(icon_lifecycle, test_dial_value_still_rotates_image_under_owner_presentati
 
 ZTEST(icon_lifecycle, test_images_and_dials_apply_opacity_once_without_recoloring_or_reloading) {
     for(bool is_dial : { false, true }) {
-        auto configuration = Configuration(IconType::Image);
+        auto configuration = is_dial ? DialConfiguration() : Configuration(IconType::Image);
         configuration->properties[WidgetPropertyType::OPACITY] = 128;
         if(is_dial)
             configuration->properties[WidgetPropertyType::START_ANGLE] = 180;
         auto root = MakeRoot();
-        auto context = ImageContext(*configuration);
+        auto needle = views_test::NeedleConfiguration(2, IconType::Image);
+        auto context = ImageContext(is_dial ? *needle : *configuration);
         std::unique_ptr<WidgetBase> widget;
-        if(is_dial)
-            widget = std::make_unique<TestDial>(1, root, context);
-        else
+        if(is_dial) {
+            auto dial = std::make_unique<TestDial>(1, root, context);
+            dial->Assemble(configuration, needle, context);
+            widget = std::move(dial);
+        } else {
             widget = std::make_unique<TestIcon>(1, root, context);
-        widget->Configure(configuration);
+            widget->Configure(configuration);
+        }
         auto* outer = widget->GetContainer()->GetObject();
         zassert_equal(lv_obj_get_style_opa_layered(outer, LV_PART_MAIN), 128);
         zassert_equal(widget->Render(), 0);

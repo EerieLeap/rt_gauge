@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "domain/ui_domain/models/screen_configuration.h"
@@ -9,13 +10,11 @@
 #include "views/widgets/i_widget.h"
 #include "views/widgets/widget_context.h"
 #include "views/screens/i_screen.h"
+#include "views/screens/widget_assembly.h"
 #include "views/utilitites/frame.h"
-#include "views/utilitites/grid_layout.h"
 
 namespace eerie_leap::views::screens {
 
-using eerie_leap::domain::ui_domain::models::GridSettings;
-using eerie_leap::views::utilitites::GridLayout;
 using eerie_leap::views::widgets::WidgetContext;
 
 class Screen : public RenderableBase, public IScreen {
@@ -26,8 +25,9 @@ protected:
 
     std::shared_ptr<std::vector<std::unique_ptr<IWidget>>> widgets_;
     std::shared_ptr<ScreenConfiguration> configuration_;
+    // Declared after widgets_ so the tree is released before its root list.
+    std::optional<WidgetAssembly> assembly_;
 
-    void UpdateWidgetGeometry(IWidget& widget, const GridLayout& layout);
     void SetVisibility(bool is_visible);
 
     int DoRender() override;

@@ -59,7 +59,7 @@ public:
 
     // Configurable keys for this widget, without requiring configuration first.
     // Owned children expose their own keys independently; composites additionally
-    // report CHILD_WIDGET_IDS as structural metadata. Legacy dial parts still share keys.
+    // report CHILD_WIDGET_IDS as structural metadata.
     virtual std::vector<WidgetPropertyType> GetSupportedProperties() const = 0;
 
     // Layout

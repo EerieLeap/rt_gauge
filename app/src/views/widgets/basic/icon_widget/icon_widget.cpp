@@ -72,7 +72,7 @@ void IconWidget::RegisterProperties(WidgetPropertyStore& store) const {
     store.Register(WidgetPropertyType::POSITION_Y, ConfigValue { 0 }, PropertyChangeEffect::Relayout);
 
     // ICON_TYPE is seeded after registration, so resolve it from configuration
-    // here. A constructor-fixed icon (for example a dial's image needle) wins.
+    // here. A constructor-fixed icon wins.
     auto type = icon_type_;
     if(type == IconType::None && configuration_ != nullptr) {
         auto it = configuration_->properties.find(WidgetPropertyType::ICON_TYPE);
@@ -84,7 +84,7 @@ void IconWidget::RegisterProperties(WidgetPropertyStore& store) const {
 
 void IconWidget::OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) {
     switch(type) {
-        // A concrete type given at construction wins: the needle of a dial is not configurable.
+        // A concrete type given at construction wins over configuration.
         case WidgetPropertyType::ICON_TYPE:
             if(icon_type_ == IconType::None)
                 icon_type_ = static_cast<IconType>(ConfigValueAs<int>(value, 0));

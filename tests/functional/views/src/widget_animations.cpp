@@ -387,25 +387,19 @@ ZTEST(widget_animations, test_widget_animation_adapter_stages_properties_until_s
     zassert_equal(lv_obj_get_style_transform_rotation(content.GetObject(), LV_PART_MAIN), 900);
     animation.Synchronize();
     zassert_equal(animation_start_calls, attempts + 1);
-    animation.SetOwner(false);
-    Advance(250);
-    zassert_equal(lv_anim_count_running(), count);
-    zassert_equal(lv_obj_get_style_transform_rotation(content.GetObject(), LV_PART_MAIN), 0);
-    animation.SetOwner(true);
-    animation.Synchronize();
-    zassert_equal(animation_start_calls, attempts + 2);
     eligible = false;
     Advance(250);
     zassert_equal(lv_anim_count_running(), count);
+    zassert_equal(lv_obj_get_style_transform_rotation(content.GetObject(), LV_PART_MAIN), 0);
     eligible = true;
     animation.Synchronize();
-    zassert_equal(animation_start_calls, attempts + 3);
+    zassert_equal(animation_start_calls, attempts + 2);
     animation.Detach();
     animation.Detach();
     animation.StopAndReset();
     animation.Synchronize();
     zassert_equal(lv_anim_count_running(), count);
-    zassert_equal(animation_start_calls, attempts + 3);
+    zassert_equal(animation_start_calls, attempts + 2);
     zassert_equal(lv_obj_get_event_count(content.GetObject()), callbacks);
 }
 
