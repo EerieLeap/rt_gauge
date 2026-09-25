@@ -1,3 +1,5 @@
+#include <exception>
+
 #include <zephyr/logging/log.h>
 
 #include "utilities/memory/memory_resource_manager.h"
@@ -14,30 +16,9 @@ LOG_MODULE_REGISTER(display_config_ctrl_logger);
 
 DisplayConfigurationManager::DisplayConfigurationManager(
     std::unique_ptr<CborConfigurationService<CborDisplayConfig>> cbor_configuration_service) :
-    cbor_configuration_service_(std::move(cbor_configuration_service)),
-    configuration_(nullptr) {
+    CborConfigurationManagerBase("Display", std::move(cbor_configuration_service)) {
 
-    cbor_parser_ = std::make_unique<DisplayConfigurationCborParser>();
-    std::shared_ptr<DisplayConfiguration> configuration = nullptr;
-
-    try {
-        configuration = Get(true);
-    } catch(const std::exception& e) {
-        LOG_ERR("Failed to load Display configuration. %s", e.what());
-    } catch(...) {
-        LOG_ERR("Failed to load Display configuration.");
-    }
-
-    if(configuration == nullptr) {
-        if(!CreateDefaultConfiguration()) {
-            LOG_ERR("Failed to create default Display configuration.");
-            return;
-        }
-
-        LOG_INF("Default Display configuration loaded successfully.");
-    }
-
-    LOG_INF("Display Configuration Manager initialized successfully.");
+    LoadOrCreateDefault();
 }
 
 void DisplayConfigurationManager::RegisterConfigurationUpdatedHandler(ConfigurationUpdatedHandler handler) {
@@ -45,19 +26,8 @@ void DisplayConfigurationManager::RegisterConfigurationUpdatedHandler(Configurat
 }
 
 bool DisplayConfigurationManager::ApplyCborConfiguration(std::span<const uint8_t> cbor_data) {
-    auto cbor_config = cbor_configuration_service_->Deserialize(cbor_data);
-    if(cbor_config == nullptr)
+    if(!CborConfigurationManagerBase::ApplyCborConfiguration(cbor_data))
         return false;
-
-    try {
-        auto configuration = cbor_parser_->Deserialize(Mrm::GetExtPmr(), *cbor_config);
-
-        if(!Update(*configuration))
-            return false;
-    } catch(const std::exception& e) {
-        LOG_ERR("Failed to deserialize CBOR configuration. %s", e.what());
-        return false;
-    }
 
     // Only the externally supplied configuration needs to be pushed to the
     // driver; a local Update() comes from the service that already applied it.
@@ -71,53 +41,19 @@ bool DisplayConfigurationManager::ApplyCborConfiguration(std::span<const uint8_t
         }
     }
 
-    LOG_INF("CBOR configuration loaded successfully.");
-
     return true;
 }
 
-std::pmr::vector<uint8_t> DisplayConfigurationManager::GetCborConfiguration() {
-    auto configuration = Get();
-
-    auto cbor_config = cbor_parser_->Serialize(*configuration);
-
-    return cbor_configuration_service_->Serialize(*cbor_config);
+pmr_unique_ptr<CborDisplayConfig> DisplayConfigurationManager::Serialize(const DisplayConfiguration& configuration) {
+    return cbor_parser_.Serialize(configuration);
 }
 
-bool DisplayConfigurationManager::Update(const DisplayConfiguration& configuration) {
-    try {
-        auto cbor_config = cbor_parser_->Serialize(configuration);
-
-        if(!cbor_configuration_service_->Save(cbor_config.get()))
-            return false;
-    } catch(const std::exception& e) {
-        LOG_ERR("Failed to update Display configuration. %s", e.what());
-        return false;
-    }
-
-    return Get(true) != nullptr;
-}
-
-std::shared_ptr<DisplayConfiguration> DisplayConfigurationManager::Get(bool force_load) {
-    if(configuration_ != nullptr && !force_load)
-        return configuration_;
-
-    auto cbor_config_data = cbor_configuration_service_->Load();
-    if(!cbor_config_data.has_value())
-        return nullptr;
-
-    auto cbor_config = std::move(cbor_config_data.value().config);
-
-    auto configuration = cbor_parser_->Deserialize(Mrm::GetExtPmr(), *cbor_config);
-    configuration_ = std::make_shared<DisplayConfiguration>(std::move(*configuration));
-
-    return configuration_;
+pmr_unique_ptr<DisplayConfiguration> DisplayConfigurationManager::Deserialize(const CborDisplayConfig& cbor_config) {
+    return cbor_parser_.Deserialize(Mrm::GetExtPmr(), cbor_config);
 }
 
 bool DisplayConfigurationManager::CreateDefaultConfiguration() {
-    auto configuration = make_unique_pmr<DisplayConfiguration>(Mrm::GetExtPmr());
-
-    return Update(*configuration);
+    return Update(DisplayConfiguration {});
 }
 
 } // namespace eerie_leap::domain::display_domain::configuration
