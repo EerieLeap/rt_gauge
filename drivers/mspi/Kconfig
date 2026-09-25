@@ -1,0 +1,25 @@
+# SPI drivers
+
+# Copyright (c) 2017 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+
+menuconfig MSPI
+	bool "Multi-bit Serial Peripheral Interface (MSPI) bus drivers"
+	help
+	  Enable support for the MSPI hardware bus.
+
+if MSPI
+
+config MSPI_INIT_PRIORITY
+	int "Init priority"
+	default 70
+	help
+	  Device driver initialization priority.
+
+module = MSPI
+module-str = mspi
+source "subsys/logging/Kconfig.template.log_config"
+
+rsource "Kconfig.esp32"
+
+endif # MSPI
