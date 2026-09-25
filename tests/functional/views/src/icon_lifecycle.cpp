@@ -932,6 +932,17 @@ ZTEST(icon_lifecycle, test_a_dial_without_its_needle_is_rejected_at_every_bounda
     zassert_equal(screen.GetConfiguration(), screen_configuration);
 }
 
+ZTEST(icon_lifecycle, test_an_icon_without_an_implemented_type_fails_its_render_without_throwing) {
+    ScopedLvglLock lock;
+    for(auto type : { IconType::None, static_cast<IconType>(99) }) {
+        IconWidget widget(1, MakeRoot(), WidgetContext{});
+        widget.Configure(Configuration(type));
+        zassert_equal(widget.Render(), -1);
+        zassert_false(widget.IsReady());
+        zassert_is_null(widget.GetIconContainer());
+    }
+}
+
 ZTEST(icon_lifecycle, test_all_factory_widgets_support_live_animation_without_rebuilding) {
     eerie_leap::domain::ui_domain::ScopedLvglLock lock;
     const auto count = lv_anim_count_running();

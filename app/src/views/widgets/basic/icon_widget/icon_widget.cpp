@@ -1,3 +1,9 @@
+#include <cstdint>
+#include <stdexcept>
+#include <variant>
+
+#include <zephyr/logging/log.h>
+
 #include "domain/ui_domain/models/widget_property.h"
 
 #include "views/utilitites/positioning_helpers.h"
@@ -14,6 +20,26 @@ using namespace eerie_leap::domain::ui_domain::models;
 using namespace eerie_leap::views::utilitites;
 using namespace eerie_leap::views::themes;
 using namespace eerie_leap::views::widgets::basic::icons;
+
+LOG_MODULE_REGISTER(icon_widget_logger);
+
+void IconWidget::ValidateChildren(
+    const WidgetConfiguration& configuration,
+    std::span<const WidgetConfiguration* const> children
+) {
+    WidgetBase::ValidateChildren(configuration, children);
+
+    const auto it = configuration.properties.find(WidgetPropertyType::ICON_TYPE);
+    if(it == configuration.properties.end())
+        throw std::invalid_argument("ICON_TYPE is required.");
+
+    // Replay converts with ConfigValueAs<int>, which is undefined for a double outside int range.
+    const auto* real = std::get_if<double>(&it->second);
+    const bool convertible = real == nullptr || (*real >= 0 && *real <= INT32_MAX);
+    const auto type = static_cast<IconType>(convertible ? ConfigValueAs<int>(it->second, 0) : 0);
+    if(!IconFactory::GetInstance().IsAvailable(type))
+        throw std::invalid_argument("ICON_TYPE must name an implemented icon type.");
+}
 
 IconWidget::IconWidget(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context, IconType icon_type)
     : WidgetBase(id, std::move(parent), std::move(context)), icon_type_(icon_type) {}
@@ -45,8 +71,11 @@ int IconWidget::ApplyTheme(const ITheme& theme) {
 }
 
 lv_obj_t* IconWidget::Create() {
-    if(icon_type_ == IconType::None)
-        throw std::runtime_error("Invalid icon type.");
+    // Validation rejects this; an unvalidated configuration fails only this widget.
+    if(!IconFactory::GetInstance().IsAvailable(icon_type_)) {
+        LOG_ERR("Widget %u has no implemented icon type (ICON_TYPE %u).", id_, static_cast<unsigned>(icon_type_));
+        return nullptr;
+    }
 
     icon_ = IconFactory::GetInstance().Create(icon_type_, properties_, content_frame_);
     icon_->SetAssetsManager(context_.assets_manager);

@@ -15,6 +15,7 @@
 #include "domain/ui_domain/models/widget_composition.h"
 #include "event_bus/event_channels.h"
 #include "views/screens/screen.h"
+#include "views/screens/screen_group.h"
 #include "views/screens/widget_assembly.h"
 #include "views/utilitites/grid_layout.h"
 #include "views/widgets/basic/arc_icon_widget/arc_icon_widget.h"
@@ -29,6 +30,7 @@ using namespace eerie_leap::domain::sensor_domain::event_bus;
 using namespace eerie_leap::views::widgets;
 using eerie_leap::domain::ui_domain::configuration::parsers::UiConfigurationValidator;
 using eerie_leap::event_bus::InitializeEventChannels;
+using eerie_leap::views::screens::ScreenGroup;
 using eerie_leap::views::screens::WidgetAssembly;
 using eerie_leap::views::utilitites::GridLayout;
 
@@ -43,6 +45,7 @@ struct Journal {
     std::optional<uint32_t> fail_construction;
     std::optional<uint32_t> fail_configuration;
     std::optional<uint32_t> fail_render;
+    std::optional<uint32_t> throw_render;
 };
 
 Journal journal;
@@ -79,6 +82,8 @@ public:
 
 protected:
     int DoRender() override {
+        if(journal.throw_render == id_)
+            throw std::runtime_error("Render failed");
         return journal.fail_render == id_ ? -EIO : 0;
     }
 
@@ -606,25 +611,33 @@ ZTEST(widget_assembly, test_screen_replaces_its_tree_only_after_the_candidate_as
     zassert_equal(lv_obj_get_child_count(screen_object), 1);
 }
 
-ZTEST(widget_assembly, test_screen_render_reports_failures_without_skipping_other_roots) {
+ZTEST(widget_assembly, test_a_widget_render_failure_stays_local_to_that_widget) {
     auto container = Container();
-    eerie_leap::views::screens::Screen screen(42, container, WidgetContext {});
+    auto group = std::make_shared<ScreenGroup>(0, container);
+    auto screen = std::make_shared<eerie_leap::views::screens::Screen>(42, group->GetContainer(), WidgetContext {});
     auto configuration = Screen();
     Add(*configuration, 1, WidgetType::BasicArcIcon, { 2 });
     Add(*configuration, 2, WidgetType::IndicatorDigital);
     Add(*configuration, 3, WidgetType::IndicatorDigital);
+    Add(*configuration, 4, WidgetType::IndicatorDigital);
     Validate(*configuration);
-    screen.Configure(configuration);
-    const auto& roots = *screen.GetWidgets();
+    screen->Configure(configuration);
+    group->AddScreen(screen);
+    group->Activate();
+    const auto& roots = *screen->GetWidgets();
 
     journal.fail_render = 2;
-    zassert_equal(screen.Render(), -EIO);
-    zassert_false(screen.IsReady());
+    journal.throw_render = 3;
+    zassert_equal(group->EnsureRendered(), 0);
+    zassert_true(group->IsActivated(), "A failed widget does not keep its group hidden");
+    zassert_true(screen->IsReady());
     zassert_false(roots[0]->IsReady(), "A composite with a failed child is not ready");
-    zassert_true(roots[1]->IsReady(), "Later roots still render");
+    zassert_false(roots[1]->IsReady(), "A root that threw is not ready");
+    zassert_true(roots[2]->IsReady(), "Later roots still render");
 
     journal.fail_render.reset();
-    zassert_equal(screen.Render(), 0);
-    zassert_true(screen.IsReady());
+    journal.throw_render.reset();
+    zassert_equal(screen->Render(), 0);
     zassert_true(roots[0]->IsReady());
+    zassert_true(roots[1]->IsReady());
 }

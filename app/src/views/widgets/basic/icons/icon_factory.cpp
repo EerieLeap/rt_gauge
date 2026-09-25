@@ -49,6 +49,10 @@ std::unique_ptr<IIcon> IconFactory::Create(const IconType type, std::shared_ptr<
     return icon;
 }
 
+bool IconFactory::IsAvailable(IconType type) const {
+    return registrations_.contains(type);
+}
+
 std::vector<IconType> IconFactory::GetAvailableTypes() const {
     std::vector<IconType> types;
     types.reserve(registrations_.size());

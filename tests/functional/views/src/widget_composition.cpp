@@ -29,6 +29,8 @@ std::shared_ptr<WidgetConfiguration> Widget(uint32_t id, WidgetType type) {
     widget->type = type;
     widget->position_grid = { 0, 0 };
     widget->size_grid = { 1, 1 };
+    if(type == WidgetType::BasicIcon || type == WidgetType::BasicArcIcon)
+        widget->properties[WidgetPropertyType::ICON_TYPE] = static_cast<int>(IconType::Rectangle);
     return widget;
 }
 
@@ -211,6 +213,35 @@ ZTEST(widget_composition, test_dial_rejects_inbound_animation_type_bindings_and_
         needle->bindings[0].target = target;
         zassert_true(CompositionError(*screen).empty());
     }
+}
+
+ZTEST(widget_composition, test_icon_widgets_require_an_implemented_icon_type) {
+    for(auto type : { WidgetType::BasicIcon, WidgetType::BasicArcIcon }) {
+        auto screen = Screen();
+        auto icon = Widget(9, type);
+        screen->widget_configurations = { icon };
+        zassert_true(CompositionError(*screen).empty());
+        icon->properties[WidgetPropertyType::ICON_TYPE] = 2.0;
+        zassert_true(CompositionError(*screen).empty(), "Replay reads an integral double as the same icon type");
+
+        icon->properties.erase(WidgetPropertyType::ICON_TYPE);
+        ExpectError(*screen, { "Widget ID: 9", "ICON_TYPE is required" });
+        for(int value : { static_cast<int>(IconType::None), static_cast<int>(IconType::Svg), 99, -1 }) {
+            icon->properties[WidgetPropertyType::ICON_TYPE] = value;
+            ExpectError(*screen, { "Widget ID: 9", "ICON_TYPE must name an implemented icon type" });
+        }
+        icon->properties[WidgetPropertyType::ICON_TYPE] = 1e20;
+        ExpectError(*screen, { "Widget ID: 9", "ICON_TYPE must name an implemented icon type" });
+    }
+
+    // A needle is checked as its own widget, so the error names the needle, not the dial.
+    auto screen = Screen();
+    auto dial = Widget(9, WidgetType::IndicatorDial);
+    auto needle = Widget(12, WidgetType::BasicIcon);
+    needle->properties.erase(WidgetPropertyType::ICON_TYPE);
+    Children(*dial, { 12 });
+    screen->widget_configurations = { dial, needle };
+    ExpectError(*screen, { "Widget ID: 12", "ICON_TYPE is required" });
 }
 
 ZTEST(widget_composition, test_nested_composites_validate_each_owner_and_leave_configurations_unchanged) {

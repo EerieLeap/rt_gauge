@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <span>
 
 #include <lvgl.h>
 
@@ -24,6 +25,10 @@ protected:
     int DoRender() override;
 
 public:
+    // The leaf rule, plus an ICON_TYPE the icon factory implements: without one nothing renders.
+    static void ValidateChildren(const WidgetConfiguration& configuration,
+        std::span<const WidgetConfiguration* const> children);
+
     IconWidget(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context, IconType icon_type = IconType::None);
     ~IconWidget() override;
     std::shared_ptr<Frame> GetIconContainer() const;

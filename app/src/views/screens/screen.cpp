@@ -1,3 +1,5 @@
+#include <exception>
+
 #include <zephyr/logging/log.h>
 #include <lvgl.h>
 
@@ -27,18 +29,17 @@ Screen::Screen(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context
 }
 
 int Screen::DoRender() {
-    // Render every root so one failed asset does not hide the rest; report the first failure.
-    int result = 0;
+    // A failed widget stays unready; failing the screen would keep its whole group hidden.
     for(auto& widget : *widgets_) {
-        const int res = widget->Render();
-        if(res != 0) {
-            LOG_ERR("Failed to render widget %u on screen %u.", widget->GetId(), id_);
-            if(result == 0)
-                result = res;
+        try {
+            if(widget->Render() != 0)
+                LOG_ERR("Failed to render widget %u on screen %u.", widget->GetId(), id_);
+        } catch(const std::exception& e) {
+            LOG_ERR("Failed to render widget %u on screen %u. %s", widget->GetId(), id_, e.what());
         }
     }
 
-    return result;
+    return 0;
 }
 
 int Screen::ApplyTheme(const ITheme& theme) {

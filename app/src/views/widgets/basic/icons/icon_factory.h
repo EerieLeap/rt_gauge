@@ -36,6 +36,7 @@ public:
 
     std::unique_ptr<IIcon> Create(const IconType type, std::shared_ptr<WidgetPropertyStore> properties, std::shared_ptr<Frame> parent);
 
+    bool IsAvailable(IconType type) const;
     std::vector<IconType> GetAvailableTypes() const;
 };
 
