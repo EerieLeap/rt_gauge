@@ -113,9 +113,7 @@ protected:
     // property changes again - subscriptions above all.
     virtual void OnConfigured();
 
-    // Check the receiver's runtime count/order before caching named interface
-    // handles. Throw before caching on rejection; these handles live with the owner.
-    // Configuration validation remains at the acceptance boundary.
+    // Caches handles to the injected children; ValidateChildren already checked them.
     virtual void OnChildrenAttached(std::span<const std::unique_ptr<IWidget>> children);
     // Children default to filling the mount. Composites can apply local geometry;
     // this hook never changes semantic child order or LVGL sibling stacking order.

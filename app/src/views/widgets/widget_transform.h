@@ -17,8 +17,7 @@ using domain::ui_domain::models::WidgetConfiguration;
 using views::utilitites::Frame;
 
 // Owns a presentation's shared anchors, retained rotation, and animation. The caller supplies
-// readiness/eligibility callbacks and keeps their context, property store, and
-// configuration alive until Detach (or configuration replacement). Frames are shared.
+// readiness/eligibility callbacks and keeps their context alive until Detach. Frames are shared.
 // Lifecycle calls run under the caller's LVGL lock; SetRotation, Detach, and LVGL
 // callbacks acquire it themselves.
 class WidgetTransform {
@@ -36,8 +35,8 @@ public:
     WidgetTransform& operator=(WidgetTransform&&) = delete;
 
     bool Attach(uint32_t id, std::shared_ptr<Frame> presentation,
-        std::shared_ptr<Frame> layout,
-        const WidgetPropertyStore& properties, Callbacks callbacks, void* context);
+        std::shared_ptr<Frame> layout, Callbacks callbacks, void* context);
+    // Rotation permission follows from the configuration alone, so it is decided here once.
     void Configure(const WidgetConfiguration& configuration);
     void Detach();
     static void RegisterProperties(WidgetPropertyStore& store);
@@ -64,17 +63,14 @@ private:
     std::shared_ptr<Frame> layout_;
     std::shared_ptr<Frame> target_;
 
-    const WidgetPropertyStore* properties_ = nullptr;
-    const WidgetConfiguration* configuration_ = nullptr;
-
     Callbacks callbacks_ {};
     void* context_ = nullptr;
     lv_point_t anchor_point_ { -1, -1 };
     bool updating_anchor_ = false;
     std::optional<int32_t> angle_;
+    bool rotation_allowed_ = true;
     bool target_pending_ = false;
 
-    bool CanSetRotation() const;
     static void AnchorGeometryCallback(lv_event_t* event);
 };
 

@@ -1,0 +1,14 @@
+diff --git a/zephyr/port/include/zephyr_compat.h b/zephyr/port/include/zephyr_compat.h
+--- a/zephyr/port/include/zephyr_compat.h
++++ b/zephyr/port/include/zephyr_compat.h
+@@ -264,6 +264,10 @@
+ #define CONFIG_CACHE_L1_CACHE_LINE_SIZE CONFIG_DCACHE_LINE_SIZE
+ #endif
+ 
++#ifdef CONFIG_ESP32_CACHE_L2_LINE_SIZE
++#define CONFIG_CACHE_L2_CACHE_LINE_SIZE CONFIG_ESP32_CACHE_L2_LINE_SIZE
++#endif
++
+ #ifdef CONFIG_ESP32_BT_LE_SLEEP_ENABLE
+ #define CONFIG_BT_LE_SLEEP_ENABLE CONFIG_ESP32_BT_LE_SLEEP_ENABLE
+ #endif

@@ -1,4 +1,9 @@
 menu "Zephyr"
+
+	# Keep the application priority only when the flush thread is enabled.
+	configdefault LV_Z_FLUSH_THREAD_PRIORITY
+		default 7
+
 source "Kconfig.zephyr"
 
 	config EERIE_LEAP_UI_RENDERER_THREAD_STACK_SIZE

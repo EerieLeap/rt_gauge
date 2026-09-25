@@ -876,63 +876,31 @@ ZTEST(icon_lifecycle, test_screen_builds_the_demo_dial_from_a_separate_needle_de
     }
 }
 
-ZTEST(icon_lifecycle, test_a_dial_without_its_needle_is_rejected_at_every_boundary) {
+ZTEST(icon_lifecycle, test_a_dial_without_its_needle_fails_validation_and_only_its_own_render) {
     ScopedLvglLock lock;
-    auto error_of = [](auto&& action) -> std::string {
-        try {
-            action();
-        } catch(const std::invalid_argument& error) {
-            return error.what();
-        }
-        return {};
-    };
-    auto contains = [](const std::string& text, const char* fragment) {
-        return text.find(fragment) != std::string::npos;
-    };
-
-    TestDial direct(1, MakeRoot(), WidgetContext{});
-    zassert_true(contains(error_of([&] { direct.Configure(DialConfiguration()); }), "exactly 1 child"));
-    zassert_true(contains(error_of([&] {
-        WidgetFactory::GetInstance().CreateWidget(DialConfiguration(), MakeRoot(), WidgetContext{});
-    }), "exactly 1 child"));
-
-    TestDial conflicted(1, MakeRoot(), WidgetContext{});
-    auto rotating = views_test::NeedleConfiguration(2);
-    rotating->properties[WidgetPropertyType::ANIMATION_TYPE] = static_cast<int>(Animation::Type::Rotation);
-    zassert_true(contains(error_of([&] { conflicted.Assemble(DialConfiguration(), rotating, WidgetContext{}); }),
-        "driven rotation conflicts"));
-
-    auto screen_configuration = std::make_shared<ScreenConfiguration>(std::allocator_arg, std::pmr::get_default_resource());
-    screen_configuration->id = 0;
-    screen_configuration->grid = { .snap_enabled = true, .width = 1, .height = 1, .spacing_px = 0 };
-    auto dial = DialConfiguration(9);
-    dial->position_grid = { 0, 0 };
-    dial->size_grid = { 1, 1 };
-    dial->properties[WidgetPropertyType::CHILD_WIDGET_IDS] = std::pmr::vector<int> { 12 };
-    screen_configuration->AddWidget(dial);
-    screen_configuration->AddWidget(views_test::NeedleConfiguration(12));
-    ValidateScreen(*screen_configuration);
-    eerie_leap::views::screens::Screen screen(0, MakeRoot(), WidgetContext{});
-    screen.Configure(screen_configuration);
-    const auto roots = screen.GetWidgets();
-
     auto legacy = std::make_shared<ScreenConfiguration>(std::allocator_arg, std::pmr::get_default_resource());
     legacy->id = 0;
-    legacy->grid = screen_configuration->grid;
+    legacy->grid = { .snap_enabled = true, .width = 1, .height = 1, .spacing_px = 0 };
     auto legacy_dial = DialConfiguration(9);
     legacy_dial->position_grid = { 0, 0 };
     legacy_dial->size_grid = { 1, 1 };
     legacy->AddWidget(legacy_dial);
-    const auto validation_error = error_of([&] { ValidateScreen(*legacy); });
-    for(const auto* fragment : { "Screen ID: 0", "Widget ID: 9", "exactly 1 child", "received 0" })
-        zassert_true(contains(validation_error, fragment), "Missing '%s' in '%s'", fragment, validation_error.c_str());
-    // Screens trust validated input, but the dial itself still refuses to configure without a needle.
-    const auto error = error_of([&] { screen.Configure(legacy); });
-    zassert_true(contains(error, "exactly 1 child") && contains(error, "received 0"), "%s", error.c_str());
-    zassert_equal(screen.GetWidgets(), roots);
-    zassert_equal(roots->size(), 1);
-    zassert_equal((*roots)[0]->GetChildren().size(), 1);
-    zassert_equal(screen.GetConfiguration(), screen_configuration);
+    std::string validation_error;
+    try {
+        ValidateScreen(*legacy);
+    } catch(const std::invalid_argument& error) {
+        validation_error = error.what();
+    }
+    for(const auto* fragment : { "Screen ID: 0", "Widget ID: 9", "exactly 1 child", "received 0" }) {
+        zassert_true(validation_error.find(fragment) != std::string::npos,
+            "Missing '%s' in '%s'", fragment, validation_error.c_str());
+    }
+
+    // Screens trust validated input; if an unvalidated dial gets through, only it fails.
+    eerie_leap::views::screens::Screen screen(0, MakeRoot(), WidgetContext{});
+    screen.Configure(legacy);
+    zassert_equal(screen.Render(), 0);
+    zassert_false((*screen.GetWidgets())[0]->IsReady());
 }
 
 ZTEST(icon_lifecycle, test_an_icon_without_an_implemented_type_fails_its_render_without_throwing) {

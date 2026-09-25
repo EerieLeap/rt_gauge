@@ -1,0 +1,12 @@
+diff --git a/components/esp_rom/esp32s3/ld/esp32s3.rom.libc.ld b/components/esp_rom/esp32s3/ld/esp32s3.rom.libc.ld
+--- a/components/esp_rom/esp32s3/ld/esp32s3.rom.libc.ld
++++ b/components/esp_rom/esp32s3/ld/esp32s3.rom.libc.ld
+@@ -44,7 +44,7 @@
+ strspn = 0x4000141c;
+ strtok_r = 0x40001428;
+ longjmp = 0x40001440;
+-setjmp = 0x4000144c;
++/* setjmp = 0x4000144c; ROM setjmp spills windows with an XTOS SYSCALL that Zephyr does not handle. */
+ abs = 0x40001458;
+ div = 0x40001464;
+ labs = 0x40001470;

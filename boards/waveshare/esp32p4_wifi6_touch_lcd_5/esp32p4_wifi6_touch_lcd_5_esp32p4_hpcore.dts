@@ -6,7 +6,7 @@
 
 /dts-v1/;
 
-#include <espressif/esp32p4/esp32p4_n32r32.dtsi>
+#include <espressif/esp32p4/esp32p4.dtsi>
 #include "esp32p4_wifi6_touch_lcd_5_esp32p4_hpcore-pinctrl.dtsi"
 #include <zephyr/dt-bindings/input/input-event-codes.h>
 #include <zephyr/dt-bindings/display/panel.h>
@@ -71,6 +71,17 @@
 
 &cpu1 {
 	clock-frequency = <DT_FREQ_M(360)>;
+};
+
+/* 32MB flash */
+&flash0 {
+	reg = <0x0 DT_SIZE_M(32)>;
+	ranges = <0x0 0x0 DT_SIZE_M(32)>;
+};
+
+/* 32MB PSRAM */
+&psram0 {
+	size = <DT_SIZE_M(32)>;
 };
 
 &uart0 {

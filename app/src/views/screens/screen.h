@@ -1,7 +1,6 @@
 #pragma once
 
 #include <memory>
-#include <optional>
 #include <vector>
 
 #include "domain/ui_domain/models/screen_configuration.h"
@@ -10,7 +9,6 @@
 #include "views/widgets/i_widget.h"
 #include "views/widgets/widget_context.h"
 #include "views/screens/i_screen.h"
-#include "views/screens/widget_assembly.h"
 #include "views/utilitites/frame.h"
 
 namespace eerie_leap::views::screens {
@@ -25,8 +23,6 @@ protected:
 
     std::shared_ptr<std::vector<std::unique_ptr<IWidget>>> widgets_;
     std::shared_ptr<ScreenConfiguration> configuration_;
-    // Declared after widgets_ so the tree is released before its root list.
-    std::optional<WidgetAssembly> assembly_;
 
     void SetVisibility(bool is_visible);
 

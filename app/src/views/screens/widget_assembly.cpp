@@ -3,8 +3,6 @@
 #include <span>
 #include <utility>
 
-#include <lvgl.h>
-
 #include "domain/ui_domain/lvgl_lock.h"
 #include "domain/ui_domain/models/widget_composition.h"
 #include "views/utilitites/grid_layout.h"
@@ -19,10 +17,7 @@ using eerie_leap::domain::ui_domain::models::WidgetComposition;
 using eerie_leap::views::utilitites::GridLayout;
 using eerie_leap::views::widgets::WidgetFactory;
 
-WidgetAssembly::WidgetAssembly(std::shared_ptr<Frame> frame, std::shared_ptr<Roots> roots)
-    : frame_(std::move(frame)), roots_(std::move(roots)) {}
-
-WidgetAssembly WidgetAssembly::Assemble(
+WidgetAssembly::Roots WidgetAssembly::Assemble(
     std::shared_ptr<ScreenConfiguration> configuration,
     std::shared_ptr<Frame> container,
     const WidgetContext& context
@@ -34,17 +29,6 @@ WidgetAssembly WidgetAssembly::Assemble(
     auto& factory = WidgetFactory::GetInstance();
     const auto layout = GridLayout::FromActiveScreen(configuration->grid);
     const auto composition = WidgetComposition::Build(*configuration);
-
-    auto roots = std::make_shared<Roots>();
-    roots->reserve(composition.roots.size());
-
-    auto frame = std::make_shared<Frame>(Frame::CreateWrapped(container->GetObject())
-        .SetProcessingParent(container)
-        .SetWidth(100, false)
-        .SetHeight(100, false)
-        .Build());
-    lv_obj_add_flag(frame->GetObject(), LV_OBJ_FLAG_HIDDEN);
-    frame->SetProcessingEnabled(false);
 
     std::pmr::vector<std::unique_ptr<IWidget>> instances(definitions.size(), resource);
     std::pmr::vector<size_t> siblings(resource);
@@ -59,7 +43,7 @@ WidgetAssembly WidgetAssembly::Assemble(
     };
 
     try {
-        construct(composition.roots, frame);
+        construct(composition.roots, container);
         // Reverse postorder visits every owner before its descendants.
         for(auto it = composition.postorder.rbegin(); it != composition.postorder.rend(); ++it) {
             const auto children = composition.GetChildren(*it);
@@ -89,54 +73,12 @@ WidgetAssembly WidgetAssembly::Assemble(
         throw;
     }
 
+    Roots roots;
+    roots.reserve(composition.roots.size());
     for(auto i : composition.roots)
-        roots->push_back(std::move(instances[i]));
+        roots.push_back(std::move(instances[i]));
 
-    return WidgetAssembly(std::move(frame), std::move(roots));
-}
-
-WidgetAssembly::~WidgetAssembly() {
-    Release();
-}
-
-WidgetAssembly::WidgetAssembly(WidgetAssembly&& other) noexcept
-    : frame_(std::move(other.frame_)), roots_(std::move(other.roots_)) {}
-
-WidgetAssembly& WidgetAssembly::operator=(WidgetAssembly&& other) noexcept {
-    if(this != &other) {
-        Release();
-        frame_ = std::move(other.frame_);
-        roots_ = std::move(other.roots_);
-    }
-    return *this;
-}
-
-void WidgetAssembly::Release() {
-    if(roots_ == nullptr)
-        return;
-
-    ScopedLvglLock lvgl_guard;
-    // Holders of GetRoots() observe an empty forest rather than widgets outliving the frame.
-    roots_->clear();
-    roots_.reset();
-    frame_.reset();
-}
-
-std::shared_ptr<Frame> WidgetAssembly::GetFrame() const {
-    return frame_;
-}
-
-std::shared_ptr<WidgetAssembly::Roots> WidgetAssembly::GetRoots() const {
-    return roots_;
-}
-
-void WidgetAssembly::Commit() {
-    ScopedLvglLock lvgl_guard;
-
-    lv_obj_remove_flag(frame_->GetObject(), LV_OBJ_FLAG_HIDDEN);
-    frame_->SetProcessingEnabled(true);
-    for(auto& root : *roots_)
-        root->Synchronize();
+    return roots;
 }
 
 } // namespace eerie_leap::views::screens

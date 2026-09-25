@@ -230,7 +230,7 @@ void Validate(const ScreenConfiguration& screen) {
     });
 }
 
-WidgetAssembly Assemble(const std::shared_ptr<ScreenConfiguration>& screen, const std::shared_ptr<Frame>& container) {
+WidgetAssembly::Roots Assemble(const std::shared_ptr<ScreenConfiguration>& screen, const std::shared_ptr<Frame>& container) {
     Validate(*screen);
     return WidgetAssembly::Assemble(screen, container, WidgetContext {});
 }
@@ -305,19 +305,16 @@ ZTEST(widget_assembly, test_builds_each_definition_once_under_its_owner_mount_wi
     Add(*screen, 9, WidgetType::IndicatorDigital);
     const auto definitions = std::vector(screen->widget_configurations.begin(), screen->widget_configurations.end());
 
-    auto assembly = Assemble(screen, container);
+    auto roots = Assemble(screen, container);
 
     zassert_equal(journal.live, 6);
     // Siblings are created in drawing order: equal z-index keeps definition order (5 before 0).
     zassert_true((journal.constructed == std::vector<uint32_t> { 1, 9, 2, 7, 5, 0 }), "Owners precede descendants");
     zassert_true((journal.configured == std::vector<uint32_t> { 0, 5, 2, 7, 1, 9 }), "Descendants precede owners");
-    const auto& roots = *assembly.GetRoots();
     zassert_true((Ids(roots) == std::vector<uint32_t> { 1, 9 }));
-    zassert_equal(lv_obj_get_parent(assembly.GetFrame()->GetObject()), container->GetObject());
-    zassert_equal(lv_obj_get_child_count(container->GetObject()), 1);
-    zassert_equal(lv_obj_get_child_count(assembly.GetFrame()->GetObject()), 2);
+    zassert_equal(lv_obj_get_child_count(container->GetObject()), 2);
     for(const auto& root : roots)
-        zassert_equal(Parent(*root), assembly.GetFrame()->GetObject());
+        zassert_equal(Parent(*root), container->GetObject());
 
     const auto& group = *roots[0];
     zassert_true((Ids(group.GetChildren()) == std::vector<uint32_t> { 2, 7 }));
@@ -351,9 +348,8 @@ ZTEST(widget_assembly, test_z_index_orders_siblings_without_reordering_semantic_
     Add(*screen, 2, WidgetType::IndicatorDigital, {}, -1);
     Add(*screen, 9, WidgetType::IndicatorDigital, {}, -10);
 
-    auto assembly = Assemble(screen, container);
+    const auto roots = Assemble(screen, container);
 
-    const auto& roots = *assembly.GetRoots();
     zassert_true((Ids(roots) == std::vector<uint32_t> { 8, 1, 9 }), "Roots keep definition order");
     zassert_equal(DrawingIndex(*roots[2]), 0);
     zassert_equal(DrawingIndex(*roots[1]), 1);
@@ -378,12 +374,10 @@ ZTEST(widget_assembly, test_roots_use_the_screen_grid_and_children_use_owner_loc
     Add(*screen, 4, WidgetType::BasicArcIcon, { 5 });
     Add(*screen, 5, WidgetType::IndicatorDigital);
 
-    auto assembly = Assemble(screen, container);
-    assembly.Commit();
+    const auto roots = Assemble(screen, container);
     lv_obj_update_layout(container->GetObject());
 
     const auto layout = GridLayout::FromActiveScreen(screen->grid);
-    const auto& roots = *assembly.GetRoots();
     for(size_t i = 0; i < roots.size(); ++i) {
         const auto& definition = *roots[i]->GetConfiguration();
         const auto size = layout.ToPx(definition.size_grid);
@@ -405,40 +399,13 @@ ZTEST(widget_assembly, test_roots_use_the_screen_grid_and_children_use_owner_loc
         lv_obj_get_height(roots[1]->GetChildMount()->GetObject()));
 }
 
-ZTEST(widget_assembly, test_staged_tree_stays_hidden_and_unprocessed_until_commit) {
-    auto container = Container();
-    auto screen = Screen();
-    Add(*screen, 1, WidgetType::BasicArcIcon, { 2 });
-    Add(*screen, 2, WidgetType::IndicatorDigital);
-
-    auto assembly = Assemble(screen, container);
-    auto& root = *(*assembly.GetRoots())[0];
-    const auto& child = AsNode(*root.GetChildren()[0]);
-    zassert_equal(root.Render(), 0);
-    root.OnActivated();
-
-    zassert_true(lv_obj_has_flag(assembly.GetFrame()->GetObject(), LV_OBJ_FLAG_HIDDEN));
-    zassert_false(AsNode(root).IsProcessingEligible());
-    zassert_false(child.IsProcessingEligible());
-    zassert_false(Frame::IsVisibleInHierarchy(views_test::WidgetContent(child)));
-    Publish(2, 42.0F);
-    zassert_equal(child.Value(), 42.0, "Staged widgets retain inbound values like any hidden widget");
-
-    assembly.Commit();
-    zassert_false(lv_obj_has_flag(assembly.GetFrame()->GetObject(), LV_OBJ_FLAG_HIDDEN));
-    zassert_true(AsNode(root).IsProcessingEligible());
-    zassert_true(child.IsProcessingEligible());
-    zassert_true(Frame::IsVisibleInHierarchy(views_test::WidgetContent(child)));
-}
-
-ZTEST(widget_assembly, test_failures_release_every_staged_object_and_preserve_the_previous_tree) {
+ZTEST(widget_assembly, test_failures_release_every_object_and_leave_other_trees_untouched) {
     auto container = Container();
     auto previous_screen = Screen();
     Add(*previous_screen, 1, WidgetType::BasicArcIcon, { 2 });
     Add(*previous_screen, 2, WidgetType::IndicatorDigital);
-    auto previous = Assemble(previous_screen, container);
-    previous.Commit();
-    auto& previous_root = *(*previous.GetRoots())[0];
+    const auto previous = Assemble(previous_screen, container);
+    auto& previous_root = *previous[0];
     zassert_equal(previous_root.Render(), 0);
     previous_root.OnActivated();
     const auto& previous_child = AsNode(*previous_root.GetChildren()[0]);
@@ -467,8 +434,6 @@ ZTEST(widget_assembly, test_failures_release_every_staged_object_and_preserve_th
         zassert_equal(journal.live, 2, "%s", mode);
         zassert_equal(lv_obj_get_child_count(container->GetObject()), 1, "%s", mode);
         zassert_equal(lv_display_get_event_count(lv_display_get_default()), display_callbacks, "%s", mode);
-        zassert_equal(previous.GetRoots()->size(), 1, "%s", mode);
-        zassert_false(lv_obj_has_flag(previous.GetFrame()->GetObject(), LV_OBJ_FLAG_HIDDEN), "%s", mode);
     };
 
     journal.fail_construction = 14;
@@ -479,7 +444,7 @@ ZTEST(widget_assembly, test_failures_release_every_staged_object_and_preserve_th
     journal.fail_configuration = 10;
     expect_rollback("Owner configuration failure after children subscribed");
     journal.fail_configuration.reset();
-    // Unchanged-after-validation is a precondition; the receiving widget still enforces its order.
+    // Unchanged-after-validation is a precondition; this test composite rejects the order itself.
     pair->properties[WidgetPropertyType::CHILD_WIDGET_IDS] = std::pmr::vector<int> { 14, 13 };
     expect_rollback("Runtime child-order rejection");
 
@@ -488,7 +453,7 @@ ZTEST(widget_assembly, test_failures_release_every_staged_object_and_preserve_th
     zassert_true(previous_child.IsProcessingEligible());
 }
 
-ZTEST(widget_assembly, test_destruction_and_move_assignment_release_each_tree_once) {
+ZTEST(widget_assembly, test_releasing_the_roots_releases_every_widget_once) {
     auto container = Container();
     const auto display_callbacks = lv_display_get_event_count(lv_display_get_default());
     auto screen = Screen();
@@ -497,37 +462,20 @@ ZTEST(widget_assembly, test_destruction_and_move_assignment_release_each_tree_on
     Add(*screen, 3, WidgetType::IndicatorDigital);
     Add(*screen, 4, WidgetType::IndicatorDigital);
 
-    std::optional<WidgetAssembly> tree(Assemble(screen, container));
-    tree->Commit();
-    const auto roots = tree->GetRoots();
-    std::weak_ptr<Frame> frame = tree->GetFrame();
+    auto roots = Assemble(screen, container);
     zassert_equal(journal.live, 4);
+    zassert_equal(lv_obj_get_child_count(container->GetObject()), 2);
 
-    const auto first_stores = journal.stores.size();
-    *tree = Assemble(screen, container);
-    zassert_equal(journal.live, 4, "The replaced tree is destroyed");
-    zassert_true(AllExpired(std::vector(journal.stores.begin(), journal.stores.begin() + first_stores)));
-    zassert_true(roots->empty(), "Retained root lists are emptied rather than outliving their frame");
-    zassert_true(frame.expired());
-    zassert_equal(lv_obj_get_child_count(container->GetObject()), 1);
-
-    WidgetAssembly moved(std::move(*tree));
-    tree.reset();
-    zassert_equal(journal.live, 4, "A moved-from assembly owns nothing");
-    frame = moved.GetFrame();
-    {
-        auto released = std::move(moved);
-    }
+    roots.clear();
     zassert_equal(journal.live, 0);
     zassert_true(AllExpired(journal.stores));
-    zassert_true(frame.expired());
     zassert_equal(lv_obj_get_child_count(container->GetObject()), 0);
     zassert_equal(lv_display_get_event_count(lv_display_get_default()), display_callbacks);
 }
 
-ZTEST(widget_assembly, test_staging_metadata_is_bounded_and_released_at_the_graph_limits) {
+ZTEST(widget_assembly, test_assembly_metadata_is_bounded_and_released_at_the_graph_limits) {
     // Screen-scoped graph metadata only; widget instances and LVGL objects use their own heaps.
-    constexpr size_t staging_budget = 4096;
+    constexpr size_t metadata_budget = 4096;
     auto container = Container();
     CountingResource resource;
     auto screen = Screen(&resource);
@@ -546,12 +494,12 @@ ZTEST(widget_assembly, test_staging_metadata_is_bounded_and_released_at_the_grap
 
     const auto baseline = resource.outstanding;
     resource.peak = baseline;
-    auto assembly = WidgetAssembly::Assemble(screen, container, WidgetContext {});
+    const auto roots = WidgetAssembly::Assemble(screen, container, WidgetContext {});
 
-    zassert_equal(resource.outstanding, baseline, "Staging metadata is released once the tree is assembled");
-    zassert_true(resource.peak - baseline <= staging_budget, "Staging peak %zu", resource.peak - baseline);
+    zassert_equal(resource.outstanding, baseline, "Assembly metadata is released once the tree is built");
+    zassert_true(resource.peak - baseline <= metadata_budget, "Metadata peak %zu", resource.peak - baseline);
     zassert_equal(static_cast<size_t>(journal.live), WidgetComposition::max_nodes);
-    const IWidget* owner = (*assembly.GetRoots())[0].get();
+    const IWidget* owner = roots[0].get();
     for(int depth = 1; depth < 7; ++depth)
         owner = owner->GetChildren()[0].get();
     zassert_equal(owner->GetId(), 7);
@@ -572,7 +520,7 @@ ZTEST(widget_assembly, test_screen_replaces_its_tree_only_after_the_candidate_as
     zassert_equal(Parent(*(*roots)[0]->GetChildren()[0]), (*roots)[0]->GetChildMount()->GetObject());
     zassert_equal(journal.live, 3);
     auto* screen_object = screen.GetContainer()->GetObject();
-    zassert_equal(lv_obj_get_child_count(screen_object), 1);
+    zassert_equal(lv_obj_get_child_count(screen_object), 2);
 
     auto rejected = [&](std::shared_ptr<ScreenConfiguration> candidate, const char* mode) {
         const auto constructed = journal.constructed.size();
@@ -588,9 +536,9 @@ ZTEST(widget_assembly, test_screen_replaces_its_tree_only_after_the_candidate_as
         zassert_equal(roots->size(), 2, "%s", mode);
         zassert_equal(screen.GetConfiguration(), first, "%s", mode);
         zassert_equal(journal.live, 3, "%s", mode);
-        zassert_equal(lv_obj_get_child_count(screen_object), 1, "%s", mode);
+        zassert_equal(lv_obj_get_child_count(screen_object), 2, "%s", mode);
     };
-    // The screen does not repeat preflight; the receiving widget still enforces its count.
+    // The screen does not repeat preflight; this test composite rejects the count itself.
     auto miscounted = Screen();
     Add(*miscounted, 10, WidgetType::BasicIcon, { 11 });
     Add(*miscounted, 11, WidgetType::IndicatorDigital);
@@ -604,10 +552,9 @@ ZTEST(widget_assembly, test_screen_replaces_its_tree_only_after_the_candidate_as
     journal.fail_configuration.reset();
 
     screen.Configure(runtime);
-    zassert_true(roots->empty(), "The previous tree is released after replacement");
-    zassert_true((Ids(*screen.GetWidgets()) == std::vector<uint32_t> { 10 }));
+    zassert_true((Ids(*roots) == std::vector<uint32_t> { 10 }), "Holders see the replacement tree");
     zassert_equal(screen.GetConfiguration(), runtime);
-    zassert_equal(journal.live, 2);
+    zassert_equal(journal.live, 2, "The previous tree is released after replacement");
     zassert_equal(lv_obj_get_child_count(screen_object), 1);
 }
 

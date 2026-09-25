@@ -4,6 +4,7 @@
 #include <lvgl.h>
 
 #include "domain/ui_domain/lvgl_lock.h"
+#include "views/screens/widget_assembly.h"
 
 #include "screen.h"
 
@@ -49,12 +50,7 @@ int Screen::ApplyTheme(const ITheme& theme) {
 void Screen::Configure(std::shared_ptr<ScreenConfiguration> configuration) {
     ScopedLvglLock lvgl_guard;
 
-    auto assembly = WidgetAssembly::Assemble(configuration, container_, context_);
-    assembly.Commit();
-
-    // Replacing the assembly destroys the previous tree only after the new one exists.
-    assembly_ = std::move(assembly);
-    widgets_ = assembly_->GetRoots();
+    *widgets_ = WidgetAssembly::Assemble(configuration, container_, context_);
     configuration_ = std::move(configuration);
 
     SetVisibility(IsVisible());

@@ -21,7 +21,6 @@ bool WidgetTransform::Attach(
     uint32_t id,
     std::shared_ptr<Frame> presentation,
     std::shared_ptr<Frame> layout,
-    const WidgetPropertyStore& properties,
     Callbacks callbacks,
     void* context
 ) {
@@ -37,7 +36,6 @@ bool WidgetTransform::Attach(
     id_ = id;
     presentation_ = std::move(presentation);
     layout_ = std::move(layout);
-    properties_ = &properties;
     callbacks_ = callbacks;
     context_ = context;
     if(!animation_.Attach(*presentation_, *layout_, [](void* context) {
@@ -54,7 +52,7 @@ bool WidgetTransform::Attach(
 }
 
 void WidgetTransform::Configure(const WidgetConfiguration& configuration) {
-    configuration_ = &configuration;
+    rotation_allowed_ = CanSetRotation(configuration);
 }
 
 void WidgetTransform::Detach() {
@@ -68,8 +66,6 @@ void WidgetTransform::Detach() {
     animation_.Detach();
     presentation_ = nullptr;
     layout_ = nullptr;
-    properties_ = nullptr;
-    configuration_ = nullptr;
     callbacks_ = {};
     context_ = nullptr;
 }
@@ -139,16 +135,10 @@ bool WidgetTransform::CanSetRotation(const WidgetConfiguration& configuration) {
     return !HasRotationBinding(configuration);
 }
 
-bool WidgetTransform::CanSetRotation() const {
-    return properties_ != nullptr
-        && properties_->GetAs<int>(WidgetPropertyType::ANIMATION_TYPE, 0) != static_cast<int>(Animation::Type::Rotation)
-        && (configuration_ == nullptr || !HasRotationBinding(*configuration_));
-}
-
 bool WidgetTransform::SetRotation(int32_t angle) {
     ScopedLvglLock lock;
 
-    if(!CanSetRotation())
+    if(presentation_ == nullptr || !rotation_allowed_)
         return false;
 
     angle_ = (angle % 3600 + 3600) % 3600;
@@ -226,7 +216,7 @@ void WidgetTransform::UpdateAnchor() {
 
     // Explicit rendering initializes even an inactive staged target. Later updates
     // to an existing target wait for processing to resume.
-    if(angle_.has_value() && CanSetRotation() && (target_pending_ || callbacks_.is_processing_eligible(context_))) {
+    if(angle_.has_value() && rotation_allowed_ && (target_pending_ || callbacks_.is_processing_eligible(context_))) {
         if(is_image)
             lv_image_set_rotation(bounds, *angle_);
         else

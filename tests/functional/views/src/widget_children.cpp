@@ -298,33 +298,17 @@ ZTEST(widget_children, test_nested_ownership_preserves_instances_configuration_a
     zassert_equal(tree.first->GetConfiguration().get(), first_configuration.get());
 }
 
-ZTEST(widget_children, test_injection_rejects_invalid_instances_mounts_counts_and_late_replacement) {
+ZTEST(widget_children, test_children_are_injected_once_before_the_owner_is_configured) {
     auto mount = Mount();
     Pair pair(1, mount);
-    ExpectRejected([&] { pair.Configure(PairConfiguration(1, 2, 3)); });
+    // A rejection from the receiving composite's own hook leaves injection possible.
     ExpectRejected([&] { pair.SetChildren({}); });
-    IWidget::Children null_child;
-    null_child.push_back(nullptr);
-    ExpectRejected([&] { pair.SetChildren(std::move(null_child)); });
-    IWidget::Children unconfigured;
-    unconfigured.push_back(std::make_unique<Leaf>(2, pair.GetChildMount()));
-    ExpectRejected([&] { pair.SetChildren(std::move(unconfigured)); });
-    ExpectRejected([&] { Inject(pair, MakeLeaf(2, mount), MakeLeaf(3, pair.GetChildMount())); });
-    ExpectRejected([&] { Inject(pair, MakeLeaf(2, pair.GetChildMount()), MakeLeaf(2, pair.GetChildMount())); });
-    auto bad_identity = MakeLeaf(3, pair.GetChildMount());
-    bad_identity->GetConfiguration()->id = 99;
-    ExpectRejected([&] { Inject(pair, MakeLeaf(2, pair.GetChildMount()), std::move(bad_identity)); });
     Inject(pair, MakeLeaf(2, pair.GetChildMount()), MakeLeaf(3, pair.GetChildMount()));
-    ExpectRejected([&] { pair.Configure(PairConfiguration(1, 3, 2)); });
-    zassert_is_null(pair.GetConfiguration().get());
+    ExpectRejected([&] { Inject(pair, MakeLeaf(4, pair.GetChildMount()), MakeLeaf(5, pair.GetChildMount())); });
     pair.Configure(PairConfiguration(1, 2, 3));
     const auto* left = &pair.Left();
     ExpectRejected([&] { pair.SetChildren({}); });
     zassert_equal(&pair.Left(), left);
-    Leaf leaf(6, mount);
-    IWidget::Children children;
-    children.push_back(MakeLeaf(7, leaf.GetChildMount()));
-    ExpectRejected([&] { leaf.SetChildren(std::move(children)); });
 }
 
 ZTEST(widget_children, test_render_activation_refresh_and_theme_visit_each_node_once) {

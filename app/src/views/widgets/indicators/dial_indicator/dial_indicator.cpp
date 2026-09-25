@@ -1,3 +1,4 @@
+#include <cerrno>
 #include <cstdlib>
 #include <stdexcept>
 #include <string>
@@ -50,14 +51,7 @@ DialIndicator::~DialIndicator() {
 }
 
 void DialIndicator::OnChildrenAttached(std::span<const std::unique_ptr<IWidget>> children) {
-    if(children.size() != 1)
-        throw std::invalid_argument(NeedleCountError(children.size()));
-
-    const auto& needle = *children.front();
-    if(!WidgetTransform::CanSetRotation(*needle.GetConfiguration()))
-        throw std::invalid_argument(NeedleError(needle.GetId(), rotation_conflict));
-
-    needle_ = children.front().get();
+    needle_ = children.empty() ? nullptr : children.front().get();
 }
 
 std::vector<WidgetPropertyType> DialIndicator::GetSupportedProperties() const {
@@ -67,6 +61,10 @@ std::vector<WidgetPropertyType> DialIndicator::GetSupportedProperties() const {
 }
 
 int DialIndicator::DoRender() {
+    // Validation rejects a dial without its needle; an unvalidated one fails only this widget.
+    if(needle_ == nullptr)
+        return -EINVAL;
+
     // Children render before their owner, so the needle already exists.
     UpdateIndicator(range_start_);
 

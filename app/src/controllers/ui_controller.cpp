@@ -560,7 +560,7 @@ void UiController::SetupTestConfiguration() {
     widget2->properties[WidgetPropertyType::CHART_TYPE] = static_cast<int>(HorizontalChartIndicatorType::Bar);
     widget2->properties[WidgetPropertyType::COLOR_PRIMARY_ACTIVE] = "#FFFFFFFF";
     widget2->bindings.push_back(SensorToColorBinding(WidgetPropertyType::COLOR_PRIMARY_ACTIVE, "sensor_1"));
-    screen_configuration->AddWidget(std::move(widget2));
+    // screen_configuration->AddWidget(std::move(widget2));
 
     // Widget 3: IndicatorHorizontalChart (Line)
     auto widget3 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
@@ -576,7 +576,7 @@ void UiController::SetupTestConfiguration() {
     widget3->properties[WidgetPropertyType::MAX_VALUE] = 100;
     widget3->bindings.push_back(SensorBinding("sensor_1"));
     widget3->properties[WidgetPropertyType::CHART_TYPE] = static_cast<int>(HorizontalChartIndicatorType::Line);
-    screen_configuration->AddWidget(std::move(widget3));
+    // screen_configuration->AddWidget(std::move(widget3));
 
     auto widget4 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
     widget4->type = WidgetType::IndicatorHorizontalChart;
@@ -717,7 +717,7 @@ void UiController::SetupTestConfiguration() {
     widget10->properties[WidgetPropertyType::MIN_VALUE] = 0;
     widget10->properties[WidgetPropertyType::MAX_VALUE] = 100;
     widget10->bindings.push_back(SensorBinding("sensor_1"));
-    screen_configuration->AddWidget(std::move(widget10));
+    // screen_configuration->AddWidget(std::move(widget10));
 
     // Widget: IndicatorBar - Vertical Bottom to top
     auto widget11 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());

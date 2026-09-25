@@ -98,7 +98,7 @@ WidgetBase::WidgetBase(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext
         .Build());
     container_->SetChild(content_frame_);
 
-    transform_.Attach(id_, content_frame_, container_, *properties_, {
+    transform_.Attach(id_, content_frame_, container_, {
         .is_ready = [](void* context) { return static_cast<WidgetBase*>(context)->IsReady(); },
         .is_processing_eligible = [](void* context) {
             return static_cast<WidgetBase*>(context)->IsProcessingEligible();
@@ -159,24 +159,6 @@ void WidgetBase::SetChildren(Children children) {
     if(detached_ || children_injected_ || configuration_ != nullptr || IsReady())
         throw std::logic_error("Children must be injected once, before configuring the owner.");
 
-    for(size_t i = 0; i < children.size(); ++i) {
-        const auto& child = children[i];
-        if(child == nullptr || child.get() == this)
-            throw std::invalid_argument("An owned child must be a distinct widget instance.");
-
-        const auto configuration = child->GetConfiguration();
-        if(configuration == nullptr || configuration->id != child->GetId() || configuration->type != child->GetType())
-            throw std::invalid_argument("Each child must be independently configured with its own identity.");
-
-        if(lv_obj_get_parent(child->GetContainer()->GetObject()) != content_frame_->GetObject())
-            throw std::invalid_argument("Children must be constructed under the owner's child mount.");
-
-        for(size_t j = 0; j < i; ++j) {
-            if(children[j]->GetId() == child->GetId())
-                throw std::invalid_argument("Owned children must have distinct IDs.");
-        }
-    }
-
     OnChildrenAttached(children);
     children_ = std::move(children);
     children_injected_ = true;
@@ -190,10 +172,7 @@ void WidgetBase::SetChildren(Children children) {
     UpdateChildrenLayout();
 }
 
-void WidgetBase::OnChildrenAttached(std::span<const std::unique_ptr<IWidget>> children) {
-    if(!children.empty())
-        throw std::invalid_argument("This widget does not accept owned children.");
-}
+void WidgetBase::OnChildrenAttached(std::span<const std::unique_ptr<IWidget>>) { }
 
 void WidgetBase::OnParentAttached() {
     ScopedLvglLock lvgl_guard;
@@ -624,26 +603,6 @@ void WidgetBase::Configure(std::shared_ptr<WidgetConfiguration> configuration) {
 
     if((children_injected_ || is_owned_) && configuration_ != nullptr)
         throw std::logic_error("Owned composition requires reconstruction to change configuration.");
-
-    if(children_injected_) {
-        if(configuration == nullptr || configuration->id != id_ || configuration->type != GetType())
-            throw std::invalid_argument("The owner must retain its configured identity.");
-
-        const auto it = configuration->properties.find(WidgetPropertyType::CHILD_WIDGET_IDS);
-        const auto* ids = it != configuration->properties.end()
-            ? std::get_if<std::pmr::vector<int>>(&it->second)
-            : nullptr;
-
-        if((ids == nullptr && !children_.empty()) || (ids != nullptr && ids->size() != children_.size()))
-            throw std::invalid_argument("Injected children must match CHILD_WIDGET_IDS in order.");
-
-        for(size_t i = 0; i < children_.size(); ++i) {
-            if((*ids)[i] < 0 || static_cast<uint32_t>((*ids)[i]) != children_[i]->GetId())
-                throw std::invalid_argument("Injected children must match CHILD_WIDGET_IDS in order.");
-        }
-    } else {
-        OnChildrenAttached({});
-    }
 
     configuration_ = std::move(configuration);
     transform_.Configure(*configuration_);
