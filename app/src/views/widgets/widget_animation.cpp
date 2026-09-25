@@ -47,6 +47,10 @@ bool WidgetAnimation::ApplyProperty(WidgetPropertyType type, const ConfigValue& 
     return true;
 }
 
+bool WidgetAnimation::IsRotation() const {
+    return settings_.type == Animation::Type::Rotation;
+}
+
 void WidgetAnimation::SetRotation(int32_t angle) {
     if(animator_)
         animator_->SetRotation(angle);

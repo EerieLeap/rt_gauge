@@ -507,6 +507,7 @@ ZTEST(shape_icons, test_arc_repositions_when_shape_height_changes) {
     Bind(*configuration, WidgetPropertyType::HEIGHT_PX);
     auto widget = std::make_unique<ArcIconWidget>(1, MakeRoot(), WidgetContext {});
     widget->Configure(configuration);
+    zassert_true(widget->SetRotation(0));
     zassert_equal(widget->Render(), 0);
     widget->OnActivated();
     lv_obj_update_layout(widget->GetContainer()->GetObject());

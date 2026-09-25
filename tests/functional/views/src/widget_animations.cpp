@@ -1107,6 +1107,7 @@ ZTEST(widget_animations, test_widget_local_anchor_survives_animation_reset_resiz
     PresentationProbe child(2, parent.Content(), {});
     child.SetSizePx({ 12, 40 });
     child.Configure(child_configuration);
+    zassert_true(child.SetRotation(0));
     zassert_equal(child.Render(), 0);
     child.OnActivated();
 
@@ -1133,6 +1134,8 @@ ZTEST(widget_animations, test_widget_local_anchor_survives_animation_reset_resiz
     zassert_equal(lv_obj_get_style_transform_pivot_y(content, LV_PART_MAIN), 20);
     Publish(WidgetPropertyType::ANCHOR_POINT_Y, -1);
     parent.SetSizePx({ 40, 180 });
+    // Changes made while blinking resolve once rotation is selected again.
+    Publish(WidgetPropertyType::ANIMATION_TYPE, static_cast<int>(Animation::Type::Rotation));
     zassert_equal(lv_obj_get_style_transform_pivot_x(content, LV_PART_MAIN), 7);
     zassert_equal(lv_obj_get_style_transform_pivot_y(content, LV_PART_MAIN), 90);
     parent.OnDeactivated();
@@ -1146,7 +1149,9 @@ ZTEST(widget_animations, test_control_anchor_uses_its_own_presentation_size) {
     auto root = std::make_shared<Frame>(Frame::CreateWrapped().SetWidth(466, true).SetHeight(466, true).Build());
     TestButton button(1, root, {});
     button.SetSizePx({ 20, 200 });
-    button.Configure(AnimationConfiguration(Animation::Type::None));
+    auto configuration = AnimationConfiguration();
+    configuration->properties[WidgetPropertyType::IS_ANIMATION_ACTIVE] = false;
+    button.Configure(configuration);
     zassert_equal(button.Render(), 0);
     button.OnActivated();
     auto* content = views_test::WidgetContent(button);
@@ -1188,6 +1193,59 @@ ZTEST(widget_animations, test_direct_widget_rotation_preserves_pixels_clipping_a
     zassert_false(lv_obj_has_flag(scene.clip->GetObject(), LV_OBJ_FLAG_OVERFLOW_VISIBLE));
 }
 
+ZTEST(widget_animations, test_retained_rotation_is_not_rewritten_on_refresh) {
+    ScopedLvglLock lock;
+    Scene scene;
+    IWidget& widget = scene.widget;
+    zassert_true(widget.SetRotation(900));
+    // Static, so a failed assertion cannot leave the display callback pointing at a dead frame.
+    static int invalidations;
+    invalidations = 0;
+    const lv_event_cb_t count = [](lv_event_t*) { ++invalidations; };
+    auto* display = lv_display_get_default();
+    lv_display_add_event_cb(display, count, LV_EVENT_INVALIDATE_AREA, nullptr);
+    for(int frame = 0; frame < 3; ++frame)
+        Refresh();
+    const bool repeated = widget.SetRotation(900);
+    const int idle = invalidations;
+    const bool changed = widget.SetRotation(450);
+    const int rotated = invalidations - idle;
+    lv_display_remove_event_cb_with_user_data(display, count, nullptr);
+    zassert_true(repeated && changed);
+    zassert_equal(idle, 0);
+    zassert_true(rotated > 0);
+    zassert_equal(lv_obj_get_style_transform_rotation(views_test::WidgetContent(widget), LV_PART_MAIN), 450);
+}
+
+ZTEST(widget_animations, test_anchor_resolves_only_once_the_widget_rotates) {
+    ScopedLvglLock lock;
+    auto root = std::make_shared<Frame>(Frame::CreateWrapped().SetWidth(extent, true).SetHeight(extent, true).Build());
+    auto configuration = Configuration();
+    configuration->properties[WidgetPropertyType::ANCHOR_POINT_X] = 5;
+    configuration->properties[WidgetPropertyType::ANCHOR_POINT_Y] = 4;
+    PresentationProbe widget(1, root, {});
+    widget.SetSizePx({ 64, 24 });
+    widget.Configure(configuration);
+    zassert_equal(widget.Render(), 0);
+    widget.OnActivated();
+    lv_obj_update_layout(root->GetObject());
+    auto* content = widget.Content()->GetObject();
+    static int layouts;
+    layouts = 0;
+    const lv_event_cb_t count = [](lv_event_t*) { ++layouts; };
+    auto* display = lv_display_get_default();
+    lv_display_add_event_cb(display, count, LV_EVENT_UPDATE_LAYOUT_COMPLETED, nullptr);
+    Refresh();
+    const int idle = layouts;
+    lv_display_remove_event_cb_with_user_data(display, count, nullptr);
+    zassert_equal(idle, 0);
+    zassert_equal(lv_obj_get_style_transform_pivot_x(content, LV_PART_MAIN), lv_pct(50));
+    zassert_equal(lv_obj_get_style_transform_pivot_y(content, LV_PART_MAIN), lv_pct(50));
+    zassert_true(widget.SetRotation(0));
+    zassert_equal(lv_obj_get_style_transform_pivot_x(content, LV_PART_MAIN), 5);
+    zassert_equal(lv_obj_get_style_transform_pivot_y(content, LV_PART_MAIN), 20);
+}
+
 ZTEST(widget_animations, test_asymmetric_subtree_rotates_without_internal_clipping_and_resets) {
     ScopedLvglLock lock;
     Scene scene;
@@ -1208,8 +1266,9 @@ ZTEST(widget_animations, test_asymmetric_subtree_rotates_without_internal_clippi
     CheckPixel(rotated, 59, 68, 0, 255);
     zassert_equal(lv_obj_get_width(scene.widget.GetContainer()->GetObject()), 64);
     zassert_equal(lv_obj_get_height(scene.widget.GetContainer()->GetObject()), 24);
-    zassert_equal(lv_obj_get_style_transform_pivot_x(presentation, LV_PART_MAIN), 32);
-    zassert_equal(lv_obj_get_style_transform_pivot_y(presentation, LV_PART_MAIN), 12);
+    // The widget never rotates itself, so it keeps the presentation's default centered pivot.
+    zassert_equal(lv_obj_get_style_transform_pivot_x(presentation, LV_PART_MAIN), lv_pct(50));
+    zassert_equal(lv_obj_get_style_transform_pivot_y(presentation, LV_PART_MAIN), lv_pct(50));
     styles.Reset();
     const auto restored = scene.Pixels();
     zassert_mem_equal(baseline.data(), restored.data(), baseline.size() * sizeof(lv_color32_t));

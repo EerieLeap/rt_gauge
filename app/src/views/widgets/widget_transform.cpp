@@ -48,7 +48,7 @@ bool WidgetTransform::Attach(
         Detach();
         return false;
     }
-    lv_obj_add_event_cb(presentation_->GetObject(), AnchorGeometryCallback, LV_EVENT_ALL, this);
+    lv_obj_add_event_cb(presentation_->GetObject(), AnchorGeometryCallback, LV_EVENT_SIZE_CHANGED, this);
 
     return true;
 }
@@ -81,8 +81,12 @@ void WidgetTransform::RegisterProperties(WidgetPropertyStore& store) {
 }
 
 bool WidgetTransform::ApplyProperty(WidgetPropertyType type, const ConfigValue& value) {
-    if(animation_.ApplyProperty(type, value))
+    if(animation_.ApplyProperty(type, value)) {
+        if(type == WidgetPropertyType::ANIMATION_TYPE)
+            UpdateAnchor();
+
         return true;
+    }
 
     if(type == WidgetPropertyType::ANCHOR_POINT_X)
         anchor_point_.x = std::get<int>(value);
@@ -159,22 +163,24 @@ void WidgetTransform::SetTargetFrame(std::shared_ptr<Frame> target) {
         lv_obj_remove_event_cb_with_user_data(target_->GetObject(), AnchorGeometryCallback, this);
     target_ = std::move(target);
     if(target_ != nullptr && target_ != presentation_)
-        lv_obj_add_event_cb(target_->GetObject(), AnchorGeometryCallback, LV_EVENT_ALL, this);
+        lv_obj_add_event_cb(target_->GetObject(), AnchorGeometryCallback, LV_EVENT_SIZE_CHANGED, this);
 }
 
 void WidgetTransform::AnchorGeometryCallback(lv_event_t* event) {
     ScopedLvglLock lvgl_guard;
 
-    auto* transform = static_cast<WidgetTransform*>(lv_event_get_user_data(event));
-    const auto code = lv_event_get_code(event);
-
-    if(code == LV_EVENT_SIZE_CHANGED || code == LV_EVENT_STYLE_CHANGED)
-        transform->UpdateAnchor();
+    static_cast<WidgetTransform*>(lv_event_get_user_data(event))->UpdateAnchor();
 }
 
 void WidgetTransform::UpdateAnchor() {
     if(presentation_ == nullptr || !callbacks_.is_ready(context_) || updating_anchor_)
         return;
+
+    // Anchors only place rotation, so a widget that never rotates skips the layout work.
+    if(!angle_.has_value() && !animation_.IsRotation()) {
+        target_pending_ = false;
+        return;
+    }
 
     auto* presentation = presentation_->GetObject();
     auto* bounds = target_ != nullptr ? target_->GetObject() : presentation;

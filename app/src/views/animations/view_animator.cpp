@@ -121,8 +121,13 @@ void ViewAnimator::SetRotation(int32_t angle) {
 }
 
 void ViewAnimator::ApplyRotation(int32_t angle) {
-    if(presentation_ != nullptr)
+    // A style write always invalidates; repeating it on every refresh would redraw forever.
+    const bool rotated = presentation_ != nullptr
+        && lv_obj_get_style_transform_rotation(presentation_, LV_PART_MAIN) != angle;
+    if(rotated)
         lv_obj_set_style_transform_rotation(presentation_, angle, LV_PART_MAIN);
+
+    const bool was_prepared = rotation_prepared_;
     if(angle != 0) {
         PrepareRotation();
     } else if(rotation_prepared_) {
@@ -132,7 +137,9 @@ void ViewAnimator::ApplyRotation(int32_t angle) {
             lv_obj_set_flag(layout_, LV_OBJ_FLAG_OVERFLOW_VISIBLE, layout_overflow_);
         rotation_prepared_ = false;
     }
-    RefreshDrawMargin();
+
+    if(rotated || was_prepared != rotation_prepared_)
+        RefreshDrawMargin();
 }
 
 void ViewAnimator::RefreshDrawMargin() {

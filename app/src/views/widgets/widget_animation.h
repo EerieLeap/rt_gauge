@@ -16,6 +16,7 @@ public:
         EligibilityCallback eligible, void* context);
     static void RegisterProperties(WidgetPropertyStore& store);
     bool ApplyProperty(WidgetPropertyType type, const ConfigValue& value);
+    bool IsRotation() const;
     void SetRotation(int32_t angle);
     void Synchronize();
     void StopAndReset();

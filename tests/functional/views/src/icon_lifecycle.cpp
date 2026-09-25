@@ -50,6 +50,7 @@ class TestDial : public indicators::DialIndicator {
 public:
     using DialIndicator::DialIndicator;
     IconWidget& Needle() const { return static_cast<IconWidget&>(*GetChildren().front()); }
+    ConfigValue Read(WidgetPropertyType type) const { return properties_->Get(type); }
 
     void Assemble(std::shared_ptr<WidgetConfiguration> dial, std::shared_ptr<WidgetConfiguration> needle,
         const WidgetContext& context) {
@@ -471,7 +472,7 @@ ZTEST(icon_lifecycle, test_anchor_uses_drawable_size_and_placement_not_screen_si
         for(int extent : { 300, 466 }) {
             auto root = MakeRoot();
             root->SetWidth(extent, true).SetHeight(extent, true);
-            auto configuration = Configuration(type);
+            auto configuration = RotationConfiguration(type);
             configuration->properties[WidgetPropertyType::WIDTH_PX] = 20;
             configuration->properties[WidgetPropertyType::HEIGHT_PX] = 200;
             configuration->properties[WidgetPropertyType::POSITION_X] = 13;
@@ -479,6 +480,7 @@ ZTEST(icon_lifecycle, test_anchor_uses_drawable_size_and_placement_not_screen_si
             const auto context = type == IconType::Image ? ImageContext(*configuration, 20, 200) : WidgetContext{};
             TestIcon widget(1, root, context);
             widget.Configure(configuration);
+            zassert_true(widget.SetRotation(0));
             zassert_equal(widget.Render(), 0);
             widget.OnActivated();
             auto* image = Inner(widget);
@@ -592,7 +594,7 @@ ZTEST(icon_lifecycle, test_anchor_binding_preserves_angles_and_replays_after_sus
 
 ZTEST(icon_lifecycle, test_shape_anchor_tracks_live_geometry_and_placement) {
     ScopedLvglLock lock;
-    auto configuration = Configuration(IconType::TriangleIsosceles);
+    auto configuration = RotationConfiguration(IconType::TriangleIsosceles);
     configuration->properties[WidgetPropertyType::WIDTH_PX] = 20;
     configuration->properties[WidgetPropertyType::HEIGHT_PX] = 200;
     for(auto target : { WidgetPropertyType::WIDTH_PX, WidgetPropertyType::HEIGHT_PX }) {
@@ -603,6 +605,7 @@ ZTEST(icon_lifecycle, test_shape_anchor_tracks_live_geometry_and_placement) {
     }
     TestIcon widget(1, MakeRoot(), {});
     widget.Configure(configuration);
+    zassert_true(widget.SetRotation(0));
     zassert_equal(widget.Render(), 0);
     widget.OnActivated();
     auto* shape = Inner(widget);
@@ -623,7 +626,7 @@ ZTEST(icon_lifecycle, test_shape_anchor_tracks_live_geometry_and_placement) {
 
 ZTEST(icon_lifecycle, test_image_anchor_tracks_live_dimensions_without_reloading_or_resetting_angle) {
     ScopedLvglLock lock;
-    auto configuration = Configuration(IconType::Image);
+    auto configuration = RotationConfiguration(IconType::Image);
     auto context = ImageContext(*configuration, 20, 200);
     for(auto target : { WidgetPropertyType::IMG_WIDTH, WidgetPropertyType::IMG_HEIGHT }) {
         auto binding = configuration->bindings.front();
@@ -638,7 +641,7 @@ ZTEST(icon_lifecycle, test_image_anchor_tracks_live_dimensions_without_reloading
     auto* image = Inner(widget);
     const auto* source = static_cast<const lv_image_dsc_t*>(lv_image_get_src(image));
     const auto* pixels = source->data;
-    lv_image_set_rotation(image, 900);
+    zassert_true(widget.SetRotation(900));
     Publish(WidgetPropertyType::IMG_HEIGHT, 100);
     Publish(WidgetPropertyType::IMG_WIDTH, 40);
     lv_point_t pivot;
@@ -806,7 +809,7 @@ ZTEST(icon_lifecycle, test_dial_and_needle_keep_isolated_properties_and_bindings
     zassert_equal(owned.GetConfiguration(), needle);
 
     Publish(WidgetPropertyType::ANCHOR_POINT_X, 3);
-    zassert_equal(lv_obj_get_style_transform_pivot_x(views_test::WidgetContent(dial), LV_PART_MAIN), 3);
+    zassert_equal(std::get<int>(dial.Read(WidgetPropertyType::ANCHOR_POINT_X)), 3);
     Publish(WidgetPropertyType::VALUE, 50);
     CheckRotation(owned, 1350, 10, 30);
 

@@ -326,6 +326,7 @@ ZTEST(widget_bindings, test_anchor_bindings_keep_ordinary_tracking_and_local_upd
         configuration->bindings.push_back(SensorBinding(target, SENSOR_ID));
         ProbeWidget widget(1, MakeRoot());
         widget.Configure(configuration);
+        zassert_true(widget.SetRotation(0));
         zassert_equal(widget.ReadNumber(target), 7);
         zassert_equal(widget.Render(), 0);
         widget.OnActivated();
