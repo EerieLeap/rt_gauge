@@ -15,6 +15,7 @@
 #include "domain/ui_domain/configuration/parsers/ui_configuration_validator.h"
 #include "event_bus/event_channel_id.h"
 #include "event_bus/event_channels.h"
+#include "views/assets/animations/animations_register.h"
 #include "views/screens/screen.h"
 #include "views/themes/default_theme.h"
 #include "views/widgets/basic/icon_widget/icon_widget.h"
@@ -159,6 +160,20 @@ WidgetContext ImageContext(WidgetConfiguration& configuration, int width = 4, in
     configuration.properties[WidgetPropertyType::FILE_PATH] = std::pmr::string("needle.bin");
     configuration.properties[WidgetPropertyType::IMG_WIDTH] = width;
     configuration.properties[WidgetPropertyType::IMG_HEIGHT] = height;
+    return WidgetContext { .assets_manager = std::move(assets) };
+}
+
+WidgetContext LottieContext(WidgetConfiguration& configuration) {
+    using eerie_leap::subsys::device_tree::DtFs;
+    using eerie_leap::subsys::fs::services::FsService;
+    using eerie_leap::views::assets::animations::ui_lottie_spinner_json;
+    DtFs::InitInternalFs();
+    auto fs = std::make_shared<FsService>(DtFs::GetInternalFsMp());
+    zassert_true(fs->Initialize());
+    auto assets = std::make_shared<AssetsManager>(fs, "icon-lifecycle");
+    zassert_true(assets->Save("spinner.json", std::span(
+        reinterpret_cast<const uint8_t*>(ui_lottie_spinner_json.data()), ui_lottie_spinner_json.size())));
+    configuration.properties[WidgetPropertyType::FILE_PATH] = std::pmr::string("spinner.json");
     return WidgetContext { .assets_manager = std::move(assets) };
 }
 
@@ -363,6 +378,8 @@ ZTEST(icon_lifecycle, test_every_factory_widget_and_icon_supports_direct_rotatio
             WidgetContext context;
             if(icon == IconType::Image)
                 context = ImageContext(*configuration, 20, 60);
+            if(type == WidgetType::BasicLottie)
+                context = LottieContext(*configuration);
             auto widget = factory.CreateWidget(type, 1, MakeRoot(), context);
             widget->SetSizePx({ 80, 80 });
             zassert_true(widget->SetRotation(-4500));
@@ -932,6 +949,10 @@ ZTEST(icon_lifecycle, test_all_factory_widgets_support_live_animation_without_re
             WidgetContext context;
             if(icon == IconType::Image)
                 context = ImageContext(*configuration);
+            if(type == WidgetType::BasicLottie)
+                context = LottieContext(*configuration);
+            // Lottie playback is an LVGL animation of the widget's own, paused while it cannot process.
+            const auto idle = count + (type == WidgetType::BasicLottie ? 1 : 0);
             auto widget = factory.CreateWidget(type, 1, root, context);
             const auto supported = widget->GetSupportedProperties();
             for(auto property : { WidgetPropertyType::ANIMATION_TYPE, WidgetPropertyType::IS_ANIMATION_ACTIVE,
@@ -945,11 +966,11 @@ ZTEST(icon_lifecycle, test_all_factory_widgets_support_live_animation_without_re
             widget->OnActivated();
             auto* content = views_test::WidgetContent(*widget);
             auto* leaf = lv_obj_get_child(content, 0);
-            zassert_equal(lv_anim_count_running(), count);
+            zassert_equal(lv_anim_count_running(), idle);
             Publish(WidgetPropertyType::ANIMATION_TYPE, 1);
-            zassert_equal(lv_anim_count_running(), count);
+            zassert_equal(lv_anim_count_running(), idle);
             Publish(WidgetPropertyType::IS_ANIMATION_ACTIVE, true);
-            zassert_equal(lv_anim_count_running(), count + 1);
+            zassert_equal(lv_anim_count_running(), idle + 1);
             Tick(500);
             zassert_equal(lv_obj_get_style_opa_layered(content, LV_PART_MAIN), 0);
             Publish(WidgetPropertyType::VALUE, 42.0F);
@@ -957,7 +978,7 @@ ZTEST(icon_lifecycle, test_all_factory_widgets_support_live_animation_without_re
             ThemeManager::GetInstance().SetTheme(std::make_shared<BlueTheme>());
             lv_display_send_event(lv_display_get_default(), LV_EVENT_REFR_START, nullptr);
             zassert_equal(lv_obj_get_style_opa_layered(content, LV_PART_MAIN), 0);
-            zassert_equal(lv_anim_count_running(), count + 1);
+            zassert_equal(lv_anim_count_running(), idle + 1);
             Publish(WidgetPropertyType::ANIMATION_TYPE, 2);
             Tick(250);
             widget->SetSizePx({ 72, 64 });
@@ -971,11 +992,11 @@ ZTEST(icon_lifecycle, test_all_factory_widgets_support_live_animation_without_re
             Tick(500);
             zassert_equal(lv_obj_get_style_transform_rotation(content, LV_PART_MAIN), 900);
             Publish(WidgetPropertyType::IS_VISIBLE, false);
-            zassert_equal(lv_anim_count_running(), count);
+            zassert_equal(lv_anim_count_running(), idle);
             Publish(WidgetPropertyType::ANIMATION_TYPE, 1);
             Publish(WidgetPropertyType::ANIMATION_DURATION_MS, 1000);
             Publish(WidgetPropertyType::IS_VISIBLE, true);
-            zassert_equal(lv_anim_count_running(), count + 1);
+            zassert_equal(lv_anim_count_running(), idle + 1);
             Tick(500);
             zassert_equal(lv_obj_get_style_opa_layered(content, LV_PART_MAIN), 0);
             widget.reset();

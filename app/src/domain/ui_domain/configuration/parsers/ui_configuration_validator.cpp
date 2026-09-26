@@ -393,6 +393,7 @@ void UiConfigurationValidator::ValidateWidgetType(const ScreenConfiguration& scr
         switch(widget_configuration->type) {
             case WidgetType::BasicIcon:
             case WidgetType::BasicArcIcon:
+            case WidgetType::BasicLottie:
             case WidgetType::IndicatorArcFill:
             case WidgetType::IndicatorDigital:
             case WidgetType::IndicatorHorizontalChart:

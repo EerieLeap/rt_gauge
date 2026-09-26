@@ -31,6 +31,8 @@ std::shared_ptr<WidgetConfiguration> Widget(uint32_t id, WidgetType type) {
     widget->size_grid = { 1, 1 };
     if(type == WidgetType::BasicIcon || type == WidgetType::BasicArcIcon)
         widget->properties[WidgetPropertyType::ICON_TYPE] = static_cast<int>(IconType::Rectangle);
+    if(type == WidgetType::BasicLottie)
+        widget->properties[WidgetPropertyType::FILE_PATH] = std::pmr::string("spinner.json");
     return widget;
 }
 

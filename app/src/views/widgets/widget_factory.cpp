@@ -3,6 +3,7 @@
 
 #include "views/widgets/basic/icon_widget/icon_widget.h"
 #include "views/widgets/basic/arc_icon_widget/arc_icon_widget.h"
+#include "views/widgets/basic/lottie_widget/lottie_widget.h"
 
 #include "views/widgets/controls/button_control/button_control.h"
 #include "views/widgets/controls/slider_control/slider_control.h"
@@ -83,6 +84,7 @@ std::vector<WidgetType> WidgetFactory::GetAvailableTypes() const {
 void WidgetFactory::RegisterTypes() {
     RegisterWidget<IconWidget>(WidgetType::BasicIcon);
     RegisterWidget<ArcIconWidget>(WidgetType::BasicArcIcon);
+    RegisterWidget<LottieWidget>(WidgetType::BasicLottie);
 
     RegisterWidget<ArcFillIndicator>(WidgetType::IndicatorArcFill);
     RegisterWidget<SegmentArcIndicator>(WidgetType::IndicatorSegmentArc);

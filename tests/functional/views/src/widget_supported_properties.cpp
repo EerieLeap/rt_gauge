@@ -132,6 +132,7 @@ ZTEST(widget_supported_properties, test_widgets_report_exact_color_roles) {
         { WidgetType::IndicatorBar, { primary, secondary } },
         { WidgetType::IndicatorSegmentArc, { primary, primary_inactive } },
         { WidgetType::IndicatorDial, {} },
+        { WidgetType::BasicLottie, {} },
         { WidgetType::ControlButton, { primary, primary_inactive, secondary, secondary_inactive } },
         { WidgetType::ControlToggle, { primary, primary_inactive, secondary, secondary_inactive } },
         { WidgetType::ControlSlider, { primary, primary_inactive, secondary, secondary_inactive,

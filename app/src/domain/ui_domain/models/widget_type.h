@@ -17,6 +17,7 @@ enum class WidgetType : uint32_t {
 
     BasicIcon = static_cast<uint32_t>(WidgetCategory::Basic) | 1,
     BasicArcIcon = static_cast<uint32_t>(WidgetCategory::Basic) | 2,
+    BasicLottie = static_cast<uint32_t>(WidgetCategory::Basic) | 3,
 
     IndicatorArcFill = static_cast<uint32_t>(WidgetCategory::Indicator) | 101,
     IndicatorDigital = static_cast<uint32_t>(WidgetCategory::Indicator) | 102,

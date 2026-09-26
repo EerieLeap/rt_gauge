@@ -39,6 +39,9 @@ file(GLOB_RECURSE APP_SRC_VIEWS
   ${APP_SRC_VIEWS_DIR}/*.cpp
 )
 
+# LottieWidget keeps ThorVG on the external heap.
+set(APP_SRC_UTILITIES ${APP_SRC_DIR}/utilities/memory/scoped_new_resource.cpp)
+
 # Only UiController: the other controllers pull in CAN, BLE and the sensor stack,
 # none of which this suite exercises.
 file(GLOB_RECURSE APP_SRC_CONTROLLERS
@@ -53,6 +56,7 @@ target_sources(app PRIVATE
   ${APP_SRC_CONTROLLERS}
   ${APP_SRC_EVENT_BUS}
   ${APP_SRC_UI_DOMAIN}
+  ${APP_SRC_UTILITIES}
   ${APP_SRC_VIEWS}
   ${TEST_SOURCES}
 )

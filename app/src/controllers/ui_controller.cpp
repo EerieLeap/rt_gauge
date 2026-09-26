@@ -1,4 +1,5 @@
 #include <cerrno>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -41,6 +42,7 @@
 #include "views/widgets/indicators/horizontal_chart_indicator/horizontal_chart_indicator.h"
 #include "views/widgets/widget_factory.h"
 #include "views/assets/images/images_register.h"
+#include "views/assets/animations/animations_register.h"
 
 #include "ui_controller.h"
 
@@ -53,6 +55,7 @@ using namespace eerie_leap::views::screens;
 using namespace eerie_leap::views::themes;
 using namespace eerie_leap::views::widgets::indicators;
 using namespace eerie_leap::views::assets::images;
+using namespace eerie_leap::views::assets::animations;
 
 namespace config_services = eerie_leap::configuration::services;
 
@@ -784,6 +787,18 @@ void UiController::SetupTestConfiguration() {
     // widget1_1->properties[WidgetPropertyType::ANIMATION_DURATION_MS] = 1000;
     screen_configuration_1->AddWidget(std::move(widget1_1));
 
+    // Widget 1_2: BasicLottie - renders at its 120x120 widget size
+    auto widget1_2 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
+    widget1_2->type = WidgetType::BasicLottie;
+    widget1_2->id = 3;
+    widget1_2->position_grid.x = 173;
+    widget1_2->position_grid.y = 330;
+    widget1_2->size_grid.width = 120;
+    widget1_2->size_grid.height = 120;
+    widget1_2->z_index = 0;
+    widget1_2->properties[WidgetPropertyType::FILE_PATH] = "ui_lottie_spinner.json";
+    screen_configuration_1->AddWidget(std::move(widget1_2));
+
     ui_configuration->screen_configurations.push_back(std::move(screen_configuration_1));
 
     // A settings screen is pure configuration: no C++ is written per config screen.
@@ -889,6 +904,12 @@ void UiController::SetupTestConfiguration() {
 }
 
 void UiController::SetupTestAssets() {
+    if(!ui_assets_manager_->Exists("ui_lottie_spinner.json")) {
+        ui_assets_manager_->Save(
+            "ui_lottie_spinner.json",
+            std::span(reinterpret_cast<const uint8_t*>(ui_lottie_spinner_json.data()), ui_lottie_spinner_json.size()));
+    }
+
     if(ui_assets_manager_->Exists("ui_img_norma_al88.bin"))
         return;
 

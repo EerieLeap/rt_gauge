@@ -1,0 +1,22 @@
+--- a/src/widgets/lottie/lv_lottie.c
++++ b/src/widgets/lottie/lv_lottie.c
+@@ -108,14 +108,16 @@
+     }
+
+     lv_lottie_t * lottie = (lv_lottie_t *)obj;
++    /*ThorVG un-premultiplies its output for a straight alpha target*/
++    bool premultiplied = draw_buf->header.cf == LV_COLOR_FORMAT_ARGB8888_PREMULTIPLIED;
+     tvg_swcanvas_set_target(lottie->tvg_canvas, (void *)draw_buf->data, draw_buf->header.stride / 4,
+-                            draw_buf->header.w, draw_buf->header.h, TVG_COLORSPACE_ARGB8888);
++                            draw_buf->header.w, draw_buf->header.h,
++                            premultiplied ? TVG_COLORSPACE_ARGB8888 : TVG_COLORSPACE_ARGB8888S);
+     tvg_canvas_push(lottie->tvg_canvas, lottie->tvg_paint);
+     lv_canvas_set_draw_buf(obj, draw_buf);
+     tvg_picture_set_size(lottie->tvg_paint, draw_buf->header.w, draw_buf->header.h);
+
+-    /* Rendered output images are premultiplied */
+-    lv_draw_buf_set_flag(draw_buf, LV_IMAGE_FLAGS_PREMULTIPLIED);
++    if(premultiplied) lv_draw_buf_set_flag(draw_buf, LV_IMAGE_FLAGS_PREMULTIPLIED);
+
+     /*Force updating when the buffer changes*/
+     float f_current;

@@ -584,6 +584,15 @@ ZTEST(ui_configuration_validator, test_control_widget_types_are_valid) {
     }
 }
 
+ZTEST(ui_configuration_validator, test_lottie_widget_type_is_valid) {
+    auto configuration = MakeConfiguration();
+    auto& widget_configuration = configuration->screen_configurations[0]->widget_configurations[0];
+    widget_configuration->type = WidgetType::BasicLottie;
+    widget_configuration->properties[WidgetPropertyType::FILE_PATH] = "spinner.json";
+
+    zassert_true(Validates(*configuration));
+}
+
 ZTEST(ui_configuration_validator, test_control_widget_properties_are_valid) {
     auto configuration = MakeConfiguration();
     auto& widget_configuration = configuration->screen_configurations[0]->widget_configurations[0];

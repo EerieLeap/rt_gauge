@@ -41,6 +41,9 @@ file(GLOB_RECURSE APP_SRC_VIEWS
 # references them; the fonts are needed by the themes.
 list(FILTER APP_SRC_VIEWS EXCLUDE REGEX "/views/assets/images/")
 
+# LottieWidget keeps ThorVG on the external heap.
+set(APP_SRC_UTILITIES ${APP_SRC_DIR}/utilities/memory/scoped_new_resource.cpp)
+
 file(GLOB_RECURSE TEST_SOURCES src/*.c src/*.cpp)
 
 # Add all source files to the app target
@@ -48,6 +51,7 @@ target_sources(app PRIVATE
   ${APP_SRC_CONFIGURATION}
   ${APP_SRC_EVENT_BUS}
   ${APP_SRC_UI_DOMAIN}
+  ${APP_SRC_UTILITIES}
   ${APP_SRC_VIEWS}
   ${TEST_SOURCES}
 )
