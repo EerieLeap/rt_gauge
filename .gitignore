@@ -25,3 +25,5 @@ __pycache__/
 # docker
 /docker-compose.yml
 /.devcontainer/
+
+/app/docs/plans/

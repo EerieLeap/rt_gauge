@@ -94,8 +94,10 @@ lv_obj_t* LottieWidget::Create() {
         return nullptr;
 
     const auto source = context_.assets_manager->Load(file_path_);
-    if(source.empty())
+    if(source.empty()) {
+        LOG_ERR("Lottie asset '%s' is missing or empty.", file_path_.c_str());
         return nullptr;
+    }
 
     buffer_.assign(size + LV_DRAW_BUF_ALIGN, 0);
     auto* data = lv_draw_buf_align(buffer_.data(), LV_COLOR_FORMAT_ARGB8888);

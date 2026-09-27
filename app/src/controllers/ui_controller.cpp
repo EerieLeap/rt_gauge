@@ -904,11 +904,15 @@ void UiController::SetupTestConfiguration() {
 }
 
 void UiController::SetupTestAssets() {
-    if(!ui_assets_manager_->Exists("ui_lottie_spinner.json")) {
-        ui_assets_manager_->Save(
-            "ui_lottie_spinner.json",
-            std::span(reinterpret_cast<const uint8_t*>(ui_lottie_spinner_json.data()), ui_lottie_spinner_json.size()));
-    }
+    const auto save_if_stale = [this](std::string_view name, std::string_view json) {
+        const auto path = std::string(UI_ASSETS_DIR) + "/" + std::string(name);
+        if(ui_assets_manager_->Exists(name) && fs_service_->GetFileSize(path) == json.size())
+            return;
+
+        ui_assets_manager_->Save(name, std::span(reinterpret_cast<const uint8_t*>(json.data()), json.size()));
+    };
+
+    save_if_stale("ui_lottie_spinner.json", ui_lottie_spinner_json);
 
     if(ui_assets_manager_->Exists("ui_img_norma_al88.bin"))
         return;
