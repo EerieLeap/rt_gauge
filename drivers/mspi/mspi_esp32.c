@@ -383,12 +383,27 @@ static bool dma_reachable(const void *buf, size_t len)
 	return false;
 }
 
+/* Kept for the device's lifetime: allocating per packet churned the system heap on every frame. */
+static uint8_t *bounce_buf_get(const struct device *dev)
+{
+	const struct mspi_esp32_config *config = dev->config;
+	struct mspi_esp32_data *data = dev->data;
+
+	if (data->bounce_buf == NULL) {
+		data->bounce_buf = k_aligned_alloc(
+			4, ROUND_UP(CONFIG_MSPI_DMA_MAX_BUFFER_SIZE, config->dma_buf_size_alignment));
+	}
+
+	return data->bounce_buf;
+}
+
 /*
- * Allocate a single bounce buffer for the data phase and wire it into tc.
+ * Wire the data phase into tc, through the device's bounce buffer when the
+ * caller's buffer cannot be handed to the hardware directly.
  *
  * Since a packet is either TX or RX, only one buffer is ever needed.
- * Returns the allocated buffer (caller must k_free it), or NULL on error
- * (ret is set to a negative errno in that case).
+ * Returns the bounce buffer when it is used, otherwise NULL; on error ret is
+ * set to a negative errno.
  *
  * When dma_enabled and dir == MSPI_RX the same buffer doubles as the TX
  * zero-fill required by the hardware.
@@ -416,7 +431,7 @@ static uint8_t *transfer_prepare_data(const struct device *dev,
 		bool need_bounce = config->dma_enabled && !dma_reachable(src, dma_len);
 
 		if (need_bounce) {
-			buffer = k_aligned_alloc(4, *dma_buf_len);
+			buffer = bounce_buf_get(dev);
 			if (!buffer) {
 				*ret = -ENOMEM;
 				return NULL;
@@ -439,11 +454,12 @@ static uint8_t *transfer_prepare_data(const struct device *dev,
 
 		if (need_bounce) {
 			*dma_buf_len = ROUND_UP(dma_len, config->dma_buf_size_alignment);
-			buffer = k_calloc(*dma_buf_len, sizeof(uint8_t));
+			buffer = bounce_buf_get(dev);
 			if (!buffer) {
 				*ret = -ENOMEM;
 				return NULL;
 			}
+			memset(buffer, 0, *dma_buf_len);
 			dst = buffer;
 		} else {
 			LOG_DBG("RX buf %p ok (non-DMA path)", dst);
@@ -455,7 +471,7 @@ static uint8_t *transfer_prepare_data(const struct device *dev,
 		/*
 		 * DMA RX-only: hardware also needs a TX buffer (zero-filled).
 		 * Reuse the same bounce buffer by pointing send_buffer at it;
-		 * the buffer is already zeroed by k_calloc so no extra fill is needed.
+		 * it was zeroed above.
 		 */
 		if (config->dma_enabled && !tc->send_buffer) {
 			tc->send_buffer = dst;
@@ -726,7 +742,6 @@ static int IRAM_ATTR transfer(const struct device *dev, const struct mspi_xfer *
 	LOG_DBG("%s[%zu]: success", __func__, packet_index);
 
 cleanup:
-	k_free(tmp);
 	return res;
 }
 
@@ -1175,6 +1190,11 @@ static int mspi_esp32_init(const struct device *dev)
 	if (ret != 0) {
 		LOG_ERR("MSPI config failed: %d", ret);
 		return ret;
+	}
+
+	if (config->dma_enabled && bounce_buf_get(dev) == NULL) {
+		LOG_ERR("Could not allocate the DMA bounce buffer");
+		return -ENOMEM;
 	}
 
 #ifdef CONFIG_MSPI_ESP32_INTERRUPT

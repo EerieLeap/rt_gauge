@@ -36,6 +36,10 @@ config EERIE_LEAP_UI_RENDERER_THREAD_STACK_SIZE
 	int "UI renderer thread stack size"
 	default 8192
 
+config EERIE_LEAP_SENSORS_RENDERING_SERVICE_STACK_SIZE
+	int "Sensors rendering service stack size"
+	default 4096
+
 config EERIE_LEAP_UI_ROTATION
 	int
 	default 0

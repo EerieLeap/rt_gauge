@@ -1,0 +1,12 @@
+diff --git a/components/bt/controller/esp32c3/bt.c b/components/bt/controller/esp32c3/bt.c
+--- a/components/bt/controller/esp32c3/bt.c
++++ b/components/bt/controller/esp32c3/bt.c
+@@ -500,7 +500,7 @@
+ /* Zephyr thread handle and stack for BT task */
+ static struct k_thread bt_task_handle;
+ #ifndef CONFIG_ESP32_BT_LE_CONTROLLER_TASK_STACK_SIZE
+-#define CONFIG_ESP32_BT_LE_CONTROLLER_TASK_STACK_SIZE 4096
++#define CONFIG_ESP32_BT_LE_CONTROLLER_TASK_STACK_SIZE CONFIG_ESP32_BT_CONTROLLER_STACK_SIZE
+ #endif
+ static K_THREAD_STACK_DEFINE(bt_stack, CONFIG_ESP32_BT_LE_CONTROLLER_TASK_STACK_SIZE);
+ // wakeup timer

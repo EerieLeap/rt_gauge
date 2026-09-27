@@ -58,6 +58,9 @@ struct mspi_esp32_data {
 	struct k_mutex lock;
 	struct k_sem xfer_sem;
 
+	/* Data-phase bounce buffer, allocated once and reused under lock. */
+	uint8_t *bounce_buf;
+
 	/*
 	 * True when device-level HW registers (mode/clock/CS timing) must be
 	 * reprogrammed before the next transfer. Set whenever dev_config()

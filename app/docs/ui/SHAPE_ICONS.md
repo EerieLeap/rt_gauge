@@ -122,20 +122,21 @@ fill modes other than 0 or 1 are rejected; invalid bound fill modes fall back to
 `Filled`, and invalid bound directions fall back to `LeftToRight`.
 
 The application and the view/controller test configurations enable vector,
-canvas, and ThorVG support. `cmake/lvgl_vector.cmake` adds ThorVG's C++ sources
-to Zephyr's LVGL target and supplies the missing POSIX header for its bundled
-SVG loader. It also applies `lvgl_thorvg_raster_workspace.patch`, which moves
+canvas, ThorVG, and Lottie support. `cmake/lvgl_vector.cmake` adds ThorVG's C++
+sources to Zephyr's LVGL target. It also applies `lvgl_thorvg_raster_workspace.patch`, which moves
 ThorVG's raster workspace off the caller's stack. With `LV_USE_OS` disabled,
 canvas rendering runs on the UI/event worker; `LV_DRAW_THREAD_STACK_SIZE`
 does not enlarge that worker's stack. The unpatched rasterizer needs about
 18 KiB for one function and corrupts the app's smaller worker stacks, sometimes
 crashing another thread later when an overlay opens.
 
-`lvgl_thorvg_optional_loaders.patch` also leaves SVG/Lottie loader feature macros
-undefined when `LV_USE_LOTTIE=0`. ThorVG checks those macros with `#ifdef`, so
-defining them as zero still enables the loaders and brings in their file I/O.
-The CMake source list excludes disabled loaders, and the raw image loader no
-longer includes `<fstream>`, avoiding unused iostream initialization.
+`lvgl_thorvg_optional_loaders.patch` never defines ThorVG's SVG loader macro
+(LVGL parses SVG itself) and defines the Lottie one only when `LV_USE_LOTTIE=1`.
+ThorVG checks those macros with `#ifdef`, so defining them as zero still enables
+the loaders and brings in their file I/O. The CMake source list excludes disabled
+loaders, the raw image loader no longer includes `<fstream>`, and the Lottie
+loader's path-based `open` returns false instead of calling `fopen`, so Lottie
+assets load from memory only (`lv_lottie_set_src_data`).
 On ESP32-S3 this caused unresolved `open`, `close`, `read`, `write`, `lseek`, and
 `fstat` symbols. Shape rendering works with `CONFIG_POSIX_API` disabled on both
 ESP32-S3 and ESP32-P4; it does not require these document loaders.

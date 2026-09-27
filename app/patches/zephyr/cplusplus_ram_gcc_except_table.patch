@@ -1,0 +1,16 @@
+diff --git a/include/zephyr/linker/cplusplus-ram.ld b/include/zephyr/linker/cplusplus-ram.ld
+--- a/include/zephyr/linker/cplusplus-ram.ld
++++ b/include/zephyr/linker/cplusplus-ram.ld
+@@ -5,7 +5,12 @@
+  */
+
+ #if defined (CONFIG_CPP)
++#if defined(CONFIG_SOC_FAMILY_ESPRESSIF_ESP32)
++	/* The Espressif scripts drop SECTION_DATA_PROLOGUE()'s last argument, and with it ONLY_IF_RW. */
++	.gcc_except_table : ALIGN_WITH_INPUT ONLY_IF_RW
++#else
+ 	SECTION_DATA_PROLOGUE(.gcc_except_table,,ONLY_IF_RW)
++#endif
+ 	{
+ 	*(.gcc_except_table .gcc_except_table.*)
+ 	} GROUP_DATA_LINK_IN(RAMABLE_REGION, ROMABLE_REGION)

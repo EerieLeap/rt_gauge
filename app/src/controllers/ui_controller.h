@@ -59,7 +59,7 @@ private:
 
     // The first render of a screen group builds its whole LVGL tree, so it gets
     // a stack of its own instead of running on the event bus worker.
-    static constexpr int ui_render_work_queue_stack_size_ = 8192;
+    static constexpr int ui_render_work_queue_stack_size_ = CONFIG_EERIE_LEAP_UI_RENDER_WORK_QUEUE_STACK_SIZE;
     static constexpr int ui_render_work_queue_priority_ = 9;
 
     std::shared_ptr<IFsService> fs_service_;
