@@ -167,7 +167,9 @@ int main() {
     sensors_controller->Start();
 
     auto ble_controller = std::make_shared<BleController>(
-        configuration_service, sensors_controller->GetProcessingService());
+        configuration_service,
+        sensors_controller->GetProcessingService(),
+        config_work_queue_thread);
     if(ble_controller->Initialize() == 0)
         ble_controller->Start();
     else
