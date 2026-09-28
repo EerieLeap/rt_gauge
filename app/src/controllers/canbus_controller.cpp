@@ -83,7 +83,7 @@ void CanbusController::Reconfigure() {
 
 void CanbusController::SetupTestConfiguration() {
     auto canbus_configuration = make_shared_pmr<CanbusConfiguration>(Mrm::GetExtPmr());
-    canbus_configuration->com_bus_channel = 0;
+    canbus_configuration->com_configuration.bus_channel = 0;
 
     CanChannelConfiguration canbus_channel_configuration_0(std::allocator_arg, Mrm::GetExtPmr());
     canbus_channel_configuration_0.type = CanbusType::CLASSICAL_CAN;
