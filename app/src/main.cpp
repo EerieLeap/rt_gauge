@@ -32,6 +32,7 @@
 #include "controllers/sensors_controller.h"
 #include "controllers/ble_controller.h"
 #include "controllers/logging_controller.h"
+#include "controllers/management_controller.h"
 #include "controllers/display_controller.h"
 #include "controllers/ui_controller.h"
 
@@ -165,6 +166,17 @@ int main() {
         LOG_WRN("Logging controller is not available.");
 
     sensors_controller->Start();
+
+    // Constructed after every controller that registers a configuration manager.
+    const auto canbus_com_service = canbus_controller->GetComService();
+    const auto system_configuration = system_controller->GetConfigurationManager()->Get();
+    auto management_controller = std::make_shared<ManagementController>(
+        configuration_service,
+        config_work_queue_thread,
+        canbus_com_service != nullptr ? canbus_com_service->GetNetworkInfo() : nullptr,
+        system_configuration != nullptr ? system_configuration->build_number : 0);
+    if(management_controller->Initialize() != 0)
+        LOG_ERR("Failed to initialize the management controller.");
 
     auto ble_controller = std::make_shared<BleController>(
         configuration_service,

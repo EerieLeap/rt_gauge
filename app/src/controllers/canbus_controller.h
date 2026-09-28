@@ -12,6 +12,7 @@
 #include "domain/canbus_domain/configuration/canbus_configuration_manager.h"
 #include "domain/canbus_domain/services/canbus_service.h"
 #include "domain/canbus_com_domain/services/canbus_com_service.h"
+#include "domain/canbus_com_domain/smp/network_mgmt_group.h"
 
 namespace eerie_leap::controllers {
 
@@ -24,6 +25,7 @@ using eerie_leap::domain::configuration_domain::services::ConfigurationService;
 using eerie_leap::domain::canbus_domain::configuration::CanbusConfigurationManager;
 using eerie_leap::domain::canbus_domain::services::CanbusService;
 using eerie_leap::domain::canbus_com_domain::services::CanbusComService;
+using eerie_leap::domain::canbus_com_domain::smp::NetworkMgmtGroup;
 
 class CanbusController {
 private:
@@ -36,6 +38,7 @@ private:
     std::shared_ptr<CanbusConfigurationManager> canbus_configuration_manager_;
     std::shared_ptr<CanbusService> canbus_service_;
     std::shared_ptr<CanbusComService> canbus_com_service_;
+    std::unique_ptr<NetworkMgmtGroup> network_mgmt_group_;
 
     std::vector<std::shared_ptr<IService>> dependent_services_;
 

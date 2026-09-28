@@ -54,6 +54,9 @@ int CanbusController::Initialize() {
         return -1;
     }
 
+    network_mgmt_group_ = std::make_unique<NetworkMgmtGroup>(canbus_com_service_->GetNetworkInfo());
+    network_mgmt_group_->Register();
+
     // Registered last so the test configuration above does not trigger a reconfiguration.
     canbus_configuration_manager_->RegisterConfigurationUpdatedHandler([this] { Reconfigure(); });
 
