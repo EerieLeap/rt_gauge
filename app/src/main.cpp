@@ -179,9 +179,8 @@ int main() {
         LOG_ERR("Failed to initialize the management controller.");
 
     auto ble_controller = std::make_shared<BleController>(
-        configuration_service,
         sensors_controller->GetProcessingService(),
-        config_work_queue_thread);
+        canbus_com_service);
     if(ble_controller->Initialize() == 0)
         ble_controller->Start();
     else
