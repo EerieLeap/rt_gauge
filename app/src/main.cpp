@@ -180,6 +180,7 @@ int main() {
 
     auto ble_controller = std::make_shared<BleController>(
         sensors_controller->GetProcessingService(),
+        sensor_readings_frame,
         canbus_com_service);
     if(ble_controller->Initialize() == 0)
         ble_controller->Start();
