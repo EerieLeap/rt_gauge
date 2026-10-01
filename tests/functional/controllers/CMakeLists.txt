@@ -42,10 +42,11 @@ file(GLOB_RECURSE APP_SRC_VIEWS
 # LottieWidget keeps ThorVG on the external heap.
 set(APP_SRC_UTILITIES ${APP_SRC_DIR}/utilities/memory/scoped_new_resource.cpp)
 
-# Only UiController: the other controllers pull in CAN, BLE and the sensor stack,
-# none of which this suite exercises.
+# UiController and ManagementController: the others pull in CAN, BLE and the sensor
+# stack, none of which this suite exercises.
 file(GLOB_RECURSE APP_SRC_CONTROLLERS
   ${APP_SRC_DIR}/controllers/ui_controller.cpp
+  ${APP_SRC_DIR}/controllers/management_controller.cpp
 )
 
 file(GLOB_RECURSE TEST_SOURCES src/*.c src/*.cpp)
@@ -59,4 +60,10 @@ target_sources(app PRIVATE
   ${APP_SRC_UTILITIES}
   ${APP_SRC_VIEWS}
   ${TEST_SOURCES}
+)
+
+# The SMP test client injects requests with smp_rx_req().
+target_include_directories(app PRIVATE
+  ${RT_GAUGE_DIR}/modules/eerie_leap_rt_core/tests/common
+  ${ZEPHYR_BASE}/subsys/mgmt/mcumgr/transport/include
 )
