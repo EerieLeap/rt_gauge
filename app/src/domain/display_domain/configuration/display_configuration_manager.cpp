@@ -25,8 +25,8 @@ void DisplayConfigurationManager::RegisterConfigurationUpdatedHandler(Configurat
     configuration_updated_handler_ = std::move(handler);
 }
 
-bool DisplayConfigurationManager::ApplyCborConfiguration(std::span<const uint8_t> cbor_data) {
-    if(!CborConfigurationManagerBase::ApplyCborConfiguration(cbor_data))
+bool DisplayConfigurationManager::ApplyCborConfiguration(std::span<const uint8_t> cbor_data, std::span<char> reason) {
+    if(!CborConfigurationManagerBase::ApplyCborConfiguration(cbor_data, reason))
         return false;
 
     // Only the externally supplied configuration needs to be pushed to the

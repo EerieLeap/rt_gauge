@@ -1,3 +1,4 @@
+#include <array>
 #include <memory>
 #include <memory_resource>
 #include <stdexcept>
@@ -299,7 +300,10 @@ ZTEST(ui_configuration_manager, test_UiConfigurationManager_rejects_invalid_comp
     reject_children = true;
     zassert_false(ui_configuration_manager->Update(composed));
     expect_plain_stored("Rejected save");
-    zassert_false(ui_configuration_manager->ApplyCborConfiguration(exported));
+    std::array<char, 128> reason{};
+    zassert_false(ui_configuration_manager->ApplyCborConfiguration(exported, reason));
+    zassert_str_equal(reason.data(),
+        "Invalid UI Widget configuration. Screen ID: 8, Widget ID: 0. This owner accepts no children.");
     expect_plain_stored("Rejected import");
 
     reject_children = false;

@@ -1,3 +1,4 @@
+#include <array>
 #include <memory>
 #include <span>
 #include <vector>
@@ -15,6 +16,7 @@
 #include "subsys/device_tree/dt_fs.h"
 #include "subsys/fs/services/fs_service.h"
 
+using eerie_leap::configuration::cbor::CborSerializer;
 using eerie_leap::configuration::services::CborConfigurationService;
 using eerie_leap::subsys::device_tree::DtFs;
 using eerie_leap::subsys::fs::services::FsService;
@@ -131,7 +133,33 @@ ZTEST(display_configuration_manager, test_garbage_cbor_is_rejected) {
 
     std::vector<uint8_t> garbage = {0xFF, 0xFF, 0xFF, 0xFF};
 
-    zassert_false(manager->ApplyCborConfiguration(std::span<const uint8_t>(garbage.data(), garbage.size())));
+    std::array<char, 96> reason{};
+    zassert_false(manager->ApplyCborConfiguration(std::span<const uint8_t>(garbage.data(), garbage.size()), reason));
+    zassert_str_equal(reason.data(), "Malformed CBOR");
+    zassert_equal(manager->Get(true)->brightness, 42);
+}
+
+ZTEST(display_configuration_manager, test_a_rejected_configuration_reports_why) {
+    auto manager = MakeManager();
+    zassert_true(manager->Update(MakeConfiguration()));
+
+    CborSerializer<CborDisplayConfig> serializer;
+    const auto exported = manager->GetCborConfiguration();
+    auto cbor_config = serializer.Deserialize(exported);
+    zassert_not_null(cbor_config.get());
+    cbor_config->brightness = 300;
+
+    int notifications = 0;
+    manager->RegisterConfigurationUpdatedHandler([&notifications] { notifications++; });
+
+    ConfigurationService configuration_service;
+    configuration_service.RegisterCborConfigurationManager(ConfigurationService::Type::Display, manager);
+
+    std::array<char, 96> reason{};
+    zassert_false(configuration_service.ApplyCborConfiguration(
+        ConfigurationService::Type::Display, serializer.Serialize(*cbor_config), reason));
+    zassert_str_equal(reason.data(), "Invalid Display configuration. Brightness must be between 0 and 255. Value: 300.");
+    zassert_equal(notifications, 0);
     zassert_equal(manager->Get(true)->brightness, 42);
 }
 

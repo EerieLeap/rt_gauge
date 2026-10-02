@@ -38,7 +38,9 @@ public:
 
     void RegisterConfigurationUpdatedHandler(ConfigurationUpdatedHandler handler) override;
 
-    bool ApplyCborConfiguration(std::span<const uint8_t> cbor_data) override;
+    using CborConfigurationManagerBase::ApplyCborConfiguration;
+
+    bool ApplyCborConfiguration(std::span<const uint8_t> cbor_data, std::span<char> reason) override;
 };
 
 } // namespace eerie_leap::domain::display_domain::configuration
