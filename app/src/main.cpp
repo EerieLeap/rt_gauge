@@ -1,4 +1,6 @@
 #include <memory>
+#include <string>
+#include <vector>
 
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -22,6 +24,10 @@
 #include "subsys/time/boot_elapsed_time_provider.h"
 
 #include "domain/configuration_domain/services/configuration_service.h"
+#include "domain/canbus_domain/models/canbus_configuration.h"
+#include "domain/sensor_domain/models/sensor.h"
+#include "domain/sensor_domain/models/sensor_type.h"
+#include "domain/sensor_domain/models/sources/canbus_source.h"
 #include "domain/sensor_domain/utilities/sensor_readings_frame.hpp"
 #include "domain/settings_domain/services/settings_persistence_service.h"
 
@@ -48,6 +54,9 @@ using namespace eerie_leap::subsys::threading;
 using namespace eerie_leap::subsys::time;
 
 using namespace eerie_leap::domain::configuration_domain::services;
+using namespace eerie_leap::domain::canbus_domain::models;
+using namespace eerie_leap::domain::sensor_domain::models;
+using namespace eerie_leap::domain::sensor_domain::models::sources;
 using namespace eerie_leap::domain::sensor_domain::utilities;
 using namespace eerie_leap::domain::ui_domain::services;
 using namespace eerie_leap::domain::settings_domain::services;
@@ -59,6 +68,9 @@ using namespace eerie_leap::controllers;
 LOG_MODULE_REGISTER(main_logger);
 
 constexpr uint32_t SLEEP_TIME_MS = 10000;
+
+void SetupCanbusConfiguration(std::shared_ptr<CanbusConfigurationManager> canbus_configuration_manager);
+void SetupTestSensors(std::shared_ptr<SensorsConfigurationManager> sensors_configuration_manager);
 
 int main() {
     // CoredumpReporter::PrintStoredDump();
@@ -142,6 +154,7 @@ int main() {
         fs_service,
         config_work_queue_thread,
         configuration_service);
+    // if(canbus_controller->Initialize(SetupCanbusConfiguration) != 0)
     if(canbus_controller->Initialize() != 0)
         LOG_ERR("Failed to initialize the CANBus controller.");
     canbus_controller->Start();
@@ -155,6 +168,8 @@ int main() {
         sensor_readings_frame,
         canbus_controller->GetService(),
         gpio);
+    // TODO: For test purposes only
+    // if(sensors_controller->Initialize(SetupTestSensors) != 0)
     if(sensors_controller->Initialize() != 0)
         LOG_ERR("Failed to initialize the sensors controller.");
 
@@ -191,8 +206,8 @@ int main() {
     SystemInfo::PrintThreadIds();
 
 	while(true) {
-        SystemInfo::PrintHeapInfo();
-        SystemInfo::PrintStackInfo();
+        // SystemInfo::PrintHeapInfo();
+        // SystemInfo::PrintStackInfo();
         // SystemInfo::PrintThreadIds();
         k_msleep(SLEEP_TIME_MS);
 
@@ -212,4 +227,86 @@ int main() {
 	}
 
 	return 0;
+}
+
+void SetupCanbusConfiguration(std::shared_ptr<CanbusConfigurationManager> canbus_configuration_manager) {
+    auto canbus_configuration = make_shared_pmr<CanbusConfiguration>(Mrm::GetExtPmr());
+    canbus_configuration->com_configuration.bus_channel = 0;
+
+    CanChannelConfiguration canbus_channel_configuration_0(std::allocator_arg, Mrm::GetExtPmr());
+    canbus_channel_configuration_0.type = CanbusType::CLASSICAL_CAN;
+    canbus_channel_configuration_0.is_extended_id = false;
+    canbus_channel_configuration_0.bus_channel = 0;
+    canbus_channel_configuration_0.bitrate = 1000000;
+    // canbus_channel_configuration_0.data_bitrate = 2000000;
+
+    // auto message_configuration_0 = make_shared_pmr<CanMessageConfiguration>(Mrm::GetExtPmr());
+    // message_configuration_0->name = "EL_FRAME_0";
+    // message_configuration_0->message_size = 8;
+    // message_configuration_0->frame_id = 790;
+
+    // CanSignalConfiguration signal_configuration_0(std::allocator_arg, Mrm::GetExtPmr());
+    // signal_configuration_0.start_bit = 16;
+    // signal_configuration_0.size_bits = 16;
+    // signal_configuration_0.name = "RPM";
+    // signal_configuration_0.unit = "rpm";
+    // signal_configuration_0.factor = 0.1;
+    // message_configuration_0->signal_configurations.emplace_back(std::move(signal_configuration_0));
+    // canbus_channel_configuration_0.message_configurations.emplace_back(std::move(message_configuration_0));
+
+    for(int i = 0; i < 10; i++) {
+        auto message_configuration = make_shared_pmr<CanMessageConfiguration>(Mrm::GetExtPmr());
+        message_configuration->frame_id = 100 + i;
+        message_configuration->name = "EL_FRAME_" + std::to_string(i);
+        message_configuration->message_size = 8;
+
+        CanSignalConfiguration signal_configuration(std::allocator_arg, Mrm::GetExtPmr());
+        signal_configuration.start_bit = 0;
+        signal_configuration.size_bits = 16;
+        signal_configuration.name = "sensor_" + std::to_string(i);
+        signal_configuration.unit = "km/h";
+        message_configuration->signal_configurations.emplace_back(std::move(signal_configuration));
+
+        canbus_channel_configuration_0.message_configurations.emplace_back(std::move(message_configuration));
+    }
+
+    canbus_configuration->channel_configurations.emplace(
+        canbus_channel_configuration_0.bus_channel,
+        std::move(canbus_channel_configuration_0));
+
+    canbus_configuration_manager->Update(*canbus_configuration);
+}
+
+void SetupTestSensors(std::shared_ptr<SensorsConfigurationManager> sensors_configuration_manager) {
+    // Test Sensors
+
+    // auto sensor_1 = make_shared_pmr<Sensor>(Mrm::GetExtPmr(), "sensor_1");
+
+    // sensor_1->metadata.name = "Sensor 1";
+    // sensor_1->metadata.unit = "";
+    // sensor_1->metadata.description = "Test Sensor 1";
+
+    // sensor_1->configuration.type = SensorType::CANBUS_ANALOG;
+    // sensor_1->configuration.canbus_source = make_unique_pmr<CanbusSource>(Mrm::GetExtPmr(), 0, 790, "RPM");
+
+    // std::vector<std::shared_ptr<Sensor>> sensors = {
+    //     sensor_1
+    // };
+
+    std::vector<std::shared_ptr<Sensor>> sensors;
+
+    for(int i = 0; i < 10; i++) {
+        auto sensor = make_shared_pmr<Sensor>(Mrm::GetExtPmr(), "sensor_" + std::to_string(i));
+
+        sensor->metadata.name = "Sensor 1";
+        sensor->metadata.unit = "";
+        sensor->metadata.description = "Test Sensor 1";
+
+        sensor->configuration.type = SensorType::CANBUS_ANALOG;
+        sensor->configuration.canbus_source = make_unique_pmr<CanbusSource>(Mrm::GetExtPmr(), 0, 100 + i, "sensor_" + std::to_string(i));
+
+        sensors.push_back(sensor);
+    }
+
+    sensors_configuration_manager->Update(sensors);
 }
