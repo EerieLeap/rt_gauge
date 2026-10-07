@@ -37,9 +37,18 @@ void SensorsRenderingService::Initialize() {
 
 WorkQueueTaskResult SensorsRenderingService::ProcessWorkTask(SensorsRenderingTask* task) {
     try {
-        // Taken in one step: a separate clear would drop readings processed in between.
-        for(const auto& [_, reading] : task->sensor_readings_frame->TakeProcessedReadings())
-            SubmitToEventBus(reading);
+        // Taken in one step: a separate clear would drop readings processed in between. Readings
+        // that do not fit the buffer stay pending, so the loop drains them in the same tick.
+        size_t count = 0;
+        do {
+            count = task->sensor_readings_frame->TakeProcessedReadings(task->readings);
+
+            for(size_t i = 0; i < count; i++) {
+                // A reading without a value (a raw CAN frame) has nothing to show.
+                if(task->readings[i].value.has_value())
+                    SubmitToEventBus(task->readings[i]);
+            }
+        } while(count == task->readings.size());
     } catch (const std::exception& e) {
         LOG_DBG("Failed to render sensors. Error: %s", e.what());
     }
@@ -57,7 +66,7 @@ void SensorsRenderingService::SubmitToEventBus(const SensorReading& reading) {
         .source_id = caller.hash,
         .type = SensorEventType::DataUpdated,
         .payload = {
-            { SensorPayloadType::SensorId, reading.sensor->id_hash },
+            { SensorPayloadType::SensorId, reading.sensor_id_hash },
             { SensorPayloadType::Value, reading.value.value_or(0.0f) }
         }
     });

@@ -9,7 +9,6 @@
 #include "utilities/memory/memory_resource_manager.h"
 #include "utilities/dev_tools/system_info.h"
 #include "utilities/dev_tools/coredump_reporter.h"
-#include "utilities/guid/guid_generator.h"
 
 #include "subsys/device_tree/dt_configurator.h"
 #include "subsys/device_tree/dt_feature.h"
@@ -45,7 +44,6 @@
 using namespace eerie_memory;
 using namespace eerie_leap::utilities::memory;
 using namespace eerie_leap::utilities::dev_tools;
-using namespace eerie_leap::utilities::guid;
 
 using namespace eerie_leap::subsys::device_tree;
 using namespace eerie_leap::subsys::fs::services;
@@ -95,8 +93,6 @@ int main() {
     auto boot_elapsed_time_provider = std::make_shared<BootElapsedTimeProvider>();
     auto time_service = std::make_shared<TimeService>(rtc_provider, boot_elapsed_time_provider);
     time_service->Initialize();
-
-    auto guid_generator = std::make_shared<GuidGenerator>();
 
     int config_work_queue_stack_size = 6144;
     int config_work_queue_priority = 5;
@@ -164,7 +160,6 @@ int main() {
         config_work_queue_thread,
         configuration_service,
         time_service,
-        guid_generator,
         sensor_readings_frame,
         canbus_controller->GetService(),
         gpio);
