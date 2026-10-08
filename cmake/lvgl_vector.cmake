@@ -4,7 +4,7 @@ if(CONFIG_LV_USE_VECTOR_GRAPHIC AND CONFIG_LV_USE_THORVG_INTERNAL)
     # Tests do not run app/CMakeLists.txt's patch step. Apply the same fixes here
     # so every target using ThorVG gets them, including a fresh checkout.
     foreach(THORVG_PATCH_NAME IN ITEMS thorvg_raster_workspace thorvg_optional_loaders
-            lottie_straight_alpha lottie_frame_rate)
+            lottie_straight_alpha)
         set(THORVG_PATCH
             "${CMAKE_CURRENT_LIST_DIR}/../app/patches/modules/lvgl/lvgl_${THORVG_PATCH_NAME}.patch")
         set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${THORVG_PATCH}")
