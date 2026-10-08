@@ -7,7 +7,7 @@ get_filename_component(RT_GAUGE_DIR "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 set(APP_SRC_DIR "${RT_GAUGE_DIR}/app/src")
 
 set(EXTRA_ZEPHYR_MODULES
-    "${RT_GAUGE_DIR}/modules/eerie_leap_rt_core/modules/lua"
+    "${RT_GAUGE_DIR}/modules/eerie_leap_rt_core/modules/zephyr_lua"
     "${RT_GAUGE_DIR}/modules/eerie_leap_rt_core/modules/expression_engine"
     "${RT_GAUGE_DIR}/modules/eerie_leap_rt_core")
 
