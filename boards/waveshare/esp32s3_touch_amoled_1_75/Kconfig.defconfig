@@ -6,7 +6,10 @@ if BOARD_ESP32S3_TOUCH_AMOLED_1_75_ESP32S3_PROCPU
 config KERNEL_MEM_POOL
 	default y
 
+# The panel takes RGB565 big-endian. LVGL swaps the bytes of the whole flushed
+# area whenever this is set, for any color format, so an 8-bit configuration
+# with it on swaps twice the frame buffer's size and runs into the LVGL pool.
 configdefault LV_COLOR_16_SWAP
-	default y if LVGL
+	default y if LVGL && LV_COLOR_DEPTH_16
 
 endif # BOARD_ESP32S3_TOUCH_AMOLED_1_75_ESP32S3_PROCPU
