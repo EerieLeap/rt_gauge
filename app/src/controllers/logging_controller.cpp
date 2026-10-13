@@ -69,10 +69,13 @@ int LoggingController::Initialize() {
             ARG_UNUSED(state);
 
             input_work_queue_thread_->Run([this]() {
-                CanbusComLoggingCommand command(!is_logging_in_progress_);
+                // The ack sets the state this press asked for rather than toggling, so a second
+                // press before the first ack repeats the command and both acks agree with the DAQ.
+                const bool is_start = !is_logging_in_progress_;
+                CanbusComLoggingCommand command(is_start);
                 canbus_com_service_->SendCommand(
                     command,
-                    [this](bool success) { LoggingStateUpdatedAck(success); });
+                    [this, is_start](bool success) { LoggingStateUpdatedAck(is_start, success); });
             });
         });
 
@@ -84,12 +87,15 @@ int LoggingController::Initialize() {
     return 0;
 }
 
-void LoggingController::LoggingStateUpdatedAck(bool success) {
+void LoggingController::LoggingStateUpdatedAck(bool is_logging, bool success) {
     if(!success)
         return;
 
-    is_logging_in_progress_ = !is_logging_in_progress_;
-    PublishLoggingState(is_logging_in_progress_);
+    // A repeated command changes nothing; the icon's property store would still notify on it.
+    if(is_logging_in_progress_.exchange(is_logging) == is_logging)
+        return;
+
+    PublishLoggingState(is_logging);
 }
 
 void LoggingController::PublishLoggingState(bool is_logging) {

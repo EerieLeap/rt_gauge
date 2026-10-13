@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <vector>
 #include <unordered_map>
@@ -30,9 +31,10 @@ private:
     std::shared_ptr<WorkQueueThread> input_work_queue_thread_;
 
     int button_handler_id_ = 0;
-    bool is_logging_in_progress_ = false;
+    // Read by a press on the input work queue, written by the ack on the CDMP work queue.
+    std::atomic<bool> is_logging_in_progress_ = false;
 
-    void LoggingStateUpdatedAck(bool success);
+    void LoggingStateUpdatedAck(bool is_logging, bool success);
     void PublishLoggingState(bool is_logging);
 
 public:
