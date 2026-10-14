@@ -13,12 +13,20 @@
 #include "domain/ui_domain/models/widget_property.h"
 #include "domain/ui_domain/utilities/widget_property_validator.h"
 
+#include "subsys/event_bus/event_binding.h"
+#include "subsys/event_bus/event_channel_id.h"
+
 #include "ui_configuration_validator.h"
 
 namespace eerie_leap::domain::ui_domain::configuration::parsers {
 
 using namespace eerie_leap::domain::ui_domain::models;
 using namespace eerie_leap::domain::ui_domain::utilities;
+
+// Header only, so the domain checks link without the event bus. Named here because ADL cannot
+// find IsSelectorValue through a ConfigValue, a variant of std types.
+using eerie_leap::subsys::event_bus::IsSelectorValue;
+using eerie_leap::subsys::event_bus::IsValidEventChannelId;
 
 // Matches the screen count the persisted CBOR schema allows.
 static constexpr std::size_t max_screen_count = 24;
@@ -116,19 +124,6 @@ static std::string GetWidgetPropertyValidationError(WidgetPropertyType type, con
     return {};
 }
 
-static bool IsValidEventChannelId(EventChannelId channel) {
-    switch(channel) {
-        case EventChannelId::Sensors:
-        case EventChannelId::Logging:
-        case EventChannelId::Navigation:
-        case EventChannelId::Settings:
-            return true;
-
-        default:
-            return false;
-    }
-}
-
 static bool IsValidBindingDirection(PropertyBindingDirection direction) {
     switch(direction) {
         case PropertyBindingDirection::In:
@@ -139,12 +134,6 @@ static bool IsValidBindingDirection(PropertyBindingDirection direction) {
         default:
             return false;
     }
-}
-
-// A selector is compared against a uint32 already in the payload: text is hashed, an integer is
-// used as it stands. Nothing else reduces to that comparison.
-static bool IsComparableSelectorValue(const ConfigValue& value) {
-    return std::holds_alternative<std::pmr::string>(value) || std::holds_alternative<int>(value);
 }
 
 static void InvalidUiConfiguration(std::string_view message) {
@@ -492,7 +481,7 @@ void UiConfigurationValidator::ValidateWidgetProperties(const ScreenConfiguratio
 void UiConfigurationValidator::ValidateWidgetBindings(const ScreenConfiguration& screen_configuration) {
     for(const auto& widget_configuration : screen_configuration.widget_configurations) {
         for(const auto& binding : widget_configuration->bindings) {
-            if(!IsValidEventChannelId(binding.channel))
+            if(!IsValidEventChannelId(binding.event.channel))
                 InvalidWidgetConfiguration(
                     screen_configuration.id,
                     widget_configuration->id,
@@ -527,11 +516,11 @@ void UiConfigurationValidator::ValidateWidgetBindings(const ScreenConfiguration&
                     "Binding cannot target a structural property; rebuild the screen to change child widgets."
                 );
 
-            if(binding.HasSelector() && !IsComparableSelectorValue(binding.selector_value))
+            if(binding.event.HasSelector() && !IsSelectorValue(binding.event.selector_value))
                 InvalidWidgetConfiguration(
                     screen_configuration.id,
                     widget_configuration->id,
-                    "Binding selector value must be text or an integer."
+                    "Binding selector value must be text, an integer or a bool."
                 );
         }
     }

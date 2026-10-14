@@ -8,11 +8,11 @@
 #include <zephyr/logging/log.h>
 
 #include "utilities/reflection/caller_name.h"
-#include "utilities/string/string_helpers.h"
+
+#include "subsys/event_bus/event_binding_subscription.h"
+#include "subsys/event_bus/event_channel_registry.h"
 
 #include "domain/ui_domain/models/widget_property.h"
-
-#include "event_bus/event_channel_registry.h"
 
 #include "views/widgets/property_value_conversion.h"
 
@@ -24,52 +24,12 @@ using namespace eerie_leap::utilities::type;
 using namespace eerie_leap::domain::ui_domain::models;
 
 using eerie_leap::domain::ui_domain::utilities::WidgetPropertyValidator;
-using eerie_leap::event_bus::EventChannelRegistry;
+using eerie_leap::subsys::event_bus::EventChannelRegistry;
+using eerie_leap::subsys::event_bus::SubscribeEventBinding;
+using eerie_leap::subsys::event_bus::ToSelectorValue;
 using eerie_leap::utilities::reflection::GetCallerName;
-using eerie_leap::utilities::string::StringHelpers;
 
 LOG_MODULE_REGISTER(widget_base_logger);
-
-namespace {
-
-// Configuration names a selector by the readable id it shares with the rest of the system;
-// payloads carry it hashed, so the hash is taken once at subscribe time.
-std::optional<EventData> ToSelectorValue(const ConfigValue& value) {
-    if(const auto* text = std::get_if<std::pmr::string>(&value))
-        return EventData { StringHelpers::GetHash(*text) };
-
-    if(const auto* number = std::get_if<int>(&value))
-        return EventData { *number };
-
-    if(const auto* flag = std::get_if<bool>(&value))
-        return EventData { *flag };
-
-    return std::nullopt;
-}
-
-bool SelectorMatches(const EventData& selector, const EventData& candidate) {
-    if(const auto* hash = std::get_if<uint32_t>(&selector)) {
-        const auto* value = std::get_if<uint32_t>(&candidate);
-
-        return value != nullptr && *value == *hash;
-    }
-
-    if(const auto* number = std::get_if<int>(&selector)) {
-        if(const auto* value = std::get_if<int>(&candidate))
-            return *value == *number;
-
-        const auto* unsigned_value = std::get_if<uint32_t>(&candidate);
-
-        return unsigned_value != nullptr && static_cast<int>(*unsigned_value) == *number;
-    }
-
-    const auto* flag = std::get_if<bool>(&selector);
-    const auto* value = std::get_if<bool>(&candidate);
-
-    return flag != nullptr && value != nullptr && *value == *flag;
-}
-
-} // namespace
 
 void WidgetBase::ValidateChildren(
     const WidgetConfiguration&,
@@ -469,7 +429,8 @@ void WidgetBase::ResolveBindings() {
             continue;
         }
 
-        auto* channel = registry.Find(binding.channel);
+        // Looked up here as well as when subscribing, because an outbound binding needs the channel.
+        auto* channel = registry.Find(binding.event.channel);
         if(channel == nullptr) {
             LOG_WRN("Widget %u binds property %u to an unregistered channel.",
                 id_, static_cast<unsigned>(binding.target));
@@ -477,61 +438,52 @@ void WidgetBase::ResolveBindings() {
             continue;
         }
 
-        auto selector = binding.HasSelector() ? ToSelectorValue(binding.selector_value) : std::nullopt;
-
         if(binding.direction != PropertyBindingDirection::In) {
             outbound_bindings_.push_back(OutboundBinding {
                 .target = binding.target,
                 .channel = channel,
                 .event_type = binding.outbound_event_type,
-                .payload_key = binding.payload_key,
-                .selector_key = binding.selector_key,
-                .selector_value = selector
+                .payload_key = binding.event.payload_key,
+                .selector_key = binding.event.selector_key,
+                .selector_value = ToSelectorValue(binding.event.selector_value)
             });
         }
 
         if(binding.direction == PropertyBindingDirection::Out)
             continue;
 
-        // The selector goes to the channel, not into the handler: a widget bound to another
-        // sensor is then rejected under the subscriber lock instead of waking for every sample.
-        ErasedEventFilter filter;
-        if(selector.has_value()) {
-            filter = [selector_key = binding.selector_key, selector](const ErasedPayloadView& view) {
-                const auto* candidate = view.Find(selector_key);
-
-                return candidate != nullptr && SelectorMatches(*selector, *candidate);
-            };
-        }
-
-        AddSubscription(channel->SubscribeErased(
-            binding.event_type,
-            std::move(filter),
+        auto subscription = SubscribeEventBinding(
+            binding.event,
             [
                 this,
                 store = properties_,
                 guard = dispatch_guard_,
                 target = binding.target,
-                effect = properties_->GetEffect(binding.target),
-                payload_key = binding.payload_key
-            ](const ErasedPayloadView& view) {
-                const auto* data = view.Find(payload_key);
-                if(data == nullptr)
-                    return;
-
+                effect = properties_->GetEffect(binding.target)
+            ](const EventData& data) {
                 ScopedLvglLock lvgl_guard;
 
                 guard->Dispatch([&] {
                     if(!WidgetPropertyValidator::IsManagementProperty(target) && !IsTrackingEligible())
                         return;
 
-                    auto value = CoerceToConfigValue(*data, store->GetDeclaredAlternative(target), target);
+                    auto value = CoerceToConfigValue(data, store->GetDeclaredAlternative(target), target);
                     if(std::holds_alternative<std::monostate>(value) || !store->Set(target, value))
                         return;
 
                     NotifyPropertyChanged(target, value, effect);
                 });
-            }));
+            });
+
+        // The channel resolved, so only a selector that cannot select or a refused subscription
+        // gets here.
+        if(subscription == nullptr) {
+            LOG_WRN("Widget %u could not subscribe property %u.", id_, static_cast<unsigned>(binding.target));
+
+            continue;
+        }
+
+        AddSubscription(std::move(subscription));
     }
 }
 

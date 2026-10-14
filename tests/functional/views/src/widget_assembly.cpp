@@ -214,11 +214,11 @@ std::shared_ptr<WidgetConfiguration> Add(ScreenConfiguration& screen, uint32_t i
     if(children.size() != 0)
         widget->properties[WidgetPropertyType::CHILD_WIDGET_IDS] = std::pmr::vector<int>(children);
     widget->bindings.push_back(PropertyBinding {
-        .target = WidgetPropertyType::VALUE, .channel = EventChannelId::Sensors,
-        .event_type = std::to_underlying(SensorEventType::DataUpdated),
-        .payload_key = std::to_underlying(SensorPayloadType::Value),
-        .selector_key = std::to_underlying(SensorPayloadType::SensorId),
-        .selector_value = static_cast<int>(id)
+        .target = WidgetPropertyType::VALUE, .event = { .channel = EventChannelId::Sensors,
+            .event_type = std::to_underlying(SensorEventType::DataUpdated),
+            .payload_key = std::to_underlying(SensorPayloadType::Value),
+            .selector_key = std::to_underlying(SensorPayloadType::SensorId),
+            .selector_value = static_cast<int>(id) }
     });
     screen.widget_configurations.push_back(widget);
     return widget;

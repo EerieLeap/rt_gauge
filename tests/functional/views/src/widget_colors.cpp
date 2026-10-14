@@ -14,7 +14,7 @@
 #include "subsys/fs/services/fs_service.h"
 #include "domain/ui_domain/models/animation.h"
 #include "domain/sensor_domain/event_bus/sensor_events_channel.h"
-#include "event_bus/event_channel_id.h"
+#include "subsys/event_bus/event_channel_id.h"
 #include "event_bus/event_channels.h"
 #include "views/themes/default_theme.h"
 #include "views/themes/dark_theme.h"
@@ -32,7 +32,7 @@ using namespace eerie_leap::domain::sensor_domain::event_bus;
 using namespace eerie_leap::views::widgets;
 using namespace eerie_leap::views::themes;
 using eerie_leap::views::utilitites::Frame;
-using eerie_leap::event_bus::EventChannelId;
+using eerie_leap::subsys::event_bus::EventChannelId;
 using eerie_leap::subsys::event_bus::EventData;
 
 namespace {
@@ -63,11 +63,13 @@ std::shared_ptr<WidgetConfiguration> Configuration(WidgetType type, IconType ico
                        WidgetPropertyType::VALUE }) {
         configuration->bindings.push_back(PropertyBinding {
             .target = target,
-            .channel = EventChannelId::Sensors,
-            .event_type = std::to_underlying(SensorEventType::DataUpdated),
-            .payload_key = std::to_underlying(SensorPayloadType::Value),
-            .selector_key = std::to_underlying(SensorPayloadType::SensorId),
-            .selector_value = static_cast<int>(target)
+            .event = {
+                .channel = EventChannelId::Sensors,
+                .event_type = std::to_underlying(SensorEventType::DataUpdated),
+                .payload_key = std::to_underlying(SensorPayloadType::Value),
+                .selector_key = std::to_underlying(SensorPayloadType::SensorId),
+                .selector_value = static_cast<int>(target)
+            }
         });
     }
     return configuration;

@@ -203,7 +203,7 @@ ZTEST(widget_composition, test_dial_rejects_inbound_animation_type_bindings_and_
     screen->widget_configurations = { dial, needle };
     for(auto direction : { PropertyBindingDirection::In, PropertyBindingDirection::InOut }) {
         needle->bindings = { PropertyBinding {
-            .target = WidgetPropertyType::ANIMATION_TYPE, .channel = EventChannelId::Sensors, .direction = direction
+            .target = WidgetPropertyType::ANIMATION_TYPE, .event = { .channel = EventChannelId::Sensors }, .direction = direction
         } };
         ExpectError(*screen, { "Widget ID: 9", "Child index 0, ID 12 (needle)", "inbound ANIMATION_TYPE" });
     }

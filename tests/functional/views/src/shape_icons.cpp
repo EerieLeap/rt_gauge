@@ -32,8 +32,8 @@ using namespace eerie_leap::views::themes;
 using eerie_leap::domain::sensor_domain::event_bus::SensorEventsChannel;
 using eerie_leap::domain::sensor_domain::event_bus::SensorEventType;
 using eerie_leap::domain::sensor_domain::event_bus::SensorPayloadType;
-using eerie_leap::event_bus::EventChannelId;
 using eerie_leap::event_bus::InitializeEventChannels;
+using eerie_leap::subsys::event_bus::EventChannelId;
 using eerie_leap::views::utilitites::Frame;
 using eerie_leap::views::widgets::indicators::BarIndicator;
 
@@ -160,9 +160,11 @@ void SavePreview(const lv_draw_buf_t& snapshot, const char* name, int variant) {
 void Bind(WidgetConfiguration& configuration, WidgetPropertyType type) {
     configuration.bindings.push_back(PropertyBinding {
         .target = type,
-        .channel = EventChannelId::Sensors,
-        .event_type = std::to_underlying(SensorEventType::DataUpdated),
-        .payload_key = std::to_underlying(SensorPayloadType::Value)
+        .event = {
+            .channel = EventChannelId::Sensors,
+            .event_type = std::to_underlying(SensorEventType::DataUpdated),
+            .payload_key = std::to_underlying(SensorPayloadType::Value)
+        }
     });
 }
 

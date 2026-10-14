@@ -13,7 +13,7 @@
 #include "domain/logging_domain/event_bus/logging_events_channel.h"
 #include "domain/sensor_domain/event_bus/sensor_events_channel.h"
 #include "domain/ui_domain/configuration/parsers/ui_configuration_validator.h"
-#include "event_bus/event_channel_id.h"
+#include "subsys/event_bus/event_channel_id.h"
 #include "event_bus/event_channels.h"
 #include "views/assets/animations/animations_register.h"
 #include "views/screens/screen.h"
@@ -32,9 +32,9 @@ using namespace eerie_leap::views::widgets::basic;
 using namespace eerie_leap::views::themes;
 using namespace eerie_leap::domain::sensor_domain::event_bus;
 using namespace eerie_leap::domain::logging_domain::event_bus;
-using eerie_leap::event_bus::EventChannelId;
 using eerie_leap::domain::ui_domain::configuration::parsers::UiConfigurationValidator;
 using eerie_leap::event_bus::InitializeEventChannels;
+using eerie_leap::subsys::event_bus::EventChannelId;
 using eerie_leap::subsys::event_bus::EventData;
 using eerie_leap::views::utilitites::Frame;
 
@@ -78,11 +78,13 @@ std::shared_ptr<WidgetConfiguration> Configuration(IconType type) {
                        WidgetPropertyType::ANCHOR_POINT_X, WidgetPropertyType::ANCHOR_POINT_Y }) {
         configuration->bindings.push_back(PropertyBinding {
             .target = target,
-            .channel = EventChannelId::Sensors,
-            .event_type = std::to_underlying(SensorEventType::DataUpdated),
-            .payload_key = std::to_underlying(SensorPayloadType::Value),
-            .selector_key = std::to_underlying(SensorPayloadType::SensorId),
-            .selector_value = static_cast<int>(target)
+            .event = {
+                .channel = EventChannelId::Sensors,
+                .event_type = std::to_underlying(SensorEventType::DataUpdated),
+                .payload_key = std::to_underlying(SensorPayloadType::Value),
+                .selector_key = std::to_underlying(SensorPayloadType::SensorId),
+                .selector_value = static_cast<int>(target)
+            }
         });
     }
     return configuration;
@@ -301,7 +303,7 @@ ZTEST(icon_lifecycle, test_rotation_resize_preserves_angle_and_resolves_new_boun
         for(auto target : { width, height }) {
             auto binding = configuration->bindings.front();
             binding.target = target;
-            binding.selector_value = static_cast<int>(target);
+            binding.event.selector_value = static_cast<int>(target);
             configuration->bindings.push_back(binding);
         }
         TestIcon widget(1, MakeRoot(), context);
@@ -617,7 +619,7 @@ ZTEST(icon_lifecycle, test_shape_anchor_tracks_live_geometry_and_placement) {
     for(auto target : { WidgetPropertyType::WIDTH_PX, WidgetPropertyType::HEIGHT_PX }) {
         auto binding = configuration->bindings.front();
         binding.target = target;
-        binding.selector_value = static_cast<int>(target);
+        binding.event.selector_value = static_cast<int>(target);
         configuration->bindings.push_back(binding);
     }
     TestIcon widget(1, MakeRoot(), {});
@@ -648,7 +650,7 @@ ZTEST(icon_lifecycle, test_image_anchor_tracks_live_dimensions_without_reloading
     for(auto target : { WidgetPropertyType::IMG_WIDTH, WidgetPropertyType::IMG_HEIGHT }) {
         auto binding = configuration->bindings.front();
         binding.target = target;
-        binding.selector_value = static_cast<int>(target);
+        binding.event.selector_value = static_cast<int>(target);
         configuration->bindings.push_back(binding);
     }
     TestIcon widget(1, MakeRoot(), context);
@@ -802,11 +804,13 @@ ZTEST(icon_lifecycle, test_dial_and_needle_keep_isolated_properties_and_bindings
     constexpr uint32_t needle_visibility = 1000;
     needle->bindings.push_back(PropertyBinding {
         .target = WidgetPropertyType::IS_VISIBLE,
-        .channel = EventChannelId::Sensors,
-        .event_type = std::to_underlying(SensorEventType::DataUpdated),
-        .payload_key = std::to_underlying(SensorPayloadType::Value),
-        .selector_key = std::to_underlying(SensorPayloadType::SensorId),
-        .selector_value = static_cast<int>(needle_visibility)
+        .event = {
+            .channel = EventChannelId::Sensors,
+            .event_type = std::to_underlying(SensorEventType::DataUpdated),
+            .payload_key = std::to_underlying(SensorPayloadType::Value),
+            .selector_key = std::to_underlying(SensorPayloadType::SensorId),
+            .selector_value = static_cast<int>(needle_visibility)
+        }
     });
     auto set_needle_visible = [](bool visible) {
         SensorEventsChannel::GetInstance().Publish({
@@ -1202,9 +1206,11 @@ ZTEST(icon_lifecycle, test_logging_visibility_keeps_tracking_and_does_not_overri
     configuration->properties[WidgetPropertyType::IS_VISIBLE] = false;
     configuration->bindings.push_back(PropertyBinding {
         .target = WidgetPropertyType::IS_VISIBLE,
-        .channel = EventChannelId::Logging,
-        .event_type = std::to_underlying(LoggingEventType::StatusUpdated),
-        .payload_key = std::to_underlying(LoggingPayloadType::IsActive)
+        .event = {
+            .channel = EventChannelId::Logging,
+            .event_type = std::to_underlying(LoggingEventType::StatusUpdated),
+            .payload_key = std::to_underlying(LoggingPayloadType::IsActive)
+        }
     });
     TestIcon widget(1, MakeRoot(), WidgetContext{});
     widget.Configure(configuration);
@@ -1253,9 +1259,11 @@ ZTEST(icon_lifecycle, test_logging_oval_on_arc_preserves_size_position_and_blink
     configuration->properties[WidgetPropertyType::ANIMATION_DURATION_MS] = 1000;
     configuration->bindings.push_back(PropertyBinding {
         .target = WidgetPropertyType::IS_VISIBLE,
-        .channel = EventChannelId::Logging,
-        .event_type = std::to_underlying(LoggingEventType::StatusUpdated),
-        .payload_key = std::to_underlying(LoggingPayloadType::IsActive)
+        .event = {
+            .channel = EventChannelId::Logging,
+            .event_type = std::to_underlying(LoggingEventType::StatusUpdated),
+            .payload_key = std::to_underlying(LoggingPayloadType::IsActive)
+        }
     });
     auto widget = WidgetFactory::GetInstance().CreateWidget(configuration, root, WidgetContext{});
     widget->SetSizePx({ 100, 100 });

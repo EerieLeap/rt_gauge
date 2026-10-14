@@ -24,7 +24,7 @@ file(GLOB_RECURSE APP_SRC_UI_DOMAIN
   ${APP_SRC_UI_DOMAIN_DIR}/*.cpp
 )
 
-# WidgetBase resolves its bindings through EventChannelRegistry.
+# InitializeEventChannels() registers the channels widget bindings resolve through.
 set(APP_SRC_EVENT_BUS_DIR ${APP_SRC_DIR}/event_bus)
 file(GLOB_RECURSE APP_SRC_EVENT_BUS
   ${APP_SRC_EVENT_BUS_DIR}/*.c

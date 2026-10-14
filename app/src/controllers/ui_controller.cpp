@@ -34,7 +34,7 @@
 #include "domain/ui_domain/models/animation.h"
 #include "domain/settings_domain/models/setting_id.h"
 
-#include "event_bus/event_channel_id.h"
+#include "subsys/event_bus/event_channel_id.h"
 
 #include "views/screens/screen_factory.h"
 #include "views/themes/theme_manager.h"
@@ -97,36 +97,42 @@ using eerie_leap::domain::sensor_domain::event_bus::SensorEventType;
 using eerie_leap::domain::sensor_domain::event_bus::SensorPayloadType;
 using eerie_leap::domain::settings_domain::event_bus::SettingsEventType;
 using eerie_leap::domain::settings_domain::event_bus::SettingsPayloadType;
-using eerie_leap::event_bus::EventChannelId;
+using eerie_leap::subsys::event_bus::EventChannelId;
 
 PropertyBinding SensorBinding(const char* sensor_id) {
     return PropertyBinding {
         .target = WidgetPropertyType::VALUE,
-        .channel = EventChannelId::Sensors,
-        .event_type = std::to_underlying(SensorEventType::DataUpdated),
-        .payload_key = std::to_underlying(SensorPayloadType::Value),
-        .selector_key = std::to_underlying(SensorPayloadType::SensorId),
-        .selector_value = std::pmr::string(sensor_id, Mrm::GetExtPmr())
+        .event = {
+            .channel = EventChannelId::Sensors,
+            .event_type = std::to_underlying(SensorEventType::DataUpdated),
+            .payload_key = std::to_underlying(SensorPayloadType::Value),
+            .selector_key = std::to_underlying(SensorPayloadType::SensorId),
+            .selector_value = std::pmr::string(sensor_id, Mrm::GetExtPmr())
+        }
     };
 }
 
 PropertyBinding LoggingBinding(WidgetPropertyType target) {
     return PropertyBinding {
         .target = target,
-        .channel = EventChannelId::Logging,
-        .event_type = std::to_underlying(LoggingEventType::StatusUpdated),
-        .payload_key = std::to_underlying(LoggingPayloadType::IsActive)
+        .event = {
+            .channel = EventChannelId::Logging,
+            .event_type = std::to_underlying(LoggingEventType::StatusUpdated),
+            .payload_key = std::to_underlying(LoggingPayloadType::IsActive)
+        }
     };
 }
 
 PropertyBinding SensorToColorBinding(WidgetPropertyType target, const char* sensor_id) {
     return PropertyBinding {
         .target = target,
-        .channel = EventChannelId::Sensors,
-        .event_type = std::to_underlying(SensorEventType::DataUpdated),
-        .payload_key = std::to_underlying(SensorPayloadType::Value),
-        .selector_key = std::to_underlying(SensorPayloadType::SensorId),
-        .selector_value = std::pmr::string(sensor_id, Mrm::GetExtPmr())
+        .event = {
+            .channel = EventChannelId::Sensors,
+            .event_type = std::to_underlying(SensorEventType::DataUpdated),
+            .payload_key = std::to_underlying(SensorPayloadType::Value),
+            .selector_key = std::to_underlying(SensorPayloadType::SensorId),
+            .selector_value = std::pmr::string(sensor_id, Mrm::GetExtPmr())
+        }
     };
 }
 
@@ -139,13 +145,15 @@ PropertyBinding SettingBinding(
 
     return PropertyBinding {
         .target = target,
-        .channel = EventChannelId::Settings,
-        .event_type = std::to_underlying(event),
-        .payload_key = std::to_underlying(key),
+        .event = {
+            .channel = EventChannelId::Settings,
+            .event_type = std::to_underlying(event),
+            .payload_key = std::to_underlying(key),
+            .selector_key = std::to_underlying(SettingsPayloadType::SettingId),
+            .selector_value = std::pmr::string(setting_id, Mrm::GetExtPmr())
+        },
         .direction = direction,
-        .outbound_event_type = std::to_underlying(SettingsEventType::ChangeRequested),
-        .selector_key = std::to_underlying(SettingsPayloadType::SettingId),
-        .selector_value = std::pmr::string(setting_id, Mrm::GetExtPmr())
+        .outbound_event_type = std::to_underlying(SettingsEventType::ChangeRequested)
     };
 }
 

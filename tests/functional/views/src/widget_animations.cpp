@@ -8,7 +8,7 @@
 #include <zephyr/ztest.h>
 
 #include "domain/sensor_domain/event_bus/sensor_events_channel.h"
-#include "event_bus/event_channel_id.h"
+#include "subsys/event_bus/event_channel_id.h"
 #include "event_bus/event_channels.h"
 #include "views/animations/view_animator.h"
 #include "views/widgets/basic/icons/shape_icon/oval_icon/oval_icon.h"
@@ -23,7 +23,7 @@ using namespace eerie_leap::domain::ui_domain::models;
 using namespace eerie_leap::domain::sensor_domain::event_bus;
 using namespace eerie_leap::views::widgets;
 using eerie_leap::domain::ui_domain::ScopedLvglLock;
-using eerie_leap::event_bus::EventChannelId;
+using eerie_leap::subsys::event_bus::EventChannelId;
 using eerie_leap::views::animations::ViewAnimator;
 using eerie_leap::views::themes::ITheme;
 using eerie_leap::views::utilitites::Frame;
@@ -68,9 +68,11 @@ std::shared_ptr<WidgetConfiguration> Configuration() {
     auto configuration = std::make_shared<WidgetConfiguration>(std::allocator_arg, std::pmr::get_default_resource());
     configuration->bindings.push_back(PropertyBinding {
         .target = WidgetPropertyType::VALUE,
-        .channel = EventChannelId::Sensors,
-        .event_type = std::to_underlying(SensorEventType::DataUpdated),
-        .payload_key = std::to_underlying(SensorPayloadType::Value)
+        .event = {
+            .channel = EventChannelId::Sensors,
+            .event_type = std::to_underlying(SensorEventType::DataUpdated),
+            .payload_key = std::to_underlying(SensorPayloadType::Value)
+        }
     });
     return configuration;
 }
@@ -160,11 +162,13 @@ std::shared_ptr<WidgetConfiguration> AnimationConfiguration(Animation::Type type
                        WidgetPropertyType::ANCHOR_POINT_Y }) {
         configuration->bindings.push_back(PropertyBinding {
             .target = target,
-            .channel = EventChannelId::Sensors,
-            .event_type = std::to_underlying(SensorEventType::DataUpdated),
-            .payload_key = std::to_underlying(SensorPayloadType::Value),
-            .selector_key = std::to_underlying(SensorPayloadType::SensorId),
-            .selector_value = static_cast<int>(target)
+            .event = {
+                .channel = EventChannelId::Sensors,
+                .event_type = std::to_underlying(SensorEventType::DataUpdated),
+                .payload_key = std::to_underlying(SensorPayloadType::Value),
+                .selector_key = std::to_underlying(SensorPayloadType::SensorId),
+                .selector_value = static_cast<int>(target)
+            }
         });
     }
     return configuration;

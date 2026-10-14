@@ -25,7 +25,7 @@
 #include "domain/ui_domain/lvgl_lock.h"
 #include "domain/ui_domain/models/widget_configuration.h"
 
-#include "event_bus/event_channel_id.h"
+#include "subsys/event_bus/event_channel_id.h"
 #include "event_bus/event_channels.h"
 
 #include "views/screens/screen.h"
@@ -53,10 +53,10 @@ using eerie_leap::domain::ui_domain::models::PropertyBindingDirection;
 using eerie_leap::domain::ui_domain::models::WidgetConfiguration;
 using eerie_leap::domain::ui_domain::models::WidgetPropertyType;
 using eerie_leap::domain::ui_domain::models::WidgetType;
-using eerie_leap::event_bus::EventChannelId;
 using eerie_leap::event_bus::InitializeEventChannels;
 using eerie_leap::subsys::event_bus::AnySubscription;
 using eerie_leap::subsys::event_bus::CreateScopedSubscription;
+using eerie_leap::subsys::event_bus::EventChannelId;
 using eerie_leap::subsys::event_bus::EventData;
 using eerie_leap::utilities::memory::Mrm;
 using eerie_leap::utilities::string::StringHelpers;
@@ -147,24 +147,28 @@ std::shared_ptr<WidgetConfiguration> MakeConfiguration() {
 PropertyBinding SensorBinding(WidgetPropertyType target, const char* sensor_id) {
     return PropertyBinding {
         .target = target,
-        .channel = EventChannelId::Sensors,
-        .event_type = std::to_underlying(SensorEventType::DataUpdated),
-        .payload_key = std::to_underlying(SensorPayloadType::Value),
-        .selector_key = std::to_underlying(SensorPayloadType::SensorId),
-        .selector_value = std::pmr::string(sensor_id, Mrm::GetExtPmr())
+        .event = {
+            .channel = EventChannelId::Sensors,
+            .event_type = std::to_underlying(SensorEventType::DataUpdated),
+            .payload_key = std::to_underlying(SensorPayloadType::Value),
+            .selector_key = std::to_underlying(SensorPayloadType::SensorId),
+            .selector_value = std::pmr::string(sensor_id, Mrm::GetExtPmr())
+        }
     };
 }
 
 PropertyBinding SettingBinding(PropertyBindingDirection direction) {
     return PropertyBinding {
         .target = WidgetPropertyType::VALUE,
-        .channel = EventChannelId::Settings,
-        .event_type = std::to_underlying(SettingsEventType::Changed),
-        .payload_key = std::to_underlying(SettingsPayloadType::Value),
+        .event = {
+            .channel = EventChannelId::Settings,
+            .event_type = std::to_underlying(SettingsEventType::Changed),
+            .payload_key = std::to_underlying(SettingsPayloadType::Value),
+            .selector_key = std::to_underlying(SettingsPayloadType::SettingId),
+            .selector_value = std::pmr::string(SETTING_ID, Mrm::GetExtPmr())
+        },
         .direction = direction,
-        .outbound_event_type = std::to_underlying(SettingsEventType::ChangeRequested),
-        .selector_key = std::to_underlying(SettingsPayloadType::SettingId),
-        .selector_value = std::pmr::string(SETTING_ID, Mrm::GetExtPmr())
+        .outbound_event_type = std::to_underlying(SettingsEventType::ChangeRequested)
     };
 }
 
@@ -801,12 +805,32 @@ ZTEST(widget_bindings, test_a_binding_to_an_unregistered_channel_is_inert) {
     auto configuration = MakeConfiguration();
 
     auto binding = SensorBinding(WidgetPropertyType::VALUE, SENSOR_ID);
-    binding.channel = EventChannelId::None;
+    binding.event.channel = EventChannelId::None;
     configuration->bindings.push_back(std::move(binding));
 
     auto widget = MakeActiveWidget(std::move(configuration));
 
     PublishSensor(SENSOR_ID, 42.5F);
+
+    zassert_within(widget->ReadNumber(WidgetPropertyType::VALUE), 0.0, 0.001);
+    zassert_true(widget->notified.empty());
+}
+
+// Validators reject such a selector. Unfiltered it would take every sensor's value, so the binding
+// gets no subscription at all.
+ZTEST(widget_bindings, test_a_binding_whose_selector_cannot_select_is_inert) {
+    auto configuration = MakeConfiguration();
+
+    auto binding = SensorBinding(WidgetPropertyType::VALUE, SENSOR_ID);
+    binding.event.selector_value = 1.5;
+    configuration->bindings.push_back(std::move(binding));
+
+    auto widget = MakeActiveWidget(std::move(configuration));
+
+    zassert_equal(widget->SubscriptionCount(), 0U);
+
+    PublishSensor(SENSOR_ID, 42.5F);
+    PublishSensor(OTHER_SENSOR_ID, 42.5F);
 
     zassert_within(widget->ReadNumber(WidgetPropertyType::VALUE), 0.0, 0.001);
     zassert_true(widget->notified.empty());

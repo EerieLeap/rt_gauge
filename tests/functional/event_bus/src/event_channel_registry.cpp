@@ -1,19 +1,25 @@
 #include <cstdint>
+#include <memory>
+#include <memory_resource>
 #include <optional>
+#include <string>
 #include <utility>
 #include <variant>
 #include <vector>
 
 #include <zephyr/ztest.h>
 
+#include "utilities/string/string_helpers.h"
+
+#include "subsys/event_bus/event_binding.h"
+#include "subsys/event_bus/event_binding_subscription.h"
 #include "subsys/event_bus/event_bus.h"
 #include "subsys/event_bus/event_channel.h"
+#include "subsys/event_bus/event_channel_id.h"
+#include "subsys/event_bus/event_channel_registry.h"
 
 #include "domain/logging_domain/event_bus/logging_events_channel.h"
 #include "domain/settings_domain/event_bus/settings_events_channel.h"
-
-#include "event_bus/event_channel_id.h"
-#include "event_bus/event_channel_registry.h"
 
 using eerie_leap::domain::logging_domain::event_bus::LoggingEventsChannel;
 using eerie_leap::domain::logging_domain::event_bus::LoggingEventType;
@@ -21,15 +27,18 @@ using eerie_leap::domain::logging_domain::event_bus::LoggingPayloadType;
 using eerie_leap::domain::settings_domain::event_bus::SettingsEventsChannel;
 using eerie_leap::domain::settings_domain::event_bus::SettingsEventType;
 using eerie_leap::domain::settings_domain::event_bus::SettingsPayloadType;
-using eerie_leap::event_bus::EventChannelId;
-using eerie_leap::event_bus::EventChannelRegistry;
 using eerie_leap::subsys::event_bus::AnySubscription;
 using eerie_leap::subsys::event_bus::CreateScopedSubscription;
 using eerie_leap::subsys::event_bus::ErasedEventFilter;
 using eerie_leap::subsys::event_bus::ErasedPayload;
 using eerie_leap::subsys::event_bus::ErasedPayloadView;
+using eerie_leap::subsys::event_bus::EventBinding;
 using eerie_leap::subsys::event_bus::EventBus;
+using eerie_leap::subsys::event_bus::EventChannelId;
+using eerie_leap::subsys::event_bus::EventChannelRegistry;
 using eerie_leap::subsys::event_bus::EventData;
+using eerie_leap::subsys::event_bus::SubscribeEventBinding;
+using eerie_leap::utilities::string::StringHelpers;
 
 namespace {
 
@@ -44,7 +53,8 @@ public:
     }
 };
 
-// Subscribes the way a widget binding does: by channel id and raw key, never naming the enums.
+// Subscribes by channel id and raw keys through the registry and SubscribeErased(), never naming
+// the enums. Widget bindings go through SubscribeEventBinding(), which the last case covers.
 class ErasedProbe {
 public:
     ErasedProbe(EventChannelId channel_id, uint32_t event_type, uint32_t payload_key,
@@ -79,6 +89,17 @@ void PublishLoggingStatus(bool is_active) {
         .source_id = 0x7E57,
         .type = LoggingEventType::StatusUpdated,
         .payload = { { LoggingPayloadType::IsActive, is_active } }
+    });
+}
+
+void PublishSettingChanged(const char* setting_id, float value) {
+    SettingsEventsChannel::GetInstance().Publish({
+        .source_id = 0x7E57,
+        .type = SettingsEventType::Changed,
+        .payload = {
+            { SettingsPayloadType::SettingId, StringHelpers::GetHash(setting_id) },
+            { SettingsPayloadType::Value, value }
+        }
     });
 }
 
@@ -215,4 +236,30 @@ ZTEST(event_channel_registry, test_erased_publish_reaches_a_typed_subscriber) {
     zassert_equal(setting_ids.front(), 7U);
     zassert_true(value.has_value());
     zassert_equal(*value, 42.0F);
+}
+
+// The path a widget's setting binding takes: rt_core's SubscribeEventBinding() resolving the
+// gauge-only Settings channel, selected by the setting's text id.
+ZTEST(event_channel_registry, test_a_binding_resolves_the_settings_channel_with_a_text_selector) {
+    // Shared with the handler, so a failed assertion cannot leave it pointing into this frame.
+    auto value = std::make_shared<std::optional<EventData>>();
+
+    auto subscription = SubscribeEventBinding(
+        EventBinding {
+            .channel = EventChannelId::Settings,
+            .event_type = std::to_underlying(SettingsEventType::Changed),
+            .payload_key = std::to_underlying(SettingsPayloadType::Value),
+            .selector_key = std::to_underlying(SettingsPayloadType::SettingId),
+            .selector_value = std::pmr::string("display.brightness")
+        },
+        [value](const EventData& data) { *value = data; });
+
+    zassert_not_null(subscription.get());
+
+    PublishSettingChanged("display.contrast", 10.0F);
+    zassert_false(value->has_value());
+
+    PublishSettingChanged("display.brightness", 80.0F);
+    zassert_true(value->has_value());
+    zassert_equal(std::get<float>(**value), 80.0F);
 }

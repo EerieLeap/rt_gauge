@@ -198,11 +198,13 @@ using eerie_leap::utilities::string::StringHelpers;
 
 widget->bindings.push_back(PropertyBinding {
     .target = WidgetPropertyType::COLOR_PRIMARY_ACTIVE,
-    .channel = EventChannelId::Sensors,
-    .event_type = std::to_underlying(SensorEventType::DataUpdated),
-    .payload_key = std::to_underlying(SensorPayloadType::Value),
-    .selector_key = std::to_underlying(SensorPayloadType::SensorId),
-    .selector_value = std::pmr::string("color_demo", Mrm::GetExtPmr())
+    .event = {
+        .channel = EventChannelId::Sensors,
+        .event_type = std::to_underlying(SensorEventType::DataUpdated),
+        .payload_key = std::to_underlying(SensorPayloadType::Value),
+        .selector_key = std::to_underlying(SensorPayloadType::SensorId),
+        .selector_value = std::pmr::string("color_demo", Mrm::GetExtPmr())
+    }
 });
 
 SensorEventsChannel::GetInstance().Publish({
@@ -215,10 +217,11 @@ SensorEventsChannel::GetInstance().Publish({
 });
 ```
 
-Include `domain/ui_domain/models/property_binding.h`, `event_bus/event_channel_id.h`,
+Include `domain/ui_domain/models/property_binding.h`, `subsys/event_bus/event_channel_id.h`,
 and `domain/sensor_domain/event_bus/sensor_events_channel.h`. `PropertyBinding`
-belongs to `eerie_leap::domain::ui_domain::models`, `EventChannelId` to
-`eerie_leap::event_bus`, and the sensor types to
+belongs to `eerie_leap::domain::ui_domain::models` and carries rt_core's
+`EventBinding` as `event`; `EventChannelId` belongs to
+`eerie_leap::subsys::event_bus`, and the sensor types to
 `eerie_leap::domain::sensor_domain::event_bus`. Initialize the application's
 event channels before publishing. Register bindings before configuring/rendering;
 only supported targets subscribe. Configured sensor-name selectors are hashed

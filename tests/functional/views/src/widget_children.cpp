@@ -182,11 +182,11 @@ std::shared_ptr<WidgetConfiguration> Configuration(uint32_t id, WidgetType type 
     for(auto target : { WidgetPropertyType::VALUE, WidgetPropertyType::IS_ACTIVE, WidgetPropertyType::IS_VISIBLE,
         WidgetPropertyType::OPACITY, WidgetPropertyType::ANCHOR_POINT_X, WidgetPropertyType::IS_ANIMATION_ACTIVE }) {
         configuration->bindings.push_back(PropertyBinding {
-            .target = target, .channel = EventChannelId::Sensors,
-            .event_type = std::to_underlying(SensorEventType::DataUpdated),
-            .payload_key = std::to_underlying(SensorPayloadType::Value),
-            .selector_key = std::to_underlying(SensorPayloadType::SensorId),
-            .selector_value = static_cast<int>(id * 100 + static_cast<uint32_t>(target))
+            .target = target, .event = { .channel = EventChannelId::Sensors,
+                .event_type = std::to_underlying(SensorEventType::DataUpdated),
+                .payload_key = std::to_underlying(SensorPayloadType::Value),
+                .selector_key = std::to_underlying(SensorPayloadType::SensorId),
+                .selector_value = static_cast<int>(id * 100 + static_cast<uint32_t>(target)) }
         });
     }
     return configuration;

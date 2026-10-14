@@ -158,17 +158,17 @@ void ToCborBindings(std::pmr::vector<CborPropertyBinding>& bindings_config, cons
         CborPropertyBinding binding_config(std::allocator_arg, Mrm::GetExtPmr());
 
         binding_config.target = static_cast<uint32_t>(binding.target);
-        binding_config.channel = static_cast<uint32_t>(binding.channel);
-        binding_config.event_type = binding.event_type;
-        binding_config.payload_key = binding.payload_key;
+        binding_config.channel = static_cast<uint32_t>(binding.event.channel);
+        binding_config.event_type = binding.event.event_type;
+        binding_config.payload_key = binding.event.payload_key;
         binding_config.direction = static_cast<uint32_t>(binding.direction);
         binding_config.outbound_event_type = binding.outbound_event_type;
-        binding_config.selector_key = binding.selector_key;
-        binding_config.has_selector = binding.HasSelector();
+        binding_config.selector_key = binding.event.selector_key;
+        binding_config.has_selector = binding.event.HasSelector();
 
         // The schema has no null, so an absent selector still has to encode some value.
         if(binding_config.has_selector)
-            ToCborPropertyValue(binding_config.selector_value, binding.selector_value);
+            ToCborPropertyValue(binding_config.selector_value, binding.event.selector_value);
         else
             ToCborPropertyValue(binding_config.selector_value, ConfigValue { 0 });
 
@@ -185,15 +185,15 @@ void FromCborBindings(
         PropertyBinding binding;
 
         binding.target = FromCborWidgetPropertyType(binding_config.target);
-        binding.channel = static_cast<EventChannelId>(binding_config.channel);
-        binding.event_type = binding_config.event_type;
-        binding.payload_key = binding_config.payload_key;
+        binding.event.channel = static_cast<EventChannelId>(binding_config.channel);
+        binding.event.event_type = binding_config.event_type;
+        binding.event.payload_key = binding_config.payload_key;
         binding.direction = static_cast<PropertyBindingDirection>(binding_config.direction);
         binding.outbound_event_type = binding_config.outbound_event_type;
-        binding.selector_key = binding_config.selector_key;
+        binding.event.selector_key = binding_config.selector_key;
 
         if(binding_config.has_selector)
-            binding.selector_value = FromCborPropertyValue(mr, binding_config.selector_value);
+            binding.event.selector_value = FromCborPropertyValue(mr, binding_config.selector_value);
 
         bindings.push_back(std::move(binding));
     }

@@ -26,9 +26,7 @@ namespace eerie_leap::views::widgets {
 using eerie_leap::domain::ui_domain::ScopedLvglLock;
 using eerie_leap::domain::ui_domain::models::PropertyBinding;
 using eerie_leap::subsys::event_bus::AnySubscription;
-using eerie_leap::subsys::event_bus::ErasedEventFilter;
 using eerie_leap::subsys::event_bus::ErasedPayload;
-using eerie_leap::subsys::event_bus::ErasedPayloadView;
 using eerie_leap::subsys::event_bus::EventData;
 using eerie_leap::subsys::event_bus::IEventChannel;
 
@@ -84,9 +82,11 @@ protected:
 
     void AddSubscription(AnySubscription subscription);
 
-    // Resolves configuration_->bindings against EventChannelRegistry. A binding naming an unknown
-    // channel or an unsupported property is dropped with a warning. Structural targets throw
-    // std::invalid_argument before any subscription is created.
+    // Resolves configuration_->bindings through rt_core's EventChannelRegistry and
+    // SubscribeEventBinding(). A binding naming an unknown channel or an unsupported property is
+    // dropped with a warning; one whose subscription SubscribeEventBinding() refuses (a selector
+    // that cannot select, a failed subscribe) keeps only its outbound half, also with a warning.
+    // Structural targets throw std::invalid_argument before any subscription is created.
     void ResolveBindings();
 
     // User input. Unlike an inbound binding this publishes on the property's outbound bindings,
