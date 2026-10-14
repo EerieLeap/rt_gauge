@@ -174,12 +174,10 @@ void AddSettingBindings(WidgetConfiguration& widget, const char* setting_id, Pro
 UiController::UiController(
     std::shared_ptr<IFsService> fs_service,
     std::shared_ptr<WorkQueueThread> config_work_queue_thread,
-    std::shared_ptr<ConfigurationService> configuration_service,
-    std::shared_ptr<SensorReadingsFrame> sensor_readings_frame)
+    std::shared_ptr<ConfigurationService> configuration_service)
         : fs_service_(std::move(fs_service)),
         config_work_queue_thread_(std::move(config_work_queue_thread)),
-        configuration_service_(std::move(configuration_service)),
-        sensor_readings_frame_(std::move(sensor_readings_frame)) {}
+        configuration_service_(std::move(configuration_service)) {}
 
 UiController::~UiController() {
     navigation_subscription_.reset();
@@ -258,11 +256,6 @@ int UiController::Initialize() {
     if(Configure(ui_configuration_manager_->Get()) != 0)
         LOG_ERR("Failed to configure the UI from the stored configuration.");
 
-    if(sensor_readings_frame_ != nullptr) {
-        sensors_rendering_service_ = std::make_shared<SensorsRenderingService>(sensor_readings_frame_);
-        sensors_rendering_service_->Initialize();
-    }
-
     SubscribeToNavigation();
 
     ui_input_service_ = std::make_shared<UiInputService>(navigation_service_);
@@ -301,13 +294,7 @@ int UiController::Start() {
             LOG_ERR("Failed to render the overlay host.");
     }
 
-    if(res != 0)
-        return res;
-
-    if(sensors_rendering_service_ != nullptr)
-        sensors_rendering_service_->Start();
-
-    return 0;
+    return res;
 }
 
 int UiController::Configure(std::shared_ptr<UiConfiguration> config) {

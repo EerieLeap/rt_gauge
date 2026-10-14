@@ -81,7 +81,7 @@ void* Setup() {
     zassert_true(fixture.config_work_queue->Initialize(), "Expected the config work queue to start.");
 
     fixture.controller = std::make_shared<UiController>(
-        fs_service, fixture.config_work_queue, nullptr, nullptr);
+        fs_service, fixture.config_work_queue, nullptr);
 
     zassert_equal(fixture.controller->Initialize(), 0, "Expected the UI controller to initialize.");
     zassert_equal(fixture.controller->Start(), 0, "Expected the UI controller to start.");

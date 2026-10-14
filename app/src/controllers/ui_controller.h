@@ -10,14 +10,12 @@
 #include "subsys/threading/work_queue_thread.h"
 
 #include "domain/configuration_domain/services/configuration_service.h"
-#include "domain/sensor_domain/utilities/sensor_readings_frame.hpp"
 
 #include "domain/ui_domain/configuration/ui_configuration_manager.h"
 #include "domain/ui_domain/event_bus/navigation_event_channel.h"
 #include "domain/ui_domain/models/ui_configuration.h"
 #include "domain/ui_domain/models/screen_configuration.h"
 #include "domain/ui_domain/services/ui_renderer_service.h"
-#include "domain/ui_domain/services/sensors_rendering_service.h"
 #include "domain/ui_domain/services/navigation_service.h"
 #include "domain/ui_domain/services/ui_input_service.h"
 
@@ -34,7 +32,6 @@ using eerie_leap::subsys::fs::services::IFsService;
 using eerie_leap::subsys::threading::WorkQueueThread;
 
 using eerie_leap::domain::configuration_domain::services::ConfigurationService;
-using eerie_leap::domain::sensor_domain::utilities::SensorReadingsFrame;
 
 using eerie_leap::domain::ui_domain::models::UiConfiguration;
 using eerie_leap::domain::ui_domain::models::ScreenConfiguration;
@@ -42,7 +39,6 @@ using eerie_leap::domain::ui_domain::configuration::UiConfigurationManager;
 using eerie_leap::domain::ui_domain::event_bus::NavigationEventChannel;
 using eerie_leap::subsys::event_bus::AnySubscription;
 using eerie_leap::domain::ui_domain::services::UiRendererService;
-using eerie_leap::domain::ui_domain::services::SensorsRenderingService;
 using eerie_leap::domain::ui_domain::services::NavigationService;
 using eerie_leap::domain::ui_domain::services::UiInputService;
 
@@ -65,11 +61,9 @@ private:
     std::shared_ptr<IFsService> fs_service_;
     std::shared_ptr<WorkQueueThread> config_work_queue_thread_;
     std::shared_ptr<ConfigurationService> configuration_service_;
-    std::shared_ptr<SensorReadingsFrame> sensor_readings_frame_;
 
     std::shared_ptr<UiConfigurationManager> ui_configuration_manager_;
     std::shared_ptr<AssetsManager> ui_assets_manager_;
-    std::shared_ptr<SensorsRenderingService> sensors_rendering_service_;
     std::shared_ptr<NavigationService> navigation_service_;
 
     // Declared before ui_input_service_, which detaches from the view's LVGL object on teardown.
@@ -114,8 +108,7 @@ public:
     UiController(
         std::shared_ptr<IFsService> fs_service,
         std::shared_ptr<WorkQueueThread> config_work_queue_thread,
-        std::shared_ptr<ConfigurationService> configuration_service,
-        std::shared_ptr<SensorReadingsFrame> sensor_readings_frame);
+        std::shared_ptr<ConfigurationService> configuration_service);
     ~UiController();
 
     int Initialize();

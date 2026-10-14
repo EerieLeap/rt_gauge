@@ -27,6 +27,7 @@
 #include "domain/sensor_domain/models/sensor.h"
 #include "domain/sensor_domain/models/sensor_type.h"
 #include "domain/sensor_domain/models/sources/canbus_source.h"
+#include "domain/sensor_domain/services/sensor_events_publisher.h"
 #include "domain/sensor_domain/utilities/sensor_readings_frame.hpp"
 #include "domain/settings_domain/services/settings_persistence_service.h"
 
@@ -55,6 +56,7 @@ using namespace eerie_leap::domain::configuration_domain::services;
 using namespace eerie_leap::domain::canbus_domain::models;
 using namespace eerie_leap::domain::sensor_domain::models;
 using namespace eerie_leap::domain::sensor_domain::models::sources;
+using namespace eerie_leap::domain::sensor_domain::services;
 using namespace eerie_leap::domain::sensor_domain::utilities;
 using namespace eerie_leap::domain::ui_domain::services;
 using namespace eerie_leap::domain::settings_domain::services;
@@ -138,13 +140,19 @@ int main() {
     auto ui_controller = std::make_shared<UiController>(
         fs_service,
         config_work_queue_thread,
-        configuration_service,
-        sensor_readings_frame);
+        configuration_service);
     if(ui_controller->Initialize() != 0) {
         LOG_ERR("Failed to initialize the UI controller.");
         return -1;
     }
     ui_controller->Start();
+
+    // Started once the UI controller has built its screens, whose widgets subscribe as they are
+    // configured, so no reading is taken before they listen. An overlay subscribes when it is
+    // shown and is honoured from the next tick.
+    auto sensor_events_publisher = std::make_shared<SensorEventsPublisher>(sensor_readings_frame);
+    if(!sensor_events_publisher->Initialize() || !sensor_events_publisher->Start())
+        LOG_ERR("Failed to start the sensor events publisher.");
 
     auto canbus_controller = std::make_shared<CanbusController>(
         fs_service,
