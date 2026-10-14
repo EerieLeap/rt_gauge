@@ -1,9 +1,12 @@
+#include <exception>
+#include <variant>
+
 #include <zephyr/logging/log.h>
 #include <eerie_memory.hpp>
 
 #include "utilities/memory/memory_resource_manager.h"
-#include "utilities/reflection/caller_name.h"
 #include "subsys/device_tree/dt_gpio.h"
+#include "subsys/event_bus/event_channel.h"
 #include "domain/canbus_com_domain/commands/canbus_com_logging_command.h"
 #include "domain/logging_domain/event_bus/logging_events_channel.h"
 
@@ -15,10 +18,9 @@ using namespace eerie_leap::utilities::memory;
 using namespace eerie_leap::subsys::device_tree;
 using namespace eerie_leap::domain::canbus_com_domain::commands;
 
-using eerie_leap::domain::logging_domain::event_bus::LoggingEventsChannel;
+using eerie_leap::subsys::event_bus::CreateScopedSubscription;
 using eerie_leap::domain::logging_domain::event_bus::LoggingEventType;
 using eerie_leap::domain::logging_domain::event_bus::LoggingPayloadType;
-using eerie_leap::utilities::reflection::GetCallerName;
 
 LOG_MODULE_REGISTER(logging_controller_logger);
 
@@ -26,8 +28,7 @@ LoggingController::LoggingController(
     std::shared_ptr<IGpio> gpio,
     std::shared_ptr<CanbusComService> canbus_com_service)
         : gpio_(std::move(gpio)),
-        canbus_com_service_(std::move(canbus_com_service)),
-        is_logging_in_progress_(false) {}
+        canbus_com_service_(std::move(canbus_com_service)) {}
 
 LoggingController::~LoggingController() {
     if(button_handler_id_ > 0)
@@ -40,9 +41,14 @@ int LoggingController::Initialize() {
         return -1;
     }
 
-    if(!DtGpio::Get().has_value()) {
-        LOG_WRN("No buttons configured.");
+    // Before the button checks, so the logging icon also works on a unit without a logging button.
+    if(InitializeLoggingStatus() != 0)
         return -1;
+
+    // A unit without a logging button only shows the status.
+    if(!DtGpio::Get().has_value()) {
+        LOG_INF("No buttons configured.");
+        return 0;
     }
 
     if(gpio_ == nullptr) {
@@ -68,15 +74,7 @@ int LoggingController::Initialize() {
             ARG_UNUSED(channel);
             ARG_UNUSED(state);
 
-            input_work_queue_thread_->Run([this]() {
-                // The ack sets the state this press asked for rather than toggling, so a second
-                // press before the first ack repeats the command and both acks agree with the DAQ.
-                const bool is_start = !is_logging_in_progress_;
-                CanbusComLoggingCommand command(is_start);
-                canbus_com_service_->SendCommand(
-                    command,
-                    [this, is_start](bool success) { LoggingStateUpdatedAck(is_start, success); });
-            });
+            input_work_queue_thread_->Run([this]() { SendLoggingCommand(); });
         });
 
     if(handler_id <= 0)
@@ -87,25 +85,50 @@ int LoggingController::Initialize() {
     return 0;
 }
 
-void LoggingController::LoggingStateUpdatedAck(bool is_logging, bool success) {
-    if(!success)
-        return;
+int LoggingController::InitializeLoggingStatus() {
+    // Subscribed before the importer exists, so its first status cannot pass unseen.
+    logging_status_subscription_ = CreateScopedSubscription(
+        LoggingEventsChannel::GetInstance(),
+        LoggingEventType::StatusUpdated,
+        [this](const LoggingEventsChannel::EventMessage& event) { OnLoggingStatusUpdated(event); });
 
-    // A repeated command changes nothing; the icon's property store would still notify on it.
-    if(is_logging_in_progress_.exchange(is_logging) == is_logging)
-        return;
+    if(logging_status_subscription_ == nullptr) {
+        LOG_ERR("Failed to subscribe to logging status updates.");
+        return -1;
+    }
 
-    PublishLoggingState(is_logging);
+    // The importer needs a bus that carries logging_events: AppEventBus does, from
+    // InitializeEventChannels() on.
+    try {
+        logging_status_importer_ = std::make_unique<NetworkStateImporter<LoggingNetworkState>>(canbus_com_service_);
+    } catch(const std::exception& e) {
+        LOG_ERR("Failed to create the logging status importer. %s", e.what());
+        return -1;
+    }
+
+    return 0;
 }
 
-void LoggingController::PublishLoggingState(bool is_logging) {
-    static constexpr auto caller = GetCallerName();
+void LoggingController::OnLoggingStatusUpdated(const LoggingEventsChannel::EventMessage& event) {
+    auto it = event.payload.find(LoggingPayloadType::IsActive);
+    if(it == event.payload.end())
+        return;
 
-    LoggingEventsChannel::GetInstance().PublishAsync({
-        .source_id = caller.hash,
-        .type = LoggingEventType::StatusUpdated,
-        .payload = { { LoggingPayloadType::IsActive, is_logging } }
-    });
+    if(const auto* is_active = std::get_if<bool>(&it->second))
+        is_logging_active_ = *is_active;
+}
+
+void LoggingController::SendLoggingCommand() {
+    // Stops while any unit logs and starts otherwise. The command is broadcast, so every logging
+    // unit follows it, and the status they share, not the response, tells whether they did.
+    const bool is_start = !is_logging_active_;
+    CanbusComLoggingCommand command(is_start);
+    canbus_com_service_->SendCommand(
+        command,
+        [is_start](bool success) {
+            if(!success)
+                LOG_WRN("Logging %s command failed.", is_start ? "start" : "stop");
+        });
 }
 
 } // namespace eerie_leap::controllers
