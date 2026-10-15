@@ -19,9 +19,9 @@ private:
 
     AppEventBus() : EventBus("app_event_bus", k_stack_size) {
         RegisterChannel(NavigationEventChannel::GetInstance());
-        // This bus carries logging_events on the gauge, so rt_core's LoggingEventBus is never created
-        // here: it registers the same channel, and a channel stays with the first bus that registers
-        // it while the other's registration fails with -EEXIST.
+        // rt_core creates no bus for logging_events: the composition root picks one, and on the gauge it
+        // is this one. A channel stays with the first bus that registers it; another bus's registration
+        // fails with -EEXIST.
         RegisterChannel(LoggingEventsChannel::GetInstance());
         RegisterChannel(SettingsEventsChannel::GetInstance());
     }
