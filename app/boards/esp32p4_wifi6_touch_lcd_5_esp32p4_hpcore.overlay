@@ -33,7 +33,7 @@
 
 		/* 40-pin header GP2 (GPIO4). */
 		di_0: di_0 {
-			gpios = <&gpio0 4 GPIO_PULL_UP>;
+			gpios = <&gpio0 4 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
 			zephyr,code = <INPUT_BTN_0>;
 		};
 	};
