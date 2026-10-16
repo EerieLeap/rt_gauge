@@ -322,7 +322,9 @@ void DisplayService::WriteConfiguration() {
         snapshot = configuration_;
     }
 
-    if(!configuration_manager_->Update(snapshot))
+    // The unit's own setting (the brightness its slider sets), not a configuration update from the
+    // network: it stops no logging.
+    if(!configuration_manager_->UpdateOwnSetting(snapshot))
         LOG_ERR("Failed to persist the Display configuration.");
 }
 

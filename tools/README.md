@@ -73,7 +73,8 @@ Leave DTR alone there. A port that the client holds is exclusive; close the term
 
 #### Writing a configuration
 
-The write returns once the unit applied the configuration, and applying restarts services that log. The
+The write returns once the unit applied the configuration, and applying restarts services that log and
+stops logging on every unit (a stored configuration is an update; a refused one is not). The
 request that completes a write is therefore sent once, with at least 15 s to answer, and is never resent
 blindly: a second one would stage and apply the bytes again, or meet a closed session. When its answer
 is lost or corrupted, the client reads the stored length, CRC32 and applied flag (`config-crc`). A match

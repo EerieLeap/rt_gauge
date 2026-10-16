@@ -10,6 +10,7 @@
 #include "configuration/cbor/cbor_ui_config/cbor_ui_config.h"
 #include "configuration/services/cbor_configuration_service.h"
 
+#include "domain/configuration_domain/services/configuration_service.h"
 #include "domain/ui_domain/configuration/ui_configuration_manager.h"
 #include "domain/ui_domain/configuration/parsers/ui_configuration_cbor_parser.h"
 #include "domain/ui_domain/models/widget_property.h"
@@ -337,4 +338,30 @@ ZTEST(ui_configuration_manager, test_UiConfigurationManager_falls_back_when_the_
 
     zassert_not_null(configuration.get());
     zassert_true(configuration->screen_configurations.empty());
+}
+
+// UiController::SetupTestConfiguration() stores through Update(), which adopts the configuration it is
+// given; the service reports it, so a UI configuration written to the unit stops logging (L9).
+ZTEST(ui_configuration_manager, test_an_update_is_reported_to_the_configuration_service) {
+    DtFs::InitInternalFs();
+    auto fs_service = std::make_shared<FsService>(DtFs::GetInternalFsMp());
+
+    fs_service->Format();
+
+    auto ui_configuration_manager = std::make_shared<UiConfigurationManager>(
+        std::make_unique<CborConfigurationService<CborUiConfig>>("ui_config", fs_service));
+
+    eerie_leap::domain::configuration_domain::services::ConfigurationService configuration_service;
+    using Type = eerie_leap::domain::configuration_domain::services::ConfigurationService::Type;
+    configuration_service.RegisterCborConfigurationManager(Type::Ui, ui_configuration_manager);
+
+    std::vector<Type> reports;
+    configuration_service.RegisterConfigurationStoredHandler([&reports](Type type) { reports.push_back(type); });
+
+    zassert_true(ui_configuration_manager->Update(ui_configuration_manager_test_SetupTestUiConfiguration()));
+
+    zassert_equal(reports.size(), 1U, "A UI configuration stored after the unit started is an update");
+    zassert_equal(reports[0], Type::Ui);
+
+    configuration_service.RegisterConfigurationStoredHandler(nullptr);
 }

@@ -27,6 +27,14 @@ file(GLOB_RECURSE APP_SRC_UI_DOMAIN
   ${APP_SRC_UI_DOMAIN_DIR}/*.cpp
 )
 
+# DisplayService persists the unit's own brightness through the display configuration manager; the
+# dummy display is what it drives.
+set(APP_SRC_DISPLAY_DOMAIN_DIR ${APP_SRC_DIR}/domain/display_domain)
+file(GLOB_RECURSE APP_SRC_DISPLAY_DOMAIN
+  ${APP_SRC_DISPLAY_DOMAIN_DIR}/*.c
+  ${APP_SRC_DISPLAY_DOMAIN_DIR}/*.cpp
+)
+
 set(APP_SRC_VIEWS_DIR ${APP_SRC_DIR}/views)
 file(GLOB_RECURSE APP_SRC_VIEWS
   ${APP_SRC_VIEWS_DIR}/*.c
@@ -48,6 +56,7 @@ file(GLOB_RECURSE TEST_SOURCES src/*.c src/*.cpp)
 target_sources(app PRIVATE
   ${APP_SRC_CONFIGURATION}
   ${APP_SRC_CONTROLLERS}
+  ${APP_SRC_DISPLAY_DOMAIN}
   ${APP_SRC_UI_DOMAIN}
   ${APP_SRC_UTILITIES}
   ${APP_SRC_VIEWS}

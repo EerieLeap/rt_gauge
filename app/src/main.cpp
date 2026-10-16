@@ -30,7 +30,9 @@
 
 #include "domain/configuration_domain/services/configuration_service.h"
 #include "domain/canbus_domain/models/canbus_configuration.h"
+#include "domain/logging_domain/control/canbus_com_logging_command_sender.h"
 #include "domain/logging_domain/control/configuration/logging_control_configuration_manager.h"
+#include "domain/logging_domain/control/configuration_update_logging_stop.h"
 #include "domain/logging_domain/control/models/logging_control_configuration.h"
 #include "domain/logging_domain/control/models/logging_trigger.h"
 #include "domain/sensor_domain/event_bus/sensor_event_type.h"
@@ -77,6 +79,8 @@ using namespace eerie_leap::event_bus;
 
 using namespace eerie_leap::controllers;
 
+using eerie_leap::domain::logging_domain::control::CanbusComLoggingCommandSender;
+using eerie_leap::domain::logging_domain::control::ConfigurationUpdateLoggingStop;
 using eerie_leap::domain::logging_domain::control::configuration::LoggingControlConfigurationManager;
 using eerie_leap::domain::logging_domain::control::models::LoggingControlConfiguration;
 using eerie_leap::domain::logging_domain::control::models::LoggingTrigger;
@@ -261,15 +265,40 @@ int main() {
         sensors_controller->GetConfigurationManager(),
         canbus_controller->GetComService(),
         sensor_events_publisher);
+    // Only when the controller could not be initialized: sends the logging stop for a stored configuration.
+    std::unique_ptr<ConfigurationUpdateLoggingStop> configuration_update_logging_stop;
     // The count the sensors manager was built with, which the button's sensor and trigger agree on.
     const int gpio_channel_count = gpio != nullptr ? gpio->GetChannelCount() : 0;
     // TODO: For test purposes only
     if(logging_controller->Initialize([gpio_channel_count](auto logging_control_configuration_manager) {
             SetupTestLoggingTrigger(logging_control_configuration_manager, gpio_channel_count);
-        }) != 0)
+        }) != 0) {
         LOG_WRN("Logging controller is not available.");
 
+        // It would have told the units that log about a configuration stored here; the broadcast alone
+        // still can.
+        if(canbus_controller->GetComService() != nullptr) {
+            configuration_update_logging_stop = std::make_unique<ConfigurationUpdateLoggingStop>(
+                configuration_service,
+                config_work_queue_thread,
+                nullptr,
+                std::make_shared<CanbusComLoggingCommandSender>(canbus_controller->GetComService()));
+            if(!configuration_update_logging_stop->Initialize())
+                configuration_update_logging_stop.reset();
+        }
+    }
+
     sensors_controller->Start();
+
+    // Last of the boot's stores (the UI test configuration, the logging button's sensor and trigger):
+    // from here on a configuration stored on this unit stops logging on every unit, and
+    // ManagementController below lets other units write one.
+    if(configuration_update_logging_stop != nullptr) {
+        if(!configuration_update_logging_stop->Start())
+            LOG_ERR("Failed to start the configuration update stop.");
+    } else {
+        logging_controller->Start();
+    }
 
     // Constructed after every controller that registers a configuration manager.
     const auto canbus_com_service = canbus_controller->GetComService();

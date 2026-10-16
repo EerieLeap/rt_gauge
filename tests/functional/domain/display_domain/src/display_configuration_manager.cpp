@@ -183,3 +183,52 @@ ZTEST(display_configuration_manager, test_the_configuration_service_routes_the_d
 
     zassert_equal(manager->Get(true)->brightness, 42);
 }
+
+// Logging learns of a configuration update from the service (ConfigurationUpdateLoggingStop): a write
+// from outside and a local Update() are reported, the unit's own setting is not.
+ZTEST(display_configuration_manager, test_update_and_apply_are_reported_to_the_configuration_service) {
+    auto manager = MakeManager();
+    ConfigurationService configuration_service;
+    configuration_service.RegisterCborConfigurationManager(ConfigurationService::Type::Display, manager);
+
+    std::vector<ConfigurationService::Type> reports;
+    configuration_service.RegisterConfigurationStoredHandler(
+        [&reports](ConfigurationService::Type type) { reports.push_back(type); });
+
+    zassert_true(manager->Update(MakeConfiguration()));
+    zassert_equal(reports.size(), 1U);
+    zassert_equal(reports[0], ConfigurationService::Type::Display);
+
+    const auto cbor = configuration_service.GetCborConfiguration(ConfigurationService::Type::Display);
+    zassert_true(configuration_service.ApplyCborConfiguration(
+        ConfigurationService::Type::Display, std::span<const uint8_t>(cbor.data(), cbor.size())));
+    zassert_equal(reports.size(), 2U, "and so is an apply, which also tells the driver's handler");
+
+    std::vector<uint8_t> garbage = {0xFF, 0xFF, 0xFF, 0xFF};
+    zassert_false(configuration_service.ApplyCborConfiguration(ConfigurationService::Type::Display, garbage));
+    zassert_equal(reports.size(), 2U, "A rejected write is not");
+
+    configuration_service.RegisterConfigurationStoredHandler(nullptr);
+}
+
+// The brightness the gauge's own slider sets is stored like any configuration, as the display
+// configuration, but it is the unit's own setting: it stops no logging.
+ZTEST(display_configuration_manager, test_update_own_setting_is_not_reported) {
+    auto manager = MakeManager();
+    ConfigurationService configuration_service;
+    configuration_service.RegisterCborConfigurationManager(ConfigurationService::Type::Display, manager);
+
+    int reports = 0;
+    configuration_service.RegisterConfigurationStoredHandler([&reports](ConfigurationService::Type) { reports++; });
+
+    int notifications = 0;
+    manager->RegisterConfigurationUpdatedHandler([&notifications] { notifications++; });
+
+    zassert_true(manager->UpdateOwnSetting(MakeConfiguration()));
+
+    zassert_equal(manager->Get(true)->brightness, 42, "The setting is stored");
+    zassert_equal(reports, 0, "and no update is reported");
+    zassert_equal(notifications, 0);
+
+    configuration_service.RegisterConfigurationStoredHandler(nullptr);
+}
