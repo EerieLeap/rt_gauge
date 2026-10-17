@@ -18,6 +18,10 @@ tools/README.md. Failed SMP requests are resent: once on CAN, three times on ser
 line landing in a response corrupts it. The request that completes a configuration write is never
 resent blindly; the client reads the stored CRC to learn whether it was applied.
 
+Asset files (images, animations, scripts, logs) are listed, downloaded, uploaded and deleted with the
+assets commands. A download keeps several requests in flight, can continue a partial file and checks
+the file's CRC32 against the unit's; the format is in tools/README.md.
+
 Requires cbor2; python-can for CAN, pyserial for serial, PyYAML and zcbor for descriptions.
 
 Examples:
@@ -30,6 +34,10 @@ Examples:
     smp_can_client.py --serial /dev/ttyACM0 config-get sensors daq_sensors.yaml
     smp_can_client.py --serial /dev/ttyACM0 config-set logging_control triggers.yaml
     smp_can_client.py --serial /dev/ttyACM0 shell "sensor set bench_switch 1"
+    smp_can_client.py --channel can0 --target 1 assets kinds
+    smp_can_client.py --channel can0 --target 1 assets ls logs
+    smp_can_client.py --channel can0 --target 1 assets get logs log_data_0001.mf4 --resume --in-flight 2
+    smp_can_client.py --serial /dev/ttyACM0 assets put images logo.bin ./logo.bin
     smp_can_client.py config-decode sensors sensors_config.cbor
 """
 
@@ -75,12 +83,21 @@ SMP_HEADER_SIZE = 8
 REASSEMBLY_TIMEOUT_S = 0.1
 # Room for the header and the keys around `data` in a config write request.
 CONFIG_WRITE_OVERHEAD = 64
+# The same for an assets write request, at its worst, without the name: the header, the map head, kind,
+# the key of `name`, off, len, crc and tok (a text key and an unsigned 32-bit integer each) and the key
+# and head of `data`. The name adds its head and characters, and counts as at least the unit's longest
+# name (EERIE_LEAP_ASSETS_MAX_NAME_LENGTH), so that the chunks of an upload have one size for any name.
+ASSET_NAME_LIMIT = 64
+ASSET_WRITE_FIXED_OVERHEAD = SMP_HEADER_SIZE + 1 + (5 + 5) + 5 + 4 * (4 + 5) + (5 + 5)
+ASSET_WRITE_OVERHEAD = ASSET_WRITE_FIXED_OVERHEAD + 2 + ASSET_NAME_LIMIT
 
 # MCUmgr's shell transport: MCUMGR_SERIAL_HDR_PKT and _FRAG, and MCUMGR_SERIAL_MAX_FRAME, which is also
 # the size of the unit's receive buffer for one line.
 SERIAL_PACKET_MARKER = b"\x06\x09"
 SERIAL_FRAGMENT_MARKER = b"\x04\x14"
 SERIAL_MAX_LINE = 127
+# The length and the CRC16 around a packet count against the unit's buffer, as the packet does.
+SERIAL_FRAME_OVERHEAD = 4
 # Raw bytes per line: 124 base64 characters between the marker and the newline. A multiple of 3,
 # so that only the last line carries padding.
 SERIAL_LINE_DATA = (SERIAL_MAX_LINE - 3) // 4 * 3
@@ -98,6 +115,17 @@ CONFIG_SESSION_TIMEOUT_S = 5.0
 # How long to look for a write whose answer got lost.
 CONFIRM_WINDOW_S = 8.0
 
+DEFAULT_ASSET_IN_FLIGHT = 2
+MAX_ASSET_IN_FLIGHT = 255
+# How often a download that is stuck at one byte asks for it before it gives up.
+MAX_ASSET_RESTARTS = 16
+# EERIE_LEAP_SMP_ASSETS_SESSION_TIMEOUT_MS: an idle download or upload is dropped after this, and an
+# upload that was stored answers its last chunk again for this long.
+ASSET_SESSION_TIMEOUT_S = 5.0
+# A download continued at an offset makes the unit read the file up to there to seed its CRC32 before
+# it answers; this is the least the first request waits for then.
+ASSET_SEED_TIMEOUT_S = 30.0
+
 
 class Op(IntEnum):
     READ = 0
@@ -112,6 +140,9 @@ class Group(IntEnum):
     DEVICE = 65
     NETWORK = 66
     LIVE = 67
+    CALIBRATION = 68
+    FILES = 69
+    ASSETS = 70
 
 
 OS_RESET = 5
@@ -130,13 +161,52 @@ CONFIG_BAD_OFFSET = 4
 CONFIG_BAD_TOKEN = 5
 CONFIG_BUSY = 6
 
+ASSETS_ERRORS = {
+    1: "unknown error",
+    2: "unknown kind",
+    3: "unavailable: the volume is not mounted",
+    4: "not found",
+    5: "bad name",
+    6: "denied: the kind does not allow this",
+    7: "in use",
+    8: "too large",
+    9: "no space",
+    10: "bad offset",
+    11: "bad token",
+    12: "busy: another upload is open",
+    13: "CRC mismatch",
+    14: "I/O error",
+    15: "no memory",
+}
+ASSETS_BAD_OFFSET = 10
+ASSETS_BAD_TOKEN = 11
+ASSETS_BUSY = 12
+ASSETS_NOT_FOUND = 4
+
+GROUP_ERRORS = {Group.CONFIG: CONFIG_ERRORS, Group.ASSETS: ASSETS_ERRORS}
+# MCUmgr's MGMT_ERR_ENOTSUP, which a unit answers at the top level for a group it does not serve.
+MGMT_ERR_ENOTSUP = 8
+
+
+class AssetsCommand(IntEnum):
+    KINDS = 0
+    LIST = 1
+    READ = 2
+    WRITE = 3
+    DELETE = 4
+
+
+ASSET_KINDS = {"images": 0, "animations": 1, "sensor_scripts": 2, "can_scripts": 3, "logs": 4}
+
 
 class SmpError(Exception):
-    def __init__(self, rc: int, group: int | None, response: dict):
+    def __init__(self, rc: int, group: int | None, response: dict, request_group: int | None = None):
         self.rc = rc
         self.group = group
         self.response = response
-        reason = CONFIG_ERRORS.get(rc, "") if group == Group.CONFIG else ""
+        reason = GROUP_ERRORS.get(group, {}).get(rc, "")
+        if group is None and rc == MGMT_ERR_ENOTSUP and request_group == Group.ASSETS:
+            reason = "the unit has no assets group (older firmware)"
         where = f"group {group} error" if group is not None else "MCUmgr error"
         message = f"{where} {rc}" + (f" ({reason})" if reason else "")
         # APPLY_FAILED carries the validator's reason.
@@ -146,6 +216,9 @@ class SmpError(Exception):
 
     def is_config_error(self, rc: int) -> bool:
         return self.group == Group.CONFIG and self.rc == rc
+
+    def is_assets_error(self, rc: int) -> bool:
+        return self.group == Group.ASSETS and self.rc == rc
 
 
 def require(module: str, package: str) -> types.ModuleType:
@@ -496,6 +569,30 @@ class SmpSerialLink:
             print(f"console: {line}", file=sys.stderr)
 
 
+def encode_request(op: Op, group: int, command: int, body: dict | None, sequence: int) -> bytes:
+    payload = cbor2.dumps(body or {})
+    # SMP v2: version 1 in bits 3-4 of the first byte.
+    header = struct.pack(">BBHHBB", op | 1 << 3, 0, len(payload), group, sequence, command)
+    return header + payload
+
+
+def unpack_header(packet: bytes) -> tuple[int, int, int, int]:
+    """Returns the body length, group, sequence number and command of a packet."""
+    _, _, length, group, sequence, command = struct.unpack(">BBHHBB", packet[:SMP_HEADER_SIZE])
+    return length, group, sequence, command
+
+
+def decode_response(packet: bytes, length: int, request_group: int) -> dict:
+    """Decodes the body of a response and raises the error it carries."""
+    response = cbor2.loads(packet[SMP_HEADER_SIZE:SMP_HEADER_SIZE + length]) if length else {}
+    if response.get("rc", 0):
+        raise SmpError(response["rc"], None, response, request_group)
+    error = response.get("err")
+    if error and error.get("rc", 0):
+        raise SmpError(error["rc"], error.get("group"), response, request_group)
+    return response
+
+
 class SmpClient:
     def __init__(self, link: SmpCanLink | SmpSerialLink, timeout_s: float, retries: int) -> None:
         self._link = link
@@ -510,6 +607,14 @@ class SmpClient:
     @property
     def timeout_s(self) -> float:
         return self._timeout_s
+
+    @property
+    def retries(self) -> int:
+        return self._retries
+
+    def next_sequence(self) -> int:
+        self._sequence = (self._sequence + 1) & 0xFF
+        return self._sequence
 
     def read(self, group: int, command: int, body: dict | None = None, **options) -> dict:
         return self.request(Op.READ, group, command, body, **options)
@@ -526,13 +631,10 @@ class SmpClient:
         """
         retries = self._retries if retries is None else retries
         timeout_s = self._timeout_s if timeout_s is None else timeout_s
-        payload = cbor2.dumps(body or {})
-        self._sequence = (self._sequence + 1) & 0xFF
-        # SMP v2: version 1 in bits 3-4 of the first byte.
-        header = struct.pack(">BBHHBB", op | 1 << 3, 0, len(payload), group, self._sequence, command)
+        packet = encode_request(op, group, command, body, self.next_sequence())
 
         for _ in range(retries + 1):
-            self._link.send(header + payload)
+            self._link.send(packet)
             response = self._wait_for_response(group, command, timeout_s)
             if response is not None:
                 return response
@@ -546,17 +648,117 @@ class SmpClient:
             if packet is None:
                 return None
 
-            _, _, length, response_group, sequence, response_command = struct.unpack(">BBHHBB", packet[:8])
+            length, response_group, sequence, response_command = unpack_header(packet)
             if (sequence, response_group, response_command) != (self._sequence, group, command):
                 continue
 
-            response = cbor2.loads(packet[8:8 + length]) if length else {}
-            if response.get("rc", 0):
-                raise SmpError(response["rc"], None, response)
-            error = response.get("err")
-            if error and error.get("rc", 0):
-                raise SmpError(error["rc"], error.get("group"), response)
-            return response
+            return decode_response(packet, length, group)
+        return None
+
+
+@dataclasses.dataclass
+class PendingRequest:
+    tag: object
+    group: int
+    command: int
+    packet: bytes
+    timeout_s: float
+    resends_left: int
+    deadline_s: float = 0.0
+
+
+@dataclasses.dataclass
+class Completion:
+    """How a pipelined request ended: with a response, or with the error the unit or the wait produced."""
+    tag: object
+    response: dict | None = None
+    error: SmpError | TimeoutError | None = None
+
+
+class SmpPipeline:
+    """Several requests of one client in flight at once, matched to their responses by sequence number.
+
+    Whichever link carries them hands over one packet at a time (the CAN link the first one completed,
+    the serial link the ones it queued), and a response is told by its sequence number, group and
+    command, so the responses of the requests may arrive in any order. A request that gets no response
+    within its timeout is sent again under its own sequence number, as many times as the client's
+    retries, and then completes with a TimeoutError. A late response to a request that is not
+    outstanding any more is dropped. The window is the caller's to keep: sequence numbers are one byte.
+    """
+
+    def __init__(self, client: SmpClient) -> None:
+        self._client = client
+        self._pending: dict[int, PendingRequest] = {}
+
+    @property
+    def outstanding(self) -> int:
+        return len(self._pending)
+
+    def submit(self, op: Op, group: int, command: int, body: dict | None, tag: object, *,
+               retries: int | None = None, timeout_s: float | None = None) -> None:
+        """Sends a request. @p tag comes back with its completion."""
+        if len(self._pending) > 0xFF:
+            raise ValueError("too many requests in flight")
+        sequence = self._client.next_sequence()
+        while sequence in self._pending:
+            sequence = self._client.next_sequence()
+
+        request = PendingRequest(
+            tag, group, command, encode_request(op, group, command, body, sequence),
+            self._client.timeout_s if timeout_s is None else timeout_s,
+            self._client.retries if retries is None else retries)
+        self._pending[sequence] = request
+        self._send(request)
+
+    def next_completion(self) -> Completion:
+        """Waits until one of the outstanding requests ends, and returns how."""
+        if not self._pending:
+            raise RuntimeError("no request is in flight")
+
+        while True:
+            wait_s = min(request.deadline_s for request in self._pending.values()) - time.monotonic()
+            # A response that is there already wins over a deadline that just passed.
+            packet = self._client.link.receive(max(wait_s, 0.001))
+            if packet is not None:
+                completion = self._accept(packet)
+                if completion is not None:
+                    return completion
+            completion = self._expire(time.monotonic())
+            if completion is not None:
+                return completion
+
+    def _send(self, request: PendingRequest) -> None:
+        self._client.link.send(request.packet)
+        request.deadline_s = time.monotonic() + request.timeout_s
+
+    def _accept(self, packet: bytes) -> Completion | None:
+        if len(packet) < SMP_HEADER_SIZE:
+            return None
+        length, group, sequence, command = unpack_header(packet)
+        request = self._pending.get(sequence)
+        if request is None or (group, command) != (request.group, request.command):
+            return None
+
+        try:
+            completion = Completion(request.tag, response=decode_response(packet, length, group))
+        except SmpError as error:
+            completion = Completion(request.tag, error=error)
+        except cbor2.CBORDecodeError:
+            return None  # As good as lost: its deadline sends the request again.
+        del self._pending[sequence]
+        return completion
+
+    def _expire(self, now_s: float) -> Completion | None:
+        for sequence, request in list(self._pending.items()):
+            if request.deadline_s > now_s:
+                continue
+            if request.resends_left > 0:
+                request.resends_left -= 1
+                self._send(request)
+                continue
+            del self._pending[sequence]
+            return Completion(request.tag,
+                              error=TimeoutError(f"no response to group {request.group} command {request.command}"))
         return None
 
 
@@ -703,6 +905,377 @@ def write_config(client: SmpClient, number: int, data: bytes) -> int:
             time.sleep(CONFIG_SESSION_TIMEOUT_S + 0.5)
 
     raise AssertionError("unreachable")
+
+
+def parse_asset_kind(text: str) -> int:
+    """An asset kind by name or number; a number the table lacks passes through (the unit says what it serves)."""
+    name = text.lower().replace("-", "_")
+    if name in ASSET_KINDS:
+        return ASSET_KINDS[name]
+    try:
+        kind = int(text, 0)
+    except ValueError:
+        kind = -1
+    if kind < 0:
+        names = ", ".join(ASSET_KINDS)
+        raise argparse.ArgumentTypeError(f"{text!r} is not an asset kind number or one of: {names}")
+    return kind
+
+
+def format_access(access: int) -> str:
+    """The AssetAccess bits as letters: R read, W write, D delete."""
+    return "".join(letter if access & bit else "-" for letter, bit in (("R", 1), ("W", 2), ("D", 4)))
+
+
+def format_kind(entry: dict) -> str:
+    maximum = f"{entry['max']} B" if entry["max"] else "none"
+    return (f"kind {entry['kind']}  {entry['name']}  dir {entry['dir']}  access {format_access(entry['access'])}  "
+            f"max {maximum}  ext {' '.join(entry['ext']) or '-'}  avail {'yes' if entry['avail'] else 'no'}")
+
+
+def asset_write_overhead(name: str) -> int:
+    """The room around `data` in an assets write request for @p name, at its worst."""
+    length = max(ASSET_NAME_LIMIT, len(name.encode()))
+    return ASSET_WRITE_FIXED_OVERHEAD + len(encode_cbor_head(3, length)) + length
+
+
+def asset_chunk_size(buf_size: int, name: str, is_serial: bool = False) -> int:
+    """The data an assets write request for @p name can carry in a unit's packet of @p buf_size bytes.
+
+    A request that does not fit is dropped by the unit's transport without an answer, so a name that
+    leaves no room for data is refused here.
+    """
+    available = buf_size - (SERIAL_FRAME_OVERHEAD if is_serial else 0)
+    size = available - asset_write_overhead(name)
+    if size < 1:
+        raise RuntimeError(f"the unit's packets of {available} B cannot carry an upload request for the name {name!r} "
+                           f"({len(name.encode())} B); it needs more than {asset_write_overhead(name)} B")
+    return size
+
+
+def limit_window(requested: int, buf_count: int | None) -> int:
+    """The requests to keep in flight: below the unit's packet count, since requests and responses share them."""
+    if not buf_count or requested < buf_count:
+        return requested
+    return max(1, buf_count - 1)
+
+
+def file_crc32(path: Path) -> int:
+    crc = 0
+    with path.open("rb") as file:
+        while block := file.read(1 << 16):
+            crc = zlib.crc32(block, crc)
+    return crc
+
+
+class Progress:
+    """A transfer's progress, rewritten in place on stderr when that is a terminal and silent otherwise."""
+
+    def __init__(self, label: str) -> None:
+        self._label = label
+        self._enabled = sys.stderr.isatty()
+        self._last_s = 0.0
+        self._width = 0
+
+    def update(self, done: int, total: int | None) -> None:
+        now_s = time.monotonic()
+        if not self._enabled or now_s - self._last_s < 0.25:
+            return
+        self._last_s = now_s
+        text = f"{self._label}: {done} B"
+        if total is not None:
+            text += f" / {total} B ({done * 100 // total if total else 100} %)"
+        self._width = max(self._width, len(text))
+        sys.stderr.write(f"\r{text}")
+        sys.stderr.flush()
+
+    def finish(self) -> None:
+        if self._enabled and self._width:
+            sys.stderr.write("\r" + " " * self._width + "\r")
+            sys.stderr.flush()
+        self._width = 0
+
+
+def list_assets(client: SmpClient, kind: int) -> list[dict]:
+    """Lists the files of a kind. A page can be empty and still have a next one."""
+    entries: list[dict] = []
+    offset = 0
+    while True:
+        response = client.read(Group.ASSETS, AssetsCommand.LIST, {"kind": kind, "off": offset})
+        entries += response["entries"]
+        following = response.get("next")
+        if following is None:
+            return entries
+        if following <= offset:
+            raise RuntimeError(f"the list did not advance past position {offset}")
+        offset = following
+
+
+class AssetDownload:
+    """What a pipelined download knows: which offsets to ask for next, and the bytes that arrived, in order.
+
+    Every chunk but the last has the length of the first, whatever its offset, so once the first answer
+    is in, the offsets to ask for are known without waiting for the rest. The size of the asset comes
+    with the chunk at offset 0 (`len`), or with the last chunk (`crc`), or with the error of a request
+    past the end; a chunk that is short and not the last leaves a gap, which is asked for again.
+    """
+
+    MAX_STRAY_RESPONSES = 16
+
+    def __init__(self, start: int) -> None:
+        self.written = start                    # The bytes before it are all there.
+        self.length: int | None = None          # The size of the asset, once known.
+        self.crc: int | None = None             # CRC32 of the whole asset, from its last chunk.
+        self._chunk_size = 0
+        self._next = start                      # The first offset not asked for yet.
+        self._chunks: dict[int, bytes] = {}     # Arrived, but not yet next in line.
+        self._again: list[int] = []             # Offsets to ask for before the next new one.
+        self._stray = 0
+
+    @property
+    def is_complete(self) -> bool:
+        return self.length is not None and self.crc is not None and self.written >= self.length
+
+    def accept(self, offset: int, response: dict) -> None:
+        """Takes the response to the request for @p offset."""
+        if response["off"] != offset:
+            # The answer to another request, such as a late one under a sequence number that came round.
+            self._stray += 1
+            if self._stray > self.MAX_STRAY_RESPONSES:
+                raise RuntimeError(f"the unit keeps answering for another offset than {offset}")
+            self._again.append(offset)
+            return
+
+        data = response["data"]
+        is_last = "crc" in response
+        if "len" in response:
+            self.set_length(response["len"])
+        if is_last:
+            self.crc = response["crc"]
+            self.set_length(offset + len(data))
+        elif not data:
+            raise RuntimeError(f"empty chunk at offset {offset}")
+
+        if self._chunk_size == 0 and data:
+            self._chunk_size = len(data)
+            self._next = offset + len(data)
+        elif not is_last and len(data) < self._chunk_size:
+            self._again.append(offset + len(data))
+        if data:
+            self._chunks[offset] = data
+
+    def set_length(self, length: int) -> None:
+        if self.length is not None and self.length != length:
+            raise RuntimeError(f"the asset changed during the download: {self.length} B, then {length} B")
+        self.length = length
+
+    def next_offset(self) -> int | None:
+        """The offset to ask for next, or None when every byte is asked for."""
+        while self._again:
+            # A gap may have been filled in part since, by a chunk that overlapped it: the hole starts later.
+            offset = max(self._again.pop(0), self.written)
+            if self.length is None or offset < self.length:
+                return offset
+        if self.length is not None and self._next >= self.length:
+            return None
+        offset = self._next
+        self._next += self._chunk_size
+        return offset
+
+    def take_ready(self) -> list[bytes]:
+        """The bytes that now follow what was written, in order."""
+        ready = []
+        progressed = True
+        while progressed:
+            progressed = False
+            for offset in sorted(self._chunks):
+                if offset > self.written:
+                    break
+                data = self._chunks.pop(offset)
+                if offset + len(data) > self.written:
+                    ready.append(data[self.written - offset:])
+                    self.written = offset + len(data)
+                progressed = True
+                break
+        if self.length is not None and self.written > self.length:
+            raise RuntimeError(
+                f"the asset changed during the download: it is {self.length} B, {self.written} B arrived")
+        return ready
+
+
+def download_asset(client: SmpClient, kind: int, name: str, path: Path, *, resume: bool, in_flight: int,
+                   progress: Progress) -> tuple[int, int, int]:
+    """Downloads an asset into @p path and checks its CRC32. Returns the size, the CRC32 and the offset it began at.
+
+    The first request goes alone, to learn the chunk size, and the rest follow at consecutive offsets,
+    @p in_flight at a time. A resumed download asks for the bytes after the local file's, and the file
+    is checked whole at the end. The file is only touched once the unit has answered.
+
+    The unit answers the requests one after another, so the last of a full window waits for the
+    responses before it: each pipelined request is given the client's timeout once per request in
+    flight, or a slow bus would have every request sent again.
+    """
+    start = path.stat().st_size if resume and path.is_file() else 0
+
+    def body(offset: int) -> dict:
+        return {"kind": kind, "name": name, "off": offset}
+
+    try:
+        # The unit reads the file up to the offset before it answers a resumed download.
+        first = client.read(Group.ASSETS, AssetsCommand.READ, body(start),
+                            timeout_s=max(client.timeout_s, ASSET_SEED_TIMEOUT_S) if start else None)
+    except SmpError as error:
+        if start and error.is_assets_error(ASSETS_BAD_OFFSET) and "len" in error.response:
+            raise RuntimeError(f"{path} is {start} B, more than the asset's {error.response['len']} B; "
+                               f"it cannot be resumed") from None
+        raise
+    if first["off"] != start:
+        raise RuntimeError(f"asked for offset {start}, got offset {first['off']}")
+
+    download = AssetDownload(start)
+    download.accept(start, first)
+    pipeline = SmpPipeline(client)
+    asked: set[int] = set()     # The offsets in flight.
+    stuck_at, restarts = -1, 0
+
+    def ask(offset: int) -> None:
+        asked.add(offset)
+        pipeline.submit(Op.READ, Group.ASSETS, AssetsCommand.READ, body(offset), offset,
+                        timeout_s=client.timeout_s * in_flight)
+
+    with path.open("ab" if start else "wb") as file:
+        while True:
+            for data in download.take_ready():
+                file.write(data)
+            progress.update(download.written, download.length)
+            if download.is_complete:
+                break
+
+            while pipeline.outstanding < in_flight and (offset := download.next_offset()) is not None:
+                if offset not in asked:
+                    ask(offset)
+            if not pipeline.outstanding:
+                # Everything was asked for and answered, and a hole is left or the last chunk never
+                # came: ask for what is the first byte missing.
+                restarts = restarts + 1 if stuck_at == download.written else 1
+                stuck_at = download.written
+                if restarts > MAX_ASSET_RESTARTS:
+                    raise RuntimeError(f"the download stopped at byte {download.written}")
+                ask(download.written)
+
+            completion = pipeline.next_completion()
+            asked.discard(completion.tag)
+            if completion.error is None:
+                download.accept(completion.tag, completion.response)
+            elif (isinstance(completion.error, SmpError) and completion.error.is_assets_error(ASSETS_BAD_OFFSET)
+                  and "len" in completion.error.response):
+                # A request past the end: the error says where the asset ends.
+                download.set_length(completion.error.response["len"])
+            else:
+                raise completion.error
+
+    size = path.stat().st_size
+    crc = file_crc32(path)
+    if size != download.length or crc != download.crc:
+        hint = ("it continued a file that may be of another version: download it again without --resume"
+                if start else "the asset may have changed during the download")
+        raise RuntimeError(f"CRC mismatch: {path} holds {size} B with crc {crc:#010x}, the unit reports "
+                           f"{download.length} B with crc {download.crc:#010x}; {hint}. The file was kept")
+    return download.length, crc, start
+
+
+def upload_asset(client: SmpClient, kind: int, name: str, data: bytes, crc: int, chunk_size: int,
+                 progress: Progress) -> None:
+    """Sends the chunks of an upload. The unit stores the file, under @p name, when the last one arrives."""
+    offset = 0
+    token = None
+
+    while True:
+        chunk = data[offset:offset + chunk_size]
+        is_final = offset + len(chunk) >= len(data)
+        body = {"kind": kind, "name": name, "off": offset, "data": chunk}
+        if offset == 0:
+            body |= {"len": len(data), "crc": crc}
+        else:
+            body["tok"] = token
+
+        # A chunk is sent again after a timeout under the same sequence number, and the unit answers
+        # the repeat: the first chunk with its token, a chunk it holds with where it expects the next
+        # one, and, for CONFIG_EERIE_LEAP_SMP_ASSETS_SESSION_TIMEOUT_MS after the file was stored, the
+        # last chunk with the same answer again.
+        try:
+            response = client.write(Group.ASSETS, AssetsCommand.WRITE, body)
+        except TimeoutError:
+            if is_final:
+                raise RuntimeError(f"no response to the last chunk of {name}: the unit may have stored it, "
+                                   f"check with `assets ls`") from None
+            raise TransferLost(f"no response to the chunk at offset {offset}") from None
+        except SmpError as error:
+            if error.is_assets_error(ASSETS_BAD_OFFSET) and error.response.get("off") not in (None, offset):
+                # A lost response: the unit says where it expects to continue.
+                offset = error.response["off"]
+                if offset > len(data):
+                    raise RuntimeError(f"the unit expects offset {offset}, past the end of the file") from None
+                continue
+            if error.is_assets_error(ASSETS_BAD_TOKEN) and is_final:
+                raise RuntimeError(
+                    f"the unit refused the last chunk of {name} with BAD_TOKEN, so it has no upload open for it: "
+                    f"it dropped the upload, or it stored the file and the answer to the chunk got lost; "
+                    f"check with `assets ls` or `assets get`") from None
+            if error.is_assets_error(ASSETS_BAD_TOKEN) or error.is_assets_error(ASSETS_BUSY):
+                raise TransferLost(str(error)) from None
+            raise
+
+        if is_final:
+            progress.update(len(data), len(data))
+            return
+        if offset == 0:
+            token = response["tok"]
+        offset = response["off"]
+        if not 0 <= offset <= len(data):
+            raise RuntimeError(f"the unit expects offset {offset} of a file of {len(data)} B")
+        progress.update(offset, len(data))
+
+
+def write_asset(client: SmpClient, kind: int, name: str, data: bytes, progress: Progress) -> int:
+    """Uploads a file and returns its CRC32.
+
+    A transfer the unit dropped, or that another upload blocked, starts over once, after the unit's
+    session timeout.
+    """
+    if len(data) > 0xFFFFFFFF:
+        raise RuntimeError("the unit counts file sizes in 32 bits")
+    crc = zlib.crc32(data)
+    chunk_size = asset_chunk_size(client.read(Group.OS, 6)["buf_size"], name, isinstance(client.link, SmpSerialLink))
+
+    for attempt in range(2):
+        try:
+            upload_asset(client, kind, name, data, crc, chunk_size, progress)
+            return crc
+        except TransferLost as error:
+            progress.finish()
+            if attempt:
+                raise RuntimeError(f"{name} was not uploaded: {error}") from None
+            print(f"{error}; trying again after the unit's session timeout", file=sys.stderr)
+            time.sleep(ASSET_SESSION_TIMEOUT_S + 0.5)
+
+    raise AssertionError("unreachable")
+
+
+def delete_asset(client: SmpClient, kind: int, name: str) -> None:
+    """Deletes an asset. A delete sent again after a lost answer meets NOT_FOUND: that means it was done."""
+    for attempt in range(client.retries + 1):
+        try:
+            client.write(Group.ASSETS, AssetsCommand.DELETE, {"kind": kind, "name": name}, retries=0)
+            return
+        except TimeoutError:
+            continue
+        except SmpError as error:
+            if attempt and error.is_assets_error(ASSETS_NOT_FOUND):
+                return
+            raise
+
+    raise TimeoutError(f"no response to group {Group.ASSETS} command {AssetsCommand.DELETE}")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1204,6 +1777,78 @@ def command_config_decode(client: None, args: argparse.Namespace) -> None:
     write_description(ConfigCodec(args.type).decode(args.input.read_bytes()), args.output)
 
 
+def command_assets_kinds(client: SmpClient, args: argparse.Namespace) -> None:
+    for entry in client.read(Group.ASSETS, AssetsCommand.KINDS)["kinds"]:
+        print(format_kind(entry))
+
+
+def command_assets_ls(client: SmpClient, args: argparse.Namespace) -> None:
+    for entry in list_assets(client, args.kind):
+        print(f"{entry['size']:>10}  {entry['name']}")
+
+
+def command_assets_get(client: SmpClient, args: argparse.Namespace) -> None:
+    path = args.file or Path(Path(args.name).name)
+    if path.is_dir():
+        path = path / Path(args.name).name
+
+    in_flight = args.in_flight
+    if in_flight > 1:
+        try:
+            buf_count = client.read(Group.OS, 6).get("buf_count")
+        except SmpError:
+            buf_count = None  # No packet count to go by.
+        in_flight = limit_window(in_flight, buf_count)
+        if in_flight != args.in_flight:
+            print(f"warning: the unit has {buf_count} packets, shared by requests and responses: "
+                  f"{in_flight} in flight instead of {args.in_flight}", file=sys.stderr)
+
+    progress = Progress(args.name)
+    start_s = time.monotonic()
+    try:
+        length, crc, start = download_asset(client, args.kind, args.name, path, resume=args.resume,
+                                            in_flight=in_flight, progress=progress)
+    finally:
+        progress.finish()
+    elapsed_s = max(time.monotonic() - start_s, 1e-9)
+
+    resumed = f", resumed at {start} B" if start else ""
+    print(f"read {args.name}: {length} B to {path}, crc {crc:#010x}; {length - start} B in {elapsed_s:.2f} s "
+          f"({(length - start) / elapsed_s / 1024:.1f} KB/s{resumed})")
+
+
+def command_assets_put(client: SmpClient, args: argparse.Namespace) -> None:
+    data = args.file.read_bytes()
+    progress = Progress(args.name)
+    start_s = time.monotonic()
+    try:
+        crc = write_asset(client, args.kind, args.name, data, progress)
+    finally:
+        progress.finish()
+    elapsed_s = max(time.monotonic() - start_s, 1e-9)
+
+    print(f"wrote {args.name}: {len(data)} B, crc {crc:#010x}; "
+          f"{elapsed_s:.2f} s ({len(data) / elapsed_s / 1024:.1f} KB/s)")
+
+
+def command_assets_rm(client: SmpClient, args: argparse.Namespace) -> None:
+    delete_asset(client, args.kind, args.name)
+    print(f"deleted {args.name}")
+
+
+ASSETS_HANDLERS = {
+    "kinds": command_assets_kinds,
+    "ls": command_assets_ls,
+    "get": command_assets_get,
+    "put": command_assets_put,
+    "rm": command_assets_rm,
+}
+
+
+def command_assets(client: SmpClient, args: argparse.Namespace) -> None:
+    ASSETS_HANDLERS[args.assets_command](client, args)
+
+
 def command_shell(client: SmpClient, args: argparse.Namespace) -> None:
     if args.text:
         client.link.send_text(args.text)
@@ -1280,6 +1925,27 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     decode.add_argument("type", type=parse_config_type)
     decode.add_argument("input", type=Path)
     decode.add_argument("output", nargs="?")
+    assets = commands.add_parser("assets", help="asset files: images, animations, scripts, logs")
+    assets_commands = assets.add_subparsers(dest="assets_command", required=True)
+    assets_commands.add_parser("kinds", help="the asset kinds the unit serves")
+    asset_ls = assets_commands.add_parser("ls", help="list the files of a kind")
+    asset_ls.add_argument("kind", type=parse_asset_kind, help="asset kind, a name or a number")
+    asset_get = assets_commands.add_parser("get", help="download a file, checking its CRC32")
+    asset_get.add_argument("kind", type=parse_asset_kind, help="asset kind, a name or a number")
+    asset_get.add_argument("name")
+    asset_get.add_argument("file", nargs="?", type=Path,
+                           help="local file, or the directory to put NAME in (default: NAME here)")
+    asset_get.add_argument("--in-flight", type=int, default=DEFAULT_ASSET_IN_FLIGHT, metavar="N",
+                           help=f"requests outstanding at once (default: {DEFAULT_ASSET_IN_FLIGHT}); fewer than the "
+                                "unit's packet count, and each waits --timeout once per request in flight")
+    asset_get.add_argument("--resume", action="store_true", help="continue a partial local file from its size")
+    asset_put = assets_commands.add_parser("put", help="upload a file")
+    asset_put.add_argument("kind", type=parse_asset_kind, help="asset kind, a name or a number")
+    asset_put.add_argument("name", help="the asset's name on the unit")
+    asset_put.add_argument("file", type=Path)
+    asset_rm = assets_commands.add_parser("rm", help="delete a file")
+    asset_rm.add_argument("kind", type=parse_asset_kind, help="asset kind, a name or a number")
+    asset_rm.add_argument("name")
     shell = commands.add_parser("shell", help="serial only: type a shell command and print the console")
     shell.add_argument("text", help="the command line; empty to only listen")
     shell.add_argument("--wait", type=float, default=1.0, help="seconds to print the console for (default: 1)")
@@ -1290,6 +1956,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     args = parser.parse_args(argv)
     if args.command in OFFLINE_COMMANDS:
         return args
+
+    if args.command == "assets" and args.assets_command == "get" and not 1 <= args.in_flight <= MAX_ASSET_IN_FLIGHT:
+        parser.error(f"--in-flight must be 1-{MAX_ASSET_IN_FLIGHT}")
 
     if args.serial:
         if args.target is not None:
@@ -1323,6 +1992,7 @@ HANDLERS = {
     "config-set": command_config_set,
     "config-encode": command_config_encode,
     "config-decode": command_config_decode,
+    "assets": command_assets,
     "shell": command_shell,
     "bench": command_bench,
 }

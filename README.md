@@ -148,9 +148,9 @@ and the reproducible native simulator gallery.
 
 ### Bench tools
 
-`tools/smp_can_client.py` reads and writes a unit's stored configurations over SMP, on CAN or on the console
-of a unit built with `app/bench.conf` (shell, SMP over the console, stack reports). See
-[tools/README.md](tools/README.md).
+`tools/smp_can_client.py` reads and writes a unit's stored configurations over SMP, and lists, downloads,
+uploads and deletes its asset files (images, animations, scripts, logs), on CAN or on the console of a unit
+built with `app/bench.conf` (shell, SMP over the console, stack reports). See [tools/README.md](tools/README.md).
 
 ### Required tools
 

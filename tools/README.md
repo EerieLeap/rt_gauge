@@ -2,14 +2,15 @@
 
 | File | Purpose |
 | --- | --- |
-| `smp_can_client.py` | An SMP client for a unit, over CAN or over its console. Reads and writes stored configurations as YAML or JSON. |
+| `smp_can_client.py` | An SMP client for a unit, over CAN or over its console. Reads and writes stored configurations as YAML or JSON, and lists, downloads, uploads and deletes its asset files. |
 | `LVGLImage.py` | LVGL's image converter, for the UI's asset files. |
 | `update_zephyr.sh` | Updates the west workspace to `west.yml` with the build's patches reverted and applied again. |
 
 ## SMP client
 
 `smp_can_client.py` sends SMP requests to one unit and prints the responses. It speaks the `os`,
-`device`, `network` and `config` groups the units serve (see rt_core's `docs/smp.md`).
+`device`, `network`, `config` and `assets` groups the units serve (see rt_core's `docs/smp.md`); the `live`,
+`calibration` and `files` groups have no command here.
 
 ### Requirements
 
@@ -68,6 +69,10 @@ Leave DTR alone there. A port that the client holds is exclusive; close the term
 | `config-get TYPE [FILE]` | either | Reads a configuration and prints it as a description (YAML; a `.json` file name selects JSON). |
 | `config-set TYPE FILE` | either | Encodes a description (`-` is standard input) and writes it; the unit validates and applies it. |
 | `config-encode TYPE DESCRIPTION OUTPUT`, `config-decode TYPE INPUT [OUTPUT]` | none | The same conversion offline, between a description and a CBOR file. |
+| `assets kinds`, `assets ls KIND` | either | The asset kinds the unit serves, and the files of one (see [Assets](#assets)). |
+| `assets get KIND NAME [FILE] [--in-flight N] [--resume]` | either | Downloads a file and checks its CRC32. |
+| `assets put KIND NAME FILE` | either | Uploads a file under the name NAME. |
+| `assets rm KIND NAME` | either | Deletes a file. |
 | `shell TEXT [--wait S]` | serial | Types TEXT as a shell command line and prints the console for S seconds (1). An empty TEXT only listens: `shell "" --wait 15` catches a thread analyzer report. |
 | `bench [--size N] [--count N]` | either | Echo round trips, for throughput. |
 
@@ -84,6 +89,100 @@ starts over instead, and the unit may apply the bytes twice. A transfer that is 
 once, after the unit's 5 s session timeout. Earlier chunks and reads are resent as usual: the unit
 answers a repeated chunk with where it expects the next one. A refused configuration fails with the
 validator's reason, such as `Debounce is only supported for indicator sensors.`.
+
+### Assets
+
+The `assets` group serves a unit's files by kind: an image or a script is addressed by its kind and a flat
+name, never by a path. `KIND` is a name or a number, as in the table; what a unit serves (and with which
+access, size cap and extensions) is what `assets kinds` prints, one line per kind:
+
+```
+kind 0  images  dir ui_assets/images  access RWD  max 4194304 B  ext .bin  avail yes
+kind 4  logs  dir logs  access R-D  max none  ext .mf4  avail yes
+```
+
+`access` shows R (download), W (upload) and D (delete) for what the kind allows and `-` for what it does
+not (`R-D`: logs can be downloaded and deleted, not uploaded), `max` is the largest upload (`none` for a
+kind that takes none) and `avail` says whether the volume is mounted now.
+
+| Number | Name | Served by |
+| --- | --- | --- |
+| 0 | `images` | the gauge, from `ui_assets/images` |
+| 1 | `animations` | the gauge, from `ui_assets/animations` |
+| 2 | `sensor_scripts` | a unit with an SD card and sensors, from `scripts/sensors` |
+| 3 | `can_scripts` | a unit with an SD card and a CAN bus, from `scripts/can` |
+| 4 | `logs` | a unit that logs, from `logs` (download and delete only; the file being written is in use) |
+
+A unit serves the kinds it has the services for, so the gauge lists the first two. `assets ls` prints the
+size and name of each file. A name is 1 to 64 characters of `A-Z a-z 0-9 . _ -`, does not start with `.`,
+and ends in one of the kind's extensions with at least one character before it. A unit built before the
+group answers every `assets` command with `MCUmgr error 8 (the unit has no assets group (older firmware))`.
+
+```shell
+python3 tools/smp_can_client.py --channel can0 --target 1 assets kinds
+python3 tools/smp_can_client.py --channel can0 --target 1 assets ls logs
+python3 tools/smp_can_client.py --channel can0 --target 1 assets get logs log_data_0001.mf4 --resume
+python3 tools/smp_can_client.py --serial /dev/ttyACM0 assets put images logo.bin ./logo.bin
+python3 tools/smp_can_client.py --serial /dev/ttyACM0 assets rm images logo.bin
+```
+
+#### Downloading
+
+`get` writes `FILE` (`NAME` in the current directory by default; a directory gets `NAME` inside it). The file
+is only touched once the unit has answered, so a wrong name leaves an existing file alone. The first `READ`
+goes alone: its answer carries the size of the file and, in its data length, the length of every chunk but
+the last. The client then keeps `--in-flight N` requests (2 by default) outstanding at consecutive offsets
+and matches the responses by SMP sequence number, which hides the round trip of each chunk. A request that
+gets no answer is sent again under its own sequence number, as many times as `--retries` says; a chunk that
+is short without being the last leaves a gap, which is asked for again. The unit's packets are one pool for
+requests and responses (`params` shows `buf_count`), so a window of `buf_count` would exhaust it: the client
+lowers `--in-flight` to `buf_count - 1` and says so (`--in-flight` takes 1 to 255).
+
+The unit answers the requests one after another, so the last request of a full window waits for the
+responses of the others. Each pipelined request is therefore given `--timeout` once per request in flight:
+`--in-flight 3` with the default 2 s waits 6 s, which a slow bus needs (at 125 kbit/s and 25 % of the bus, a
+1 KB response takes about 0.75 s). The price is that a response that got lost is found, and asked for
+again, after that longer time.
+
+The last chunk carries the CRC32 of the whole file. The client computes the CRC32 of the local file (not of
+what it received) and compares: on a mismatch it prints both, keeps the file and exits with 1. A mismatch
+can also mean that the asset changed during the download. A download that ends in an error keeps what it has.
+
+`--resume` continues a partial `FILE` from its size (a file that does not exist starts at 0). The first
+request then asks for the bytes after the local ones; the unit reads the file up to there to seed its CRC32
+before it answers, so that request waits at least 30 s (more for a larger `--timeout`). A local file longer
+than the asset is refused. The CRC32 check covers the whole file, so a partial file of another version of
+the asset is caught at the end: download it again without `--resume`.
+
+At the end `get` prints the size, the CRC32 and the rate. Over CAN the rate is set by the unit that sends
+the data, not by the client: its stored `smp_bus_share_percent` (25 % of the bus by default) caps the bus
+time its SMP frames use, and the bus does the rest. Raising `--in-flight` does not raise it past that cap.
+
+#### Uploading
+
+`put` sends the file in chunks that fit the unit's packet (`params` `buf_size`, less an allowance for the
+request's header, kind, the name, offsets, length, CRC32 and token). The allowance counts the name as at
+least 64 characters, so the chunks have one size for any name, and as many as the name has beyond that; over
+the console it also keeps 4 bytes for the length and CRC16 of the frame. A request the unit's transport
+cannot take is dropped without an answer, so a name that leaves no room for data is refused before anything
+is sent. The first chunk carries
+the size and the CRC32 of the file (`zlib.crc32`) and is answered with a token, which the later chunks
+carry. The unit stages the data in a file no listing shows, checks the CRC32 with the last chunk and then
+replaces the asset, so a failed or abandoned upload leaves the old file. Only one upload is open at a time
+(`BUSY` for another), and the unit drops one that is idle for 5 s.
+
+Chunks go one after the other. Each is sent again after a timeout, and a lost answer is no problem: the
+unit answers a first chunk sent again with its token, a chunk it already holds with `BAD_OFFSET` and the
+offset it expects (where the client continues), and the last chunk, for 5 s after the file was stored,
+with the same answer again. A file of one chunk that was stored is answered again with its token as well.
+An upload that is lost before the last chunk (no answer to a chunk, `BAD_TOKEN`, `BUSY`) starts over once,
+after the unit's 5 s timeout. If the last chunk gets no answer, or `BAD_TOKEN`, the outcome is unknown, since
+the file may be stored already: the client says so, and `assets ls` or `assets get`
+shows which it is. A file in use (`IN_USE`), too large (`TOO_LARGE`), without room (`NO_SPACE`) or of a kind
+that takes no uploads (`DENIED`) fails with the unit's reason, and so does a CRC32 that does not match.
+
+`rm` deletes a file. A delete whose answer was lost and that is sent again meets `NOT_FOUND`, which the client
+takes for done; a first request that meets it fails.
 
 ### Types
 
