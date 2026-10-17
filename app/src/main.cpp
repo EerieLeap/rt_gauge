@@ -239,10 +239,14 @@ int main() {
     if(!sensor_events_publisher->Initialize() || !sensor_events_publisher->Start())
         LOG_ERR("Failed to start the sensor events publisher.");
 
+    // The gauge has no SD service, so the controllers below register no asset kind; the registry is
+    // passed for uniformity with the units that do.
     auto canbus_controller = std::make_shared<CanbusController>(
         fs_service,
         config_work_queue_thread,
-        configuration_service);
+        configuration_service,
+        nullptr, // sd_fs_service
+        assets_manager);
     // if(canbus_controller->Initialize(SetupCanbusConfiguration) != 0)
     if(canbus_controller->Initialize() != 0)
         LOG_ERR("Failed to initialize the CANBus controller.");
@@ -255,7 +259,11 @@ int main() {
         time_service,
         sensor_readings_frame,
         canbus_controller->GetService(),
-        gpio);
+        gpio,
+        nullptr, // adc_manager
+        nullptr, // adc_configuration_manager
+        nullptr, // sd_fs_service
+        assets_manager);
     // TODO: For test purposes only
     // if(sensors_controller->Initialize(SetupTestSensors) != 0)
     if(sensors_controller->Initialize(SetupTestLoggingButton) != 0)
@@ -271,7 +279,12 @@ int main() {
         configuration_service,
         sensors_controller->GetConfigurationManager(),
         canbus_controller->GetComService(),
-        sensor_events_publisher);
+        sensor_events_publisher,
+        nullptr, // sd_fs_service
+        nullptr, // time_service
+        nullptr, // sensor_readings_frame
+        std::string{}, // tool_id
+        assets_manager);
     // Only when the controller could not be initialized: sends the logging stop for a stored configuration.
     std::unique_ptr<ConfigurationUpdateLoggingStop> configuration_update_logging_stop;
     // The count the sensors manager was built with, which the button's sensor and trigger agree on.

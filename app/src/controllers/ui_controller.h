@@ -55,7 +55,10 @@ using eerie_leap::views::widgets::WidgetContext;
 class UiController {
 private:
     static constexpr const char* UI_CONFIGURATION_NAME = "ui_config";
+    // The directory every asset used to share, which SetupTestAssets() still clears, and the one of each kind.
     static constexpr const char* UI_ASSETS_DIR = "ui_assets";
+    static constexpr const char* UI_IMAGES_DIR = "ui_assets/images";
+    static constexpr const char* UI_ANIMATIONS_DIR = "ui_assets/animations";
 
     // What a client may upload as each kind. A provider keeps only a span of its extensions.
     static constexpr std::array<std::string_view, 1> IMAGE_EXTENSIONS { ".bin" };
@@ -74,7 +77,8 @@ private:
     // The unit's registry of asset kinds, shared with the other controllers; the kinds this controller
     // serves are the ones it registers there.
     std::shared_ptr<AssetsManager> assets_manager_;
-    std::shared_ptr<AssetStore> ui_assets_store_;
+    std::shared_ptr<AssetStore> images_store_;
+    std::shared_ptr<AssetStore> animations_store_;
     // Whether the registry took the kind from this controller, so only that is taken back.
     bool images_registered_ = false;
     bool animations_registered_ = false;
@@ -100,7 +104,7 @@ private:
     AnySubscription navigation_subscription_;
     int Configure(std::shared_ptr<UiConfiguration> config);
 
-    // Offers ui_assets/ to clients as the image and animation kinds.
+    // Offers ui_assets/images and ui_assets/animations to clients as the image and animation kinds.
     void RegisterAssets();
 
     std::shared_ptr<IScreen> CreateScreen(std::shared_ptr<ScreenConfiguration> configuration, std::shared_ptr<Frame> parent);

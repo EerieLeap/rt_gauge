@@ -286,7 +286,8 @@ int UiController::Initialize() {
 }
 
 void UiController::RegisterAssets() {
-    ui_assets_store_ = std::make_shared<AssetStore>(fs_service_, UI_ASSETS_DIR);
+    images_store_ = std::make_shared<AssetStore>(fs_service_, UI_IMAGES_DIR);
+    animations_store_ = std::make_shared<AssetStore>(fs_service_, UI_ANIMATIONS_DIR);
 
     // Widgets keep RAM copies of what they load, so a client may overwrite or delete a file a widget
     // shows: nothing is ever in use, and the change appears at the widget's next render.
@@ -296,7 +297,7 @@ void UiController::RegisterAssets() {
     images_registered_ = assets_manager_->Register(AssetProvider {
         .kind = AssetKind::IMAGES,
         .name = "images",
-        .store = ui_assets_store_,
+        .store = images_store_,
         .extensions = IMAGE_EXTENSIONS,
         .access = access,
         .max_size = CONFIG_EERIE_LEAP_UI_IMAGE_MAX_SIZE
@@ -307,7 +308,7 @@ void UiController::RegisterAssets() {
     animations_registered_ = assets_manager_->Register(AssetProvider {
         .kind = AssetKind::ANIMATIONS,
         .name = "animations",
-        .store = ui_assets_store_,
+        .store = animations_store_,
         .extensions = ANIMATION_EXTENSIONS,
         .access = access,
         .max_size = CONFIG_EERIE_LEAP_UI_ANIMATION_MAX_SIZE
@@ -948,23 +949,31 @@ void UiController::SetupTestConfiguration() {
 }
 
 void UiController::SetupTestAssets() {
+    // The demo files used to sit at the root of ui_assets/. Deleted before the new copies are written:
+    // the volume cannot hold both.
+    for(const char* name : { "ui_img_norma_al88.bin", "ui_img_arrow_al88.bin", "ui_lottie_spinner.json" }) {
+        const auto legacy_path = std::string(UI_ASSETS_DIR) + "/" + name;
+        if(fs_service_->Exists(legacy_path) && !fs_service_->DeleteFile(legacy_path))
+            LOG_WRN("Failed to delete the old asset %s.", legacy_path.c_str());
+    }
+
     const auto save_if_stale = [this](std::string_view name, std::string_view json) {
-        if(const auto size = ui_assets_store_->GetSize(name); size.has_value() && *size == json.size())
+        if(const auto size = animations_store_->GetSize(name); size.has_value() && *size == json.size())
             return;
 
-        ui_assets_store_->Save(name, std::span(reinterpret_cast<const uint8_t*>(json.data()), json.size()));
+        animations_store_->Save(name, std::span(reinterpret_cast<const uint8_t*>(json.data()), json.size()));
     };
 
     save_if_stale("ui_lottie_spinner.json", ui_lottie_spinner_json);
 
-    if(ui_assets_store_->Exists("ui_img_norma_al88.bin"))
+    if(images_store_->Exists("ui_img_norma_al88.bin"))
         return;
 
-    ui_assets_store_->Save(
+    images_store_->Save(
         "ui_img_norma_al88.bin",
         ui_img_norma_al88_data);
 
-    ui_assets_store_->Save(
+    images_store_->Save(
         "ui_img_arrow_al88.bin",
         ui_img_arrow_al88_data);
 }

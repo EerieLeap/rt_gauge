@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -42,6 +43,7 @@ using eerie_leap::subsys::event_bus::AnySubscription;
 using eerie_leap::subsys::event_bus::CreateScopedSubscription;
 using eerie_leap::subsys::event_bus::EventBus;
 using eerie_leap::subsys::fs::services::FsService;
+using eerie_leap::subsys::fs::services::IFsService;
 using eerie_leap::subsys::threading::WorkQueueThread;
 using eerie_leap::views::assets::animations::ui_lottie_spinner_json;
 using eerie_leap::views::assets::images::ui_img_arrow_al88_data;
@@ -76,6 +78,7 @@ public:
 // One controller for the whole suite: Initialize() builds every screen in the demo
 // configuration and writes ~870 KB of assets, and its LVGL objects are process-wide.
 struct Fixture {
+    std::shared_ptr<FsService> fs_service;
     std::shared_ptr<WorkQueueThread> config_work_queue;
     std::shared_ptr<AssetsManager> assets_manager;
     std::shared_ptr<UiController> controller;
@@ -91,8 +94,8 @@ void* Setup() {
     DtDisplay::Initialize();
 
     DtFs::InitInternalFs();
-    auto fs_service = std::make_shared<FsService>(DtFs::GetInternalFsMp());
-    fs_service->Format();
+    fixture.fs_service = std::make_shared<FsService>(DtFs::GetInternalFsMp());
+    fixture.fs_service->Format();
 
     fixture.config_work_queue = std::make_shared<WorkQueueThread>(
         "cfg_work_q", CONFIG_WORK_QUEUE_STACK_SIZE, CONFIG_WORK_QUEUE_PRIORITY);
@@ -100,7 +103,7 @@ void* Setup() {
 
     fixture.assets_manager = std::make_shared<AssetsManager>();
     fixture.controller = std::make_shared<UiController>(
-        fs_service, fixture.config_work_queue, nullptr, fixture.assets_manager);
+        fixture.fs_service, fixture.config_work_queue, nullptr, fixture.assets_manager);
 
     zassert_equal(fixture.controller->Initialize(), 0, "Expected the UI controller to initialize.");
     zassert_equal(fixture.controller->Start(), 0, "Expected the UI controller to start.");
@@ -129,6 +132,7 @@ void Teardown(void*) {
     fixture.navigation_service.reset();
     fixture.assets_manager.reset();
     fixture.config_work_queue.reset();
+    fixture.fs_service.reset();
 }
 
 NavigationService& Navigation() { return *fixture.navigation_service; }
@@ -139,8 +143,12 @@ AssetsManager& Assets() { return *fixture.assets_manager; }
 constexpr uint8_t UI_ASSETS_ACCESS =
     ToMask(AssetAccess::READ) | ToMask(AssetAccess::WRITE) | ToMask(AssetAccess::DELETE);
 
+// The demo files, which the kinds keep in directories of their own.
+constexpr std::array<std::string_view, 3> DEMO_ASSETS {
+    "ui_img_norma_al88.bin", "ui_img_arrow_al88.bin", "ui_lottie_spinner.json" };
+
 void CheckProvider(const AssetsManager& assets, AssetKind kind, std::string_view name,
-    std::string_view extension, uint32_t max_size) {
+    std::string_view directory, std::string_view extension, uint32_t max_size) {
 
     const auto provider = assets.Find(kind);
     zassert_not_null(provider.get(), "Expected the %s kind to be registered.", std::string(name).c_str());
@@ -154,6 +162,8 @@ void CheckProvider(const AssetsManager& assets, AssetKind kind, std::string_view
     zassert_false(static_cast<bool>(provider->is_in_use), "Expected nothing to be in use: widgets keep copies.");
     zassert_not_null(provider->store.get());
     zassert_true(provider->store->IsAvailable());
+    zassert_true(provider->store->GetDirectory() == directory, "Expected the %s kind in %s, not in %s.",
+        std::string(name).c_str(), std::string(directory).c_str(), provider->store->GetDirectory().c_str());
 }
 
 void CheckLoads(const AssetProvider& provider, std::string_view name, std::span<const uint8_t> expected) {
@@ -164,22 +174,10 @@ void CheckLoads(const AssetProvider& provider, std::string_view name, std::span<
         "Expected %s to load as it was written.", std::string(name).c_str());
 }
 
-} // namespace
-
-ZTEST_SUITE(ui_controller, NULL, Setup, Reset, Reset, Teardown);
-
-// What a client sees of the gauge's UI assets (the SMP assets group) is these two kinds.
-ZTEST(ui_controller, test_the_controller_registers_the_image_and_animation_kinds) {
-    CheckProvider(Assets(), AssetKind::IMAGES, "images", ".bin", CONFIG_EERIE_LEAP_UI_IMAGE_MAX_SIZE);
-    CheckProvider(Assets(), AssetKind::ANIMATIONS, "animations", ".json", CONFIG_EERIE_LEAP_UI_ANIMATION_MAX_SIZE);
-
-    zassert_equal(Assets().GetProviders().size(), 2U, "Expected no kind but those of the UI.");
-}
-
-// The widgets of the demo configuration load these by name, and now through the kinds.
-ZTEST(ui_controller, test_the_demo_assets_load_through_the_registered_kinds) {
-    const auto images = Assets().Find(AssetKind::IMAGES);
-    const auto animations = Assets().Find(AssetKind::ANIMATIONS);
+// The demo files load through the providers, whole, and are not at the root of ui_assets/, where they used to be.
+void CheckDemoAssets(const AssetsManager& assets, const IFsService& fs_service) {
+    const auto images = assets.Find(AssetKind::IMAGES);
+    const auto animations = assets.Find(AssetKind::ANIMATIONS);
     zassert_not_null(images.get(), "Expected the images to be registered.");
     zassert_not_null(animations.get(), "Expected the animations to be registered.");
 
@@ -187,6 +185,32 @@ ZTEST(ui_controller, test_the_demo_assets_load_through_the_registered_kinds) {
     CheckLoads(*images, "ui_img_arrow_al88.bin", ui_img_arrow_al88_data);
     CheckLoads(*animations, "ui_lottie_spinner.json", std::span(
         reinterpret_cast<const uint8_t*>(ui_lottie_spinner_json.data()), ui_lottie_spinner_json.size()));
+
+    for(const auto name : DEMO_ASSETS) {
+        const auto legacy_path = "ui_assets/" + std::string(name);
+        zassert_false(fs_service.Exists(legacy_path), "Expected %s to be gone.", legacy_path.c_str());
+    }
+}
+
+} // namespace
+
+ZTEST_SUITE(ui_controller, NULL, Setup, Reset, Reset, Teardown);
+
+// What a client sees of the gauge's UI assets (the SMP assets group) is these two kinds.
+ZTEST(ui_controller, test_the_controller_registers_the_image_and_animation_kinds) {
+    CheckProvider(Assets(), AssetKind::IMAGES, "images", "ui_assets/images", ".bin",
+        CONFIG_EERIE_LEAP_UI_IMAGE_MAX_SIZE);
+    CheckProvider(Assets(), AssetKind::ANIMATIONS, "animations", "ui_assets/animations", ".json",
+        CONFIG_EERIE_LEAP_UI_ANIMATION_MAX_SIZE);
+
+    zassert_equal(Assets().GetProviders().size(), 2U, "Expected no kind but those of the UI.");
+    zassert_not_equal(Assets().Find(AssetKind::IMAGES)->store.get(), Assets().Find(AssetKind::ANIMATIONS)->store.get(),
+        "Expected a store for each kind.");
+}
+
+// The widgets of the demo configuration load these by name, and now through the kinds.
+ZTEST(ui_controller, test_the_demo_assets_load_through_the_registered_kinds) {
+    CheckDemoAssets(Assets(), *fixture.fs_service);
 }
 
 // Configure() reads the stored configuration and must have found usable groups.
@@ -312,23 +336,40 @@ ZTEST(ui_controller, test_closing_with_no_overlay_open_is_refused) {
 // The kinds go with the controller, which the suite above keeps to its end, so this one builds its own.
 ZTEST_SUITE(ui_controller_assets, NULL, NULL, NULL, NULL, NULL);
 
-ZTEST(ui_controller_assets, test_destroying_the_controller_unregisters_its_asset_kinds) {
+namespace {
+
+// A freshly formatted volume.
+std::shared_ptr<FsService> FormatFs() {
     DtDisplay::Initialize();
 
     DtFs::InitInternalFs();
     auto fs_service = std::make_shared<FsService>(DtFs::GetInternalFsMp());
     fs_service->Format();
 
+    return fs_service;
+}
+
+std::shared_ptr<WorkQueueThread> StartConfigWorkQueue() {
     auto config_work_queue = std::make_shared<WorkQueueThread>(
         "cfg_work_q", CONFIG_WORK_QUEUE_STACK_SIZE, CONFIG_WORK_QUEUE_PRIORITY);
     zassert_true(config_work_queue->Initialize(), "Expected the config work queue to start.");
+
+    return config_work_queue;
+}
+
+} // namespace
+
+ZTEST(ui_controller_assets, test_destroying_the_controller_unregisters_its_asset_kinds) {
+    auto fs_service = FormatFs();
+    auto config_work_queue = StartConfigWorkQueue();
 
     auto assets_manager = std::make_shared<AssetsManager>();
     auto controller = std::make_shared<UiController>(fs_service, config_work_queue, nullptr, assets_manager);
     zassert_equal(controller->Initialize(), 0, "Expected the UI controller to initialize.");
 
-    CheckProvider(*assets_manager, AssetKind::IMAGES, "images", ".bin", CONFIG_EERIE_LEAP_UI_IMAGE_MAX_SIZE);
-    CheckProvider(*assets_manager, AssetKind::ANIMATIONS, "animations", ".json",
+    CheckProvider(*assets_manager, AssetKind::IMAGES, "images", "ui_assets/images", ".bin",
+        CONFIG_EERIE_LEAP_UI_IMAGE_MAX_SIZE);
+    CheckProvider(*assets_manager, AssetKind::ANIMATIONS, "animations", "ui_assets/animations", ".json",
         CONFIG_EERIE_LEAP_UI_ANIMATION_MAX_SIZE);
 
     controller.reset();
@@ -338,4 +379,25 @@ ZTEST(ui_controller_assets, test_destroying_the_controller_unregisters_its_asset
     zassert_is_null(assets_manager->Find(AssetKind::ANIMATIONS).get(),
         "Expected the animations to go with the controller.");
     zassert_true(assets_manager->GetProviders().empty());
+}
+
+// The demo files used to sit at the root of ui_assets/. Written there first, they are cleared by Initialize(), and
+// the kinds' directories hold the bundled files, not the stale ones.
+ZTEST(ui_controller_assets, test_the_demo_assets_move_from_the_ui_assets_root_into_the_kind_directories) {
+    auto fs_service = FormatFs();
+    auto config_work_queue = StartConfigWorkQueue();
+
+    const std::array<uint8_t, 16> stale {};
+    zassert_true(fs_service->CreateDirectory("ui_assets"));
+    for(const auto name : DEMO_ASSETS) {
+        const auto legacy_path = "ui_assets/" + std::string(name);
+        zassert_true(fs_service->WriteFile(legacy_path, stale.data(), stale.size()));
+        zassert_true(fs_service->Exists(legacy_path), "Expected %s to be written.", legacy_path.c_str());
+    }
+
+    auto assets_manager = std::make_shared<AssetsManager>();
+    auto controller = std::make_shared<UiController>(fs_service, config_work_queue, nullptr, assets_manager);
+    zassert_equal(controller->Initialize(), 0, "Expected the UI controller to initialize.");
+
+    CheckDemoAssets(*assets_manager, *fs_service);
 }
