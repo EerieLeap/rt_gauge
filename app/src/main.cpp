@@ -144,6 +144,7 @@ LoggingTrigger MakeLoggingButtonTrigger() {
     trigger.binding.payload_key = std::to_underlying(SensorPayloadType::Value);
     trigger.binding.selector_key = std::to_underlying(SensorPayloadType::SensorId);
     trigger.binding.selector_value = std::pmr::string(LOGGING_BUTTON_SENSOR_ID, Mrm::GetExtPmr());
+    trigger.target_uid = 0; // Every unit that can log.
 
     return trigger;
 }
@@ -477,11 +478,9 @@ void SetupTestLoggingTrigger(
     if(!HasLoggingButton(gpio_channel_count))
         return;
 
-    // Storing would overwrite a file that may only be unreadable for now.
-    if(logging_control_configuration_manager->IsStoredConfigurationRejected()) {
-        LOG_WRN("The stored logging control configuration could not be read; it is left as it is and the logging button trigger is not added.");
-        return;
-    }
+    // A file stored before the trigger's target does not decode, and the manager runs on an unsaved
+    // default instead: the update below then replaces the stored file.
+    const bool is_replacing_rejected = logging_control_configuration_manager->IsStoredConfigurationRejected();
 
     auto logging_control_configuration = make_shared_pmr<LoggingControlConfiguration>(Mrm::GetExtPmr());
     if(const auto stored_configuration = logging_control_configuration_manager->Get(); stored_configuration != nullptr)
@@ -492,8 +491,10 @@ void SetupTestLoggingTrigger(
 
     logging_control_configuration->triggers.push_back(MakeLoggingButtonTrigger());
 
-    if(logging_control_configuration_manager->Update(*logging_control_configuration))
+    if(logging_control_configuration_manager->Update(*logging_control_configuration)) {
         LOG_INF("Logging button trigger added to the logging control configuration.");
-    else
+        if(is_replacing_rejected)
+            LOG_WRN("The stored logging control configuration could not be read; it was replaced by one holding only the logging button trigger.");
+    } else
         LOG_ERR("Failed to add the logging button trigger to the logging control configuration.");
 }
