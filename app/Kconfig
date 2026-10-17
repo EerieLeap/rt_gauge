@@ -14,6 +14,18 @@ source "Kconfig.zephyr"
 		int "UI render work queue stack size"
 		default 8192
 
+	config EERIE_LEAP_UI_IMAGE_MAX_SIZE
+		int "Largest image upload"
+		default 4194304
+		help
+		  Largest image a client may upload, in bytes.
+
+	config EERIE_LEAP_UI_ANIMATION_MAX_SIZE
+		int "Largest animation upload"
+		default 524288
+		help
+		  Largest animation a client may upload, in bytes.
+
 	choice EERIE_LEAP_UI_ROTATION_CHOICE
 		prompt "UI rotation"
 		default EERIE_LEAP_UI_ROTATION_NONE

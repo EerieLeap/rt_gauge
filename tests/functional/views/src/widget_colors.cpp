@@ -9,9 +9,7 @@
 
 #include <zephyr/ztest.h>
 
-#include "subsys/assets/assets_manager.h"
-#include "subsys/device_tree/dt_fs.h"
-#include "subsys/fs/services/fs_service.h"
+#include "subsys/assets/asset_kind.h"
 #include "domain/ui_domain/models/animation.h"
 #include "domain/sensor_domain/event_bus/sensor_events_channel.h"
 #include "subsys/event_bus/event_channel_id.h"
@@ -32,6 +30,7 @@ using namespace eerie_leap::domain::sensor_domain::event_bus;
 using namespace eerie_leap::views::widgets;
 using namespace eerie_leap::views::themes;
 using eerie_leap::views::utilitites::Frame;
+using eerie_leap::subsys::assets::AssetKind;
 using eerie_leap::subsys::event_bus::EventChannelId;
 using eerie_leap::subsys::event_bus::EventData;
 
@@ -216,15 +215,11 @@ ZTEST(widget_colors, test_animation_simulator_gallery) {
         WidgetContext context;
         std::shared_ptr<WidgetConfiguration> needle;
         if(index == 2) {
-            using eerie_leap::subsys::device_tree::DtFs;
-            using eerie_leap::subsys::fs::services::FsService;
-            DtFs::InitInternalFs();
-            auto fs = std::make_shared<FsService>(DtFs::GetInternalFsMp());
-            zassert_true(fs->Initialize());
-            context.assets_manager = std::make_shared<AssetsManager>(fs, "animation-gallery");
+            auto store = views_test::MakeAssetStore("animation-gallery");
             std::array<uint8_t, 8 * 28 * 4> pixels;
             pixels.fill(255);
-            zassert_true(context.assets_manager->Save("needle.bin", pixels));
+            zassert_true(store->Save("needle.bin", pixels));
+            context.assets_manager = views_test::MakeAssetsManager(AssetKind::IMAGES, std::move(store));
             needle = views_test::NeedleConfiguration(2, IconType::Image);
             needle->properties[WidgetPropertyType::FILE_PATH] = std::pmr::string("needle.bin");
             needle->properties[WidgetPropertyType::IMG_WIDTH] = 8;

@@ -18,12 +18,14 @@ private:
 
     lv_image_dsc_t lv_image_descriptor_;
     std::optional<std::pmr::vector<uint8_t>> image_data_;
+    // The object that reads lv_image_descriptor_ and image_data_; null until rendered.
+    lv_obj_t* lv_image_ = nullptr;
 
     lv_obj_t* Create(lv_obj_t* parent);
 
 public:
     explicit ImageIcon(std::shared_ptr<Frame> parent);
-    virtual ~ImageIcon() = default;
+    ~ImageIcon() override;
 
     static void RegisterProperties(WidgetPropertyStore& store);
 

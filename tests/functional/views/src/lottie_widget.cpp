@@ -7,9 +7,8 @@
 
 #include <zephyr/ztest.h>
 
+#include "subsys/assets/asset_kind.h"
 #include "subsys/assets/assets_manager.h"
-#include "subsys/device_tree/dt_fs.h"
-#include "subsys/fs/services/fs_service.h"
 #include "domain/ui_domain/lvgl_lock.h"
 #include "event_bus/event_channels.h"
 #include "views/assets/animations/animations_register.h"
@@ -22,6 +21,7 @@ using namespace eerie_leap::domain::ui_domain::models;
 using namespace eerie_leap::views::widgets;
 using namespace eerie_leap::views::widgets::basic;
 using eerie_leap::domain::ui_domain::ScopedLvglLock;
+using eerie_leap::subsys::assets::AssetKind;
 using eerie_leap::subsys::assets::AssetsManager;
 using eerie_leap::views::assets::animations::ui_lottie_spinner_json;
 using eerie_leap::views::utilitites::Frame;
@@ -66,16 +66,11 @@ std::span<const uint8_t> Bytes(std::string_view text) {
 }
 
 WidgetContext Context() {
-    using eerie_leap::subsys::device_tree::DtFs;
-    using eerie_leap::subsys::fs::services::FsService;
-    DtFs::InitInternalFs();
-    auto fs = std::make_shared<FsService>(DtFs::GetInternalFsMp());
-    zassert_true(fs->Initialize());
-    auto assets = std::make_shared<AssetsManager>(fs, "lottie-widget");
-    zassert_true(assets->Save("spinner.json", Bytes(ui_lottie_spinner_json)));
-    zassert_true(assets->Save("fade.json", Bytes(fade_json)));
-    zassert_true(assets->Save("broken.json", Bytes("{\"v\":\"5.7.4\"")));
-    return WidgetContext { .assets_manager = std::move(assets) };
+    auto store = views_test::MakeAssetStore("lottie-widget");
+    zassert_true(store->Save("spinner.json", Bytes(ui_lottie_spinner_json)));
+    zassert_true(store->Save("fade.json", Bytes(fade_json)));
+    zassert_true(store->Save("broken.json", Bytes("{\"v\":\"5.7.4\"")));
+    return WidgetContext { .assets_manager = views_test::MakeAssetsManager(AssetKind::ANIMATIONS, std::move(store)) };
 }
 
 std::shared_ptr<WidgetConfiguration> Configuration(const char* file_path, int width = 0, int height = 0) {
@@ -230,6 +225,28 @@ ZTEST(lottie_widget, test_missing_or_invalid_asset_fails_render) {
     LottieWidget widget(1, MakeRoot(), WidgetContext{});
     widget.Configure(Configuration("spinner.json"));
     zassert_not_equal(widget.Render(), 0);
+}
+
+// Animations are looked up under the animations kind: a store served as another kind, and a registry with
+// no providers, leave the widget blank.
+ZTEST(lottie_widget, test_an_animation_is_served_by_the_animations_kind_only) {
+    ScopedLvglLock lock;
+    {
+        LottieWidget widget(1, MakeRoot(), Context());
+        widget.Configure(Configuration("spinner.json"));
+        zassert_equal(widget.Render(), 0);
+    }
+
+    // The same store, which holds spinner.json, under the other kind.
+    auto store = views_test::MakeAssetStore("lottie-widget");
+    zassert_true(store->Exists("spinner.json"));
+    for(const auto& assets : { views_test::MakeAssetsManager(AssetKind::IMAGES, store),
+                               std::make_shared<AssetsManager>() }) {
+        LottieWidget widget(1, MakeRoot(), WidgetContext { .assets_manager = assets });
+        widget.Configure(Configuration("spinner.json"));
+        zassert_not_equal(widget.Render(), 0);
+        zassert_is_null(LottieObject(widget));
+    }
 }
 
 ZTEST(lottie_widget, test_validation_requires_a_file_path) {

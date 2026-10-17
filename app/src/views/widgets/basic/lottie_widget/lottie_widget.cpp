@@ -7,6 +7,9 @@
 
 #include "utilities/memory/memory_resource_manager.h"
 #include "utilities/memory/scoped_new_resource.h"
+#include "subsys/assets/asset_kind.h"
+#include "subsys/assets/asset_provider.h"
+#include "subsys/assets/asset_store.h"
 #include "domain/ui_domain/models/widget_property.h"
 
 #include "lottie_widget.h"
@@ -16,6 +19,9 @@ namespace eerie_leap::views::widgets::basic {
 using namespace eerie_leap::utilities::memory;
 using namespace eerie_leap::utilities::type;
 using namespace eerie_leap::domain::ui_domain::models;
+
+// Inside eerie_leap::views a bare `assets::` is eerie_leap::views::assets, hence the declaration.
+using eerie_leap::subsys::assets::AssetKind;
 
 LOG_MODULE_REGISTER(lottie_widget_logger);
 
@@ -93,7 +99,13 @@ lv_obj_t* LottieWidget::Create() {
     if(size > max_buffer_bytes)
         return nullptr;
 
-    const auto source = context_.assets_manager->Load(file_path_);
+    const auto provider = context_.assets_manager->Find(AssetKind::ANIMATIONS);
+    if(provider == nullptr || provider->store == nullptr) {
+        LOG_ERR("The unit serves no animations, so Lottie asset '%s' cannot load.", file_path_.c_str());
+        return nullptr;
+    }
+
+    const auto source = provider->store->Load(file_path_);
     if(source.empty()) {
         LOG_ERR("Lottie asset '%s' is missing or empty.", file_path_.c_str());
         return nullptr;

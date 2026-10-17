@@ -40,6 +40,14 @@ config EERIE_LEAP_UI_RENDER_WORK_QUEUE_STACK_SIZE
 	int "UI render work queue stack size"
 	default 8192
 
+config EERIE_LEAP_UI_IMAGE_MAX_SIZE
+	int "Largest image upload"
+	default 4194304
+
+config EERIE_LEAP_UI_ANIMATION_MAX_SIZE
+	int "Largest animation upload"
+	default 524288
+
 config EERIE_LEAP_UI_ROTATION
 	int
 	default 0

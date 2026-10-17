@@ -3,10 +3,14 @@
 #include <cstdint>
 #include <initializer_list>
 #include <memory>
+#include <string_view>
 #include <vector>
 
 #include <lvgl.h>
 
+#include "subsys/assets/asset_kind.h"
+#include "subsys/assets/asset_store.h"
+#include "subsys/assets/assets_manager.h"
 #include "domain/ui_domain/models/icon_type.h"
 #include "domain/ui_domain/models/widget_configuration.h"
 #include "views/renderable_base.h"
@@ -28,6 +32,16 @@ void CleanTestDisplay(void* fixture);
 
 // The stable presentation object beneath a widget's public layout container.
 lv_obj_t* WidgetContent(const eerie_leap::views::widgets::IWidget& widget);
+
+// A store for a directory of the internal volume, which is mounted on first use. Files a test saved
+// there stay for the tests after it.
+std::shared_ptr<eerie_leap::subsys::assets::AssetStore> MakeAssetStore(std::string_view directory);
+
+// A registry that serves the store as the kind, the way UiController registers its kinds. Only IMAGES
+// and ANIMATIONS are supported.
+std::shared_ptr<eerie_leap::subsys::assets::AssetsManager> MakeAssetsManager(
+    eerie_leap::subsys::assets::AssetKind kind,
+    std::shared_ptr<eerie_leap::subsys::assets::AssetStore> store);
 
 // A fill-slot BasicIcon needle for a dial. Labels get text so they can render.
 std::shared_ptr<eerie_leap::domain::ui_domain::models::WidgetConfiguration> NeedleConfiguration(

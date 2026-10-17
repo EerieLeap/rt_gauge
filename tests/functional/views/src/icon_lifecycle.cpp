@@ -1,15 +1,16 @@
 #include <algorithm>
 #include <array>
 #include <memory>
+#include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <utility>
 
 #include <zephyr/ztest.h>
 
+#include "subsys/assets/asset_kind.h"
 #include "subsys/assets/assets_manager.h"
-#include "subsys/device_tree/dt_fs.h"
-#include "subsys/fs/services/fs_service.h"
 #include "domain/logging_domain/event_bus/logging_events_channel.h"
 #include "domain/sensor_domain/event_bus/sensor_events_channel.h"
 #include "domain/ui_domain/configuration/parsers/ui_configuration_validator.h"
@@ -34,6 +35,7 @@ using namespace eerie_leap::domain::sensor_domain::event_bus;
 using namespace eerie_leap::domain::logging_domain::event_bus;
 using eerie_leap::domain::ui_domain::configuration::parsers::UiConfigurationValidator;
 using eerie_leap::event_bus::InitializeEventChannels;
+using eerie_leap::subsys::assets::AssetKind;
 using eerie_leap::subsys::event_bus::EventChannelId;
 using eerie_leap::subsys::event_bus::EventData;
 using eerie_leap::views::utilitites::Frame;
@@ -138,6 +140,15 @@ lv_obj_t* Inner(const IconWidget& widget) {
     return widget.GetIconContainer()->GetObject();
 }
 
+// The lv_image objects at or below an object.
+int CountImages(lv_obj_t* object) {
+    int count = lv_obj_check_type(object, &lv_image_class) ? 1 : 0;
+    const auto children = static_cast<int32_t>(lv_obj_get_child_count(object));
+    for(int32_t index = 0; index < children; ++index)
+        count += CountImages(lv_obj_get_child(object, index));
+    return count;
+}
+
 lv_anim_t* Pulse(const TestIcon& widget) {
     return lv_anim_get(widget.Oval(), nullptr);
 }
@@ -147,36 +158,33 @@ void Tick(uint32_t elapsed) {
     lv_anim_refr_now();
 }
 
-WidgetContext ImageContext(WidgetConfiguration& configuration, int width = 4, int height = 4) {
-    using eerie_leap::subsys::device_tree::DtFs;
-    using eerie_leap::subsys::fs::services::FsService;
-    DtFs::InitInternalFs();
-    auto fs = std::make_shared<FsService>(DtFs::GetInternalFsMp());
-    zassert_true(fs->Initialize());
-    auto assets = std::make_shared<AssetsManager>(fs, "icon-lifecycle");
-    // RGB565A8 reports the RGB plane's two bytes per pixel; append the separate alpha plane.
+// The bytes of a width x height image in the native format with alpha. RGB565A8 reports the RGB plane's
+// two bytes per pixel; the separate alpha plane adds one more.
+size_t ImageBytes(int width, int height) {
     const int bytes_per_pixel = lv_color_format_get_size(LV_COLOR_FORMAT_NATIVE_WITH_ALPHA)
         + (LV_COLOR_FORMAT_NATIVE_WITH_ALPHA == LV_COLOR_FORMAT_RGB565A8 ? 1 : 0);
-    std::vector<uint8_t> pixels(width * height * bytes_per_pixel, 255);
-    zassert_true(assets->Save("needle.bin", pixels));
+    return static_cast<size_t>(width) * height * bytes_per_pixel;
+}
+
+// Serves "needle.bin" as the only image: a file of file_size bytes, exactly the image by default.
+WidgetContext ImageContext(WidgetConfiguration& configuration, int width = 4, int height = 4,
+    std::optional<size_t> file_size = std::nullopt) {
+    auto store = views_test::MakeAssetStore("icon-lifecycle");
+    std::vector<uint8_t> pixels(file_size.value_or(ImageBytes(width, height)), 255);
+    zassert_true(store->Save("needle.bin", pixels));
     configuration.properties[WidgetPropertyType::FILE_PATH] = std::pmr::string("needle.bin");
     configuration.properties[WidgetPropertyType::IMG_WIDTH] = width;
     configuration.properties[WidgetPropertyType::IMG_HEIGHT] = height;
-    return WidgetContext { .assets_manager = std::move(assets) };
+    return WidgetContext { .assets_manager = views_test::MakeAssetsManager(AssetKind::IMAGES, std::move(store)) };
 }
 
 WidgetContext LottieContext(WidgetConfiguration& configuration) {
-    using eerie_leap::subsys::device_tree::DtFs;
-    using eerie_leap::subsys::fs::services::FsService;
     using eerie_leap::views::assets::animations::ui_lottie_spinner_json;
-    DtFs::InitInternalFs();
-    auto fs = std::make_shared<FsService>(DtFs::GetInternalFsMp());
-    zassert_true(fs->Initialize());
-    auto assets = std::make_shared<AssetsManager>(fs, "icon-lifecycle");
-    zassert_true(assets->Save("spinner.json", std::span(
+    auto store = views_test::MakeAssetStore("icon-lifecycle");
+    zassert_true(store->Save("spinner.json", std::span(
         reinterpret_cast<const uint8_t*>(ui_lottie_spinner_json.data()), ui_lottie_spinner_json.size())));
     configuration.properties[WidgetPropertyType::FILE_PATH] = std::pmr::string("spinner.json");
-    return WidgetContext { .assets_manager = std::move(assets) };
+    return WidgetContext { .assets_manager = views_test::MakeAssetsManager(AssetKind::ANIMATIONS, std::move(store)) };
 }
 
 constexpr std::array native_rotation_icons {
@@ -337,6 +345,93 @@ ZTEST(icon_lifecycle, test_rotation_survives_failed_image_render) {
     widget.Configure(configuration);
     zassert_equal(widget.Render(), 0);
     CheckRotation(widget, 450, 10, 30);
+}
+
+// An image object reads the descriptor and pixels of the icon that made it, so a rebuild that fails must not
+// leave the previous image in the widget: that icon is gone. The file changes the way an upload changes it.
+ZTEST(icon_lifecycle, test_a_failed_image_rebuild_leaves_the_widget_empty_and_a_later_rebuild_renders) {
+    ScopedLvglLock lock;
+    auto configuration = RotationConfiguration(IconType::Image);
+    auto context = ImageContext(*configuration, 20, 60);
+    auto store = views_test::MakeAssetStore("icon-lifecycle");
+    const std::vector<uint8_t> valid(ImageBytes(20, 60), 255);
+    TestIcon widget(1, MakeRoot(), context);
+    widget.Configure(configuration);
+    zassert_equal(widget.Render(), 0);
+    auto* content = views_test::WidgetContent(widget);
+    zassert_equal(CountImages(content), 1);
+
+    for(const bool is_deleted : { true, false }) {
+        if(is_deleted)
+            zassert_true(store->Delete("needle.bin"));
+        else
+            zassert_true(store->Save("needle.bin", std::vector<uint8_t>(valid.size() - 1, 255)));
+
+        zassert_not_equal(widget.Render(), 0, "%s file rendered", is_deleted ? "a deleted" : "a short");
+        zassert_is_null(widget.GetIconContainer().get());
+        zassert_equal(CountImages(content), 0, "%s file left an image behind", is_deleted ? "a deleted" : "a short");
+
+        zassert_true(store->Save("needle.bin", valid));
+        zassert_equal(widget.Render(), 0);
+        zassert_equal(CountImages(content), 1);
+        const auto* source = static_cast<const lv_image_dsc_t*>(lv_image_get_src(Inner(widget)));
+        zassert_equal(source->header.w, 20);
+        zassert_equal(source->header.h, 60);
+    }
+}
+
+// A client can upload any file under an image's name, and LVGL reads width x height pixels from it.
+ZTEST(icon_lifecycle, test_an_image_file_smaller_than_its_pixels_renders_nothing) {
+    ScopedLvglLock lock;
+    const size_t required = ImageBytes(20, 60);
+
+    for(const size_t file_size : { required - 1, required / 2, size_t { 1 } }) {
+        auto configuration = RotationConfiguration(IconType::Image);
+        TestIcon widget(1, MakeRoot(), ImageContext(*configuration, 20, 60, file_size));
+        widget.Configure(configuration);
+        zassert_not_equal(widget.Render(), 0, "%zu of %zu bytes rendered", file_size, required);
+        zassert_is_null(widget.GetIconContainer().get());
+    }
+
+    // Exactly the image is enough, and a longer file is read as far as the image goes.
+    for(const size_t file_size : { required, required + 1 }) {
+        auto configuration = RotationConfiguration(IconType::Image);
+        TestIcon widget(1, MakeRoot(), ImageContext(*configuration, 20, 60, file_size));
+        widget.Configure(configuration);
+        zassert_equal(widget.Render(), 0, "%zu of %zu bytes did not render", file_size, required);
+        zassert_not_null(widget.GetIconContainer().get());
+    }
+}
+
+// Images are looked up under the images kind: a store served as another kind, a registry with no
+// providers and a context with no registry all leave the icon blank.
+ZTEST(icon_lifecycle, test_an_image_is_served_by_the_images_kind_only) {
+    ScopedLvglLock lock;
+    auto configuration = RotationConfiguration(IconType::Image);
+    auto context = ImageContext(*configuration, 20, 60);
+
+    {
+        TestIcon widget(1, MakeRoot(), context);
+        widget.Configure(configuration);
+        zassert_equal(widget.Render(), 0);
+    }
+
+    // The same store, which holds needle.bin, under the other kind.
+    auto store = views_test::MakeAssetStore("icon-lifecycle");
+    zassert_true(store->Exists("needle.bin"));
+    const std::array<std::shared_ptr<AssetsManager>, 3> unfit {
+        views_test::MakeAssetsManager(AssetKind::ANIMATIONS, store),
+        std::make_shared<AssetsManager>(),
+        nullptr
+    };
+
+    for(const auto& assets : unfit) {
+        context.assets_manager = assets;
+        TestIcon widget(1, MakeRoot(), context);
+        widget.Configure(configuration);
+        zassert_not_equal(widget.Render(), 0);
+        zassert_is_null(widget.GetIconContainer().get());
+    }
 }
 
 ZTEST(icon_lifecycle, test_rotation_rejects_conflicting_animation) {
@@ -681,6 +776,56 @@ ZTEST(icon_lifecycle, test_image_anchor_tracks_live_dimensions_without_reloading
     zassert_equal(lv_image_get_src(image), source);
     zassert_equal(source->data, pixels);
     zassert_equal(lv_image_get_rotation(image), 900);
+}
+
+// A rendered image follows a dimension change in place only while its loaded file covers the new pixels, the
+// alpha plane included. 30 x 60 is the change a count of the colour plane alone lets through on RGB565: at two
+// bytes per pixel it looks like the 3600 bytes the 20 x 60 file holds.
+ZTEST(icon_lifecycle, test_a_live_image_resize_beyond_the_loaded_file_is_not_applied) {
+    ScopedLvglLock lock;
+    auto configuration = RotationConfiguration(IconType::Image);
+    auto context = ImageContext(*configuration, 20, 60);
+    for(auto target : { WidgetPropertyType::IMG_WIDTH, WidgetPropertyType::IMG_HEIGHT }) {
+        auto binding = configuration->bindings.front();
+        binding.target = target;
+        binding.event.selector_value = static_cast<int>(target);
+        configuration->bindings.push_back(binding);
+    }
+    TestIcon widget(1, MakeRoot(), context);
+    widget.Configure(configuration);
+    zassert_equal(widget.Render(), 0);
+    widget.OnActivated();
+    auto* image = Inner(widget);
+    const auto* source = static_cast<const lv_image_dsc_t*>(lv_image_get_src(image));
+    const auto* pixels = source->data;
+
+    // The descriptor and the object follow only the applied dimensions, and nothing is reloaded. The object
+    // is as big as its content once the layout has run: lv_obj_get_width() reads the last layout's result.
+    const auto check_size = [&](int width, int height) {
+        zassert_equal(source->header.w, width);
+        zassert_equal(source->header.h, height);
+        lv_obj_update_layout(image);
+        zassert_equal(lv_obj_get_width(image), width);
+        zassert_equal(lv_obj_get_height(image), height);
+        zassert_equal(Inner(widget), image);
+        zassert_equal(lv_image_get_src(image), source);
+        zassert_equal(source->data, pixels);
+    };
+    check_size(20, 60);
+
+    // Wider than the file covers: nothing is retargeted.
+    Publish(WidgetPropertyType::IMG_WIDTH, 30);
+    check_size(20, 60);
+
+    // Narrower is within it and applies.
+    Publish(WidgetPropertyType::IMG_WIDTH, 10);
+    check_size(10, 60);
+
+    // The 1200 pixels of the file exactly apply; one more row does not.
+    Publish(WidgetPropertyType::IMG_HEIGHT, 120);
+    check_size(10, 120);
+    Publish(WidgetPropertyType::IMG_HEIGHT, 121);
+    check_size(10, 120);
 }
 
 ZTEST(icon_lifecycle, test_demo_dial_geometry_and_image_rotation_baseline) {

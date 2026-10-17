@@ -1,9 +1,12 @@
 #pragma once
 
+#include <array>
 #include <memory>
 #include <optional>
+#include <string_view>
 #include <vector>
 
+#include "subsys/assets/asset_store.h"
 #include "subsys/assets/assets_manager.h"
 #include "subsys/event_bus/i_scoped_subscription.h"
 #include "subsys/fs/services/i_fs_service.h"
@@ -28,6 +31,7 @@
 namespace eerie_leap::controllers {
 
 using eerie_leap::subsys::assets::AssetsManager;
+using eerie_leap::subsys::assets::AssetStore;
 using eerie_leap::subsys::fs::services::IFsService;
 using eerie_leap::subsys::threading::WorkQueueThread;
 
@@ -53,6 +57,10 @@ private:
     static constexpr const char* UI_CONFIGURATION_NAME = "ui_config";
     static constexpr const char* UI_ASSETS_DIR = "ui_assets";
 
+    // What a client may upload as each kind. A provider keeps only a span of its extensions.
+    static constexpr std::array<std::string_view, 1> IMAGE_EXTENSIONS { ".bin" };
+    static constexpr std::array<std::string_view, 1> ANIMATION_EXTENSIONS { ".json" };
+
     // The first render of a screen group builds its whole LVGL tree, so it gets
     // a stack of its own instead of running on the event bus worker.
     static constexpr int ui_render_work_queue_stack_size_ = CONFIG_EERIE_LEAP_UI_RENDER_WORK_QUEUE_STACK_SIZE;
@@ -63,7 +71,13 @@ private:
     std::shared_ptr<ConfigurationService> configuration_service_;
 
     std::shared_ptr<UiConfigurationManager> ui_configuration_manager_;
-    std::shared_ptr<AssetsManager> ui_assets_manager_;
+    // The unit's registry of asset kinds, shared with the other controllers; the kinds this controller
+    // serves are the ones it registers there.
+    std::shared_ptr<AssetsManager> assets_manager_;
+    std::shared_ptr<AssetStore> ui_assets_store_;
+    // Whether the registry took the kind from this controller, so only that is taken back.
+    bool images_registered_ = false;
+    bool animations_registered_ = false;
     std::shared_ptr<NavigationService> navigation_service_;
 
     // Declared before ui_input_service_, which detaches from the view's LVGL object on teardown.
@@ -86,6 +100,9 @@ private:
     AnySubscription navigation_subscription_;
     int Configure(std::shared_ptr<UiConfiguration> config);
 
+    // Offers ui_assets/ to clients as the image and animation kinds.
+    void RegisterAssets();
+
     std::shared_ptr<IScreen> CreateScreen(std::shared_ptr<ScreenConfiguration> configuration, std::shared_ptr<Frame> parent);
     std::shared_ptr<ScreenConfiguration> FindOverlayConfiguration(uint32_t screen_id) const;
 
@@ -105,10 +122,15 @@ private:
     void SetupTestAssets();
 
 public:
+    /**
+     * @param assets_manager The registry the image and animation kinds are registered in on
+     *        Initialize() and removed from on destruction; a registry of its own when null.
+     */
     UiController(
         std::shared_ptr<IFsService> fs_service,
         std::shared_ptr<WorkQueueThread> config_work_queue_thread,
-        std::shared_ptr<ConfigurationService> configuration_service);
+        std::shared_ptr<ConfigurationService> configuration_service,
+        std::shared_ptr<AssetsManager> assets_manager = nullptr);
     ~UiController();
 
     int Initialize();

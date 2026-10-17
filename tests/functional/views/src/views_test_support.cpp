@@ -1,8 +1,13 @@
+#include <array>
 #include <cerrno>
 #include <utility>
 
+#include <zephyr/ztest.h>
 #include <lvgl.h>
 
+#include "subsys/assets/asset_provider.h"
+#include "subsys/device_tree/dt_fs.h"
+#include "subsys/fs/services/fs_service.h"
 #include "views/widgets/widget_factory.h"
 
 #include "views_test_support.h"
@@ -14,6 +19,13 @@ using eerie_leap::domain::ui_domain::models::ScreenConfiguration;
 using eerie_leap::domain::ui_domain::models::WidgetConfiguration;
 using eerie_leap::domain::ui_domain::models::WidgetPropertyType;
 using eerie_leap::domain::ui_domain::models::WidgetType;
+using eerie_leap::subsys::assets::AssetAccess;
+using eerie_leap::subsys::assets::AssetKind;
+using eerie_leap::subsys::assets::AssetProvider;
+using eerie_leap::subsys::assets::AssetsManager;
+using eerie_leap::subsys::assets::AssetStore;
+using eerie_leap::subsys::device_tree::DtFs;
+using eerie_leap::subsys::fs::services::FsService;
 using eerie_leap::views::themes::ITheme;
 using eerie_leap::views::utilitites::Frame;
 using eerie_leap::views::widgets::IWidget;
@@ -26,6 +38,10 @@ constexpr int32_t display_width = 466;
 constexpr int32_t display_height = 466;
 constexpr int32_t buffer_lines = 10;
 constexpr int32_t max_bytes_per_pixel = 4;
+
+// A provider keeps only a span of its extensions.
+constexpr std::array<std::string_view, 1> image_extensions { ".bin" };
+constexpr std::array<std::string_view, 1> animation_extensions { ".json" };
 
 uint8_t draw_buffer[display_width * buffer_lines * max_bytes_per_pixel];
 lv_display_t* test_display = nullptr;
@@ -60,6 +76,32 @@ void CleanTestDisplay(void* fixture) {
 
 lv_obj_t* WidgetContent(const IWidget& widget) {
     return widget.GetContainer()->GetChild()->GetObject();
+}
+
+std::shared_ptr<AssetStore> MakeAssetStore(std::string_view directory) {
+    DtFs::InitInternalFs();
+    auto fs = std::make_shared<FsService>(DtFs::GetInternalFsMp());
+    zassert_true(fs->Initialize());
+
+    return std::make_shared<AssetStore>(std::move(fs), directory);
+}
+
+std::shared_ptr<AssetsManager> MakeAssetsManager(AssetKind kind, std::shared_ptr<AssetStore> store) {
+    zassert_true(kind == AssetKind::IMAGES || kind == AssetKind::ANIMATIONS);
+    const bool is_image = kind == AssetKind::IMAGES;
+
+    auto assets = std::make_shared<AssetsManager>();
+    zassert_true(assets->Register(AssetProvider {
+        .kind = kind,
+        .name = is_image ? "images" : "animations",
+        .store = std::move(store),
+        .extensions = is_image ? image_extensions : animation_extensions,
+        .access = static_cast<uint8_t>(
+            ToMask(AssetAccess::READ) | ToMask(AssetAccess::WRITE) | ToMask(AssetAccess::DELETE)),
+        .max_size = 1024 * 1024
+    }));
+
+    return assets;
 }
 
 std::shared_ptr<WidgetConfiguration> NeedleConfiguration(uint32_t id, IconType type) {

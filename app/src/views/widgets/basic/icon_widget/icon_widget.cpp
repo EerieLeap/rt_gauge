@@ -54,6 +54,12 @@ std::shared_ptr<Frame> IconWidget::GetIconContainer() const {
 }
 
 int IconWidget::DoRender() {
+    // A rebuild starts from an empty widget, so one that fails leaves it empty. The icon goes before the
+    // frame that shows its object: the object can point into the icon (an image reads the icon's descriptor),
+    // and the icon's destructor can still touch the object.
+    icon_.reset();
+    content_frame_->SetChild(nullptr);
+
     auto lv_obj = Create();
     if(lv_obj == nullptr)
         return -1;

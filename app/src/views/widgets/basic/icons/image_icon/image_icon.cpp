@@ -1,4 +1,12 @@
+#include <cstdint>
+
+#include <zephyr/logging/log.h>
+
 #include "utilities/memory/memory_resource_manager.h"
+#include "subsys/assets/asset_kind.h"
+#include "subsys/assets/asset_provider.h"
+#include "subsys/assets/asset_store.h"
+#include "domain/ui_domain/lvgl_lock.h"
 #include "domain/ui_domain/models/widget_property.h"
 #include "views/themes/theme_manager.h"
 
@@ -13,8 +21,38 @@ using namespace eerie_leap::utilities::type;
 using namespace eerie_leap::domain::ui_domain::models;
 using namespace eerie_leap::views::themes;
 
+using eerie_leap::domain::ui_domain::ScopedLvglLock;
+// Inside eerie_leap::views a bare `assets::` is eerie_leap::views::assets, hence the declaration.
+using eerie_leap::subsys::assets::AssetKind;
+
+LOG_MODULE_REGISTER(image_icon_logger);
+
+namespace {
+
+// The bytes LVGL reads for a width x height image in the native format with alpha. RGB565A8 keeps its
+// alpha in a plane of its own, which lv_color_format_get_size() leaves out.
+uint64_t GetImageBytes(int width, int height) {
+    const uint64_t bytes_per_pixel = lv_color_format_get_size(LV_COLOR_FORMAT_NATIVE_WITH_ALPHA)
+        + (LV_COLOR_FORMAT_NATIVE_WITH_ALPHA == LV_COLOR_FORMAT_RGB565A8 ? 1 : 0);
+
+    return static_cast<uint64_t>(width) * height * bytes_per_pixel;
+}
+
+} // namespace
+
 ImageIcon::ImageIcon(std::shared_ptr<Frame> parent)
     : IconBase(std::move(parent)) {}
+
+ImageIcon::~ImageIcon() {
+    ScopedLvglLock lvgl_guard;
+
+    // The widget can still hold the shared Frame while this icon frees the descriptor and pixels its image
+    // reads, so the object lets go of them first.
+    if(lv_image_ != nullptr) {
+        lv_image_set_src(lv_image_, nullptr);
+        lv_image_cache_drop(&lv_image_descriptor_);
+    }
+}
 
 void ImageIcon::RegisterProperties(WidgetPropertyStore& store) {
     IconBase::RegisterProperties(store);
@@ -33,6 +71,7 @@ int ImageIcon::DoRender() {
         return -1;
 
     container_ = std::make_shared<Frame>(Frame::Create(image).Build());
+    lv_image_ = image;
 
     return 0;
 }
@@ -47,9 +86,22 @@ lv_obj_t* ImageIcon::Create(lv_obj_t* parent) {
     if(ui_assets_manager_ == nullptr)
         return nullptr;
 
-    auto image_data = std::move(ui_assets_manager_->Load(file_path_));
+    const auto provider = ui_assets_manager_->Find(AssetKind::IMAGES);
+    if(provider == nullptr || provider->store == nullptr)
+        return nullptr;
+
+    auto image_data = provider->store->Load(file_path_);
     if(image_data.empty())
         return nullptr;
+
+    // A client can upload any file under an image's name, and LVGL reads width x height pixels from it.
+    // Refused before it replaces image_data_, which a rendered image may still be showing.
+    if(image_data.size() < GetImageBytes(image_width_, image_height_)) {
+        LOG_ERR("Image '%s' holds %zu bytes, too few for %dx%d pixels.",
+            file_path_.c_str(), image_data.size(), image_width_, image_height_);
+        return nullptr;
+    }
+
     image_data_ = std::pmr::vector<uint8_t>(image_data.get_allocator());
     image_data_ = std::move(image_data);
 
@@ -91,9 +143,8 @@ void ImageIcon::Configure(std::shared_ptr<WidgetPropertyStore> properties) {
         || (lv_image_descriptor_.header.w == image_width_ && lv_image_descriptor_.header.h == image_height_))
         return;
 
-    const uint64_t required_bytes = static_cast<uint64_t>(image_width_) * image_height_
-        * lv_color_format_get_size(LV_COLOR_FORMAT_NATIVE_WITH_ALPHA);
-    if(!image_data_.has_value() || required_bytes > image_data_->size())
+    // The rule Create() applies: the loaded file has to cover the new dimensions, alpha plane included.
+    if(!image_data_.has_value() || GetImageBytes(image_width_, image_height_) > image_data_->size())
         return;
 
     lv_image_cache_drop(&lv_image_descriptor_);

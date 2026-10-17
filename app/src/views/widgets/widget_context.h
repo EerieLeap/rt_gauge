@@ -14,6 +14,8 @@ using eerie_leap::domain::ui_domain::services::NavigationService;
 // Everything the view layer may hand to a screen or a widget, passed at
 // construction instead of a per-dependency setter on IWidget.
 struct WidgetContext {
+    // The registry the image and animation widgets look their files up in, by kind; null when the unit
+    // serves none.
     std::shared_ptr<AssetsManager> assets_manager;
     std::shared_ptr<NavigationService> navigation_service;
 };

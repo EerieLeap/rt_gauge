@@ -19,6 +19,7 @@ protected:
 
     bool IsProcessingEligible() const;
 
+    // The unit's asset registry, in which an icon looks its files up by kind.
     std::shared_ptr<AssetsManager> ui_assets_manager_ = nullptr;
 
 public:

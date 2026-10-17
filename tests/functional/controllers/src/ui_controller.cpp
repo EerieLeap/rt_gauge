@@ -1,9 +1,17 @@
+#include <algorithm>
 #include <cstdint>
 #include <memory>
+#include <span>
+#include <string>
+#include <string_view>
 
 #include <zephyr/kernel.h>
 #include <zephyr/ztest.h>
 
+#include "subsys/assets/asset_kind.h"
+#include "subsys/assets/asset_provider.h"
+#include "subsys/assets/asset_store.h"
+#include "subsys/assets/assets_manager.h"
 #include "subsys/device_tree/dt_display.h"
 #include "subsys/device_tree/dt_fs.h"
 #include "subsys/event_bus/event_bus.h"
@@ -16,12 +24,18 @@
 #include "domain/ui_domain/services/navigation_service.h"
 
 #include "controllers/ui_controller.h"
+#include "views/assets/animations/animations_register.h"
+#include "views/assets/images/images_register.h"
 
 using eerie_leap::controllers::UiController;
 using eerie_leap::domain::settings_domain::event_bus::SettingsEventsChannel;
 using eerie_leap::domain::settings_domain::event_bus::SettingsEventType;
 using eerie_leap::domain::ui_domain::event_bus::NavigationEventChannel;
 using eerie_leap::domain::ui_domain::services::NavigationService;
+using eerie_leap::subsys::assets::AssetAccess;
+using eerie_leap::subsys::assets::AssetKind;
+using eerie_leap::subsys::assets::AssetProvider;
+using eerie_leap::subsys::assets::AssetsManager;
 using eerie_leap::subsys::device_tree::DtDisplay;
 using eerie_leap::subsys::device_tree::DtFs;
 using eerie_leap::subsys::event_bus::AnySubscription;
@@ -29,6 +43,9 @@ using eerie_leap::subsys::event_bus::CreateScopedSubscription;
 using eerie_leap::subsys::event_bus::EventBus;
 using eerie_leap::subsys::fs::services::FsService;
 using eerie_leap::subsys::threading::WorkQueueThread;
+using eerie_leap::views::assets::animations::ui_lottie_spinner_json;
+using eerie_leap::views::assets::images::ui_img_arrow_al88_data;
+using eerie_leap::views::assets::images::ui_img_norma_al88_data;
 
 namespace {
 
@@ -60,6 +77,7 @@ public:
 // configuration and writes ~870 KB of assets, and its LVGL objects are process-wide.
 struct Fixture {
     std::shared_ptr<WorkQueueThread> config_work_queue;
+    std::shared_ptr<AssetsManager> assets_manager;
     std::shared_ptr<UiController> controller;
     std::shared_ptr<NavigationService> navigation_service;
 };
@@ -80,8 +98,9 @@ void* Setup() {
         "cfg_work_q", CONFIG_WORK_QUEUE_STACK_SIZE, CONFIG_WORK_QUEUE_PRIORITY);
     zassert_true(fixture.config_work_queue->Initialize(), "Expected the config work queue to start.");
 
+    fixture.assets_manager = std::make_shared<AssetsManager>();
     fixture.controller = std::make_shared<UiController>(
-        fs_service, fixture.config_work_queue, nullptr);
+        fs_service, fixture.config_work_queue, nullptr, fixture.assets_manager);
 
     zassert_equal(fixture.controller->Initialize(), 0, "Expected the UI controller to initialize.");
     zassert_equal(fixture.controller->Start(), 0, "Expected the UI controller to start.");
@@ -108,14 +127,67 @@ void Reset(void*) {
 void Teardown(void*) {
     fixture.controller.reset();
     fixture.navigation_service.reset();
+    fixture.assets_manager.reset();
     fixture.config_work_queue.reset();
 }
 
 NavigationService& Navigation() { return *fixture.navigation_service; }
 
+AssetsManager& Assets() { return *fixture.assets_manager; }
+
+// What a client may do with the gauge's UI assets: read, overwrite and delete them.
+constexpr uint8_t UI_ASSETS_ACCESS =
+    ToMask(AssetAccess::READ) | ToMask(AssetAccess::WRITE) | ToMask(AssetAccess::DELETE);
+
+void CheckProvider(const AssetsManager& assets, AssetKind kind, std::string_view name,
+    std::string_view extension, uint32_t max_size) {
+
+    const auto provider = assets.Find(kind);
+    zassert_not_null(provider.get(), "Expected the %s kind to be registered.", std::string(name).c_str());
+
+    zassert_equal(provider->kind, kind);
+    zassert_true(provider->name == name, "Expected the kind to be listed as %s.", std::string(name).c_str());
+    zassert_equal(provider->extensions.size(), 1U);
+    zassert_true(provider->extensions[0] == extension, "Expected the extension %s.", std::string(extension).c_str());
+    zassert_equal(provider->access, UI_ASSETS_ACCESS);
+    zassert_equal(provider->max_size, max_size);
+    zassert_false(static_cast<bool>(provider->is_in_use), "Expected nothing to be in use: widgets keep copies.");
+    zassert_not_null(provider->store.get());
+    zassert_true(provider->store->IsAvailable());
+}
+
+void CheckLoads(const AssetProvider& provider, std::string_view name, std::span<const uint8_t> expected) {
+    const auto loaded = provider.store->Load(name);
+
+    zassert_equal(loaded.size(), expected.size(), "Expected %s to load whole.", std::string(name).c_str());
+    zassert_true(std::equal(loaded.begin(), loaded.end(), expected.begin()),
+        "Expected %s to load as it was written.", std::string(name).c_str());
+}
+
 } // namespace
 
 ZTEST_SUITE(ui_controller, NULL, Setup, Reset, Reset, Teardown);
+
+// What a client sees of the gauge's UI assets (the SMP assets group) is these two kinds.
+ZTEST(ui_controller, test_the_controller_registers_the_image_and_animation_kinds) {
+    CheckProvider(Assets(), AssetKind::IMAGES, "images", ".bin", CONFIG_EERIE_LEAP_UI_IMAGE_MAX_SIZE);
+    CheckProvider(Assets(), AssetKind::ANIMATIONS, "animations", ".json", CONFIG_EERIE_LEAP_UI_ANIMATION_MAX_SIZE);
+
+    zassert_equal(Assets().GetProviders().size(), 2U, "Expected no kind but those of the UI.");
+}
+
+// The widgets of the demo configuration load these by name, and now through the kinds.
+ZTEST(ui_controller, test_the_demo_assets_load_through_the_registered_kinds) {
+    const auto images = Assets().Find(AssetKind::IMAGES);
+    const auto animations = Assets().Find(AssetKind::ANIMATIONS);
+    zassert_not_null(images.get(), "Expected the images to be registered.");
+    zassert_not_null(animations.get(), "Expected the animations to be registered.");
+
+    CheckLoads(*images, "ui_img_norma_al88.bin", ui_img_norma_al88_data);
+    CheckLoads(*images, "ui_img_arrow_al88.bin", ui_img_arrow_al88_data);
+    CheckLoads(*animations, "ui_lottie_spinner.json", std::span(
+        reinterpret_cast<const uint8_t*>(ui_lottie_spinner_json.data()), ui_lottie_spinner_json.size()));
+}
 
 // Configure() reads the stored configuration and must have found usable groups.
 ZTEST(ui_controller, test_the_controller_starts_on_a_configured_screen_group) {
@@ -235,4 +307,35 @@ ZTEST(ui_controller, test_closing_with_no_overlay_open_is_refused) {
 
     zassert_false(Navigation().IsOverlayActive());
     zassert_true(Navigation().GetActiveGroupId().has_value());
+}
+
+// The kinds go with the controller, which the suite above keeps to its end, so this one builds its own.
+ZTEST_SUITE(ui_controller_assets, NULL, NULL, NULL, NULL, NULL);
+
+ZTEST(ui_controller_assets, test_destroying_the_controller_unregisters_its_asset_kinds) {
+    DtDisplay::Initialize();
+
+    DtFs::InitInternalFs();
+    auto fs_service = std::make_shared<FsService>(DtFs::GetInternalFsMp());
+    fs_service->Format();
+
+    auto config_work_queue = std::make_shared<WorkQueueThread>(
+        "cfg_work_q", CONFIG_WORK_QUEUE_STACK_SIZE, CONFIG_WORK_QUEUE_PRIORITY);
+    zassert_true(config_work_queue->Initialize(), "Expected the config work queue to start.");
+
+    auto assets_manager = std::make_shared<AssetsManager>();
+    auto controller = std::make_shared<UiController>(fs_service, config_work_queue, nullptr, assets_manager);
+    zassert_equal(controller->Initialize(), 0, "Expected the UI controller to initialize.");
+
+    CheckProvider(*assets_manager, AssetKind::IMAGES, "images", ".bin", CONFIG_EERIE_LEAP_UI_IMAGE_MAX_SIZE);
+    CheckProvider(*assets_manager, AssetKind::ANIMATIONS, "animations", ".json",
+        CONFIG_EERIE_LEAP_UI_ANIMATION_MAX_SIZE);
+
+    controller.reset();
+
+    zassert_is_null(assets_manager->Find(AssetKind::IMAGES).get(),
+        "Expected the images to go with the controller.");
+    zassert_is_null(assets_manager->Find(AssetKind::ANIMATIONS).get(),
+        "Expected the animations to go with the controller.");
+    zassert_true(assets_manager->GetProviders().empty());
 }

@@ -34,6 +34,8 @@
 #include "domain/ui_domain/models/animation.h"
 #include "domain/settings_domain/models/setting_id.h"
 
+#include "subsys/assets/asset_kind.h"
+#include "subsys/assets/asset_provider.h"
 #include "subsys/event_bus/event_channel_id.h"
 
 #include "views/screens/screen_factory.h"
@@ -60,6 +62,9 @@ using namespace eerie_leap::views::assets::animations;
 namespace config_services = eerie_leap::configuration::services;
 
 using eerie_leap::views::widgets::WidgetFactory;
+using eerie_leap::subsys::assets::AssetAccess;
+using eerie_leap::subsys::assets::AssetKind;
+using eerie_leap::subsys::assets::AssetProvider;
 using eerie_leap::domain::ui_domain::ScopedLvglLock;
 using eerie_leap::domain::ui_domain::event_bus::NavigationEventType;
 using eerie_leap::domain::ui_domain::event_bus::NavigationPayloadType;
@@ -174,10 +179,16 @@ void AddSettingBindings(WidgetConfiguration& widget, const char* setting_id, Pro
 UiController::UiController(
     std::shared_ptr<IFsService> fs_service,
     std::shared_ptr<WorkQueueThread> config_work_queue_thread,
-    std::shared_ptr<ConfigurationService> configuration_service)
+    std::shared_ptr<ConfigurationService> configuration_service,
+    std::shared_ptr<AssetsManager> assets_manager)
         : fs_service_(std::move(fs_service)),
         config_work_queue_thread_(std::move(config_work_queue_thread)),
-        configuration_service_(std::move(configuration_service)) {}
+        configuration_service_(std::move(configuration_service)),
+        assets_manager_(std::move(assets_manager)) {
+
+    if(assets_manager_ == nullptr)
+        assets_manager_ = std::make_shared<AssetsManager>();
+}
 
 UiController::~UiController() {
     navigation_subscription_.reset();
@@ -185,6 +196,13 @@ UiController::~UiController() {
     // The dispatcher holds a raw pointer to a work queue destroyed before main_view_.
     if(main_view_ != nullptr)
         main_view_->SetRenderDispatcher(nullptr);
+
+    // The registry outlives the controller. Widgets that are still drawing find nothing and show nothing.
+    if(images_registered_)
+        assets_manager_->Unregister(AssetKind::IMAGES);
+
+    if(animations_registered_)
+        assets_manager_->Unregister(AssetKind::ANIMATIONS);
 }
 
 int UiController::Initialize() {
@@ -209,7 +227,7 @@ int UiController::Initialize() {
         configuration_service_->RegisterCborConfigurationManager(
             ConfigurationService::Type::Ui, ui_configuration_manager_);
 
-    ui_assets_manager_ = std::make_shared<AssetsManager>(fs_service_, UI_ASSETS_DIR);
+    RegisterAssets();
 
     // TODO: For test purposes only
     SetupTestConfiguration();
@@ -249,7 +267,7 @@ int UiController::Initialize() {
     }
 
     widget_context_ = WidgetContext {
-        .assets_manager = ui_assets_manager_,
+        .assets_manager = assets_manager_,
         .navigation_service = navigation_service_
     };
 
@@ -265,6 +283,37 @@ int UiController::Initialize() {
     ConfigureGestures();
 
     return 0;
+}
+
+void UiController::RegisterAssets() {
+    ui_assets_store_ = std::make_shared<AssetStore>(fs_service_, UI_ASSETS_DIR);
+
+    // Widgets keep RAM copies of what they load, so a client may overwrite or delete a file a widget
+    // shows: nothing is ever in use, and the change appears at the widget's next render.
+    constexpr auto access = static_cast<uint8_t>(
+        ToMask(AssetAccess::READ) | ToMask(AssetAccess::WRITE) | ToMask(AssetAccess::DELETE));
+
+    images_registered_ = assets_manager_->Register(AssetProvider {
+        .kind = AssetKind::IMAGES,
+        .name = "images",
+        .store = ui_assets_store_,
+        .extensions = IMAGE_EXTENSIONS,
+        .access = access,
+        .max_size = CONFIG_EERIE_LEAP_UI_IMAGE_MAX_SIZE
+    });
+    if(!images_registered_)
+        LOG_ERR("Failed to register the image assets, the registry has them already.");
+
+    animations_registered_ = assets_manager_->Register(AssetProvider {
+        .kind = AssetKind::ANIMATIONS,
+        .name = "animations",
+        .store = ui_assets_store_,
+        .extensions = ANIMATION_EXTENSIONS,
+        .access = access,
+        .max_size = CONFIG_EERIE_LEAP_UI_ANIMATION_MAX_SIZE
+    });
+    if(!animations_registered_)
+        LOG_ERR("Failed to register the animation assets, the registry has them already.");
 }
 
 void UiController::ConfigureGestures() {
@@ -900,23 +949,22 @@ void UiController::SetupTestConfiguration() {
 
 void UiController::SetupTestAssets() {
     const auto save_if_stale = [this](std::string_view name, std::string_view json) {
-        const auto path = std::string(UI_ASSETS_DIR) + "/" + std::string(name);
-        if(ui_assets_manager_->Exists(name) && fs_service_->GetFileSize(path) == json.size())
+        if(const auto size = ui_assets_store_->GetSize(name); size.has_value() && *size == json.size())
             return;
 
-        ui_assets_manager_->Save(name, std::span(reinterpret_cast<const uint8_t*>(json.data()), json.size()));
+        ui_assets_store_->Save(name, std::span(reinterpret_cast<const uint8_t*>(json.data()), json.size()));
     };
 
     save_if_stale("ui_lottie_spinner.json", ui_lottie_spinner_json);
 
-    if(ui_assets_manager_->Exists("ui_img_norma_al88.bin"))
+    if(ui_assets_store_->Exists("ui_img_norma_al88.bin"))
         return;
 
-    ui_assets_manager_->Save(
+    ui_assets_store_->Save(
         "ui_img_norma_al88.bin",
         ui_img_norma_al88_data);
 
-    ui_assets_manager_->Save(
+    ui_assets_store_->Save(
         "ui_img_arrow_al88.bin",
         ui_img_arrow_al88_data);
 }

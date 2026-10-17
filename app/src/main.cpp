@@ -14,6 +14,7 @@
 #include "utilities/dev_tools/coredump_reporter.h"
 #include "utilities/string/string_helpers.h"
 
+#include "subsys/assets/assets_manager.h"
 #include "subsys/device_tree/dt_configurator.h"
 #include "subsys/device_tree/dt_feature.h"
 #include "subsys/device_tree/dt_fs.h"
@@ -86,6 +87,7 @@ using eerie_leap::domain::logging_domain::control::models::LoggingControlConfigu
 using eerie_leap::domain::logging_domain::control::models::LoggingTrigger;
 using eerie_leap::domain::sensor_domain::event_bus::SensorEventType;
 using eerie_leap::domain::sensor_domain::event_bus::SensorPayloadType;
+using eerie_leap::subsys::assets::AssetsManager;
 using eerie_leap::subsys::event_bus::EventChannelId;
 using eerie_leap::subsys::event_bus::EventData;
 using eerie_leap::subsys::event_bus::SelectorMatches;
@@ -170,6 +172,9 @@ int main() {
         return -1;
     }
 
+    // Shared: controllers register the asset kinds they own, and the management controller serves them.
+    auto assets_manager = std::make_shared<AssetsManager>();
+
     auto rtc_provider = std::make_shared<RtcProvider>();
     auto boot_elapsed_time_provider = std::make_shared<BootElapsedTimeProvider>();
     auto time_service = std::make_shared<TimeService>(rtc_provider, boot_elapsed_time_provider);
@@ -219,7 +224,8 @@ int main() {
     auto ui_controller = std::make_shared<UiController>(
         fs_service,
         config_work_queue_thread,
-        configuration_service);
+        configuration_service,
+        assets_manager);
     if(ui_controller->Initialize() != 0) {
         LOG_ERR("Failed to initialize the UI controller.");
         return -1;
