@@ -139,6 +139,7 @@ The values a bench needs:
 | CAN channel `type` | `CLASSICAL_CAN` 1, `CANFD` 2 |
 | Trigger `channel` | `Sensors` 1, `Logging` 2 |
 | Trigger `event_type`, `payload_key` (sensors channel) | `DataUpdated` 0; payload `SensorId` 0, `Value` 1 |
+| Trigger `target_uid` | CDMP UID of the unit the trigger starts and stops; 0 for every unit that can log (one broadcast) |
 | `sensor_id_hash` (logging configuration) | The 32-bit hash of the sensor id, `StringHelpers::GetHash` in rt_core; see its `smp.md` |
 
 An indicator sensor and a trigger that logs while it is on:
@@ -168,6 +169,7 @@ triggers:
   has_selector: true
   selector_key: 0               # SensorId
   selector_value: bench_switch
+  target_uid: 0                 # CDMP UID of the unit to start and stop; 0 = every unit that can log
 ```
 
 ### Bench builds

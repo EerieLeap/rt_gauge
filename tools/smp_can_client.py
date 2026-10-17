@@ -1144,7 +1144,7 @@ def command_devices(client: SmpClient, args: argparse.Namespace) -> None:
     while True:
         response = client.read(Group.NETWORK, 0, {"off": offset})
         for device in response["devices"]:
-            print(f"id {device['id']:3}  uid {device['uid']:#010x}  type {device['type']}  status {device['status']}")
+            print(f"id {device['id']:3}  uid {device['uid']:#010x}  features {device['features']:#06x}  status {device['status']}")
         offset += len(response["devices"])
         if not response["devices"] or offset >= response["total"]:
             return
