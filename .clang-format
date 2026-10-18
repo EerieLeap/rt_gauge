@@ -1,0 +1,90 @@
+# C++ style for the EerieLeap sources. Needs clang-format 23 or later: older versions reject the
+# BreakAfterOpenBracket*/BreakBeforeCloseBracket*, PackParameters and BreakBinaryOperations keys.
+---
+Language: Cpp
+BasedOnStyle: LLVM
+Standard: Latest
+
+# Indentation and line length
+IndentWidth: 4
+ContinuationIndentWidth: 4
+ColumnLimit: 120
+UseTab: Never
+TabWidth: 4
+LineEnding: LF
+InsertNewlineAtEOF: true
+AccessModifierOffset: -4
+IndentCaseLabels: true
+IndentPPDirectives: BeforeHash
+PPIndentWidth: 4
+
+# Braces and short forms: attached braces; only empty functions and lambdas stay on one line.
+BreakBeforeBraces: Attach
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortLambdasOnASingleLine: Empty
+AllowShortEnumsOnASingleLine: false
+
+# Spacing
+SpaceBeforeParens: Never
+SpaceAfterTemplateKeyword: false
+PointerAlignment: Left
+ReferenceAlignment: Pointer
+DerivePointerAlignment: false
+SpacesBeforeTrailingComments: 1
+
+# Wrapping: a list that does not fit breaks after "(" and puts ")" on its own line; parameters go one
+# per line, arguments are packed.
+AlignAfterOpenBracket: false
+BreakAfterOpenBracketFunction: true
+BreakBeforeCloseBracketFunction: true
+PackParameters:
+  BinPack: OnePerLine
+AllowAllParametersOfDeclarationOnNextLine: false
+PenaltyBreakAssignment: 100
+
+# Operators: a wrapped line starts with its operator; a wrapped condition puts each && and || on a line.
+BreakBeforeBinaryOperators: NonAssignment
+BreakBinaryOperations:
+  Default: Never
+  PerOperator:
+    - Operators: ['&&', '||']
+      Style: OnePerLine
+AlignOperands: DontAlign
+
+# Constructors, inheritance and templates
+BreakConstructorInitializers: AfterColon
+PackConstructorInitializers: Never
+ConstructorInitializerIndentWidth: 4
+BreakInheritanceList: AfterColon
+BreakTemplateDeclarations: Yes
+RequiresClausePosition: OwnLine
+IndentRequiresClause: true
+
+# Braced lists: spaces inside the braces; a trailing comma keeps one element per line.
+Cpp11BracedListStyle: Block
+SpaceBeforeCpp11BracedList: false
+
+# Access modifiers and empty lines
+EmptyLineBeforeAccessModifier: LogicalBlock
+EmptyLineAfterAccessModifier: Never
+MaxEmptyLinesToKeep: 1
+KeepEmptyLines:
+  AtEndOfFile: false
+  AtStartOfBlock: true
+  AtStartOfFile: false
+
+# Namespaces, includes, comments and macros
+ShortNamespaceLines: 0
+IncludeBlocks: Preserve
+IncludeCategories:
+  - Regex: '^<'
+    Priority: 1
+  - Regex: '.*'
+    Priority: 2
+ReflowComments: Never
+AlignEscapedNewlines: DontAlign
+# Zephyr macros whose arguments hold separators or code, such as (,), that must be kept as written.
+WhitespaceSensitiveMacros:
+  - DT_FOREACH_CHILD_SEP
+  - IF_ENABLED
+...

@@ -1,0 +1,9 @@
+# zcbor output for app/src/configuration/cbor/cbor_schemas/, adapted by hand in zcbor's layout
+app/src/configuration/cbor/cbor_*_config/**
+# LVGL font and image converter output
+app/src/views/assets/fonts/lv_font_*.c
+app/src/views/assets/images/*.cpp
+# Zephyr drivers, boards and bindings, in Zephyr's coding style
+boards/**
+drivers/**
+include/zephyr/**
