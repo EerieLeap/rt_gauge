@@ -290,7 +290,7 @@ ZTEST(ui_controller, test_overlay_can_reopen_above_the_shape_screen) {
 // An overlay is built long after Configure() broadcast the settings state, so the
 // bindings its widgets just resolved have to be seeded again or they keep their defaults.
 ZTEST(ui_controller, test_showing_an_overlay_asks_settings_owners_to_republish) {
-    k_sem requested;
+    k_sem requested{};
     k_sem_init(&requested, 0, K_SEM_MAX_LIMIT);
 
     AnySubscription subscription = CreateScopedSubscription(

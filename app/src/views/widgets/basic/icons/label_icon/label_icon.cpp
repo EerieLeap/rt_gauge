@@ -56,14 +56,14 @@ int LabelIcon::ApplyTheme(const ITheme& theme) {
 }
 
 int LabelIcon::DoRender() {
-    auto lv_icon = Create(parent_->GetObject());
+    auto* lv_icon = Create(parent_->GetObject());
     container_ = std::make_shared<Frame>(Frame::Create(lv_icon).Build());
 
     return 0;
 }
 
 lv_obj_t* LabelIcon::Create(lv_obj_t* parent) {
-    auto lv_icon = lv_obj_create(parent);
+    auto* lv_icon = lv_obj_create(parent);
     lv_obj_set_align(lv_icon, LV_ALIGN_CENTER);
     lv_obj_remove_flag(lv_icon, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_border_width(lv_icon, 0, LV_PART_MAIN | LV_STATE_DEFAULT);

@@ -44,7 +44,7 @@ private:
     std::shared_ptr<WorkQueueThread> config_work_queue_thread_;
 
     DisplayConfiguration configuration_;
-    mutable k_mutex lock_;
+    mutable k_mutex lock_{};
 
     std::optional<WorkQueueTask<PersistTask>> persist_task_;
 

@@ -16,8 +16,8 @@ using eerie_leap::views::widgets::basic::icons::IIcon;
 class IconWidget : public WidgetBase {
 protected:
     IconType icon_type_;
-    int position_x_;
-    int position_y_;
+    int position_x_{};
+    int position_y_{};
 
     std::unique_ptr<IIcon> icon_;
 

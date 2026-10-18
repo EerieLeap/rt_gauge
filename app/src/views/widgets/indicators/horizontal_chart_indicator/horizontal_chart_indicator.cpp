@@ -19,7 +19,7 @@ HorizontalChartIndicator::HorizontalChartIndicator(uint32_t id, std::shared_ptr<
     IndicatorBase(id, std::move(parent), std::move(context)) {}
 
 int HorizontalChartIndicator::DoRender() {
-    auto chart = Create(
+    auto* chart = Create(
         content_frame_->GetObject(), static_cast<int32_t>(range_start_), static_cast<int32_t>(range_end_), point_count_,
         chart_type_
     );
@@ -44,7 +44,7 @@ void HorizontalChartIndicator::RegisterProperties(WidgetPropertyStore& store) co
 int HorizontalChartIndicator::ApplyTheme(const ITheme& theme) {
     const auto primary = properties_->ResolveColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE, theme.GetPrimaryColor());
 
-    auto ser = lv_chart_get_series_next(lv_chart_, nullptr);
+    auto* ser = lv_chart_get_series_next(lv_chart_, nullptr);
     lv_chart_set_series_color(lv_chart_, ser, primary.ToLvColor());
     // LVGL's bar renderer forces its rectangles to full opacity. Composite this style-free,
     // single-series chart once for both chart types; the outer wrapper owns widget opacity.
@@ -90,7 +90,7 @@ lv_obj_t* HorizontalChartIndicator::Create(
     lv_chart_set_range(lv_chart_, LV_CHART_AXIS_PRIMARY_Y, range_start, range_end);
 
     lv_chart_set_point_count(lv_chart_, point_count);
-    auto ser = lv_chart_add_series(lv_chart_, lv_color_hex(0x000000), LV_CHART_AXIS_PRIMARY_Y);
+    auto* ser = lv_chart_add_series(lv_chart_, lv_color_hex(0x000000), LV_CHART_AXIS_PRIMARY_Y);
     lv_chart_set_series_color(lv_chart_, ser, lv_color_hex(0x3D3D3D));
 
     lv_obj_set_style_line_opa(lv_chart_, LV_OPA_COVER, LV_PART_ITEMS | LV_STATE_DEFAULT);
@@ -99,7 +99,7 @@ lv_obj_t* HorizontalChartIndicator::Create(
 }
 
 void HorizontalChartIndicator::UpdateIndicator(float value) {
-    auto ser = lv_chart_get_series_next(lv_chart_, nullptr);
+    auto* ser = lv_chart_get_series_next(lv_chart_, nullptr);
 
     lv_chart_set_next_value(lv_chart_, ser, static_cast<int32_t>(value));
 }

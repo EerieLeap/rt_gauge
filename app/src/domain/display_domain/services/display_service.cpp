@@ -40,7 +40,7 @@ uint32_t BrightnessSettingId() {
 }
 
 bool IsBrightnessSetting(const SettingsEventsChannel::EventMessage& event) {
-    auto it = event.payload.find(SettingsPayloadType::SettingId);
+    const auto* it = event.payload.find(SettingsPayloadType::SettingId);
     if(it == event.payload.end())
         return false;
 
@@ -51,7 +51,7 @@ bool IsBrightnessSetting(const SettingsEventsChannel::EventMessage& event) {
 
 // A request that names no setting is addressed to every owner.
 bool IsBrightnessStateRequest(const SettingsEventsChannel::EventMessage& event) {
-    return event.payload.find(SettingsPayloadType::SettingId) == event.payload.end() || IsBrightnessSetting(event);
+    return !event.payload.contains(SettingsPayloadType::SettingId) || IsBrightnessSetting(event);
 }
 
 } // namespace
@@ -141,7 +141,7 @@ void DisplayService::SubscribeSettings() {
 }
 
 void DisplayService::OnBrightnessChangeRequested(const SettingsEventsChannel::EventMessage& event) {
-    auto it = event.payload.find(SettingsPayloadType::Value);
+    const auto* it = event.payload.find(SettingsPayloadType::Value);
     if(it == event.payload.end())
         return;
 

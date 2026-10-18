@@ -26,7 +26,7 @@ private:
 
     std::optional<uint32_t> active_overlay_screen_id_;
 
-    mutable k_mutex lock_;
+    mutable k_mutex lock_{};
 
     void PushHistory(uint32_t screen_group_id);
     std::optional<uint32_t> PeekHistory() const;

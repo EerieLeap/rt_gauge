@@ -11,7 +11,6 @@
 #include "views_test_support.h"
 
 using eerie_leap::views::MainView;
-using eerie_leap::views::utilitites::Frame;
 using views_test::CleanTestDisplay;
 using views_test::EnsureTestDisplay;
 using views_test::FakeScreen;

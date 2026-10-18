@@ -293,10 +293,7 @@ ZTEST(widget_children, test_nested_ownership_preserves_instances_configuration_a
     zassert_equal(&tree.branch->Left(), tree.first);
     zassert_equal(&tree.root->Right(), tree.last);
     const auto parent_properties = tree.root->GetSupportedProperties();
-    zassert_true(
-        std::find(parent_properties.begin(), parent_properties.end(), WidgetPropertyType::LABEL)
-        == parent_properties.end()
-    );
+    zassert_true(std::ranges::find(parent_properties, WidgetPropertyType::LABEL) == parent_properties.end());
     zassert_equal(
         std::count(parent_properties.begin(), parent_properties.end(), WidgetPropertyType::CHILD_WIDGET_IDS), 1
     );

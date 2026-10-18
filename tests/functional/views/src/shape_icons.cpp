@@ -85,7 +85,7 @@ lv_obj_t* ImageObject(const IconWidget& widget) {
 }
 
 const lv_image_dsc_t& Mask(const IconWidget& widget) {
-    auto image = static_cast<const lv_image_dsc_t*>(lv_image_get_src(ImageObject(widget)));
+    const auto* image = static_cast<const lv_image_dsc_t*>(lv_image_get_src(ImageObject(widget)));
     zassert_not_null(image);
     zassert_equal(image->header.cf, LV_COLOR_FORMAT_A8);
     return *image;
@@ -93,7 +93,7 @@ const lv_image_dsc_t& Mask(const IconWidget& widget) {
 
 uint8_t Alpha(const IconWidget& widget, int x, int y) {
     const auto& image = Mask(widget);
-    zassert_true(x >= 0 && x < image.header.w && y >= 0 && y < image.header.h);
+    zassert_true(x >= 0 && std::cmp_less(x, image.header.w) && y >= 0 && std::cmp_less(y, image.header.h));
     return image.data[y * image.header.stride + x];
 }
 
@@ -133,7 +133,7 @@ std::vector<uint8_t> PolygonPixels(
     properties->Set(WidgetPropertyType::STROKE_PX, stroke);
     icon.Configure(properties);
     zassert_equal(icon.Render(), 0);
-    auto image = static_cast<const lv_image_dsc_t*>(lv_image_get_src(icon.GetContainer()->GetObject()));
+    const auto* image = static_cast<const lv_image_dsc_t*>(lv_image_get_src(icon.GetContainer()->GetObject()));
     zassert_not_null(image);
     std::vector<uint8_t> pixels(64 * 64);
     for(int y = 0; y < 64; ++y)
@@ -148,11 +148,11 @@ void SavePreview(const lv_draw_buf_t& snapshot, const char* name, int variant) {
         return;
     char path[512];
     std::snprintf(path, sizeof(path), "%s/%s_%d.ppm", directory, name, variant);
-    auto file = std::fopen(path, "wb");
+    auto* file = std::fopen(path, "wb");
     zassert_not_null(file);
     std::fprintf(file, "P6\n%u %u\n255\n", snapshot.header.w, snapshot.header.h);
     for(uint32_t y = 0; y < snapshot.header.h; ++y) {
-        auto pixels = reinterpret_cast<const lv_color32_t*>(snapshot.data + y * snapshot.header.stride);
+        const auto* pixels = reinterpret_cast<const lv_color32_t*>(snapshot.data + y * snapshot.header.stride);
         for(uint32_t x = 0; x < snapshot.header.w; ++x) {
             uint8_t rgb[]{ pixels[x].red, pixels[x].green, pixels[x].blue };
             zassert_equal(std::fwrite(rgb, 1, sizeof(rgb), file), sizeof(rgb));
@@ -210,16 +210,16 @@ ZTEST(shape_icons, test_vector_backend_respects_disabled_document_loaders) {
 ZTEST(shape_icons, test_factory_registers_all_shapes_and_widgets_report_their_properties) {
     auto types = IconFactory::GetInstance().GetAvailableTypes();
     for(auto type : shape_types) {
-        zassert_true(std::find(types.begin(), types.end(), type) != types.end());
+        zassert_true(std::ranges::find(types, type) != types.end());
         auto widget = MakeWidget(Configuration(type));
         zassert_equal(Mask(*widget).header.w, 64);
         zassert_equal(Mask(*widget).header.h, 48);
         auto supported = widget->GetSupportedProperties();
         for(auto property :
             { WidgetPropertyType::WIDTH_PX, WidgetPropertyType::HEIGHT_PX, WidgetPropertyType::STROKE_PX })
-            zassert_true(std::find(supported.begin(), supported.end(), property) != supported.end());
+            zassert_true(std::ranges::find(supported, property) != supported.end());
         auto supports = [&](WidgetPropertyType property) {
-            return std::find(supported.begin(), supported.end(), property) != supported.end();
+            return std::ranges::find(supported, property) != supported.end();
         };
         zassert_equal(supports(WidgetPropertyType::FILL_MODE), type != IconType::Line);
         zassert_equal(supports(WidgetPropertyType::DIRECTION), type == IconType::Line);
@@ -240,20 +240,13 @@ ZTEST(shape_icons, test_icon_metadata_is_specific_before_rendering) {
         zassert_equal(store.IsRegistered(WidgetPropertyType::LABEL), type == IconType::Label);
         zassert_equal(store.IsRegistered(WidgetPropertyType::FILE_PATH), type == IconType::Image);
         zassert_equal(
-            store.IsRegistered(WidgetPropertyType::WIDTH_PX),
-            std::find(shape_types.begin(), shape_types.end(), type) != shape_types.end()
+            store.IsRegistered(WidgetPropertyType::WIDTH_PX), std::ranges::find(shape_types, type) != shape_types.end()
         );
     }
     IconWidget line(1, root, WidgetContext{}, IconType::Line);
     auto line_properties = line.GetSupportedProperties();
-    zassert_true(
-        std::find(line_properties.begin(), line_properties.end(), WidgetPropertyType::DIRECTION)
-        != line_properties.end()
-    );
-    zassert_true(
-        std::find(line_properties.begin(), line_properties.end(), WidgetPropertyType::FILL_MODE)
-        == line_properties.end()
-    );
+    zassert_true(std::ranges::find(line_properties, WidgetPropertyType::DIRECTION) != line_properties.end());
+    zassert_true(std::ranges::find(line_properties, WidgetPropertyType::FILL_MODE) == line_properties.end());
 }
 
 ZTEST(shape_icons, test_irrelevant_bindings_do_not_reconfigure_a_shape) {
@@ -314,7 +307,7 @@ ZTEST(shape_icons, test_triangles_have_distinct_geometry_and_rounded_outline_cor
     zassert_within(Alpha(*right, 1, 8), 255, 1);
     for(int y = 0; y < 48; ++y)
         for(int x = 0; x < 64; ++x)
-            if(static_cast<float>(y + 1) < static_cast<float>(x) * 0.75f)
+            if(static_cast<float>(y + 1) < static_cast<float>(x) * 0.75F)
                 zassert_equal(Alpha(*right, x, y), 0, "Stray pixel outside the triangle at %d,%d", x, y);
     for(auto type : { IconType::TriangleIsosceles, IconType::TriangleRight }) {
         auto filled = MakeWidget(Configuration(type, 64, 48, WidgetFillMode::Filled, 10));
@@ -333,7 +326,7 @@ ZTEST(shape_icons, test_polygon_base_supports_rounded_pentagons_in_both_windings
         for(int radius : { 0, 8, 999 }) {
             auto pixels = PolygonPixels(vertices, fill, radius);
             auto reversed = vertices;
-            std::reverse(reversed.begin(), reversed.end());
+            std::ranges::reverse(reversed);
             zassert_true(pixels == PolygonPixels(reversed, fill, radius));
             zassert_equal(pixels[0], 0);
             zassert_within(pixels[32 * 64 + 32], fill == WidgetFillMode::Filled ? 255 : 0, 1);
@@ -367,7 +360,7 @@ ZTEST(shape_icons, test_polygon_base_rejects_degenerate_and_nonconvex_geometry) 
             { { 0, 0 }, { 32, 32 }, { 64, 64 } }, { { 0, 0 }, { 64, 0 }, { 32, 16 }, { 64, 64 }, { 0, 64 } },
             { { 0, 0 }, { 64, 64 }, { 0, 64 }, { 64, 0 } } }) {
         auto pixels = PolygonPixels(vertices, WidgetFillMode::Outline, 8);
-        zassert_true(std::all_of(pixels.begin(), pixels.end(), [](uint8_t alpha) {
+        zassert_true(std::ranges::all_of(pixels, [](uint8_t alpha) {
             return alpha == 0;
         }));
     }
@@ -437,7 +430,7 @@ ZTEST(shape_icons, test_large_radii_and_thicknesses_fit_small_shapes) {
     for(auto type : { IconType::Rectangle, IconType::TriangleIsosceles, IconType::TriangleRight, IconType::Oval }) {
         auto widget = MakeWidget(Configuration(type, 8, 8, WidgetFillMode::Outline, 999, 999));
         auto pixels = Pixels(*widget);
-        zassert_true(std::any_of(pixels.begin(), pixels.end(), [](uint8_t alpha) {
+        zassert_true(std::ranges::any_of(pixels, [](uint8_t alpha) {
             return alpha > 0;
         }));
     }
@@ -569,7 +562,7 @@ ZTEST(shape_icons, test_arc_position_angle_and_edge_offset_remain_leaf_owned) {
 ZTEST(shape_icons, test_theme_and_visibility_preserve_geometry_and_part_opacity) {
     class BlueTheme : public DefaultTheme {
         LvglColor GetAccentColor() const override {
-            return LvglColor(0x3366FF, 128);
+            return { 0x3366FF, 128 };
         }
     };
     auto configuration = Configuration(IconType::Rectangle, 32, 32);
@@ -619,7 +612,7 @@ ZTEST(shape_icons, test_rendered_gallery_preserves_background_and_recolors_masks
                 shape_types[i], 64, 48, variant % 2 == 0 ? WidgetFillMode::Filled : WidgetFillMode::Outline,
                 variant >= 2 ? 12 : 0, 4, variant >= 2 ? WidgetDirection::TopToBottom : WidgetDirection::LeftToRight
             ));
-            auto root = lv_obj_get_parent(widget->GetContainer()->GetObject());
+            auto* root = lv_obj_get_parent(widget->GetContainer()->GetObject());
             lv_obj_set_size(root, 96, 72);
             lv_obj_set_style_bg_color(root, lv_color_hex(0xF3F4F6), 0);
             lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
@@ -632,7 +625,9 @@ ZTEST(shape_icons, test_rendered_gallery_preserves_background_and_recolors_masks
             zassert_equal(snapshot->header.h, 72);
             size_t colored_pixels = 0;
             for(int y = 0; y < 72; ++y) {
-                auto pixels = reinterpret_cast<const lv_color32_t*>(snapshot->data + y * snapshot->header.stride);
+                const auto* pixels = reinterpret_cast<const lv_color32_t*>(
+                    snapshot->data + y * snapshot->header.stride
+                );
                 for(int x = 0; x < 96; ++x) {
                     bool background = pixels[x].red == 0xF3 && pixels[x].green == 0xF4 && pixels[x].blue == 0xF6;
                     if(x < 16 || x >= 80 || y < 12 || y >= 60)

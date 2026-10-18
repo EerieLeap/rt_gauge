@@ -162,7 +162,7 @@ inline EventData ToEventData(const ConfigValue& value) {
             else if constexpr(std::is_same_v<T, bool>)
                 return argument;
             else if constexpr(std::is_same_v<T, std::pmr::string>)
-                return std::string(argument.c_str());
+                return std::string(argument);
             else
                 return 0;
         },

@@ -14,7 +14,7 @@ namespace eerie_leap::domain::ui_domain {
 // concurrent access. The bus does not take it for you: each subscriber does.
 class LvglLock {
 private:
-    k_mutex lock_;
+    k_mutex lock_{};
 
     LvglLock();
     ~LvglLock() = default;

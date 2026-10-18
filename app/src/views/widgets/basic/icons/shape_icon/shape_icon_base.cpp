@@ -160,7 +160,7 @@ void ShapeIconBase::Rasterize(lv_vector_path_t* path, int width_px, int height_p
     if(tile == nullptr)
         throw std::bad_alloc();
     auto canvas_frame = Frame::Create(lv_canvas_create(parent_->GetObject())).Build();
-    auto canvas = canvas_frame.GetObject();
+    auto* canvas = canvas_frame.GetObject();
     lv_obj_add_flag(canvas, LV_OBJ_FLAG_HIDDEN);
     lv_canvas_set_draw_buf(canvas, tile.get());
 
@@ -187,7 +187,7 @@ void ShapeIconBase::Rasterize(lv_vector_path_t* path, int width_px, int height_p
             lv_canvas_finish_layer(canvas, &layer);
 
             for(int row = 0; row < std::min(tile_size, height_px - y); ++row) {
-                auto pixels = reinterpret_cast<const lv_color32_t*>(
+                const auto* pixels = reinterpret_cast<const lv_color32_t*>(
                     tile->data + (row + tile_padding) * tile->header.stride
                 );
                 for(int column = 0; column < std::min(tile_size, width_px - x); ++column)

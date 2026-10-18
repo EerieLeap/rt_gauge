@@ -5,6 +5,7 @@
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <variant>
 
 #include "domain/ui_domain/models/widget_composition.h"
@@ -252,7 +253,7 @@ void UiConfigurationValidator::Validate(
         size_t index;
         size_t next_child;
     };
-    std::array<Visit, WidgetComposition::max_nodes> stack;
+    std::array<Visit, WidgetComposition::max_nodes> stack{};
     std::array<uint8_t, WidgetComposition::max_nodes> state{};
     std::array<size_t, WidgetComposition::max_nodes> height{};
     const auto visit = [&](size_t start) {
@@ -312,7 +313,7 @@ void UiConfigurationValidator::Validate(
     ValidateWidgetPosition(configuration, ownership);
 
     if(validate_children) {
-        std::array<const WidgetConfiguration*, WidgetComposition::max_edges> children;
+        std::array<const WidgetConfiguration*, WidgetComposition::max_edges> children{};
         for(size_t i = 0; i < definitions.size(); ++i) {
             const auto ids = child_ids[i];
             for(size_t slot = 0; slot < ids.size(); ++slot)
@@ -452,12 +453,12 @@ void UiConfigurationValidator::ValidateWidgetPosition(
                 screen_configuration.id, widget_configuration->id, "Widget position cannot be negative."
             );
 
-        if(static_cast<uint32_t>(widget_configuration->position_grid.x) >= screen_configuration.grid.width)
+        if(std::cmp_greater_equal(widget_configuration->position_grid.x, screen_configuration.grid.width))
             InvalidWidgetConfiguration(
                 screen_configuration.id, widget_configuration->id, "Widget position X must be within the screen grid."
             );
 
-        if(static_cast<uint32_t>(widget_configuration->position_grid.y) >= screen_configuration.grid.height)
+        if(std::cmp_greater_equal(widget_configuration->position_grid.y, screen_configuration.grid.height))
             InvalidWidgetConfiguration(
                 screen_configuration.id, widget_configuration->id, "Widget position Y must be within the screen grid."
             );

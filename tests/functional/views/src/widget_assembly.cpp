@@ -402,14 +402,14 @@ ZTEST(widget_assembly, test_roots_use_the_screen_grid_and_children_use_owner_loc
     lv_obj_update_layout(container->GetObject());
 
     const auto layout = GridLayout::FromActiveScreen(screen->grid);
-    for(size_t i = 0; i < roots.size(); ++i) {
-        const auto& definition = *roots[i]->GetConfiguration();
+    for(const auto& root : roots) {
+        const auto& definition = *root->GetConfiguration();
         const auto size = layout.ToPx(definition.size_grid);
         const auto position = layout.ToPx(definition.position_grid, size);
-        zassert_equal(roots[i]->GetSizePx().width, size.width);
-        zassert_equal(roots[i]->GetSizePx().height, size.height);
-        zassert_equal(roots[i]->GetPositionPx().x, position.x);
-        zassert_equal(roots[i]->GetPositionPx().y, position.y);
+        zassert_equal(root->GetSizePx().width, size.width);
+        zassert_equal(root->GetSizePx().height, size.height);
+        zassert_equal(root->GetPositionPx().x, position.x);
+        zassert_equal(root->GetPositionPx().y, position.y);
     }
     const auto halves = roots[0]->GetChildren();
     const auto width = lv_obj_get_width(roots[0]->GetChildMount()->GetObject());

@@ -16,8 +16,7 @@ constexpr lv_obj_flag_t presentation_flag = LV_OBJ_FLAG_USER_1;
 
 } // namespace
 
-Frame::Frame() :
-    lv_object_(nullptr) {}
+Frame::Frame() = default;
 
 Frame::~Frame() {
     ScopedLvglLock lvgl_guard;

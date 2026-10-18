@@ -17,7 +17,7 @@ private:
 
     // Renderables register/unregister from their ctor/dtor on any thread while
     // the renderer or event bus thread can be iterating observers_.
-    k_mutex observers_lock_;
+    k_mutex observers_lock_{};
 
     ThemeManager();
     ~ThemeManager() = default;

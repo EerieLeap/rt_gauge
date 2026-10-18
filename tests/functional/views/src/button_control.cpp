@@ -103,15 +103,15 @@ private:
     AnySubscription subscription_;
 
     void Record(const NavigationEventChannel::EventMessage& event) {
-        if(auto it = event.payload.find(NavigationPayloadType::Action); it != event.payload.end())
+        if(const auto* it = event.payload.find(NavigationPayloadType::Action); it != event.payload.end())
             if(const auto* action = std::get_if<uint32_t>(&it->second))
                 actions_.push_back(static_cast<NavigationAction>(*action));
 
-        if(auto it = event.payload.find(NavigationPayloadType::TargetGroupId); it != event.payload.end())
+        if(const auto* it = event.payload.find(NavigationPayloadType::TargetGroupId); it != event.payload.end())
             if(const auto* screen_group_id = std::get_if<uint32_t>(&it->second))
                 target_group_ids_.push_back(*screen_group_id);
 
-        if(auto it = event.payload.find(NavigationPayloadType::TargetScreenId); it != event.payload.end())
+        if(const auto* it = event.payload.find(NavigationPayloadType::TargetScreenId); it != event.payload.end())
             if(const auto* screen_id = std::get_if<uint32_t>(&it->second))
                 target_screen_ids_.push_back(*screen_id);
 

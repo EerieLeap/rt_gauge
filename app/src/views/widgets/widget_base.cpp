@@ -572,7 +572,7 @@ void WidgetBase::Configure(std::shared_ptr<WidgetConfiguration> configuration) {
         if(WidgetPropertyValidator::IsStructuralProperty(type))
             continue;
 
-        if(!properties_->Set(type, value) && std::find(supported.begin(), supported.end(), type) == supported.end())
+        if(!properties_->Set(type, value) && std::ranges::find(supported, type) == supported.end())
             LOG_WRN("Widget %u does not support property %u.", id_, static_cast<unsigned>(type));
     }
 

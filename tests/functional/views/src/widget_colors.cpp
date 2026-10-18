@@ -46,16 +46,16 @@ constexpr auto tertiary_inactive = WidgetPropertyType::COLOR_TERTIARY_INACTIVE;
 class TranslucentTheme : public DefaultTheme {
 public:
     LvglColor GetPrimaryColor() const override {
-        return LvglColor(0x123456, 128);
+        return { 0x123456, 128 };
     }
     LvglColor GetSecondaryColor() const override {
-        return LvglColor(0x345678, 96);
+        return { 0x345678, 96 };
     }
     LvglColor GetSurfaceColor() const override {
-        return LvglColor(0x56789A, 64);
+        return { 0x56789A, 64 };
     }
     LvglColor GetAccentColor() const override {
-        return LvglColor(0x789ABC, 32);
+        return { 0x789ABC, 32 };
     }
 };
 
@@ -140,7 +140,7 @@ void GallerySnapshot(lv_obj_t* root, const char* name, bool visible = true) {
     const auto* background = reinterpret_cast<const lv_color32_t*>(snapshot->data);
     size_t changed = 0;
     for(uint32_t row = 0; row < snapshot->header.h; ++row) {
-        auto* pixels = reinterpret_cast<const lv_color32_t*>(snapshot->data + row * snapshot->header.stride);
+        const auto* pixels = reinterpret_cast<const lv_color32_t*>(snapshot->data + row * snapshot->header.stride);
         for(uint32_t column = 0; column < snapshot->header.w; ++column) {
             if(pixels[column].red != background->red
                 || pixels[column].green != background->green
@@ -160,7 +160,7 @@ void GallerySnapshot(lv_obj_t* root, const char* name, bool visible = true) {
     zassert_not_null(file, "%s", path);
     std::fprintf(file, "P6\n%u %u\n255\n", snapshot->header.w, snapshot->header.h);
     for(uint32_t row = 0; row < snapshot->header.h; ++row) {
-        auto* pixels = reinterpret_cast<const lv_color32_t*>(snapshot->data + row * snapshot->header.stride);
+        const auto* pixels = reinterpret_cast<const lv_color32_t*>(snapshot->data + row * snapshot->header.stride);
         for(uint32_t column = 0; column < snapshot->header.w; ++column) {
             const uint8_t rgb[]{ pixels[column].red, pixels[column].green, pixels[column].blue };
             zassert_equal(std::fwrite(rgb, 1, sizeof(rgb), file), sizeof(rgb));
@@ -220,7 +220,7 @@ ZTEST(widget_colors, test_animation_simulator_gallery) {
         std::shared_ptr<WidgetConfiguration> needle;
         if(index == 2) {
             auto store = views_test::MakeAssetStore("animation-gallery");
-            std::array<uint8_t, 8 * 28 * 4> pixels;
+            std::array<uint8_t, 8 * 28 * 4> pixels{};
             pixels.fill(255);
             zassert_true(store->Save("needle.bin", pixels));
             context.assets_manager = views_test::MakeAssetsManager(AssetKind::IMAGES, std::move(store));

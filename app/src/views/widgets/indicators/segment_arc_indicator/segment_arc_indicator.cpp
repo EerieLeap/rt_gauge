@@ -1,4 +1,5 @@
 #include <cmath>
+#include <utility>
 
 #include "domain/ui_domain/models/widget_property.h"
 
@@ -59,7 +60,7 @@ lv_obj_t* SegmentArcIndicator::CreateSegment(lv_obj_t* parent, int start_angle, 
     if(seg_end_angle > end_angle + 90)
         return nullptr;
 
-    auto lv_arc_segment = lv_arc_create(parent);
+    auto* lv_arc_segment = lv_arc_create(parent);
 
     lv_arc_set_range(lv_arc_segment, 0, 1);
     lv_obj_set_width(lv_arc_segment, lv_pct(100));
@@ -83,7 +84,7 @@ void SegmentArcIndicator::Create(lv_obj_t* parent, int32_t range_start, int32_t 
     segments_.clear();
 
     for(int i = 0; i < 1000; i++) {
-        auto segment = CreateSegment(parent, start_angle_, end_angle_, i);
+        auto* segment = CreateSegment(parent, start_angle_, end_angle_, i);
         if(segment == nullptr)
             break;
 
@@ -99,7 +100,7 @@ void SegmentArcIndicator::UpdateIndicator(float value) {
         segment_index = segments_.size() - 1;
 
     for(size_t i = 0; i < segments_.size(); i++) {
-        segments_[i].is_active = i <= segment_index;
+        segments_[i].is_active = std::cmp_less_equal(i, segment_index);
     }
 
     ApplyTheme(ThemeManager::GetInstance().GetCurrentTheme());

@@ -53,7 +53,7 @@ void ThemeManager::RegisterObserver(IThemeObserver* observer) {
 void ThemeManager::UnregisterObserver(IThemeObserver* observer) {
     k_mutex_lock(&observers_lock_, K_FOREVER);
 
-    observers_.erase(std::remove(observers_.begin(), observers_.end(), observer), observers_.end());
+    observers_.erase(std::ranges::remove(observers_, observer).begin(), observers_.end());
 
     k_mutex_unlock(&observers_lock_);
 }

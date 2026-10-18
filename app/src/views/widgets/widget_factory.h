@@ -50,14 +50,14 @@ public:
             T::ValidateChildren
         );
     }
-    void RegisterWidget(const WidgetType type, WidgetCreator creator, ChildValidator validator = {});
+    void RegisterWidget(WidgetType type, WidgetCreator creator, ChildValidator validator = {});
 
     // Dispatches one widget-owned rule for the central validator; the supplied
     // children have already passed reference, ownership, type, and binding checks.
     void ValidateChildren(const WidgetConfiguration& owner, std::span<const WidgetConfiguration* const> children) const;
 
     std::unique_ptr<IWidget>
-    CreateWidget(const WidgetType type, const uint32_t id, std::shared_ptr<Frame> parent, const WidgetContext& context);
+    CreateWidget(WidgetType type, uint32_t id, std::shared_ptr<Frame> parent, const WidgetContext& context);
     // Childless convenience path: constructs and configures one widget.
     std::unique_ptr<IWidget> CreateWidget(
         std::shared_ptr<WidgetConfiguration> configuration,

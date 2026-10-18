@@ -80,7 +80,7 @@ namespace {
 
 std::optional<uint32_t> GetPayloadId(const NavigationEventChannel::EventMessage& event, NavigationPayloadType key) {
 
-    auto it = event.payload.find(key);
+    const auto* it = event.payload.find(key);
     if(it == event.payload.end())
         return std::nullopt;
 
@@ -245,7 +245,7 @@ int UiController::Initialize() {
         // dispatching - out of the multi-frame first render of a screen group.
         main_view_->SetRenderDispatcher([work_queue = ui_render_work_queue_thread_.get()](std::function<void()> work) {
             try {
-                work_queue->Run(std::move(work));
+                work_queue->Run(work);
             } catch(const std::exception& e) {
                 LOG_ERR("Failed to queue a screen group render. %s", e.what());
             }

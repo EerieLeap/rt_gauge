@@ -68,7 +68,7 @@ public:
             || type == WidgetPropertyType::OPACITY;
     }
 
-    inline static constexpr std::array color_properties{ WidgetPropertyType::COLOR_PRIMARY_ACTIVE,
+    static constexpr std::array color_properties{ WidgetPropertyType::COLOR_PRIMARY_ACTIVE,
         WidgetPropertyType::COLOR_PRIMARY_INACTIVE, WidgetPropertyType::COLOR_SECONDARY_ACTIVE,
         WidgetPropertyType::COLOR_SECONDARY_INACTIVE, WidgetPropertyType::COLOR_TERTIARY_ACTIVE,
         WidgetPropertyType::COLOR_TERTIARY_INACTIVE };

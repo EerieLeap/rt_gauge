@@ -42,10 +42,10 @@ public:
         };
     }
 
-    void RegisterScreen(const ScreenType type, ScreenCreator creator);
+    void RegisterScreen(ScreenType type, ScreenCreator creator);
 
     std::shared_ptr<IScreen>
-    CreateScreen(const ScreenType type, const uint32_t id, std::shared_ptr<Frame> parent, const WidgetContext& context);
+    CreateScreen(ScreenType type, uint32_t id, std::shared_ptr<Frame> parent, const WidgetContext& context);
     std::shared_ptr<IScreen> CreateScreen(
         std::shared_ptr<ScreenConfiguration> configuration,
         std::shared_ptr<Frame> parent,

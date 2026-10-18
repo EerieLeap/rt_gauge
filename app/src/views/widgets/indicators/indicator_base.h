@@ -23,7 +23,7 @@ private:
     static constexpr float min_animation_delta_ratio_ = 0.001F; // 0.1% of range
 
 protected:
-    lv_anim_t value_change_animation_;
+    lv_anim_t value_change_animation_{};
     float range_start_ = 0;
     float range_end_ = 0;
     float value_ = 0;

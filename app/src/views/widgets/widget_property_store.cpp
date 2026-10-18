@@ -19,7 +19,7 @@ WidgetPropertyStore::WidgetPropertyStore() {
 }
 
 const WidgetPropertyStore::Entry* WidgetPropertyStore::Find(WidgetPropertyType type) const {
-    const auto it = std::find_if(entries_.begin(), entries_.end(), [type](const Entry& entry) {
+    const auto it = std::ranges::find_if(entries_, [type](const Entry& entry) {
         return entry.type == type;
     });
 

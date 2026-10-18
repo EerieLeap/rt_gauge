@@ -208,10 +208,10 @@ ZTEST(event_channel_registry, test_erased_publish_reaches_a_typed_subscriber) {
     auto subscription = CreateScopedSubscription(
         SettingsEventsChannel::GetInstance(), SettingsEventType::ChangeRequested,
         [&](const SettingsEventsChannel::EventMessage& event) {
-            if(auto it = event.payload.find(SettingsPayloadType::SettingId); it != event.payload.end())
+            if(const auto* it = event.payload.find(SettingsPayloadType::SettingId); it != event.payload.end())
                 setting_ids.push_back(std::get<uint32_t>(it->second));
 
-            if(auto it = event.payload.find(SettingsPayloadType::Value); it != event.payload.end())
+            if(const auto* it = event.payload.find(SettingsPayloadType::Value); it != event.payload.end())
                 value = std::get<float>(it->second);
         }
     );

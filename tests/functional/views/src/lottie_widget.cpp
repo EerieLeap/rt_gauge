@@ -253,7 +253,7 @@ ZTEST(lottie_widget, test_validation_requires_a_file_path) {
     auto configuration = Configuration("spinner.json");
     zassert_false(IsRejected(*configuration));
 
-    for(auto value : { ConfigValue{ std::pmr::string() }, ConfigValue{ 1 } }) {
+    for(const auto& value : { ConfigValue{ std::pmr::string() }, ConfigValue{ 1 } }) {
         configuration->properties[WidgetPropertyType::FILE_PATH] = value;
         zassert_true(IsRejected(*configuration));
     }

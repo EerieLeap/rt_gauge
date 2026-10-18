@@ -33,7 +33,7 @@ private:
     std::shared_ptr<WorkQueueThread> work_queue_thread_;
 
     std::vector<uint32_t> pending_setting_ids_;
-    mutable k_mutex lock_;
+    mutable k_mutex lock_{};
 
     AnySubscription changed_subscription_;
     std::optional<WorkQueueTask<PersistTask>> persist_task_;

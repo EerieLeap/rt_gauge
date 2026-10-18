@@ -29,13 +29,13 @@ public:
     static IconFactory& GetInstance();
 
     template<typename T>
-    void Register(const IconType type);
-    void Register(const IconType type, IconCreator creator, PropertyRegistrar registrar = {});
+    void Register(IconType type);
+    void Register(IconType type, IconCreator creator, PropertyRegistrar registrar = {});
 
     void RegisterProperties(IconType type, WidgetPropertyStore& store) const;
 
     std::unique_ptr<IIcon>
-    Create(const IconType type, std::shared_ptr<WidgetPropertyStore> properties, std::shared_ptr<Frame> parent);
+    Create(IconType type, std::shared_ptr<WidgetPropertyStore> properties, std::shared_ptr<Frame> parent);
 
     bool IsAvailable(IconType type) const;
     std::vector<IconType> GetAvailableTypes() const;

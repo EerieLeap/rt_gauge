@@ -33,10 +33,9 @@ void ScreenGroup::AddScreen(std::shared_ptr<IScreen> screen) {
     if(screen == nullptr)
         return;
 
-    const auto insert_position = std::upper_bound(
-        screens_.begin(), screens_.end(), screen->GetZIndex(),
-        [](int32_t z_index, const std::shared_ptr<IScreen>& current) {
-            return z_index < current->GetZIndex();
+    const auto insert_position = std::ranges::upper_bound(
+        screens_, screen->GetZIndex(), std::ranges::less{}, [](const std::shared_ptr<IScreen>& current) {
+            return current->GetZIndex();
         }
     );
 

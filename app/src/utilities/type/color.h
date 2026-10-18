@@ -26,7 +26,7 @@ struct Color {
         if(value.size() != 9 || value.front() != '#')
             return std::unexpected(std::errc::invalid_argument);
 
-        std::array<uint8_t, 4> channels;
+        std::array<uint8_t, 4> channels{};
         for(std::size_t index = 0; index < channels.size(); ++index) {
             const char* begin = value.data() + 1 + index * 2;
             const char* end = begin + 2;

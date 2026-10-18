@@ -331,7 +331,7 @@ ZTEST(ui_configuration_parser, test_widget_child_rules_guard_save_and_load) {
         try {
             action();
         } catch(const std::invalid_argument& error) {
-            return std::string(error.what()).find("Widget rule rejected.") != std::string::npos;
+            return std::string(error.what()).contains("Widget rule rejected.");
         }
         return false;
     };
@@ -910,7 +910,7 @@ ZTEST(ui_configuration_parser, test_child_id_order_and_empty_lists_survive_z_ord
     owner->properties[WidgetPropertyType::CHILD_WIDGET_IDS] = std::pmr::vector<int>({ 7, 3, 5 }, Mrm::GetDefaultPmr());
     auto empty = Leaf(5);
     empty->properties[WidgetPropertyType::CHILD_WIDGET_IDS] = std::pmr::vector<int>(Mrm::GetDefaultPmr());
-    for(auto widget : { Leaf(7, 5), owner, Leaf(3, -5), empty })
+    for(const auto& widget : { Leaf(7, 5), owner, Leaf(3, -5), empty })
         screen.AddWidget(widget);
 
     UiConfigurationCborParser parser;

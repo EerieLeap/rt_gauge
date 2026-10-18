@@ -1,5 +1,6 @@
 #include <cstdlib>
 #include <stdexcept>
+#include <utility>
 
 #include <lvgl.h>
 
@@ -15,10 +16,10 @@ GridLayout::GridLayout(const GridSettings& grid, int32_t screen_width, int32_t s
     if(screen_width_ <= 0 || screen_height_ <= 0)
         throw std::invalid_argument("Invalid active screen size.");
 
-    if(grid_.width == 0 || grid_.width > static_cast<uint32_t>(screen_width_))
+    if(grid_.width == 0 || std::cmp_greater(grid_.width, screen_width_))
         throw std::invalid_argument("Invalid screen width.");
 
-    if(grid_.height == 0 || grid_.height > static_cast<uint32_t>(screen_height_))
+    if(grid_.height == 0 || std::cmp_greater(grid_.height, screen_height_))
         throw std::invalid_argument("Invalid screen height.");
 }
 

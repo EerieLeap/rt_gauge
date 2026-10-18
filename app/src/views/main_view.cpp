@@ -156,7 +156,7 @@ std::vector<uint32_t> MainView::GetGroupIds() const {
     for(const auto& [screen_group_id, screen_group] : screen_groups_)
         screen_group_ids.push_back(screen_group_id);
 
-    std::sort(screen_group_ids.begin(), screen_group_ids.end());
+    std::ranges::sort(screen_group_ids);
 
     return screen_group_ids;
 }

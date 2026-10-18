@@ -33,7 +33,7 @@ std::shared_ptr<Frame> MakeRoot() {
 }
 
 bool Supports(const std::vector<WidgetPropertyType>& types, WidgetPropertyType type) {
-    return std::find(types.begin(), types.end(), type) != types.end();
+    return std::ranges::find(types, type) != types.end();
 }
 
 void* SetUp() {

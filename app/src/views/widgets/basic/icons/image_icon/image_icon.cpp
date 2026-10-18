@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <utility>
 
 #include <zephyr/logging/log.h>
 
@@ -122,7 +123,7 @@ lv_obj_t* ImageIcon::Create(lv_obj_t* parent) {
         .data = image_data_.value().data()
     };
 
-    auto lv_image = lv_image_create(parent_->GetObject());
+    auto* lv_image = lv_image_create(parent_->GetObject());
     lv_image_set_src(lv_image, &lv_image_descriptor_);
     lv_image_set_antialias(lv_image, true);
 
@@ -145,7 +146,8 @@ void ImageIcon::Configure(std::shared_ptr<WidgetPropertyStore> properties) {
         || image_height_ <= 0
         || image_width_ > UINT16_MAX
         || image_height_ > UINT16_MAX
-        || (lv_image_descriptor_.header.w == image_width_ && lv_image_descriptor_.header.h == image_height_))
+        || (std::cmp_equal(lv_image_descriptor_.header.w, image_width_)
+            && std::cmp_equal(lv_image_descriptor_.header.h, image_height_)))
         return;
 
     // The rule Create() applies: the loaded file has to cover the new dimensions, alpha plane included.

@@ -209,10 +209,10 @@ public:
         subscription_ = CreateScopedSubscription(
             SettingsEventsChannel::GetInstance(), SettingsEventType::ChangeRequested,
             [state = state_](const SettingsEventsChannel::EventMessage& event) {
-                if(auto it = event.payload.find(SettingsPayloadType::Value); it != event.payload.end())
+                if(const auto* it = event.payload.find(SettingsPayloadType::Value); it != event.payload.end())
                     state->value = std::get<float>(it->second);
 
-                if(auto it = event.payload.find(SettingsPayloadType::SettingId); it != event.payload.end())
+                if(const auto* it = event.payload.find(SettingsPayloadType::SettingId); it != event.payload.end())
                     state->setting_id = std::get<uint32_t>(it->second);
 
                 ++state->calls;
@@ -371,7 +371,7 @@ ZTEST(widget_bindings, test_anchor_bindings_keep_ordinary_tracking_and_local_upd
             zassert_equal(lv_obj_get_style_transform_pivot_x(content, LV_PART_MAIN), 34);
         else
             zassert_equal(lv_obj_get_style_transform_pivot_y(content, LV_PART_MAIN), lv_obj_get_height(content) - 34);
-        const ConfigValue invalid[] = { -2, static_cast<int>(INT32_MAX), 10.0, true, std::pmr::string("10") };
+        const ConfigValue invalid[] = { -2, INT32_MAX, 10.0, true, std::pmr::string("10") };
         for(const auto& value : invalid) {
             zassert_false(widget.GetStore()->Set(target, value));
             widget.WriteLocal(target, value);
@@ -435,7 +435,7 @@ ZTEST(widget_bindings, test_color_store_rejects_invalid_updates_and_accepts_rese
     for(auto type : color_properties) {
         store.Register(type, std::pmr::string{}, PropertyChangeEffect::None);
         zassert_true(std::get<std::pmr::string>(store.Get(type)).empty());
-        for(auto text : { "#3366fF80", "#00000000", "#FFFFFFFF" }) {
+        for(const auto* text : { "#3366fF80", "#00000000", "#FFFFFFFF" }) {
             ConfigValue color = std::pmr::string(text, Mrm::GetExtPmr());
             zassert_true(store.Set(type, color));
             for(const auto& value : invalid_values) {
@@ -523,7 +523,7 @@ ZTEST(widget_bindings, test_color_bindings_preserve_exact_rgba_and_reject_invali
         auto configuration = MakeConfiguration();
         configuration->bindings.push_back(SensorBinding(type, SENSOR_ID));
         auto widget = MakeActiveWidget(std::move(configuration));
-        for(auto text : { "#3366fF80", "#00000000", "#FFFFFFFF", "" }) {
+        for(const auto* text : { "#3366fF80", "#00000000", "#FFFFFFFF", "" }) {
             PublishSensor(SENSOR_ID, std::string(text));
             zassert_true(std::get<std::pmr::string>(widget->Read(type)) == text);
             zassert_equal(widget->notified.size(), 1U);

@@ -17,9 +17,9 @@ private:
     static const int segment_length_ = 46;
     static const int step_deg_ = 4;
 
-    int start_angle_;
-    int end_angle_;
-    float segments_per_value_;
+    int start_angle_{};
+    int end_angle_{};
+    float segments_per_value_{};
 
     std::vector<Segment> segments_;
 
@@ -35,7 +35,6 @@ protected:
     void RegisterProperties(WidgetPropertyStore& store) const override;
     void OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) override;
 
-public:
 public:
     ~SegmentArcIndicator() override;
 

@@ -42,7 +42,7 @@ void NavigationService::SetGroupIds(std::vector<uint32_t> screen_group_ids) {
     k_mutex_lock(&lock_, K_FOREVER);
 
     screen_group_ids_ = std::move(screen_group_ids);
-    std::sort(screen_group_ids_.begin(), screen_group_ids_.end());
+    std::ranges::sort(screen_group_ids_);
 
     k_mutex_unlock(&lock_);
 }
@@ -57,7 +57,7 @@ void NavigationService::SetActiveGroupId(uint32_t screen_group_id) {
 
 void NavigationService::PushHistory(uint32_t screen_group_id) {
     if(history_count_ == k_history_depth) {
-        std::rotate(history_.begin(), history_.begin() + 1, history_.end());
+        std::ranges::rotate(history_, history_.begin() + 1);
         --history_count_;
     }
 
@@ -80,7 +80,7 @@ std::optional<size_t> NavigationService::GetActiveIndex() const {
     if(!active_screen_group_id_.has_value())
         return std::nullopt;
 
-    const auto it = std::find(screen_group_ids_.begin(), screen_group_ids_.end(), *active_screen_group_id_);
+    const auto it = std::ranges::find(screen_group_ids_, *active_screen_group_id_);
     if(it == screen_group_ids_.end())
         return std::nullopt;
 
@@ -95,7 +95,7 @@ int NavigationService::RequestGroup(
     if(active_overlay_screen_id_.has_value())
         return -EBUSY;
 
-    if(std::find(screen_group_ids_.begin(), screen_group_ids_.end(), screen_group_id) == screen_group_ids_.end()) {
+    if(std::ranges::find(screen_group_ids_, screen_group_id) == screen_group_ids_.end()) {
         LOG_WRN("Screen group %u is not available.", screen_group_id);
         return -ENOENT;
     }

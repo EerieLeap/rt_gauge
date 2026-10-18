@@ -86,7 +86,7 @@ ZTEST(widget_property, test_sentinels_and_unknown_types_are_invalid) {
 }
 
 ZTEST(widget_property, test_color_parser_requires_explicit_rgba) {
-    for(auto text : { "#3366FF80", "#3366ff80", "#3366fF80" }) {
+    for(const auto* text : { "#3366FF80", "#3366ff80", "#3366fF80" }) {
         const auto parsed = Color::TryParse(text);
         zassert_true(parsed.has_value());
         zassert_true(parsed->has_value());

@@ -2,6 +2,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 #include <zephyr/ztest.h>
 
@@ -84,7 +85,7 @@ public:
                 + roles[i] + "): ";
             if(children[i]->type != types[i])
                 throw std::invalid_argument(prefix + "unsupported configuration for this role.");
-            if(children[i]->position_grid.x != static_cast<int>(i)
+            if(std::cmp_not_equal(children[i]->position_grid.x, i)
                 || children[i]->position_grid.y != 0
                 || children[i]->size_grid.width != 1
                 || children[i]->size_grid.height != 1)

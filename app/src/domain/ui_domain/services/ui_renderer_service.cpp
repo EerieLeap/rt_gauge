@@ -23,7 +23,6 @@
 namespace eerie_leap::domain::ui_domain::services {
 
 using namespace eerie_leap::subsys::device_tree;
-using eerie_leap::utilities::memory::Mrm;
 
 LOG_MODULE_REGISTER(renderer_logger);
 
@@ -32,6 +31,9 @@ LOG_MODULE_REGISTER(renderer_logger);
 // The flush thread signals completion through the callback this replaces, so
 // leaving it enabled would park the renderer on a semaphore nobody gives.
 BUILD_ASSERT(!IS_ENABLED(CONFIG_LV_Z_FLUSH_THREAD), "CONFIG_LV_Z_FLUSH_THREAD must be disabled when the UI is rotated");
+
+// Only the rotation code allocates from the external heap.
+using eerie_leap::utilities::memory::Mrm;
 
 namespace {
 

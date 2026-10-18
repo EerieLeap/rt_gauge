@@ -10,8 +10,8 @@ namespace eerie_leap::views::widgets::basic {
 
 class ArcIconWidget : public IconWidget {
 private:
-    float position_angle_;
-    int edge_offset_px_;
+    float position_angle_{};
+    int edge_offset_px_{};
 
     int ApplyTheme(const ITheme& theme) override;
 

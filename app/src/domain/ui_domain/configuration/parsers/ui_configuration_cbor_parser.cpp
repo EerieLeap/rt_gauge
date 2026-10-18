@@ -241,8 +241,8 @@ PmrUniquePtr<CborUiConfig> UiConfigurationCborParser::Serialize(const UiConfigur
     config->version = configuration_version;
     config->active_screen_group_id = configuration.active_screen_group_id;
 
-    config->properties_present = configuration.properties.size() > 0;
-    if(configuration.properties.size() > 0)
+    config->properties_present = !configuration.properties.empty();
+    if(!configuration.properties.empty())
         ValueTypeToCborPropertyValueType<UiPropertyType>(config->properties, configuration.properties);
 
     config->CborScreenConfig_m.clear();
@@ -281,7 +281,7 @@ PmrUniquePtr<CborUiConfig> UiConfigurationCborParser::Serialize(const UiConfigur
             widget_config.z_index = configuration.screen_configurations[i]->widget_configurations[j]->z_index;
 
             widget_config.properties_present =
-                configuration.screen_configurations[i]->widget_configurations[j]->properties.size() > 0;
+                !configuration.screen_configurations[i]->widget_configurations[j]->properties.empty();
             if(widget_config.properties_present)
                 ValueTypeToCborPropertyValueType<WidgetPropertyType>(
                     widget_config.properties,
@@ -320,41 +320,36 @@ UiConfigurationCborParser::Deserialize(std::pmr::memory_resource* mr, const Cbor
     if(config.properties_present)
         CborPropertyValueTypeToUiValueType(mr, configuration->properties, config.properties);
 
-    for(int i = 0; i < config.CborScreenConfig_m.size(); i++) {
+    for(const auto& i : config.CborScreenConfig_m) {
         auto screen_configuration = make_shared_pmr<ScreenConfiguration>(mr);
-        screen_configuration->id = config.CborScreenConfig_m[i].id;
-        screen_configuration->screen_group_id = config.CborScreenConfig_m[i].group_id;
-        screen_configuration->type = static_cast<ScreenType>(config.CborScreenConfig_m[i].type);
-        screen_configuration->z_index = config.CborScreenConfig_m[i].z_index;
-        screen_configuration->is_visible = config.CborScreenConfig_m[i].is_visible;
-        screen_configuration->is_overlay = config.CborScreenConfig_m[i].is_overlay;
+        screen_configuration->id = i.id;
+        screen_configuration->screen_group_id = i.group_id;
+        screen_configuration->type = static_cast<ScreenType>(i.type);
+        screen_configuration->z_index = i.z_index;
+        screen_configuration->is_visible = i.is_visible;
+        screen_configuration->is_overlay = i.is_overlay;
 
-        screen_configuration->grid.snap_enabled = config.CborScreenConfig_m[i].grid.snap_enabled;
-        screen_configuration->grid.width = config.CborScreenConfig_m[i].grid.width;
-        screen_configuration->grid.height = config.CborScreenConfig_m[i].grid.height;
-        screen_configuration->grid.spacing_px = config.CborScreenConfig_m[i].grid.spacing_px;
+        screen_configuration->grid.snap_enabled = i.grid.snap_enabled;
+        screen_configuration->grid.width = i.grid.width;
+        screen_configuration->grid.height = i.grid.height;
+        screen_configuration->grid.spacing_px = i.grid.spacing_px;
 
-        for(int j = 0; j < config.CborScreenConfig_m[i].CborWidgetConfig_m.size(); j++) {
+        for(int j = 0; j < i.CborWidgetConfig_m.size(); j++) {
             auto widget_configuration = make_shared_pmr<WidgetConfiguration>(mr);
-            widget_configuration->type = static_cast<WidgetType>(
-                config.CborScreenConfig_m[i].CborWidgetConfig_m[j].type
-            );
-            widget_configuration->id = config.CborScreenConfig_m[i].CborWidgetConfig_m[j].id;
-            widget_configuration->position_grid.x = config.CborScreenConfig_m[i].CborWidgetConfig_m[j].position.x;
-            widget_configuration->position_grid.y = config.CborScreenConfig_m[i].CborWidgetConfig_m[j].position.y;
-            widget_configuration->size_grid.width = config.CborScreenConfig_m[i].CborWidgetConfig_m[j].size.width;
-            widget_configuration->size_grid.height = config.CborScreenConfig_m[i].CborWidgetConfig_m[j].size.height;
-            widget_configuration->z_index = config.CborScreenConfig_m[i].CborWidgetConfig_m[j].z_index;
+            widget_configuration->type = static_cast<WidgetType>(i.CborWidgetConfig_m[j].type);
+            widget_configuration->id = i.CborWidgetConfig_m[j].id;
+            widget_configuration->position_grid.x = i.CborWidgetConfig_m[j].position.x;
+            widget_configuration->position_grid.y = i.CborWidgetConfig_m[j].position.y;
+            widget_configuration->size_grid.width = i.CborWidgetConfig_m[j].size.width;
+            widget_configuration->size_grid.height = i.CborWidgetConfig_m[j].size.height;
+            widget_configuration->z_index = i.CborWidgetConfig_m[j].z_index;
 
-            if(config.CborScreenConfig_m[i].CborWidgetConfig_m[j].properties_present)
+            if(i.CborWidgetConfig_m[j].properties_present)
                 CborPropertyValueTypeToWidgetValueType(
-                    mr, widget_configuration->properties, config.CborScreenConfig_m[i].CborWidgetConfig_m[j].properties
+                    mr, widget_configuration->properties, i.CborWidgetConfig_m[j].properties
                 );
 
-            FromCborBindings(
-                mr, widget_configuration->bindings,
-                config.CborScreenConfig_m[i].CborWidgetConfig_m[j].CborPropertyBinding_m
-            );
+            FromCborBindings(mr, widget_configuration->bindings, i.CborWidgetConfig_m[j].CborPropertyBinding_m);
 
             screen_configuration->AddWidget(std::move(widget_configuration));
         }

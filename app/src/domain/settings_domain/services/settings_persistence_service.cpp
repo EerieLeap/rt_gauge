@@ -46,7 +46,7 @@ int SettingsPersistenceService::Initialize() {
     changed_subscription_ = CreateScopedSubscription(
         SettingsEventsChannel::GetInstance(), SettingsEventType::Changed,
         [this](const SettingsEventsChannel::EventMessage& event) {
-            auto it = event.payload.find(SettingsPayloadType::SettingId);
+            const auto* it = event.payload.find(SettingsPayloadType::SettingId);
             if(it == event.payload.end())
                 return;
 
@@ -57,8 +57,7 @@ int SettingsPersistenceService::Initialize() {
             {
                 ScopedMutex guard(lock_);
 
-                if(std::find(pending_setting_ids_.begin(), pending_setting_ids_.end(), *setting_id)
-                    == pending_setting_ids_.end())
+                if(std::ranges::find(pending_setting_ids_, *setting_id) == pending_setting_ids_.end())
                     pending_setting_ids_.push_back(*setting_id);
             }
 

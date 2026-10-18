@@ -348,7 +348,7 @@ struct Scene {
         std::vector<lv_color32_t> pixels;
         pixels.reserve(extent * extent);
         for(int row = 0; row < extent; ++row) {
-            auto* source = reinterpret_cast<const lv_color32_t*>(snapshot->data + row * snapshot->header.stride);
+            const auto* source = reinterpret_cast<const lv_color32_t*>(snapshot->data + row * snapshot->header.stride);
             pixels.insert(pixels.end(), source, source + extent);
         }
         return pixels;
@@ -482,7 +482,7 @@ ZTEST(widget_animations, test_widget_animation_render_order_failures_and_recover
         zassert_equal(views_test::WidgetContent(widget), content);
         Advance(500);
         zassert_equal(lv_obj_get_style_transform_rotation(content, LV_PART_MAIN), 900);
-    } while(std::next_permutation(order.begin(), order.end()));
+    } while(std::ranges::next_permutation(order).found);
     zassert_equal(lv_anim_count_running(), count);
 }
 

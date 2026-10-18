@@ -8,8 +8,8 @@ namespace eerie_leap::views::widgets::indicators {
 
 class DigitalIndicator : public IndicatorBase {
 private:
-    lv_obj_t* lv_label_;
-    int value_precision_;
+    lv_obj_t* lv_label_{};
+    int value_precision_{};
 
     void UpdateIndicator(float value) override;
     lv_obj_t* Create(std::shared_ptr<Frame> parent);
@@ -21,7 +21,6 @@ protected:
     void RegisterProperties(WidgetPropertyStore& store) const override;
     void OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) override;
 
-public:
 public:
     explicit DigitalIndicator(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context);
     WidgetType GetType() const override {

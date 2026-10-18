@@ -18,7 +18,7 @@ ArcFillIndicator::ArcFillIndicator(uint32_t id, std::shared_ptr<Frame> parent, W
     IndicatorBase(id, std::move(parent), std::move(context)) {}
 
 int ArcFillIndicator::DoRender() {
-    auto lv_obj = Create(
+    auto* lv_obj = Create(
         content_frame_->GetObject(), static_cast<int32_t>(range_start_), static_cast<int32_t>(range_end_)
     );
     const auto child = std::make_shared<Frame>(Frame::Create(lv_obj).Build());

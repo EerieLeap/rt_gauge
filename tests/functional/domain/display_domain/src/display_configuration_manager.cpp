@@ -82,7 +82,7 @@ ZTEST(display_configuration_manager, test_cbor_configuration_round_trips) {
     zassert_true(manager->Update(MakeConfiguration()));
 
     auto cbor = manager->GetCborConfiguration();
-    zassert_true(cbor.size() > 0);
+    zassert_true(!cbor.empty());
 
     DisplayConfiguration replacement;
     replacement.brightness = 7;
@@ -180,7 +180,7 @@ ZTEST(display_configuration_manager, test_the_configuration_service_routes_the_d
     configuration_service.RegisterCborConfigurationManager(ConfigurationService::Type::Display, manager);
 
     auto cbor = configuration_service.GetCborConfiguration(ConfigurationService::Type::Display);
-    zassert_true(cbor.size() > 0);
+    zassert_true(!cbor.empty());
 
     DisplayConfiguration replacement;
     replacement.brightness = 9;

@@ -45,7 +45,7 @@ private:
         eerie_leap::domain::ui_domain::utilities::WidgetPropertyValidator::color_properties.size()>;
     ColorCache colors_;
     ColorCache applied_colors_;
-    mutable k_mutex lock_;
+    mutable k_mutex lock_{};
 
     Entry* Find(WidgetPropertyType type);
     const Entry* Find(WidgetPropertyType type) const;

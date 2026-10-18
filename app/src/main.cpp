@@ -98,10 +98,10 @@ LOG_MODULE_REGISTER(main_logger);
 
 constexpr uint32_t SLEEP_TIME_MS = 10000;
 
-void SetupCanbusConfiguration(std::shared_ptr<CanbusConfigurationManager> canbus_configuration_manager);
-void SetupTestSensors(std::shared_ptr<SensorsConfigurationManager> sensors_configuration_manager);
-void SetupTestLoggingButton(std::shared_ptr<SensorsConfigurationManager> sensors_configuration_manager);
-void SetupTestLoggingTrigger(
+static void SetupCanbusConfiguration(std::shared_ptr<CanbusConfigurationManager> canbus_configuration_manager);
+static void SetupTestSensors(std::shared_ptr<SensorsConfigurationManager> sensors_configuration_manager);
+static void SetupTestLoggingButton(std::shared_ptr<SensorsConfigurationManager> sensors_configuration_manager);
+static void SetupTestLoggingTrigger(
     std::shared_ptr<LoggingControlConfigurationManager> logging_control_configuration_manager,
     int gpio_channel_count
 );
@@ -175,7 +175,7 @@ int main() {
     const auto rtc_provider = std::make_shared<RtcProvider>();
     const auto boot_elapsed_time_provider = std::make_shared<BootElapsedTimeProvider>();
     const auto time_service = std::make_shared<TimeService>(rtc_provider, boot_elapsed_time_provider);
-    time_service->Initialize();
+    eerie_leap::subsys::time::TimeService::Initialize();
 
     const int config_work_queue_stack_size = 6144;
     const int config_work_queue_priority = 5;
@@ -320,7 +320,7 @@ int main() {
         sensors_controller->GetProcessingService(), sensor_readings_frame, canbus_com_service
     );
     if(ble_controller->Initialize() == 0)
-        ble_controller->Start();
+        eerie_leap::controllers::BleController::Start();
     else
         LOG_ERR("Failed to initialize the BLE controller.");
 
@@ -389,7 +389,7 @@ void SetupCanbusConfiguration(std::shared_ptr<CanbusConfigurationManager> canbus
         signal_configuration.unit = "km/h";
         message_configuration->signal_configurations.emplace_back(std::move(signal_configuration));
 
-        canbus_channel_configuration_0.message_configurations.emplace_back(std::move(message_configuration));
+        canbus_channel_configuration_0.message_configurations.emplace_back(message_configuration);
     }
 
     canbus_configuration->channel_configurations.emplace(

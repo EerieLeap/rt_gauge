@@ -229,7 +229,7 @@ ZTEST(ui_configuration_validator, test_anchor_values_are_strict_local_pixel_coor
     auto configuration = MakeConfiguration();
     auto& properties = configuration->screen_configurations[0]->widget_configurations[0]->properties;
     const int valid[] = { -1, 0, 10, 100, 2000, WidgetPropertyValidator::max_anchor_coordinate };
-    const ConfigValue invalid[] = { {}, true, false, -2, static_cast<int>(INT32_MIN), static_cast<int>(INT32_MAX),
+    const ConfigValue invalid[] = { {}, true, false, -2, (INT32_MIN), INT32_MAX,
         WidgetPropertyValidator::max_anchor_coordinate + 1, -1.0, 10.0, 1.5, std::pmr::string("10"),
         std::pmr::vector<int>{ 10 }, std::numeric_limits<double>::infinity(),
         std::numeric_limits<double>::quiet_NaN() };
@@ -364,7 +364,7 @@ ZTEST(ui_configuration_validator, test_color_properties_require_rgba_text_or_emp
     for(auto type : { WidgetPropertyType::COLOR_PRIMARY_ACTIVE, WidgetPropertyType::COLOR_PRIMARY_INACTIVE,
             WidgetPropertyType::COLOR_SECONDARY_ACTIVE, WidgetPropertyType::COLOR_SECONDARY_INACTIVE,
             WidgetPropertyType::COLOR_TERTIARY_ACTIVE, WidgetPropertyType::COLOR_TERTIARY_INACTIVE }) {
-        for(auto text : { "", "#00000000", "#FFFFFFFF", "#3366fF80" }) {
+        for(const auto* text : { "", "#00000000", "#FFFFFFFF", "#3366fF80" }) {
             properties[type] = std::pmr::string(text, Mrm::GetExtPmr());
             zassert_true(Validates(*configuration));
         }
@@ -968,7 +968,7 @@ ZTEST(ui_configuration_validator, test_composition_checks_child_types_properties
 }
 
 ZTEST(ui_configuration_validator, test_composition_propagates_screen_allocator) {
-    std::array<std::byte, 2048> storage;
+    std::array<std::byte, 2048> storage{};
     std::pmr::monotonic_buffer_resource resource(storage.data(), storage.size(), std::pmr::null_memory_resource());
     auto screen = make_shared_pmr<ScreenConfiguration>(&resource);
     screen->id = 42;

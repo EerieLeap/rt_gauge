@@ -43,13 +43,13 @@ public:
     explicit AlphaTheme(uint8_t alpha) :
         alpha_(alpha) {}
     LvglColor GetPrimaryColor() const override {
-        return LvglColor(0xFFFFFF, alpha_);
+        return { 0xFFFFFF, alpha_ };
     }
     LvglColor GetSecondaryColor() const override {
-        return LvglColor(0xFFFFFF, alpha_);
+        return { 0xFFFFFF, alpha_ };
     }
     LvglColor GetAccentColor() const override {
-        return LvglColor(0xFFFFFF, alpha_);
+        return { 0xFFFFFF, alpha_ };
     }
 };
 
@@ -135,7 +135,7 @@ struct Scene {
         auto snapshot = Snapshot();
         std::vector<uint8_t> result(extent * extent);
         for(int y = 0; y < extent; ++y) {
-            auto* pixels = reinterpret_cast<const lv_color32_t*>(snapshot->data + y * snapshot->header.stride);
+            const auto* pixels = reinterpret_cast<const lv_color32_t*>(snapshot->data + y * snapshot->header.stride);
             for(int x = 0; x < extent; ++x)
                 result[y * extent + x] = pixels[x].red;
         }
@@ -144,7 +144,7 @@ struct Scene {
 
     void CheckBrightness(int expected) const {
         const auto pixels = RedPixels();
-        const auto brightest = *std::max_element(pixels.begin(), pixels.end());
+        const auto brightest = *std::ranges::max_element(pixels);
         zassert_within(brightest, expected, rounding, "expected=%d actual=%d", expected, brightest);
         if(expected == 0)
             zassert_equal(brightest, 0);
@@ -388,7 +388,7 @@ ZTEST(widget_alpha, test_fill_and_track_alpha_remain_independent_under_widget_fa
     configuration->properties[opacity] = 128;
     Scene scene(configuration);
     auto snapshot = scene.Snapshot();
-    auto* pixels = reinterpret_cast<const lv_color32_t*>(snapshot->data + 32 * snapshot->header.stride);
+    const auto* pixels = reinterpret_cast<const lv_color32_t*>(snapshot->data + 32 * snapshot->header.stride);
     zassert_within(pixels[16].red, 64, rounding);
     zassert_within(pixels[16].blue, 32, rounding);
     zassert_equal(pixels[48].red, 0);
@@ -414,7 +414,7 @@ ZTEST(widget_alpha, test_control_style_changes_preserve_values_states_and_event_
             for(auto property : { primary, inactive, WidgetPropertyType::COLOR_SECONDARY_ACTIVE,
                     WidgetPropertyType::COLOR_SECONDARY_INACTIVE, WidgetPropertyType::COLOR_TERTIARY_ACTIVE,
                     WidgetPropertyType::COLOR_TERTIARY_INACTIVE }) {
-                if(std::find(supported.begin(), supported.end(), property) != supported.end())
+                if(std::ranges::find(supported, property) != supported.end())
                     Publish(property, White(alpha));
             }
             Publish(opacity, 128);

@@ -33,7 +33,7 @@ bool NormalizeConvexPolygon(Polygon& vertices) {
         return false;
     // Positive winding is clockwise in screen coordinates; arcs use this winding too.
     if(area < 0)
-        std::reverse(vertices.begin(), vertices.end());
+        std::ranges::reverse(vertices);
 
     for(size_t i = 0; i < vertices.size(); ++i) {
         const size_t next = (i + 1) % vertices.size();

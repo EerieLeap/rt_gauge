@@ -48,10 +48,10 @@ protected:
     // handful of entries rather than a registry lookup.
     struct OutboundBinding {
         WidgetPropertyType target;
-        IEventChannel* channel;
-        uint32_t event_type;
-        uint32_t payload_key;
-        uint32_t selector_key;
+        IEventChannel* channel{};
+        uint32_t event_type{};
+        uint32_t payload_key{};
+        uint32_t selector_key{};
         std::optional<EventData> selector_value;
     };
 

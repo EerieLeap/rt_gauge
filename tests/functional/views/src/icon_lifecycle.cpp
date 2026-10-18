@@ -75,7 +75,7 @@ public:
 
 class BlueTheme : public DefaultTheme {
     LvglColor GetAccentColor() const override {
-        return LvglColor(0x3366FF, 128);
+        return { 0x3366FF, 128 };
     }
 };
 
@@ -564,7 +564,7 @@ ZTEST(icon_lifecycle, test_rotation_pixels_clipping_and_parent_animation) {
                 lv_snapshot_take(root->GetObject(), LV_COLOR_FORMAT_ARGB8888), lv_draw_buf_destroy
             );
             zassert_not_null(snapshot);
-            auto* row = reinterpret_cast<const lv_color32_t*>(snapshot->data + y * snapshot->header.stride);
+            const auto* row = reinterpret_cast<const lv_color32_t*>(snapshot->data + y * snapshot->header.stride);
             zassert_equal(
                 row[x].red > 200, lit, "type %u sample %d pixel %d,%d = %u", static_cast<unsigned>(type), sample, x, y,
                 row[x].red
@@ -700,8 +700,7 @@ ZTEST(icon_lifecycle, test_anchor_binding_preserves_angles_and_replays_after_sus
     lv_image_get_pivot(image, &pivot);
     zassert_equal(pivot.x, 25);
     zassert_equal(pivot.y, -11);
-    const EventData invalid[] = { -2, static_cast<int>(INT32_MAX), uint32_t{ UINT32_MAX }, 10.0F, true,
-        std::string("10") };
+    const EventData invalid[] = { -2, INT32_MAX, uint32_t{ UINT32_MAX }, 10.0F, true, std::string("10") };
     for(const auto& value : invalid) {
         Publish(WidgetPropertyType::ANCHOR_POINT_X, value);
         zassert_equal(std::get<int>(widget.Read(WidgetPropertyType::ANCHOR_POINT_X)), 25);
@@ -1642,7 +1641,9 @@ ZTEST(icon_lifecycle, test_images_and_dials_apply_opacity_once_without_recolorin
             zassert_not_null(snapshot);
             int brightest = 0;
             for(uint32_t y = 0; y < snapshot->header.h; ++y) {
-                auto* pixels = reinterpret_cast<const lv_color32_t*>(snapshot->data + y * snapshot->header.stride);
+                const auto* pixels = reinterpret_cast<const lv_color32_t*>(
+                    snapshot->data + y * snapshot->header.stride
+                );
                 for(uint32_t x = 0; x < snapshot->header.w; ++x)
                     brightest = std::max(brightest, static_cast<int>(pixels[x].red));
             }
