@@ -171,6 +171,9 @@ The script exits 0 when clean, 1 when files need formatting and 2 on a setup err
 major. To keep a hand-aligned block as written, wrap it in `// clang-format off` … `// clang-format on` with a comment
 saying why. CI fails on unformatted code and when `.clang-format` differs from rt_core's.
 
+`git config blame.ignoreRevsFile .git-blame-ignore-revs` hides the reformat commit from `git blame`; GitHub reads the
+file by itself.
+
 ### Required tools
 
 #### CBOR
