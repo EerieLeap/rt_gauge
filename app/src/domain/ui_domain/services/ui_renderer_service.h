@@ -3,8 +3,8 @@
 #include <atomic>
 #include <memory>
 
-#include <zephyr/kernel.h>
 #include <lvgl.h>
+#include <zephyr/kernel.h>
 
 #include <subsys/threading/thread.h>
 

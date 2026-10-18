@@ -3,20 +3,20 @@
 #include <cstring>
 #include <memory>
 
-#include <zephyr/kernel.h>
-#include <zephyr/logging/log.h>
+#include <lvgl_mem.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/display.h>
-#include <lvgl_mem.h>
+#include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
 
 #ifdef CONFIG_ESP32_PPA
-#include <zephyr/cache.h>
-#include <driver/ppa.h>
+    #include <driver/ppa.h>
+    #include <zephyr/cache.h>
 #endif
 
-#include "utilities/memory/memory_resource_manager.h"
-#include "subsys/device_tree/dt_display.h"
 #include "domain/ui_domain/lvgl_lock.h"
+#include "subsys/device_tree/dt_display.h"
+#include "utilities/memory/memory_resource_manager.h"
 
 #include "ui_renderer_service.h"
 
@@ -31,8 +31,7 @@ LOG_MODULE_REGISTER(renderer_logger);
 
 // The flush thread signals completion through the callback this replaces, so
 // leaving it enabled would park the renderer on a semaphore nobody gives.
-BUILD_ASSERT(!IS_ENABLED(CONFIG_LV_Z_FLUSH_THREAD),
-    "CONFIG_LV_Z_FLUSH_THREAD must be disabled when the UI is rotated");
+BUILD_ASSERT(!IS_ENABLED(CONFIG_LV_Z_FLUSH_THREAD), "CONFIG_LV_Z_FLUSH_THREAD must be disabled when the UI is rotated");
 
 namespace {
 
@@ -65,8 +64,15 @@ constexpr int32_t rotation_tile_ = 32;
 // Tiling on the destination row (x) keeps a band of whole destination rows and
 // the source columns feeding them resident together: 32 * (720*2 + 1280*2) is
 // 92 KB, inside the 128 KB L2, so each line is filled once and written back once.
-void RotateTiledRgb565(const uint16_t* source, uint16_t* destination, int32_t width,
-    int32_t height, int32_t source_stride, int32_t destination_stride, bool clockwise) {
+void RotateTiledRgb565(
+    const uint16_t* source,
+    uint16_t* destination,
+    int32_t width,
+    int32_t height,
+    int32_t source_stride,
+    int32_t destination_stride,
+    bool clockwise
+) {
 
     for(int32_t tile_x = 0; tile_x < width; tile_x += rotation_tile_) {
         const int32_t tile_width = MIN(tile_x + rotation_tile_, width);
@@ -77,9 +83,8 @@ void RotateTiledRgb565(const uint16_t* source, uint16_t* destination, int32_t wi
             for(int32_t x = tile_x; x < tile_width; ++x) {
                 const uint16_t* row = source + (size_t)tile_y * source_stride + x;
 
-                uint16_t* column = clockwise
-                    ? destination + (size_t)(width - x - 1) * destination_stride + tile_y
-                    : destination + (size_t)x * destination_stride + (height - tile_y - 1);
+                uint16_t* column = clockwise ? destination + (size_t)(width - x - 1) * destination_stride + tile_y
+                                             : destination + (size_t)x * destination_stride + (height - tile_y - 1);
                 const int32_t step = clockwise ? 1 : -1;
 
                 for(int32_t y = tile_y; y < tile_height; ++y) {
@@ -92,43 +97,64 @@ void RotateTiledRgb565(const uint16_t* source, uint16_t* destination, int32_t wi
     }
 }
 
-void Rotate(const uint8_t* source, uint8_t* destination, int32_t width, int32_t height,
-    int32_t source_stride, int32_t destination_stride, lv_display_rotation_t rotation,
-    lv_color_format_t color_format) {
+void Rotate(
+    const uint8_t* source,
+    uint8_t* destination,
+    int32_t width,
+    int32_t height,
+    int32_t source_stride,
+    int32_t destination_stride,
+    lv_display_rotation_t rotation,
+    lv_color_format_t color_format
+) {
 
-    const bool quarter_turn = rotation == LV_DISPLAY_ROTATION_90
-        || rotation == LV_DISPLAY_ROTATION_270;
+    const bool quarter_turn = rotation == LV_DISPLAY_ROTATION_90 || rotation == LV_DISPLAY_ROTATION_270;
 
     if(!quarter_turn || color_format != LV_COLOR_FORMAT_RGB565) {
-        lv_draw_sw_rotate(source, destination, width, height, source_stride,
-            destination_stride, rotation, color_format);
+        lv_draw_sw_rotate(
+            source, destination, width, height, source_stride, destination_stride, rotation, color_format
+        );
         return;
     }
 
-    RotateTiledRgb565(reinterpret_cast<const uint16_t*>(source),
-        reinterpret_cast<uint16_t*>(destination), width, height,
-        source_stride / (int32_t)sizeof(uint16_t),
-        destination_stride / (int32_t)sizeof(uint16_t),
-        rotation == LV_DISPLAY_ROTATION_90);
+    RotateTiledRgb565(
+        reinterpret_cast<const uint16_t*>(source), reinterpret_cast<uint16_t*>(destination), width, height,
+        source_stride / (int32_t)sizeof(uint16_t), destination_stride / (int32_t)sizeof(uint16_t),
+        rotation == LV_DISPLAY_ROTATION_90
+    );
 }
 
-#ifdef CONFIG_ESP32_PPA
+    #ifdef CONFIG_ESP32_PPA
 
 ppa_client_handle_t ppa_client = nullptr;
 
 // LVGL counts its rotation the way the PPA counts its own, counter-clockwise.
 ppa_srm_rotation_angle_t ToPpaRotation(lv_display_rotation_t rotation) {
     switch(rotation) {
-        case LV_DISPLAY_ROTATION_90: return PPA_SRM_ROTATION_ANGLE_90;
-        case LV_DISPLAY_ROTATION_180: return PPA_SRM_ROTATION_ANGLE_180;
-        case LV_DISPLAY_ROTATION_270: return PPA_SRM_ROTATION_ANGLE_270;
-        default: return PPA_SRM_ROTATION_ANGLE_0;
+        case LV_DISPLAY_ROTATION_90:
+            return PPA_SRM_ROTATION_ANGLE_90;
+        case LV_DISPLAY_ROTATION_180:
+            return PPA_SRM_ROTATION_ANGLE_180;
+        case LV_DISPLAY_ROTATION_270:
+            return PPA_SRM_ROTATION_ANGLE_270;
+        default:
+            return PPA_SRM_ROTATION_ANGLE_0;
     }
 }
 
-bool RotateAccelerated(uint8_t* source, int32_t width, int32_t height, uint32_t source_stride,
-    int32_t destination_x, int32_t destination_y, int32_t panel_width, int32_t panel_height,
-    uint32_t panel_stride, lv_display_rotation_t rotation, lv_color_format_t color_format) {
+bool RotateAccelerated(
+    uint8_t* source,
+    int32_t width,
+    int32_t height,
+    uint32_t source_stride,
+    int32_t destination_x,
+    int32_t destination_y,
+    int32_t panel_width,
+    int32_t panel_height,
+    uint32_t panel_stride,
+    lv_display_rotation_t rotation,
+    lv_color_format_t color_format
+) {
 
     if(ppa_client == nullptr || color_format != LV_COLOR_FORMAT_RGB565)
         return false;
@@ -137,7 +163,7 @@ bool RotateAccelerated(uint8_t* source, int32_t width, int32_t height, uint32_t 
     // descriptors, so what LVGL just drew has to leave the cache first.
     sys_cache_data_flush_range(source, source_stride * (size_t)height);
 
-    ppa_srm_oper_config_t config {};
+    ppa_srm_oper_config_t config{};
 
     config.in.buffer = source;
     config.in.pic_w = source_stride / LV_COLOR_FORMAT_GET_SIZE(color_format);
@@ -168,8 +194,10 @@ bool RotateAccelerated(uint8_t* source, int32_t width, int32_t height, uint32_t 
 
         if(!reported) {
             reported = true;
-            LOG_WRN("PPA rejected a %dx%d area at %d,%d (%d), rotating it on the CPU.",
-                width, height, destination_x, destination_y, status);
+            LOG_WRN(
+                "PPA rejected a %dx%d area at %d,%d (%d), rotating it on the CPU.", width, height, destination_x,
+                destination_y, status
+            );
         }
 
         return false;
@@ -178,22 +206,37 @@ bool RotateAccelerated(uint8_t* source, int32_t width, int32_t height, uint32_t 
     return true;
 }
 
-#else
+    #else
 
-bool RotateAccelerated(uint8_t*, int32_t, int32_t, uint32_t, int32_t, int32_t, int32_t,
-    int32_t, uint32_t, lv_display_rotation_t, lv_color_format_t) {
+bool RotateAccelerated(
+    uint8_t*,
+    int32_t,
+    int32_t,
+    uint32_t,
+    int32_t,
+    int32_t,
+    int32_t,
+    int32_t,
+    uint32_t,
+    lv_display_rotation_t,
+    lv_color_format_t
+) {
 
     return false;
 }
 
-#endif
+    #endif
 
 lv_display_rotation_t ToLvglRotation(int degrees) {
     switch(degrees) {
-        case 90: return LV_DISPLAY_ROTATION_90;
-        case 180: return LV_DISPLAY_ROTATION_180;
-        case 270: return LV_DISPLAY_ROTATION_270;
-        default: return LV_DISPLAY_ROTATION_0;
+        case 90:
+            return LV_DISPLAY_ROTATION_90;
+        case 180:
+            return LV_DISPLAY_ROTATION_180;
+        case 270:
+            return LV_DISPLAY_ROTATION_270;
+        default:
+            return LV_DISPLAY_ROTATION_0;
     }
 }
 
@@ -213,17 +256,17 @@ void RotatedFlushCb(lv_display_t* display, const lv_area_t* area, uint8_t* px_ma
 
     // Rotating into the frame at its final position is the whole copy: the
     // scanout is pointed at this buffer, so nothing moves it again afterwards.
-    uint8_t* destination = frames[draw_frame_].get()
-        + static_cast<size_t>(rotated.y1) * panel_stride
+    uint8_t* destination = frames[draw_frame_].get() + static_cast<size_t>(rotated.y1) * panel_stride
         + static_cast<size_t>(rotated.x1) * pixel_size;
 
     const lv_display_rotation_t rotation = lv_display_get_rotation(display);
 
-    if(!RotateAccelerated(px_map, source_width, source_height, source_stride, rotated.x1,
-           rotated.y1, panel_width, panel_height, panel_stride, rotation, color_format)) {
+    if(!RotateAccelerated(
+           px_map, source_width, source_height, source_stride, rotated.x1, rotated.y1, panel_width, panel_height,
+           panel_stride, rotation, color_format
+       )) {
 
-        Rotate(px_map, destination, source_width, source_height, source_stride,
-            panel_stride, rotation, color_format);
+        Rotate(px_map, destination, source_width, source_height, source_stride, panel_stride, rotation, color_format);
     }
 
     if(!lv_display_flush_is_last(display)) {
@@ -231,7 +274,7 @@ void RotatedFlushCb(lv_display_t* display, const lv_area_t* area, uint8_t* px_ma
         return;
     }
 
-    display_buffer_descriptor descriptor {};
+    display_buffer_descriptor descriptor{};
     descriptor.buf_size = panel_stride * static_cast<uint32_t>(panel_height);
     descriptor.width = static_cast<uint16_t>(panel_width);
     descriptor.height = static_cast<uint16_t>(panel_height);
@@ -250,8 +293,7 @@ int InitializeRotation(lv_display_t* display) {
     const lv_color_format_t color_format = lv_display_get_color_format(display);
     const int32_t width = lv_display_get_original_horizontal_resolution(display);
     const int32_t height = lv_display_get_original_vertical_resolution(display);
-    const size_t size =
-        static_cast<size_t>(lv_draw_buf_width_to_stride(width, color_format)) * height;
+    const size_t size = static_cast<size_t>(lv_draw_buf_width_to_stride(width, color_format)) * height;
 
     for(size_t i = 0; i < frame_count_; ++i) {
         auto* frame = static_cast<uint8_t*>(Mrm::GetExtPmr()->allocate(size, frame_alignment_));
@@ -261,17 +303,17 @@ int InitializeRotation(lv_display_t* display) {
         }
 
         memset(frame, 0, size);
-        frames[i] = std::unique_ptr<uint8_t[], FrameDeleter>(frame, FrameDeleter{size});
+        frames[i] = std::unique_ptr<uint8_t[], FrameDeleter>(frame, FrameDeleter{ size });
 
-#ifdef CONFIG_ESP32_PPA
+    #ifdef CONFIG_ESP32_PPA
         // Both the scanout and the accelerator reach the frame over DMA, so the
         // zeroing has to be in memory before either of them looks at it.
         sys_cache_data_flush_range(frame, size);
-#endif
+    #endif
     }
 
-#ifdef CONFIG_ESP32_PPA
-    ppa_client_config_t client_config {};
+    #ifdef CONFIG_ESP32_PPA
+    ppa_client_config_t client_config{};
     client_config.oper_type = PPA_OPERATION_SRM;
     client_config.max_pending_trans_num = 1;
     client_config.data_burst_length = PPA_DATA_BURST_LENGTH_128;
@@ -280,14 +322,15 @@ int InitializeRotation(lv_display_t* display) {
         ppa_client = nullptr;
         LOG_WRN("No PPA client, rotating on the CPU.");
     }
-#endif
+    #endif
 
     lv_display_set_rotation(display, ToLvglRotation(CONFIG_EERIE_LEAP_UI_ROTATION));
     lv_display_set_flush_cb(display, RotatedFlushCb);
 
-    LOG_INF("UI rotated by %d degrees: %dx%d.", CONFIG_EERIE_LEAP_UI_ROTATION,
-        lv_display_get_horizontal_resolution(display),
-        lv_display_get_vertical_resolution(display));
+    LOG_INF(
+        "UI rotated by %d degrees: %dx%d.", CONFIG_EERIE_LEAP_UI_ROTATION,
+        lv_display_get_horizontal_resolution(display), lv_display_get_vertical_resolution(display)
+    );
 
     return 0;
 }
@@ -299,11 +342,8 @@ int InitializeRotation(lv_display_t* display) {
 UiRendererService::UiRendererService() {
     // NOTE: Stack should be allocated on internal RAM to take an advantage of DMA for rendering
     thread_ = std::make_unique<Thread>(
-        "ui_renderer_service",
-        this,
-        UiRendererService::k_stack_size_,
-        UiRendererService::k_priority_,
-        false);
+        "ui_renderer_service", this, UiRendererService::k_stack_size_, UiRendererService::k_priority_, false
+    );
 }
 
 UiRendererService::~UiRendererService() {
@@ -317,9 +357,9 @@ int UiRendererService::Initialize() {
     }
 
     if(!device_is_ready(DtDisplay::Get())) {
-		LOG_ERR("Display not ready, aborting");
-		return -1;
-	}
+        LOG_ERR("Display not ready, aborting");
+        return -1;
+    }
 
     thread_->Initialize();
 

@@ -11,13 +11,12 @@ using namespace eerie_leap::domain::ui_domain::models;
 using namespace eerie_leap::views::utilitites;
 using namespace eerie_leap::views::themes;
 
-DigitalIndicator::DigitalIndicator(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context)
-    : IndicatorBase(id, std::move(parent), std::move(context)) {}
+DigitalIndicator::DigitalIndicator(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context) :
+    IndicatorBase(id, std::move(parent), std::move(context)) {}
 
 int DigitalIndicator::DoRender() {
     auto lv_obj = Create(content_frame_);
-    auto child = std::make_shared<Frame>(
-        Frame::Create(lv_obj).Build());
+    auto child = std::make_shared<Frame>(Frame::Create(lv_obj).Build());
     content_frame_->SetChild(child);
 
     return 0;
@@ -28,7 +27,7 @@ void DigitalIndicator::RegisterProperties(WidgetPropertyStore& store) const {
 
     store.RegisterColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE);
 
-    store.Register(WidgetPropertyType::VALUE_PRECISION, ConfigValue { 0 }, PropertyChangeEffect::Repaint);
+    store.Register(WidgetPropertyType::VALUE_PRECISION, ConfigValue{ 0 }, PropertyChangeEffect::Repaint);
 }
 
 int DigitalIndicator::ApplyTheme(const ITheme& theme) {

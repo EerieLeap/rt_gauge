@@ -15,7 +15,13 @@ WidgetPosition PositioningHelpers::GetPointOnCircle(int center_x, int center_y, 
     return { .x = x, .y = y };
 }
 
-void PositioningHelpers::PlaceObjectOnCircle(lv_obj_t* object, int center_x, int center_y, int radius_px, float angle_deg) {
+void PositioningHelpers::PlaceObjectOnCircle(
+    lv_obj_t* object,
+    int center_x,
+    int center_y,
+    int radius_px,
+    float angle_deg
+) {
     float angle_deg_normalized = 180.0F + angle_deg;
     WidgetPosition pos = GetPointOnCircle(center_x, center_y, radius_px, angle_deg_normalized);
 

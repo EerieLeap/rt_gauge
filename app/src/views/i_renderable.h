@@ -2,15 +2,15 @@
 
 #include <memory>
 
-#include "views/utilitites/frame.h"
-#include "views/themes/i_theme_observer.h"
 #include "views/themes/i_theme.h"
+#include "views/themes/i_theme_observer.h"
+#include "views/utilitites/frame.h"
 
 namespace eerie_leap::views {
 
-using eerie_leap::views::utilitites::Frame;
 using eerie_leap::views::themes::ITheme;
 using eerie_leap::views::themes::IThemeObserver;
+using eerie_leap::views::utilitites::Frame;
 
 class IRenderable : public IThemeObserver {
 protected:
@@ -25,4 +25,4 @@ public:
     virtual bool IsReady() const = 0;
 };
 
-} // namespace eerie_leap
+} // namespace eerie_leap::views

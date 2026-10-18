@@ -15,7 +15,8 @@ class NavigationEventChannel : public EventChannel<NavigationEventType, Navigati
 private:
     static constexpr size_t k_max_queued_events = 16;
 
-    NavigationEventChannel() : EventChannel("navigation_events", k_max_queued_events) { }
+    NavigationEventChannel() :
+        EventChannel("navigation_events", k_max_queued_events) {}
 
 public:
     static NavigationEventChannel& GetInstance() {

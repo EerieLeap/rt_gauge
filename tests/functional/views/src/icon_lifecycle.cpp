@@ -9,13 +9,14 @@
 
 #include <zephyr/ztest.h>
 
-#include "subsys/assets/asset_kind.h"
-#include "subsys/assets/assets_manager.h"
 #include "domain/logging_domain/event_bus/logging_events_channel.h"
 #include "domain/sensor_domain/event_bus/sensor_events_channel.h"
 #include "domain/ui_domain/configuration/parsers/ui_configuration_validator.h"
-#include "subsys/event_bus/event_channel_id.h"
+#include "domain/ui_domain/utilities/widget_property_validator.h"
 #include "event_bus/event_channels.h"
+#include "subsys/assets/asset_kind.h"
+#include "subsys/assets/assets_manager.h"
+#include "subsys/event_bus/event_channel_id.h"
 #include "views/assets/animations/animations_register.h"
 #include "views/screens/screen.h"
 #include "views/themes/default_theme.h"
@@ -23,7 +24,6 @@
 #include "views/widgets/basic/icons/shape_icon/oval_icon/oval_icon.h"
 #include "views/widgets/indicators/dial_indicator/dial_indicator.h"
 #include "views/widgets/widget_factory.h"
-#include "domain/ui_domain/utilities/widget_property_validator.h"
 
 #include "views_test_support.h"
 
@@ -45,25 +45,38 @@ namespace {
 class TestIcon : public IconWidget {
 public:
     using IconWidget::IconWidget;
-    icons::OvalIcon* Oval() const { return dynamic_cast<icons::OvalIcon*>(icon_.get()); }
-    ConfigValue Read(WidgetPropertyType type) const { return properties_->Get(type); }
+    icons::OvalIcon* Oval() const {
+        return dynamic_cast<icons::OvalIcon*>(icon_.get());
+    }
+    ConfigValue Read(WidgetPropertyType type) const {
+        return properties_->Get(type);
+    }
 };
 
 class TestDial : public indicators::DialIndicator {
 public:
     using DialIndicator::DialIndicator;
-    IconWidget& Needle() const { return static_cast<IconWidget&>(*GetChildren().front()); }
-    ConfigValue Read(WidgetPropertyType type) const { return properties_->Get(type); }
+    IconWidget& Needle() const {
+        return static_cast<IconWidget&>(*GetChildren().front());
+    }
+    ConfigValue Read(WidgetPropertyType type) const {
+        return properties_->Get(type);
+    }
 
-    void Assemble(std::shared_ptr<WidgetConfiguration> dial, std::shared_ptr<WidgetConfiguration> needle,
-        const WidgetContext& context) {
+    void Assemble(
+        std::shared_ptr<WidgetConfiguration> dial,
+        std::shared_ptr<WidgetConfiguration> needle,
+        const WidgetContext& context
+    ) {
         views_test::InjectChildren(*this, *dial, { std::move(needle) }, context);
         Configure(std::move(dial));
     }
 };
 
 class BlueTheme : public DefaultTheme {
-    LvglColor GetAccentColor() const override { return LvglColor(0x3366FF, 128); }
+    LvglColor GetAccentColor() const override {
+        return LvglColor(0x3366FF, 128);
+    }
 };
 
 std::shared_ptr<Frame> MakeRoot() {
@@ -73,21 +86,19 @@ std::shared_ptr<Frame> MakeRoot() {
 std::shared_ptr<WidgetConfiguration> Configuration(IconType type) {
     auto configuration = std::make_shared<WidgetConfiguration>(std::allocator_arg, std::pmr::get_default_resource());
     configuration->properties[WidgetPropertyType::ICON_TYPE] = static_cast<int>(type);
-    for(auto target : { WidgetPropertyType::IS_ACTIVE, WidgetPropertyType::IS_VISIBLE,
-                       WidgetPropertyType::OPACITY, WidgetPropertyType::POSITION_X, WidgetPropertyType::VALUE,
-                       WidgetPropertyType::ANIMATION_TYPE, WidgetPropertyType::IS_ANIMATION_ACTIVE,
-                       WidgetPropertyType::ANIMATION_DURATION_MS, WidgetPropertyType::COLOR_PRIMARY_ACTIVE,
-                       WidgetPropertyType::ANCHOR_POINT_X, WidgetPropertyType::ANCHOR_POINT_Y }) {
-        configuration->bindings.push_back(PropertyBinding {
-            .target = target,
-            .event = {
-                .channel = EventChannelId::Sensors,
-                .event_type = std::to_underlying(SensorEventType::DataUpdated),
-                .payload_key = std::to_underlying(SensorPayloadType::Value),
-                .selector_key = std::to_underlying(SensorPayloadType::SensorId),
-                .selector_value = static_cast<int>(target)
-            }
-        });
+    for(auto target : { WidgetPropertyType::IS_ACTIVE, WidgetPropertyType::IS_VISIBLE, WidgetPropertyType::OPACITY,
+            WidgetPropertyType::POSITION_X, WidgetPropertyType::VALUE, WidgetPropertyType::ANIMATION_TYPE,
+            WidgetPropertyType::IS_ANIMATION_ACTIVE, WidgetPropertyType::ANIMATION_DURATION_MS,
+            WidgetPropertyType::COLOR_PRIMARY_ACTIVE, WidgetPropertyType::ANCHOR_POINT_X,
+            WidgetPropertyType::ANCHOR_POINT_Y }) {
+        configuration->bindings.push_back(
+            PropertyBinding{ .target = target,
+                .event = { .channel = EventChannelId::Sensors,
+                    .event_type = std::to_underlying(SensorEventType::DataUpdated),
+                    .payload_key = std::to_underlying(SensorPayloadType::Value),
+                    .selector_key = std::to_underlying(SensorPayloadType::SensorId),
+                    .selector_value = static_cast<int>(target) } }
+        );
     }
     return configuration;
 }
@@ -118,22 +129,20 @@ void ValidateScreen(const ScreenConfiguration& screen) {
 }
 
 void Publish(WidgetPropertyType type, const EventData& value) {
-    SensorEventsChannel::GetInstance().Publish({
-        .source_id = 0,
-        .type = SensorEventType::DataUpdated,
-        .payload = {
-            { SensorPayloadType::SensorId, static_cast<int>(type) },
-            { SensorPayloadType::Value, value }
-        }
-    });
+    SensorEventsChannel::GetInstance().Publish(
+        { .source_id = 0,
+            .type = SensorEventType::DataUpdated,
+            .payload = {
+                { SensorPayloadType::SensorId, static_cast<int>(type) }, { SensorPayloadType::Value, value } } }
+    );
 }
 
 void PublishLogging(bool active) {
-    LoggingEventsChannel::GetInstance().Publish({
-        .source_id = 0,
-        .type = LoggingEventType::StatusUpdated,
-        .payload = {{ LoggingPayloadType::IsActive, active }}
-    });
+    LoggingEventsChannel::GetInstance().Publish(
+        { .source_id = 0,
+            .type = LoggingEventType::StatusUpdated,
+            .payload = { { LoggingPayloadType::IsActive, active } } }
+    );
 }
 
 lv_obj_t* Inner(const IconWidget& widget) {
@@ -167,30 +176,34 @@ size_t ImageBytes(int width, int height) {
 }
 
 // Serves "needle.bin" as the only image: a file of file_size bytes, exactly the image by default.
-WidgetContext ImageContext(WidgetConfiguration& configuration, int width = 4, int height = 4,
-    std::optional<size_t> file_size = std::nullopt) {
+WidgetContext ImageContext(
+    WidgetConfiguration& configuration,
+    int width = 4,
+    int height = 4,
+    std::optional<size_t> file_size = std::nullopt
+) {
     auto store = views_test::MakeAssetStore("icon-lifecycle");
     std::vector<uint8_t> pixels(file_size.value_or(ImageBytes(width, height)), 255);
     zassert_true(store->Save("needle.bin", pixels));
     configuration.properties[WidgetPropertyType::FILE_PATH] = std::pmr::string("needle.bin");
     configuration.properties[WidgetPropertyType::IMG_WIDTH] = width;
     configuration.properties[WidgetPropertyType::IMG_HEIGHT] = height;
-    return WidgetContext { .assets_manager = views_test::MakeAssetsManager(AssetKind::IMAGES, std::move(store)) };
+    return WidgetContext{ .assets_manager = views_test::MakeAssetsManager(AssetKind::IMAGES, std::move(store)) };
 }
 
 WidgetContext LottieContext(WidgetConfiguration& configuration) {
     using eerie_leap::views::assets::animations::ui_lottie_spinner_json;
     auto store = views_test::MakeAssetStore("icon-lifecycle");
-    zassert_true(store->Save("spinner.json", std::span(
-        reinterpret_cast<const uint8_t*>(ui_lottie_spinner_json.data()), ui_lottie_spinner_json.size())));
+    zassert_true(store->Save(
+        "spinner.json",
+        std::span(reinterpret_cast<const uint8_t*>(ui_lottie_spinner_json.data()), ui_lottie_spinner_json.size())
+    ));
     configuration.properties[WidgetPropertyType::FILE_PATH] = std::pmr::string("spinner.json");
-    return WidgetContext { .assets_manager = views_test::MakeAssetsManager(AssetKind::ANIMATIONS, std::move(store)) };
+    return WidgetContext{ .assets_manager = views_test::MakeAssetsManager(AssetKind::ANIMATIONS, std::move(store)) };
 }
 
-constexpr std::array native_rotation_icons {
-    IconType::Image, IconType::Rectangle, IconType::TriangleIsosceles,
-    IconType::TriangleRight, IconType::Oval, IconType::Line
-};
+constexpr std::array native_rotation_icons{ IconType::Image, IconType::Rectangle, IconType::TriangleIsosceles,
+    IconType::TriangleRight, IconType::Oval, IconType::Line };
 
 std::shared_ptr<WidgetConfiguration> RotationConfiguration(IconType type) {
     auto configuration = Configuration(type);
@@ -244,7 +257,7 @@ ZTEST(icon_lifecycle, test_rotation_retains_signed_angles_anchors_and_rerender) 
         CheckRotation(widget, 2700, 10, 30);
         widget.OnActivated();
         CheckRotation(widget, 2700, 10, 30);
-        for(int32_t angle : std::initializer_list<int32_t> { 0, -1, 4500, -7200, INT32_MIN, INT32_MAX }) {
+        for(int32_t angle : std::initializer_list<int32_t>{ 0, -1, 4500, -7200, INT32_MIN, INT32_MAX }) {
             zassert_true(rotation->SetRotation(angle));
             CheckRotation(widget, (angle % 3600 + 3600) % 3600, 10, 30);
         }
@@ -385,7 +398,7 @@ ZTEST(icon_lifecycle, test_an_image_file_smaller_than_its_pixels_renders_nothing
     ScopedLvglLock lock;
     const size_t required = ImageBytes(20, 60);
 
-    for(const size_t file_size : { required - 1, required / 2, size_t { 1 } }) {
+    for(const size_t file_size : { required - 1, required / 2, size_t{ 1 } }) {
         auto configuration = RotationConfiguration(IconType::Image);
         TestIcon widget(1, MakeRoot(), ImageContext(*configuration, 20, 60, file_size));
         widget.Configure(configuration);
@@ -419,10 +432,8 @@ ZTEST(icon_lifecycle, test_an_image_is_served_by_the_images_kind_only) {
     // The same store, which holds needle.bin, under the other kind.
     auto store = views_test::MakeAssetStore("icon-lifecycle");
     zassert_true(store->Exists("needle.bin"));
-    const std::array<std::shared_ptr<AssetsManager>, 3> unfit {
-        views_test::MakeAssetsManager(AssetKind::ANIMATIONS, store),
-        std::make_shared<AssetsManager>(),
-        nullptr
+    const std::array<std::shared_ptr<AssetsManager>, 3> unfit{
+        views_test::MakeAssetsManager(AssetKind::ANIMATIONS, store), std::make_shared<AssetsManager>(), nullptr
     };
 
     for(const auto& assets : unfit) {
@@ -461,10 +472,9 @@ ZTEST(icon_lifecycle, test_every_factory_widget_and_icon_supports_direct_rotatio
     auto& factory = WidgetFactory::GetInstance();
     for(auto type : factory.GetAvailableTypes()) {
         const bool is_icon = type == WidgetType::BasicIcon || type == WidgetType::BasicArcIcon;
-        const auto icons = is_icon
-            ? std::vector<IconType>{ IconType::Label, IconType::Image, IconType::Rectangle,
-                IconType::TriangleIsosceles, IconType::TriangleRight, IconType::Oval, IconType::Line }
-            : std::vector<IconType>{ IconType::Label };
+        const auto icons = is_icon ? std::vector<IconType>{ IconType::Label, IconType::Image, IconType::Rectangle,
+            IconType::TriangleIsosceles, IconType::TriangleRight, IconType::Oval, IconType::Line }
+                                   : std::vector<IconType>{ IconType::Label };
         for(auto icon : icons) {
             auto configuration = RotationConfiguration(icon);
             configuration->properties[WidgetPropertyType::LABEL] = std::pmr::string("RPM");
@@ -487,11 +497,11 @@ ZTEST(icon_lifecycle, test_every_factory_widget_and_icon_supports_direct_rotatio
             auto angle = [&] {
                 auto* content = views_test::WidgetContent(*widget);
                 return native ? lv_image_get_rotation(lv_obj_get_child(content, 0))
-                    : lv_obj_get_style_transform_rotation(content, LV_PART_MAIN);
+                              : lv_obj_get_style_transform_rotation(content, LV_PART_MAIN);
             };
             zassert_equal(angle(), 2700, "widget %d icon %d", static_cast<int>(type), static_cast<int>(icon));
             widget->OnActivated();
-            for(int32_t value : std::initializer_list<int32_t> { INT32_MIN, INT32_MAX, -1, 0, 4500 }) {
+            for(int32_t value : std::initializer_list<int32_t>{ INT32_MIN, INT32_MAX, -1, 0, 4500 }) {
                 zassert_true(widget->SetRotation(value));
                 zassert_equal(angle(), (value % 3600 + 3600) % 3600);
             }
@@ -526,8 +536,9 @@ ZTEST(icon_lifecycle, test_rotation_pixels_clipping_and_parent_animation) {
         lv_obj_set_style_bg_color(root->GetObject(), lv_color_black(), 0);
         lv_obj_set_style_bg_opa(root->GetObject(), LV_OPA_COVER, 0);
         auto frame = [](const std::shared_ptr<Frame>& parent) {
-            return std::make_shared<Frame>(Frame::CreateWrapped(parent->GetObject())
-                .SetWidth(96, true).SetHeight(96, true).Build());
+            return std::make_shared<Frame>(
+                Frame::CreateWrapped(parent->GetObject()).SetWidth(96, true).SetHeight(96, true).Build()
+            );
         };
         auto clip = frame(root);
         auto layout = frame(clip);
@@ -550,11 +561,14 @@ ZTEST(icon_lifecycle, test_rotation_pixels_clipping_and_parent_animation) {
             ++sample;
             lv_obj_update_layout(root->GetObject());
             std::unique_ptr<lv_draw_buf_t, decltype(&lv_draw_buf_destroy)> snapshot(
-                lv_snapshot_take(root->GetObject(), LV_COLOR_FORMAT_ARGB8888), lv_draw_buf_destroy);
+                lv_snapshot_take(root->GetObject(), LV_COLOR_FORMAT_ARGB8888), lv_draw_buf_destroy
+            );
             zassert_not_null(snapshot);
             auto* row = reinterpret_cast<const lv_color32_t*>(snapshot->data + y * snapshot->header.stride);
-            zassert_equal(row[x].red > 200, lit, "type %u sample %d pixel %d,%d = %u",
-                static_cast<unsigned>(type), sample, x, y, row[x].red);
+            zassert_equal(
+                row[x].red > 200, lit, "type %u sample %d pixel %d,%d = %u", static_cast<unsigned>(type), sample, x, y,
+                row[x].red
+            );
         };
         zassert_true(rotation->SetRotation(0));
         check_pixel(48, 35, true);
@@ -566,7 +580,13 @@ ZTEST(icon_lifecycle, test_rotation_pixels_clipping_and_parent_animation) {
         check_pixel(60, 63, true);
         clip->SetWidth(96, true);
         ViewAnimator animator;
-        zassert_true(animator.Attach(*presentation, *layout, [](void*) { return true; }, nullptr));
+        zassert_true(animator.Attach(
+            *presentation, *layout,
+            [](void*) {
+                return true;
+            },
+            nullptr
+        ));
         animator.Synchronize({ Animation::Type::Rotation, true, 1000 });
         Tick(250);
         zassert_within(lv_obj_get_style_transform_rotation(presentation->GetObject(), LV_PART_MAIN), 900, 5);
@@ -615,7 +635,9 @@ ZTEST(icon_lifecycle, test_anchor_uses_drawable_size_and_placement_not_screen_si
                 zassert_equal(lv_obj_get_style_transform_pivot_x(image, LV_PART_MAIN), 0);
                 zassert_equal(lv_obj_get_style_transform_pivot_y(image, LV_PART_MAIN), 200 - coordinate);
                 zassert_equal(lv_obj_get_style_transform_pivot_x(presentation, LV_PART_MAIN), extent / 2 + 3);
-                zassert_equal(lv_obj_get_style_transform_pivot_y(presentation, LV_PART_MAIN), extent / 2 + 83 - coordinate);
+                zassert_equal(
+                    lv_obj_get_style_transform_pivot_y(presentation, LV_PART_MAIN), extent / 2 + 83 - coordinate
+                );
                 if(type == IconType::Image) {
                     lv_point_t pivot;
                     lv_image_get_pivot(image, &pivot);
@@ -667,7 +689,7 @@ ZTEST(icon_lifecycle, test_anchor_binding_preserves_angles_and_replays_after_sus
     const auto angle = lv_obj_get_style_transform_rotation(presentation, LV_PART_MAIN);
     const auto animations = lv_anim_count_running();
     zassert_true(angle > 0);
-    Publish(WidgetPropertyType::ANCHOR_POINT_X, uint32_t { 25 });
+    Publish(WidgetPropertyType::ANCHOR_POINT_X, uint32_t{ 25 });
     Publish(WidgetPropertyType::ANCHOR_POINT_Y, 211);
     zassert_equal(lv_obj_get_style_transform_rotation(presentation, LV_PART_MAIN), angle);
     zassert_equal(lv_image_get_rotation(image), 900);
@@ -678,7 +700,8 @@ ZTEST(icon_lifecycle, test_anchor_binding_preserves_angles_and_replays_after_sus
     lv_image_get_pivot(image, &pivot);
     zassert_equal(pivot.x, 25);
     zassert_equal(pivot.y, -11);
-    const EventData invalid[] = { -2, static_cast<int>(INT32_MAX), uint32_t { UINT32_MAX }, 10.0F, true, std::string("10") };
+    const EventData invalid[] = { -2, static_cast<int>(INT32_MAX), uint32_t{ UINT32_MAX }, 10.0F, true,
+        std::string("10") };
     for(const auto& value : invalid) {
         Publish(WidgetPropertyType::ANCHOR_POINT_X, value);
         zassert_equal(std::get<int>(widget.Read(WidgetPropertyType::ANCHOR_POINT_X)), 25);
@@ -868,11 +891,7 @@ ZTEST(icon_lifecycle, test_demo_dial_geometry_and_image_rotation_baseline) {
             int value;
             uint32_t mapped_angle;
             int32_t image_angle;
-        } cases[] = {
-            { 0, UINT32_MAX - 1349U, 2250 },
-            { 50, 0, 0 },
-            { 100, 1350, 1350 }
-        };
+        } cases[] = { { 0, UINT32_MAX - 1349U, 2250 }, { 50, 0, 0 }, { 100, 1350, 1350 } };
         for(const auto& expected : cases) {
             zassert_equal(dial.GetAngleForValue(expected.value), expected.mapped_angle);
             Publish(WidgetPropertyType::VALUE, expected.value);
@@ -929,8 +948,10 @@ ZTEST(icon_lifecycle, test_the_same_dial_drives_image_shape_and_label_needles) {
         for(int value : { 0, 50, 100 }) {
             Publish(WidgetPropertyType::VALUE, value);
             if(type == IconType::Label)
-                zassert_equal(lv_obj_get_style_transform_rotation(
-                    views_test::WidgetContent(dial.Needle()), LV_PART_MAIN), 27 * value);
+                zassert_equal(
+                    lv_obj_get_style_transform_rotation(views_test::WidgetContent(dial.Needle()), LV_PART_MAIN),
+                    27 * value
+                );
             else
                 CheckRotation(dial.Needle(), 27 * value, 3, 53);
             zassert_equal(lv_obj_get_style_transform_rotation(views_test::WidgetContent(dial), LV_PART_MAIN), 0);
@@ -947,25 +968,21 @@ ZTEST(icon_lifecycle, test_dial_and_needle_keep_isolated_properties_and_bindings
     needle->properties[WidgetPropertyType::WIDTH_PX] = 20;
     needle->properties[WidgetPropertyType::HEIGHT_PX] = 60;
     constexpr uint32_t needle_visibility = 1000;
-    needle->bindings.push_back(PropertyBinding {
-        .target = WidgetPropertyType::IS_VISIBLE,
-        .event = {
-            .channel = EventChannelId::Sensors,
-            .event_type = std::to_underlying(SensorEventType::DataUpdated),
-            .payload_key = std::to_underlying(SensorPayloadType::Value),
-            .selector_key = std::to_underlying(SensorPayloadType::SensorId),
-            .selector_value = static_cast<int>(needle_visibility)
-        }
-    });
+    needle->bindings.push_back(
+        PropertyBinding{ .target = WidgetPropertyType::IS_VISIBLE,
+            .event = { .channel = EventChannelId::Sensors,
+                .event_type = std::to_underlying(SensorEventType::DataUpdated),
+                .payload_key = std::to_underlying(SensorPayloadType::Value),
+                .selector_key = std::to_underlying(SensorPayloadType::SensorId),
+                .selector_value = static_cast<int>(needle_visibility) } }
+    );
     auto set_needle_visible = [](bool visible) {
-        SensorEventsChannel::GetInstance().Publish({
-            .source_id = 0,
-            .type = SensorEventType::DataUpdated,
-            .payload = {
-                { SensorPayloadType::SensorId, static_cast<int>(needle_visibility) },
-                { SensorPayloadType::Value, visible }
-            }
-        });
+        SensorEventsChannel::GetInstance().Publish(
+            { .source_id = 0,
+                .type = SensorEventType::DataUpdated,
+                .payload = { { SensorPayloadType::SensorId, static_cast<int>(needle_visibility) },
+                    { SensorPayloadType::Value, visible } } }
+        );
     };
     TestDial dial(1, MakeRoot(), WidgetContext{});
     dial.Assemble(configuration, needle, WidgetContext{});
@@ -991,7 +1008,9 @@ ZTEST(icon_lifecycle, test_dial_and_needle_keep_isolated_properties_and_bindings
 
 ZTEST(icon_lifecycle, test_screen_builds_the_demo_dial_from_a_separate_needle_definition) {
     ScopedLvglLock lock;
-    auto screen_configuration = std::make_shared<ScreenConfiguration>(std::allocator_arg, std::pmr::get_default_resource());
+    auto screen_configuration = std::make_shared<ScreenConfiguration>(
+        std::allocator_arg, std::pmr::get_default_resource()
+    );
     screen_configuration->id = 0;
     screen_configuration->type = ScreenType::Gauge;
     screen_configuration->grid = { .snap_enabled = true, .width = 466, .height = 466, .spacing_px = 0 };
@@ -1006,7 +1025,7 @@ ZTEST(icon_lifecycle, test_screen_builds_the_demo_dial_from_a_separate_needle_de
     dial->size_grid = { 466, 466 };
     dial->properties[WidgetPropertyType::MIN_VALUE] = 0;
     dial->properties[WidgetPropertyType::MAX_VALUE] = 100;
-    dial->properties[WidgetPropertyType::CHILD_WIDGET_IDS] = std::pmr::vector<int> { 12 };
+    dial->properties[WidgetPropertyType::CHILD_WIDGET_IDS] = std::pmr::vector<int>{ 12 };
     // A forward reference: the needle is defined before its owner.
     screen_configuration->AddWidget(needle);
     screen_configuration->AddWidget(dial);
@@ -1035,7 +1054,10 @@ ZTEST(icon_lifecycle, test_screen_builds_the_demo_dial_from_a_separate_needle_de
     lv_image_get_pivot(image, &pivot);
     zassert_equal(pivot.x, 7);
     zassert_equal(pivot.y, 213);
-    const struct { int value; int32_t angle; } cases[] = { { 0, 2250 }, { 50, 0 }, { 100, 1350 } };
+    const struct {
+        int value;
+        int32_t angle;
+    } cases[] = { { 0, 2250 }, { 50, 0 }, { 100, 1350 } };
     for(const auto& expected : cases) {
         Publish(WidgetPropertyType::VALUE, expected.value);
         zassert_equal(lv_image_get_rotation(image), expected.angle);
@@ -1058,8 +1080,10 @@ ZTEST(icon_lifecycle, test_a_dial_without_its_needle_fails_validation_and_only_i
         validation_error = error.what();
     }
     for(const auto* fragment : { "Screen ID: 0", "Widget ID: 9", "exactly 1 child", "received 0" }) {
-        zassert_true(validation_error.find(fragment) != std::string::npos,
-            "Missing '%s' in '%s'", fragment, validation_error.c_str());
+        zassert_true(
+            validation_error.find(fragment) != std::string::npos, "Missing '%s' in '%s'", fragment,
+            validation_error.c_str()
+        );
     }
 
     // Screens trust validated input; if an unvalidated dial gets through, only it fails.
@@ -1088,7 +1112,7 @@ ZTEST(icon_lifecycle, test_all_factory_widgets_support_live_animation_without_re
     for(auto type : factory.GetAvailableTypes()) {
         const auto icons = type == WidgetType::BasicIcon || type == WidgetType::BasicArcIcon
             ? std::vector<IconType>{ IconType::Label, IconType::Rectangle, IconType::TriangleIsosceles,
-                IconType::TriangleRight, IconType::Oval, IconType::Line, IconType::Image }
+                  IconType::TriangleRight, IconType::Oval, IconType::Line, IconType::Image }
             : std::vector<IconType>{ IconType::Oval };
         for(auto icon : icons) {
             auto root = MakeRoot();
@@ -1105,13 +1129,15 @@ ZTEST(icon_lifecycle, test_all_factory_widgets_support_live_animation_without_re
             auto widget = factory.CreateWidget(type, 1, root, context);
             const auto supported = widget->GetSupportedProperties();
             for(auto property : { WidgetPropertyType::ANIMATION_TYPE, WidgetPropertyType::IS_ANIMATION_ACTIVE,
-                                 WidgetPropertyType::ANIMATION_DURATION_MS, WidgetPropertyType::ANCHOR_POINT_X,
-                                 WidgetPropertyType::ANCHOR_POINT_Y })
+                    WidgetPropertyType::ANIMATION_DURATION_MS, WidgetPropertyType::ANCHOR_POINT_X,
+                    WidgetPropertyType::ANCHOR_POINT_Y })
                 zassert_equal(std::count(supported.begin(), supported.end(), property), 1);
             widget->SetSizePx({ 80, 80 });
             InjectTestNeedle(*widget, *configuration);
             widget->Configure(configuration);
-            zassert_equal(widget->Render(), 0, "widget type %d icon %d", static_cast<int>(type), static_cast<int>(icon));
+            zassert_equal(
+                widget->Render(), 0, "widget type %d icon %d", static_cast<int>(type), static_cast<int>(icon)
+            );
             widget->OnActivated();
             auto* content = views_test::WidgetContent(*widget);
             auto* leaf = lv_obj_get_child(content, 0);
@@ -1250,8 +1276,10 @@ ZTEST(icon_lifecycle, test_oval_management_changes_keep_static_appearance) {
         Publish(target, 0);
         zassert_is_null(Pulse(widget));
         zassert_false(widget.IsProcessingEligible());
-        zassert_equal(lv_obj_has_flag(widget.GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN),
-            target == WidgetPropertyType::IS_VISIBLE);
+        zassert_equal(
+            lv_obj_has_flag(widget.GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN),
+            target == WidgetPropertyType::IS_VISIBLE
+        );
         Tick(2000);
         zassert_equal(lv_obj_get_style_opa(Inner(widget), LV_PART_MAIN), opacity);
         ThemeManager::GetInstance().SetTheme(std::make_shared<BlueTheme>());
@@ -1267,7 +1295,7 @@ ZTEST(icon_lifecycle, test_oval_management_changes_keep_static_appearance) {
     }
 }
 
-    ZTEST(icon_lifecycle, test_oval_ancestor_suspension_keeps_static_appearance) {
+ZTEST(icon_lifecycle, test_oval_ancestor_suspension_keeps_static_appearance) {
     for(int gate : { 0, 1, 2 }) {
         auto root = MakeRoot();
         TestIcon widget(1, root, WidgetContext{});
@@ -1301,8 +1329,8 @@ ZTEST(icon_lifecycle, test_oval_management_changes_keep_static_appearance) {
 ZTEST(icon_lifecycle, test_icon_eligibility_uses_ancestor_layered_opacity_but_not_color_alpha) {
     class TestOval : public icons::OvalIcon {
     public:
-        using OvalIcon::OvalIcon;
         using IconBase::IsProcessingEligible;
+        using OvalIcon::OvalIcon;
     };
     auto root = MakeRoot();
     auto properties = std::make_shared<WidgetPropertyStore>();
@@ -1349,14 +1377,12 @@ ZTEST(icon_lifecycle, test_oval_group_lifecycle_and_teardown_do_not_start_animat
 ZTEST(icon_lifecycle, test_logging_visibility_keeps_tracking_and_does_not_override_activity) {
     auto configuration = Configuration(IconType::Oval);
     configuration->properties[WidgetPropertyType::IS_VISIBLE] = false;
-    configuration->bindings.push_back(PropertyBinding {
-        .target = WidgetPropertyType::IS_VISIBLE,
-        .event = {
-            .channel = EventChannelId::Logging,
-            .event_type = std::to_underlying(LoggingEventType::StatusUpdated),
-            .payload_key = std::to_underlying(LoggingPayloadType::IsActive)
-        }
-    });
+    configuration->bindings.push_back(
+        PropertyBinding{ .target = WidgetPropertyType::IS_VISIBLE,
+            .event = { .channel = EventChannelId::Logging,
+                .event_type = std::to_underlying(LoggingEventType::StatusUpdated),
+                .payload_key = std::to_underlying(LoggingPayloadType::IsActive) } }
+    );
     TestIcon widget(1, MakeRoot(), WidgetContext{});
     widget.Configure(configuration);
     zassert_equal(widget.Render(), 0);
@@ -1402,14 +1428,12 @@ ZTEST(icon_lifecycle, test_logging_oval_on_arc_preserves_size_position_and_blink
     configuration->properties[WidgetPropertyType::IS_ANIMATION_ACTIVE] = true;
     configuration->properties[WidgetPropertyType::ANIMATION_TYPE] = static_cast<int>(Animation::Type::Blinking);
     configuration->properties[WidgetPropertyType::ANIMATION_DURATION_MS] = 1000;
-    configuration->bindings.push_back(PropertyBinding {
-        .target = WidgetPropertyType::IS_VISIBLE,
-        .event = {
-            .channel = EventChannelId::Logging,
-            .event_type = std::to_underlying(LoggingEventType::StatusUpdated),
-            .payload_key = std::to_underlying(LoggingPayloadType::IsActive)
-        }
-    });
+    configuration->bindings.push_back(
+        PropertyBinding{ .target = WidgetPropertyType::IS_VISIBLE,
+            .event = { .channel = EventChannelId::Logging,
+                .event_type = std::to_underlying(LoggingEventType::StatusUpdated),
+                .payload_key = std::to_underlying(LoggingPayloadType::IsActive) } }
+    );
     auto widget = WidgetFactory::GetInstance().CreateWidget(configuration, root, WidgetContext{});
     widget->SetSizePx({ 100, 100 });
     zassert_equal(widget->Render(), 0);
@@ -1454,7 +1478,9 @@ ZTEST(icon_lifecycle, test_inactive_label_keeps_the_normal_palette) {
     widget.OnActivated();
     ThemeManager::GetInstance().SetTheme(std::make_shared<BlueTheme>());
     auto* object = Inner(widget);
-    zassert_equal(lv_color_to_u32(lv_obj_get_style_bg_color(object, LV_PART_MAIN)), lv_color_to_u32(lv_color_hex(0x3366FF)));
+    zassert_equal(
+        lv_color_to_u32(lv_obj_get_style_bg_color(object, LV_PART_MAIN)), lv_color_to_u32(lv_color_hex(0x3366FF))
+    );
     zassert_equal(lv_obj_get_style_bg_opa(object, LV_PART_MAIN), 128);
     Publish(WidgetPropertyType::IS_ACTIVE, true);
     Publish(WidgetPropertyType::IS_ACTIVE, false);
@@ -1485,7 +1511,8 @@ ZTEST(icon_lifecycle, test_dial_needle_inherits_live_owner_state_and_has_one_fra
     for(auto target : { WidgetPropertyType::IS_ACTIVE, WidgetPropertyType::IS_VISIBLE, WidgetPropertyType::OPACITY }) {
         {
             auto configuration = DialConfiguration();
-            configuration->properties[target] = target == WidgetPropertyType::OPACITY ? ConfigValue{0} : ConfigValue{false};
+            configuration->properties[target] = target == WidgetPropertyType::OPACITY ? ConfigValue{ 0 }
+                                                                                      : ConfigValue{ false };
             configuration->properties[WidgetPropertyType::VALUE] = 50.0;
             auto needle_configuration = views_test::NeedleConfiguration(2, IconType::Image);
             auto context = ImageContext(*needle_configuration);
@@ -1603,12 +1630,15 @@ ZTEST(icon_lifecycle, test_images_and_dials_apply_opacity_once_without_recolorin
             zassert_equal(widget->IsProcessingEligible(), opacity > 0);
             if(is_dial) {
                 auto& needle = static_cast<TestDial*>(widget.get())->Needle();
-                zassert_equal(lv_obj_get_style_opa_layered(needle.GetContainer()->GetObject(), LV_PART_MAIN), LV_OPA_COVER);
+                zassert_equal(
+                    lv_obj_get_style_opa_layered(needle.GetContainer()->GetObject(), LV_PART_MAIN), LV_OPA_COVER
+                );
                 zassert_equal(needle.IsProcessingEligible(), opacity > 0);
             }
 
             std::unique_ptr<lv_draw_buf_t, decltype(&lv_draw_buf_destroy)> snapshot(
-                lv_snapshot_take(root->GetObject(), LV_COLOR_FORMAT_ARGB8888), lv_draw_buf_destroy);
+                lv_snapshot_take(root->GetObject(), LV_COLOR_FORMAT_ARGB8888), lv_draw_buf_destroy
+            );
             zassert_not_null(snapshot);
             int brightest = 0;
             for(uint32_t y = 0; y < snapshot->header.h; ++y) {

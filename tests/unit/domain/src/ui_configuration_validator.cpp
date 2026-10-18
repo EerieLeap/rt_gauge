@@ -6,18 +6,18 @@
 #include <utility>
 #include <vector>
 
-#include <zephyr/ztest.h>
 #include <eerie_memory.hpp>
+#include <zephyr/ztest.h>
 
 #include "utilities/memory/memory_resource_manager.h"
 
+#include "domain/ui_domain/configuration/parsers/ui_configuration_validator.h"
+#include "domain/ui_domain/models/property_binding.h"
 #include "domain/ui_domain/models/ui_configuration.h"
 #include "domain/ui_domain/models/widget_composition.h"
-#include "domain/ui_domain/models/widget_type.h"
-#include "domain/ui_domain/models/widget_property.h"
 #include "domain/ui_domain/models/widget_fill_mode.h"
-#include "domain/ui_domain/models/property_binding.h"
-#include "domain/ui_domain/configuration/parsers/ui_configuration_validator.h"
+#include "domain/ui_domain/models/widget_property.h"
+#include "domain/ui_domain/models/widget_type.h"
 #include "domain/ui_domain/utilities/widget_property_validator.h"
 
 using namespace eerie_memory;
@@ -29,11 +29,10 @@ ZTEST_SUITE(ui_configuration_validator, NULL, NULL, NULL, NULL, NULL);
 
 ZTEST(ui_configuration_validator, test_color_property_mapping_uses_explicit_membership) {
     using namespace eerie_leap::domain::ui_domain::utilities;
-    constexpr std::array expected {
-        WidgetPropertyType::COLOR_TERTIARY_INACTIVE, WidgetPropertyType::COLOR_PRIMARY_ACTIVE,
-        WidgetPropertyType::COLOR_SECONDARY_INACTIVE, WidgetPropertyType::COLOR_TERTIARY_ACTIVE,
-        WidgetPropertyType::COLOR_PRIMARY_INACTIVE, WidgetPropertyType::COLOR_SECONDARY_ACTIVE
-    };
+    constexpr std::array expected{ WidgetPropertyType::COLOR_TERTIARY_INACTIVE,
+        WidgetPropertyType::COLOR_PRIMARY_ACTIVE, WidgetPropertyType::COLOR_SECONDARY_INACTIVE,
+        WidgetPropertyType::COLOR_TERTIARY_ACTIVE, WidgetPropertyType::COLOR_PRIMARY_INACTIVE,
+        WidgetPropertyType::COLOR_SECONDARY_ACTIVE };
     zassert_equal(WidgetPropertyValidator::color_properties.size(), expected.size());
     std::array<bool, WidgetPropertyValidator::color_properties.size()> seen{};
     for(auto type : expected) {
@@ -53,8 +52,9 @@ ZTEST(ui_configuration_validator, test_color_property_mapping_uses_explicit_memb
         zassert_equal(WidgetPropertyValidator::GetColorPropertyIndex(type).has_value(), is_color);
         zassert_equal(WidgetPropertyValidator::IsColorProperty(type), is_color);
     }
-    zassert_false(WidgetPropertyValidator::GetColorPropertyIndex(
-        static_cast<WidgetPropertyType>(UINT16_MAX)).has_value());
+    zassert_false(
+        WidgetPropertyValidator::GetColorPropertyIndex(static_cast<WidgetPropertyType>(UINT16_MAX)).has_value()
+    );
 }
 
 namespace {
@@ -130,7 +130,9 @@ ZTEST(ui_configuration_validator, test_only_child_widget_ids_are_structural) {
     using eerie_leap::domain::ui_domain::utilities::WidgetPropertyValidator;
     for(uint16_t id = 0; id <= static_cast<uint16_t>(WidgetPropertyType::COUNT); ++id) {
         const auto type = static_cast<WidgetPropertyType>(id);
-        zassert_equal(WidgetPropertyValidator::IsStructuralProperty(type), type == WidgetPropertyType::CHILD_WIDGET_IDS);
+        zassert_equal(
+            WidgetPropertyValidator::IsStructuralProperty(type), type == WidgetPropertyType::CHILD_WIDGET_IDS
+        );
     }
     zassert_false(WidgetPropertyValidator::IsStructuralProperty(static_cast<WidgetPropertyType>(UINT16_MAX)));
 }
@@ -145,11 +147,9 @@ ZTEST(ui_configuration_validator, test_child_widget_ids_require_exact_integer_li
         screen.AddWidget(MakeWidget(id));
     properties[WidgetPropertyType::CHILD_WIDGET_IDS] = std::pmr::vector<int>({ 12, INT32_MAX }, Mrm::GetDefaultPmr());
     zassert_true(Validates(*configuration));
-    const ConfigValue invalid[] = {
-        {}, 12, 12.0, true, std::pmr::string("12"),
-        std::pmr::vector<std::pmr::string> { std::pmr::string("12") },
-        std::pmr::unordered_map<std::pmr::string, std::pmr::string> {}
-    };
+    const ConfigValue invalid[] = { {}, 12, 12.0, true, std::pmr::string("12"),
+        std::pmr::vector<std::pmr::string>{ std::pmr::string("12") },
+        std::pmr::unordered_map<std::pmr::string, std::pmr::string>{} };
     for(const auto& value : invalid) {
         properties[WidgetPropertyType::CHILD_WIDGET_IDS] = value;
         zassert_false(Validates(*configuration));
@@ -157,7 +157,8 @@ ZTEST(ui_configuration_validator, test_child_widget_ids_require_exact_integer_li
 }
 
 ZTEST(ui_configuration_validator, test_structural_bindings_are_rejected_in_every_direction) {
-    for(auto direction : { PropertyBindingDirection::In, PropertyBindingDirection::Out, PropertyBindingDirection::InOut }) {
+    for(auto direction :
+        { PropertyBindingDirection::In, PropertyBindingDirection::Out, PropertyBindingDirection::InOut }) {
         auto configuration = MakeConfiguration();
         auto binding = MakeSensorBinding();
         binding.target = WidgetPropertyType::CHILD_WIDGET_IDS;
@@ -189,7 +190,7 @@ ZTEST(ui_configuration_validator, test_whole_configuration_runs_each_screen_pref
         if(!children.empty())
             zassert_equal(children[0], child.get());
     });
-    const std::vector<std::pair<uint32_t, size_t>> expected { { 0, 0 }, { 0, 1 }, { 7, 0 } };
+    const std::vector<std::pair<uint32_t, size_t>> expected{ { 0, 0 }, { 0, 1 }, { 7, 0 } };
     zassert_true(checked == expected);
 
     std::string message;
@@ -210,7 +211,8 @@ ZTEST(ui_configuration_validator, test_whole_configuration_runs_each_screen_pref
 
 ZTEST(ui_configuration_validator, test_anchor_bindings_remain_ordinary_properties) {
     for(auto target : { WidgetPropertyType::ANCHOR_POINT_X, WidgetPropertyType::ANCHOR_POINT_Y }) {
-        for(auto direction : { PropertyBindingDirection::In, PropertyBindingDirection::Out, PropertyBindingDirection::InOut }) {
+        for(auto direction :
+            { PropertyBindingDirection::In, PropertyBindingDirection::Out, PropertyBindingDirection::InOut }) {
             auto configuration = MakeConfiguration();
             auto binding = MakeSensorBinding();
             binding.target = target;
@@ -227,12 +229,10 @@ ZTEST(ui_configuration_validator, test_anchor_values_are_strict_local_pixel_coor
     auto configuration = MakeConfiguration();
     auto& properties = configuration->screen_configurations[0]->widget_configurations[0]->properties;
     const int valid[] = { -1, 0, 10, 100, 2000, WidgetPropertyValidator::max_anchor_coordinate };
-    const ConfigValue invalid[] = {
-        {}, true, false, -2, static_cast<int>(INT32_MIN), static_cast<int>(INT32_MAX),
-        WidgetPropertyValidator::max_anchor_coordinate + 1,
-        -1.0, 10.0, 1.5, std::pmr::string("10"), std::pmr::vector<int> { 10 },
-        std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()
-    };
+    const ConfigValue invalid[] = { {}, true, false, -2, static_cast<int>(INT32_MIN), static_cast<int>(INT32_MAX),
+        WidgetPropertyValidator::max_anchor_coordinate + 1, -1.0, 10.0, 1.5, std::pmr::string("10"),
+        std::pmr::vector<int>{ 10 }, std::numeric_limits<double>::infinity(),
+        std::numeric_limits<double>::quiet_NaN() };
     for(auto type : { WidgetPropertyType::ANCHOR_POINT_X, WidgetPropertyType::ANCHOR_POINT_Y }) {
         for(int coordinate : valid) {
             properties[type] = coordinate;
@@ -290,12 +290,9 @@ ZTEST(ui_configuration_validator, test_animation_defaults_effects_and_duration_b
 
 ZTEST(ui_configuration_validator, test_invalid_animation_values_are_rejected_even_when_dormant) {
     using eerie_leap::domain::ui_domain::utilities::WidgetPropertyValidator;
-    const ConfigValue invalid_numbers[] = {
-        {}, true, false, 0.0, 1.0, 2.0, 2.5, 1000.0,
-        static_cast<double>(INT32_MAX) + 1.0,
-        std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity(),
-        -std::numeric_limits<double>::infinity(), std::pmr::string("2")
-    };
+    const ConfigValue invalid_numbers[] = { {}, true, false, 0.0, 1.0, 2.0, 2.5, 1000.0,
+        static_cast<double>(INT32_MAX) + 1.0, std::numeric_limits<double>::quiet_NaN(),
+        std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity(), std::pmr::string("2") };
     auto configuration = MakeConfiguration();
     auto& properties = configuration->screen_configurations[0]->widget_configurations[0]->properties;
     const int invalid_integers[] = { INT32_MIN, -1 };
@@ -323,10 +320,8 @@ ZTEST(ui_configuration_validator, test_invalid_animation_values_are_rejected_eve
 
     properties[WidgetPropertyType::ANIMATION_TYPE] = 0;
     properties[WidgetPropertyType::ANIMATION_DURATION_MS] = 1000;
-    const ConfigValue invalid_active[] = {
-        {}, 0, 1, -1, 2, 0.0, 1.0, 0.5, std::pmr::string("true"),
-        std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity()
-    };
+    const ConfigValue invalid_active[] = { {}, 0, 1, -1, 2, 0.0, 1.0, 0.5, std::pmr::string("true"),
+        std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity() };
     for(const auto& value : invalid_active) {
         properties[WidgetPropertyType::IS_ANIMATION_ACTIVE] = value;
         zassert_false(WidgetPropertyValidator::IsValidAnimationValue(WidgetPropertyType::IS_ANIMATION_ACTIVE, value));
@@ -346,15 +341,15 @@ ZTEST(ui_configuration_validator, test_appearance_classification_is_separate_fro
     zassert_true(WidgetPropertyValidator::IsValidAppearanceValue(WidgetPropertyType::OPACITY, 128));
     zassert_false(WidgetPropertyValidator::IsValidAppearanceValue(WidgetPropertyType::OPACITY, 256));
     for(auto type : { WidgetPropertyType::COLOR_PRIMARY_ACTIVE, WidgetPropertyType::COLOR_PRIMARY_INACTIVE,
-                     WidgetPropertyType::COLOR_SECONDARY_ACTIVE, WidgetPropertyType::COLOR_SECONDARY_INACTIVE,
-                     WidgetPropertyType::COLOR_TERTIARY_ACTIVE, WidgetPropertyType::COLOR_TERTIARY_INACTIVE }) {
+            WidgetPropertyType::COLOR_SECONDARY_ACTIVE, WidgetPropertyType::COLOR_SECONDARY_INACTIVE,
+            WidgetPropertyType::COLOR_TERTIARY_ACTIVE, WidgetPropertyType::COLOR_TERTIARY_INACTIVE }) {
         zassert_true(WidgetPropertyValidator::IsAppearanceProperty(type));
         zassert_true(WidgetPropertyValidator::IsValidAppearanceValue(type, std::pmr::string("#12345680")));
         zassert_true(WidgetPropertyValidator::IsValidAppearanceValue(type, std::pmr::string("")));
         zassert_false(WidgetPropertyValidator::IsValidAppearanceValue(type, std::pmr::string("#123456")));
     }
     for(auto type : { WidgetPropertyType::VALUE, WidgetPropertyType::LABEL, WidgetPropertyType::IS_SMOOTHED,
-                     WidgetPropertyType::DIRECTION, WidgetPropertyType::NONE, WidgetPropertyType::COUNT }) {
+            WidgetPropertyType::DIRECTION, WidgetPropertyType::NONE, WidgetPropertyType::COUNT }) {
         zassert_false(WidgetPropertyValidator::IsAppearanceProperty(type));
         zassert_false(WidgetPropertyValidator::IsValidAppearanceValue(type, 1));
     }
@@ -363,10 +358,9 @@ ZTEST(ui_configuration_validator, test_appearance_classification_is_separate_fro
 ZTEST(ui_configuration_validator, test_color_properties_require_rgba_text_or_empty_reset) {
     auto configuration = MakeConfiguration();
     auto& properties = configuration->screen_configurations[0]->widget_configurations[0]->properties;
-    const ConfigValue invalid_values[] = {
-        {}, 0, 255, 128.0, true, false, std::pmr::string("#3366FF"), std::pmr::string("3366FF80"),
-        std::pmr::string("#3366FF8G"), std::pmr::string("#3366FF800"), std::pmr::string("#3366FF80\0", 10)
-    };
+    const ConfigValue invalid_values[] = { {}, 0, 255, 128.0, true, false, std::pmr::string("#3366FF"),
+        std::pmr::string("3366FF80"), std::pmr::string("#3366FF8G"), std::pmr::string("#3366FF800"),
+        std::pmr::string("#3366FF80\0", 10) };
     for(auto type : { WidgetPropertyType::COLOR_PRIMARY_ACTIVE, WidgetPropertyType::COLOR_PRIMARY_INACTIVE,
             WidgetPropertyType::COLOR_SECONDARY_ACTIVE, WidgetPropertyType::COLOR_SECONDARY_INACTIVE,
             WidgetPropertyType::COLOR_TERTIARY_ACTIVE, WidgetPropertyType::COLOR_TERTIARY_INACTIVE }) {
@@ -390,9 +384,8 @@ ZTEST(ui_configuration_validator, test_opacity_requires_an_integer_in_byte_range
         properties[WidgetPropertyType::OPACITY] = opacity;
         zassert_true(Validates(*configuration));
     }
-    const ConfigValue invalid_values[] = {
-        {}, -1, 256, INT32_MIN, INT32_MAX, 0.0, 128.5, 255.0, true, false, std::pmr::string("128")
-    };
+    const ConfigValue invalid_values[] = { {}, -1, 256, INT32_MIN, INT32_MAX, 0.0, 128.5, 255.0, true, false,
+        std::pmr::string("128") };
     for(const auto& value : invalid_values) {
         properties[WidgetPropertyType::OPACITY] = value;
         zassert_false(Validates(*configuration));
@@ -527,8 +520,8 @@ ZTEST(ui_configuration_validator, test_known_widget_properties_are_valid) {
 }
 
 ZTEST(ui_configuration_validator, test_unknown_widget_property_is_invalid) {
-    for(auto type : { WidgetPropertyType::NONE, WidgetPropertyType::COUNT,
-                      static_cast<WidgetPropertyType>(9999), static_cast<WidgetPropertyType>(UINT16_MAX) }) {
+    for(auto type : { WidgetPropertyType::NONE, WidgetPropertyType::COUNT, static_cast<WidgetPropertyType>(9999),
+            static_cast<WidgetPropertyType>(UINT16_MAX) }) {
         auto configuration = MakeConfiguration();
         configuration->screen_configurations[0]->widget_configurations[0]->properties[type] = 1;
 
@@ -569,18 +562,16 @@ ZTEST(ui_configuration_validator, test_popup_screen_type_is_valid) {
 }
 
 ZTEST(ui_configuration_validator, test_control_widget_types_are_valid) {
-    constexpr std::array control_types = {
-        WidgetType::ControlSlider,
-        WidgetType::ControlToggle,
-        WidgetType::ControlButton,
-        WidgetType::IndicatorSetting
-    };
+    constexpr std::array control_types = { WidgetType::ControlSlider, WidgetType::ControlToggle,
+        WidgetType::ControlButton, WidgetType::IndicatorSetting };
 
     for(auto control_type : control_types) {
         auto configuration = MakeConfiguration();
         configuration->screen_configurations[0]->widget_configurations[0]->type = control_type;
 
-        zassert_true(Validates(*configuration), "Expected widget type %u to be accepted.", static_cast<uint32_t>(control_type));
+        zassert_true(
+            Validates(*configuration), "Expected widget type %u to be accepted.", static_cast<uint32_t>(control_type)
+        );
     }
 }
 
@@ -636,7 +627,7 @@ ZTEST(ui_configuration_validator, test_an_unconditional_binding_is_valid) {
 
     auto binding = MakeSensorBinding();
     binding.event.selector_key = 0;
-    binding.event.selector_value = { };
+    binding.event.selector_value = {};
 
     zassert_false(binding.event.HasSelector());
 
@@ -755,7 +746,7 @@ ZTEST(ui_configuration_validator, test_empty_ui_properties_are_valid) {
 
 ZTEST(ui_configuration_validator, test_undefined_ui_properties_are_invalid) {
     for(auto type : { UiPropertyType::NONE, UiPropertyType::COUNT, static_cast<UiPropertyType>(29),
-                      static_cast<UiPropertyType>(9999), static_cast<UiPropertyType>(UINT16_MAX) }) {
+            static_cast<UiPropertyType>(9999), static_cast<UiPropertyType>(UINT16_MAX) }) {
         auto configuration = MakeConfiguration();
         configuration->properties[type] = 1;
 
@@ -774,8 +765,9 @@ std::shared_ptr<ScreenConfiguration> MakeCompositionScreen(std::initializer_list
 }
 
 void SetChildren(WidgetConfiguration& widget, std::initializer_list<int> ids) {
-    widget.properties[WidgetPropertyType::CHILD_WIDGET_IDS] =
-        std::pmr::vector<int>(ids, widget.properties.get_allocator().resource());
+    widget.properties[WidgetPropertyType::CHILD_WIDGET_IDS] = std::pmr::vector<int>(
+        ids, widget.properties.get_allocator().resource()
+    );
 }
 
 void ExpectCompositionError(const ScreenConfiguration& screen, std::initializer_list<const char*> fragments) {
@@ -855,8 +847,8 @@ ZTEST(ui_configuration_validator, test_composition_rejects_signed_and_missing_re
 
 ZTEST(ui_configuration_validator, test_composition_rejects_wrong_reference_kinds_without_coercion) {
     auto screen = MakeCompositionScreen({ 9 });
-    for(const ConfigValue& value : { ConfigValue { 9 }, ConfigValue { 9.0 }, ConfigValue { true },
-        ConfigValue { std::pmr::string("9") }, ConfigValue {} }) {
+    for(const ConfigValue& value : { ConfigValue{ 9 }, ConfigValue{ 9.0 }, ConfigValue{ true },
+            ConfigValue{ std::pmr::string("9") }, ConfigValue{} }) {
         screen->widget_configurations[0]->properties[WidgetPropertyType::CHILD_WIDGET_IDS] = value;
         ExpectCompositionError(*screen, { "Widget ID: 9", "integer list" });
     }
@@ -965,7 +957,8 @@ ZTEST(ui_configuration_validator, test_composition_checks_child_types_properties
     ExpectCompositionError(*screen, { "Widget ID: 12", "Invalid widget type" });
     child.type = WidgetType::IndicatorDial; // Domain graph has no widget-specific count rule.
     UiConfigurationValidator::Validate(*screen);
-    for(auto direction : { PropertyBindingDirection::In, PropertyBindingDirection::Out, PropertyBindingDirection::InOut }) {
+    for(auto direction :
+        { PropertyBindingDirection::In, PropertyBindingDirection::Out, PropertyBindingDirection::InOut }) {
         auto binding = MakeSensorBinding();
         binding.target = WidgetPropertyType::CHILD_WIDGET_IDS;
         binding.direction = direction;
@@ -1015,6 +1008,7 @@ ZTEST(ui_configuration_validator, test_composition_size_limits_are_checked_befor
         bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override {
             return this == &other;
         }
+
     public:
         bool reject_allocations = false;
     } resource;
@@ -1027,7 +1021,8 @@ ZTEST(ui_configuration_validator, test_composition_size_limits_are_checked_befor
     resource.reject_allocations = true;
     ExpectCompositionError(*screen, { "32 nodes" });
     screen->widget_configurations.pop_back();
-    screen->widget_configurations[0]->properties[WidgetPropertyType::CHILD_WIDGET_IDS] =
-        std::pmr::vector<int>(32, 1, Mrm::GetDefaultPmr());
+    screen->widget_configurations[0]->properties[WidgetPropertyType::CHILD_WIDGET_IDS] = std::pmr::vector<int>(
+        32, 1, Mrm::GetDefaultPmr()
+    );
     ExpectCompositionError(*screen, { "Widget ID: 0", "Child index 31, ID 1", "31 edges" });
 }

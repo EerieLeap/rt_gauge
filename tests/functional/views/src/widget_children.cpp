@@ -10,8 +10,8 @@
 #include "domain/sensor_domain/event_bus/sensor_events_channel.h"
 #include "event_bus/event_channels.h"
 #include "views/themes/default_theme.h"
-#include "views/widgets/widget_base.h"
 #include "views/widgets/basic/icon_widget/icon_widget.h"
+#include "views/widgets/widget_base.h"
 #include "views_test_support.h"
 
 using namespace eerie_leap::domain::ui_domain::models;
@@ -44,7 +44,8 @@ public:
     bool fail_render = false;
     bool throw_render = false;
 
-    Leaf(uint32_t id, std::shared_ptr<Frame> parent) : WidgetBase(id, std::move(parent), WidgetContext {}) {}
+    Leaf(uint32_t id, std::shared_ptr<Frame> parent) :
+        WidgetBase(id, std::move(parent), WidgetContext{}) {}
 
     ~Leaf() override {
         DetachDispatch();
@@ -118,10 +119,13 @@ protected:
 class Pair : public Leaf {
     IWidget* left_ = nullptr;
     IWidget* right_ = nullptr;
+
 public:
     using Leaf::Leaf;
 
-    ~Pair() override { DetachDispatch(); }
+    ~Pair() override {
+        DetachDispatch();
+    }
 
     WidgetType GetType() const override {
         return WidgetType::BasicArcIcon;
@@ -180,14 +184,16 @@ std::shared_ptr<WidgetConfiguration> Configuration(uint32_t id, WidgetType type 
     configuration->size_grid = { 1, 1 };
     configuration->properties[WidgetPropertyType::VALUE] = static_cast<double>(id);
     for(auto target : { WidgetPropertyType::VALUE, WidgetPropertyType::IS_ACTIVE, WidgetPropertyType::IS_VISIBLE,
-        WidgetPropertyType::OPACITY, WidgetPropertyType::ANCHOR_POINT_X, WidgetPropertyType::IS_ANIMATION_ACTIVE }) {
-        configuration->bindings.push_back(PropertyBinding {
-            .target = target, .event = { .channel = EventChannelId::Sensors,
-                .event_type = std::to_underlying(SensorEventType::DataUpdated),
-                .payload_key = std::to_underlying(SensorPayloadType::Value),
-                .selector_key = std::to_underlying(SensorPayloadType::SensorId),
-                .selector_value = static_cast<int>(id * 100 + static_cast<uint32_t>(target)) }
-        });
+            WidgetPropertyType::OPACITY, WidgetPropertyType::ANCHOR_POINT_X,
+            WidgetPropertyType::IS_ANIMATION_ACTIVE }) {
+        configuration->bindings.push_back(
+            PropertyBinding{ .target = target,
+                .event = { .channel = EventChannelId::Sensors,
+                    .event_type = std::to_underlying(SensorEventType::DataUpdated),
+                    .payload_key = std::to_underlying(SensorPayloadType::Value),
+                    .selector_key = std::to_underlying(SensorPayloadType::SensorId),
+                    .selector_value = static_cast<int>(id * 100 + static_cast<uint32_t>(target)) } }
+        );
     }
     return configuration;
 }
@@ -205,7 +211,7 @@ std::unique_ptr<Leaf> MakeLeaf(uint32_t id, std::shared_ptr<Frame> mount, bool b
 
 std::shared_ptr<WidgetConfiguration> PairConfiguration(uint32_t id, int left, int right) {
     auto configuration = Configuration(id, WidgetType::BasicArcIcon);
-    configuration->properties[WidgetPropertyType::CHILD_WIDGET_IDS] = std::pmr::vector<int> { left, right };
+    configuration->properties[WidgetPropertyType::CHILD_WIDGET_IDS] = std::pmr::vector<int>{ left, right };
     return configuration;
 }
 
@@ -238,7 +244,9 @@ struct Tree {
         Inject(*root, std::move(nested), std::move(trailing));
         root->Configure(PairConfiguration(1, 2, 5));
     }
-    auto Nodes() const { return std::array<Leaf*, 5> { root.get(), branch, first, second, last }; }
+    auto Nodes() const {
+        return std::array<Leaf*, 5>{ root.get(), branch, first, second, last };
+    }
     void Start() {
         zassert_equal(root->Render(), 0);
         root->OnActivated();
@@ -246,19 +254,22 @@ struct Tree {
 };
 
 void Publish(uint32_t id, WidgetPropertyType target, const EventData& value) {
-    SensorEventsChannel::GetInstance().Publish({
-        .source_id = 0, .type = SensorEventType::DataUpdated,
-        .payload = {
-            { SensorPayloadType::SensorId, id * 100 + static_cast<uint32_t>(target) },
-            { SensorPayloadType::Value, value }
-        }
-    });
+    SensorEventsChannel::GetInstance().Publish(
+        { .source_id = 0,
+            .type = SensorEventType::DataUpdated,
+            .payload = { { SensorPayloadType::SensorId, id * 100 + static_cast<uint32_t>(target) },
+                { SensorPayloadType::Value, value } } }
+    );
 }
 
 template<typename Action>
 void ExpectRejected(Action&& action) {
     bool rejected = false;
-    try { action(); } catch(const std::logic_error&) { rejected = true; }
+    try {
+        action();
+    } catch(const std::logic_error&) {
+        rejected = true;
+    }
     zassert_true(rejected);
 }
 
@@ -282,9 +293,13 @@ ZTEST(widget_children, test_nested_ownership_preserves_instances_configuration_a
     zassert_equal(&tree.branch->Left(), tree.first);
     zassert_equal(&tree.root->Right(), tree.last);
     const auto parent_properties = tree.root->GetSupportedProperties();
-    zassert_true(std::find(parent_properties.begin(), parent_properties.end(), WidgetPropertyType::LABEL)
-        == parent_properties.end());
-    zassert_equal(std::count(parent_properties.begin(), parent_properties.end(), WidgetPropertyType::CHILD_WIDGET_IDS), 1);
+    zassert_true(
+        std::find(parent_properties.begin(), parent_properties.end(), WidgetPropertyType::LABEL)
+        == parent_properties.end()
+    );
+    zassert_equal(
+        std::count(parent_properties.begin(), parent_properties.end(), WidgetPropertyType::CHILD_WIDGET_IDS), 1
+    );
     for(auto* node : tree.Nodes()) {
         zassert_equal(node->GetConfiguration()->id, node->GetId());
         zassert_equal(node->GetConfiguration()->type, node->GetType());
@@ -293,8 +308,12 @@ ZTEST(widget_children, test_nested_ownership_preserves_instances_configuration_a
     }
     zassert_not_equal(tree.root->Store().get(), tree.first->Store().get());
     const auto first_configuration = tree.first->GetConfiguration();
-    ExpectRejected([&] { tree.root->Configure(PairConfiguration(1, 2, 5)); });
-    ExpectRejected([&] { tree.first->Configure(Configuration(3)); });
+    ExpectRejected([&] {
+        tree.root->Configure(PairConfiguration(1, 2, 5));
+    });
+    ExpectRejected([&] {
+        tree.first->Configure(Configuration(3));
+    });
     zassert_equal(tree.first->GetConfiguration().get(), first_configuration.get());
 }
 
@@ -302,12 +321,18 @@ ZTEST(widget_children, test_children_are_injected_once_before_the_owner_is_confi
     auto mount = Mount();
     Pair pair(1, mount);
     // A rejection from the receiving composite's own hook leaves injection possible.
-    ExpectRejected([&] { pair.SetChildren({}); });
+    ExpectRejected([&] {
+        pair.SetChildren({});
+    });
     Inject(pair, MakeLeaf(2, pair.GetChildMount()), MakeLeaf(3, pair.GetChildMount()));
-    ExpectRejected([&] { Inject(pair, MakeLeaf(4, pair.GetChildMount()), MakeLeaf(5, pair.GetChildMount())); });
+    ExpectRejected([&] {
+        Inject(pair, MakeLeaf(4, pair.GetChildMount()), MakeLeaf(5, pair.GetChildMount()));
+    });
     pair.Configure(PairConfiguration(1, 2, 3));
     const auto* left = &pair.Left();
-    ExpectRejected([&] { pair.SetChildren({}); });
+    ExpectRejected([&] {
+        pair.SetChildren({});
+    });
     zassert_equal(&pair.Left(), left);
 }
 
@@ -319,7 +344,7 @@ ZTEST(widget_children, test_render_activation_refresh_and_theme_visit_each_node_
     for(auto* node : tree.Nodes())
         node->render_order = &order;
     tree.Start();
-    const std::vector<uint32_t> expected { 3, 4, 2, 5, 1 };
+    const std::vector<uint32_t> expected{ 3, 4, 2, 5, 1 };
     zassert_true(order == expected);
     for(auto* node : tree.Nodes()) {
         zassert_equal(node->observations->renders, 1);
@@ -373,9 +398,10 @@ ZTEST(widget_children, test_parent_management_gates_descendants_and_preserves_ch
     zassert_equal(lv_anim_count_running(), animations + 3);
     Publish(4, WidgetPropertyType::IS_VISIBLE, false);
     zassert_equal(lv_anim_count_running(), animations + 2);
-    for(auto property : { WidgetPropertyType::IS_VISIBLE, WidgetPropertyType::OPACITY, WidgetPropertyType::IS_ACTIVE }) {
-        const auto hidden = property == WidgetPropertyType::OPACITY ? EventData { 0 } : EventData { false };
-        const auto shown = property == WidgetPropertyType::OPACITY ? EventData { 255 } : EventData { true };
+    for(auto property :
+        { WidgetPropertyType::IS_VISIBLE, WidgetPropertyType::OPACITY, WidgetPropertyType::IS_ACTIVE }) {
+        const auto hidden = property == WidgetPropertyType::OPACITY ? EventData{ 0 } : EventData{ false };
+        const auto shown = property == WidgetPropertyType::OPACITY ? EventData{ 255 } : EventData{ true };
         Publish(1, property, hidden);
         zassert_equal(lv_anim_count_running(), animations);
         for(auto* node : tree.Nodes())
@@ -464,16 +490,19 @@ ZTEST(widget_children, test_teardown_detaches_entire_tree_before_waiting_deliver
         observations.push_back(node->observations);
         frames.push_back(node->GetContainer());
     }
-    k_thread publisher {};
-    k_sem started {};
+    k_thread publisher{};
+    k_sem started{};
     k_sem_init(&started, 0, 1);
     {
         ScopedLvglLock lock;
-        k_thread_create(&publisher, children_publisher_stack, K_THREAD_STACK_SIZEOF(children_publisher_stack),
+        k_thread_create(
+            &publisher, children_publisher_stack, K_THREAD_STACK_SIZEOF(children_publisher_stack),
             [](void* context, void*, void*) {
                 k_sem_give(static_cast<k_sem*>(context));
                 Publish(3, WidgetPropertyType::VALUE, 55.0F);
-            }, &started, nullptr, nullptr, K_PRIO_COOP(0), 0, K_NO_WAIT);
+            },
+            &started, nullptr, nullptr, K_PRIO_COOP(0), 0, K_NO_WAIT
+        );
         zassert_equal(k_sem_take(&started, K_MSEC(1000)), 0);
         tree.root.reset();
     }
@@ -496,7 +525,11 @@ ZTEST(widget_children, test_render_exception_and_terminal_detach_stop_all_descen
     tree.Start();
     tree.second->throw_render = true;
     bool failed = false;
-    try { tree.root->Render(); } catch(const std::runtime_error&) { failed = true; }
+    try {
+        tree.root->Render();
+    } catch(const std::runtime_error&) {
+        failed = true;
+    }
     zassert_true(failed);
     zassert_false(tree.root->IsReady());
     zassert_equal(lv_anim_count_running(), animations);
@@ -525,7 +558,9 @@ ZTEST(widget_children, test_render_exception_and_terminal_detach_stop_all_descen
 ZTEST(widget_children, test_owned_icon_retains_native_rotation_across_parent_rotation_resize_and_rerender) {
     auto mount = Mount();
     Pair pair(1, mount);
-    auto icon = std::make_unique<basic::IconWidget>(2, pair.GetChildMount(), WidgetContext {}, IconType::TriangleIsosceles);
+    auto icon = std::make_unique<basic::IconWidget>(
+        2, pair.GetChildMount(), WidgetContext{}, IconType::TriangleIsosceles
+    );
     auto* needle = icon.get();
     auto configuration = Configuration(2, WidgetType::BasicIcon);
     configuration->bindings.clear();

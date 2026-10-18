@@ -2,8 +2,8 @@
 
 #include "domain/ui_domain/models/widget_property.h"
 
-#include "views/widgets/indicators/indicator_base.h"
 #include "views/themes/theme_manager.h"
+#include "views/widgets/indicators/indicator_base.h"
 
 #include "arc_fill_indicator.h"
 
@@ -14,13 +14,14 @@ using namespace eerie_leap::domain::ui_domain::models;
 using namespace eerie_leap::views::utilitites;
 using eerie_leap::views::utilities::LvglColor;
 
-ArcFillIndicator::ArcFillIndicator(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context)
-    : IndicatorBase(id, std::move(parent), std::move(context)) {}
+ArcFillIndicator::ArcFillIndicator(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context) :
+    IndicatorBase(id, std::move(parent), std::move(context)) {}
 
 int ArcFillIndicator::DoRender() {
-    auto lv_obj = Create(content_frame_->GetObject(), static_cast<int32_t>(range_start_), static_cast<int32_t>(range_end_));
-    auto child = std::make_shared<Frame>(
-        Frame::Create(lv_obj).Build());
+    auto lv_obj = Create(
+        content_frame_->GetObject(), static_cast<int32_t>(range_start_), static_cast<int32_t>(range_end_)
+    );
+    auto child = std::make_shared<Frame>(Frame::Create(lv_obj).Build());
     content_frame_->SetChild(child);
 
     return 0;
@@ -32,8 +33,8 @@ void ArcFillIndicator::RegisterProperties(WidgetPropertyStore& store) const {
     store.RegisterColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE);
     store.RegisterColor(WidgetPropertyType::COLOR_SECONDARY_ACTIVE);
 
-    store.Register(WidgetPropertyType::START_ANGLE, ConfigValue { DEFAULT_START_ANGLE }, PropertyChangeEffect::Repaint);
-    store.Register(WidgetPropertyType::END_ANGLE, ConfigValue { DEFAULT_END_ANGLE }, PropertyChangeEffect::Repaint);
+    store.Register(WidgetPropertyType::START_ANGLE, ConfigValue{ DEFAULT_START_ANGLE }, PropertyChangeEffect::Repaint);
+    store.Register(WidgetPropertyType::END_ANGLE, ConfigValue{ DEFAULT_END_ANGLE }, PropertyChangeEffect::Repaint);
 }
 
 int ArcFillIndicator::ApplyTheme(const ITheme& theme) {

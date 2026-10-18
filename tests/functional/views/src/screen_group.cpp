@@ -1,7 +1,7 @@
 #include <memory>
 
-#include <zephyr/ztest.h>
 #include <lvgl.h>
+#include <zephyr/ztest.h>
 
 #include "views/screens/screen_group.h"
 #include "views/utilitites/frame.h"
@@ -17,10 +17,7 @@ using views_test::FakeScreen;
 namespace {
 
 std::shared_ptr<Frame> MakeRoot() {
-    return std::make_shared<Frame>(Frame::CreateWrapped()
-        .SetWidth(100, false)
-        .SetHeight(100, false)
-        .Build());
+    return std::make_shared<Frame>(Frame::CreateWrapped().SetWidth(100, false).SetHeight(100, false).Build());
 }
 
 bool IsHidden(const std::shared_ptr<ScreenGroup>& group) {

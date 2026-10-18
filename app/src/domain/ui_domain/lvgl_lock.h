@@ -31,8 +31,12 @@ public:
 
 class ScopedLvglLock {
 public:
-    ScopedLvglLock() { LvglLock::GetInstance().Lock(); }
-    ~ScopedLvglLock() { LvglLock::GetInstance().Unlock(); }
+    ScopedLvglLock() {
+        LvglLock::GetInstance().Lock();
+    }
+    ~ScopedLvglLock() {
+        LvglLock::GetInstance().Unlock();
+    }
 
     ScopedLvglLock(const ScopedLvglLock&) = delete;
     ScopedLvglLock& operator=(const ScopedLvglLock&) = delete;

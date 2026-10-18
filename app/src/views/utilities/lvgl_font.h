@@ -14,8 +14,9 @@ private:
 public:
     const std::string name;
 
-    LvglFont(const std::string& name, const lv_font_t* font, uint32_t size)
-        : lv_font_(font), name(name) { }
+    LvglFont(const std::string& name, const lv_font_t* font, uint32_t size) :
+        lv_font_(font),
+        name(name) {}
 
     [[nodiscard]] const lv_font_t* ToLvFont() const {
         return lv_font_;

@@ -10,7 +10,9 @@ private:
 
 public:
     using PolygonIconBase::PolygonIconBase;
-    [[nodiscard]] IconType GetIconType() const override { return IconType::TriangleRight; }
+    [[nodiscard]] IconType GetIconType() const override {
+        return IconType::TriangleRight;
+    }
 };
 
 } // namespace eerie_leap::views::widgets::basic::icons

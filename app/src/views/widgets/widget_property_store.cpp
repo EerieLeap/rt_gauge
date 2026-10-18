@@ -19,8 +19,9 @@ WidgetPropertyStore::WidgetPropertyStore() {
 }
 
 const WidgetPropertyStore::Entry* WidgetPropertyStore::Find(WidgetPropertyType type) const {
-    auto it = std::find_if(entries_.begin(), entries_.end(),
-        [type](const Entry& entry) { return entry.type == type; });
+    auto it = std::find_if(entries_.begin(), entries_.end(), [type](const Entry& entry) {
+        return entry.type == type;
+    });
 
     return it == entries_.end() ? nullptr : &(*it);
 }
@@ -39,8 +40,7 @@ void WidgetPropertyStore::Register(WidgetPropertyType type, ConfigValue default_
 
     if(const auto index = WidgetPropertyValidator::GetColorPropertyIndex(type)) {
         const auto* text = std::get_if<std::pmr::string>(&default_value);
-        colors_[*index] =
-            text == nullptr ? std::nullopt : Color::TryParse(*text).value_or(std::nullopt);
+        colors_[*index] = text == nullptr ? std::nullopt : Color::TryParse(*text).value_or(std::nullopt);
         applied_colors_[*index] = colors_[*index];
     }
 
@@ -52,16 +52,13 @@ void WidgetPropertyStore::Register(WidgetPropertyType type, ConfigValue default_
         return;
     }
 
-    entries_.push_back(Entry {
-        .type = type,
-        .effect = effect,
-        .declared_alternative = alternative,
-        .value = std::move(default_value)
-    });
+    entries_.push_back(
+        Entry{ .type = type, .effect = effect, .declared_alternative = alternative, .value = std::move(default_value) }
+    );
 }
 
 void WidgetPropertyStore::RegisterColor(WidgetPropertyType type) {
-    Register(type, ConfigValue { std::pmr::string {} }, PropertyChangeEffect::Repaint);
+    Register(type, ConfigValue{ std::pmr::string{} }, PropertyChangeEffect::Repaint);
 }
 
 void WidgetPropertyStore::ApplyColor(WidgetPropertyType type) {
@@ -130,15 +127,15 @@ bool WidgetPropertyStore::Set(WidgetPropertyType type, const ConfigValue& value)
         return true;
     }
 
-    if(WidgetPropertyValidator::IsAppearanceProperty(type) && !WidgetPropertyValidator::IsValidAppearanceValue(type, value))
+    if(WidgetPropertyValidator::IsAppearanceProperty(type)
+        && !WidgetPropertyValidator::IsValidAppearanceValue(type, value))
         return false;
 
     if(WidgetPropertyValidator::IsAnimationProperty(type)
         && !WidgetPropertyValidator::IsValidAnimationValue(type, value))
         return false;
 
-    if(WidgetPropertyValidator::IsAnchorProperty(type)
-        && !WidgetPropertyValidator::IsValidAnchorValue(type, value))
+    if(WidgetPropertyValidator::IsAnchorProperty(type) && !WidgetPropertyValidator::IsValidAnchorValue(type, value))
         return false;
 
     entry->value = value;
@@ -151,7 +148,7 @@ ConfigValue WidgetPropertyStore::Get(WidgetPropertyType type) const {
 
     const auto* entry = Find(type);
 
-    return entry == nullptr ? ConfigValue { } : entry->value;
+    return entry == nullptr ? ConfigValue{} : entry->value;
 }
 
 std::vector<WidgetPropertyType> WidgetPropertyStore::GetRegisteredTypes() const {

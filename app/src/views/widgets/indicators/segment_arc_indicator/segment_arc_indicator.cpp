@@ -2,8 +2,8 @@
 
 #include "domain/ui_domain/models/widget_property.h"
 
-#include "views/widgets/indicators/indicator_base.h"
 #include "views/themes/theme_manager.h"
+#include "views/widgets/indicators/indicator_base.h"
 
 #include "segment_arc_indicator.h"
 
@@ -14,8 +14,8 @@ using namespace eerie_leap::domain::ui_domain::models;
 using namespace eerie_leap::views::utilitites;
 using eerie_leap::views::utilities::LvglColor;
 
-SegmentArcIndicator::SegmentArcIndicator(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context)
-    : IndicatorBase(id, std::move(parent), std::move(context)) { }
+SegmentArcIndicator::SegmentArcIndicator(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context) :
+    IndicatorBase(id, std::move(parent), std::move(context)) {}
 
 SegmentArcIndicator::~SegmentArcIndicator() {
     DetachDispatch();
@@ -35,8 +35,8 @@ void SegmentArcIndicator::RegisterProperties(WidgetPropertyStore& store) const {
     store.RegisterColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE);
     store.RegisterColor(WidgetPropertyType::COLOR_PRIMARY_INACTIVE);
 
-    store.Register(WidgetPropertyType::START_ANGLE, ConfigValue { 45 }, PropertyChangeEffect::Repaint);
-    store.Register(WidgetPropertyType::END_ANGLE, ConfigValue { 315 }, PropertyChangeEffect::Repaint);
+    store.Register(WidgetPropertyType::START_ANGLE, ConfigValue{ 45 }, PropertyChangeEffect::Repaint);
+    store.Register(WidgetPropertyType::END_ANGLE, ConfigValue{ 315 }, PropertyChangeEffect::Repaint);
 }
 
 int SegmentArcIndicator::ApplyTheme(const ITheme& theme) {
@@ -87,10 +87,7 @@ void SegmentArcIndicator::Create(lv_obj_t* parent, int32_t range_start, int32_t 
         if(segment == nullptr)
             break;
 
-        segments_.push_back({
-            .lv_segment = segment,
-            .is_active = false
-        });
+        segments_.push_back({ .lv_segment = segment, .is_active = false });
     }
 
     segments_per_value_ = (range_end - range_start) / static_cast<float>(segments_.size());

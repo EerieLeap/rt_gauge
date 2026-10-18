@@ -4,8 +4,8 @@
 #include <utility>
 #include <variant>
 
-#include <zephyr/logging/log.h>
 #include <eerie_memory.hpp>
+#include <zephyr/logging/log.h>
 
 #include "utilities/memory/memory_resource_manager.h"
 
@@ -26,23 +26,26 @@ LOG_MODULE_REGISTER(display_controller_logger);
 DisplayController::DisplayController(
     std::shared_ptr<IFsService> fs_service,
     std::shared_ptr<WorkQueueThread> config_work_queue_thread,
-    std::shared_ptr<ConfigurationService> configuration_service)
-        : fs_service_(std::move(fs_service)),
-        config_work_queue_thread_(std::move(config_work_queue_thread)),
-        configuration_service_(std::move(configuration_service)) {}
+    std::shared_ptr<ConfigurationService> configuration_service
+) :
+    fs_service_(std::move(fs_service)),
+    config_work_queue_thread_(std::move(config_work_queue_thread)),
+    configuration_service_(std::move(configuration_service)) {}
 
 int DisplayController::Initialize() {
     auto cbor_display_config_service = std::make_unique<config_services::CborConfigurationService<CborDisplayConfig>>(
-        DISPLAY_CONFIGURATION_NAME, fs_service_, config_work_queue_thread_);
+        DISPLAY_CONFIGURATION_NAME, fs_service_, config_work_queue_thread_
+    );
     display_configuration_manager_ = std::make_shared<DisplayConfigurationManager>(
-        std::move(cbor_display_config_service));
+        std::move(cbor_display_config_service)
+    );
 
     if(configuration_service_ != nullptr)
         configuration_service_->RegisterCborConfigurationManager(
-            ConfigurationService::Type::Display, display_configuration_manager_);
+            ConfigurationService::Type::Display, display_configuration_manager_
+        );
 
-    display_service_ = std::make_shared<DisplayService>(
-        display_configuration_manager_, config_work_queue_thread_);
+    display_service_ = std::make_shared<DisplayService>(display_configuration_manager_, config_work_queue_thread_);
 
     if(display_service_->Initialize() != 0) {
         LOG_ERR("Failed to initialize the display service.");

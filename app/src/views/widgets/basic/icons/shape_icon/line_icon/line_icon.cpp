@@ -7,15 +7,18 @@ namespace eerie_leap::views::widgets::basic::icons {
 
 void LineIcon::RegisterProperties(WidgetPropertyStore& store) {
     ShapeIconBase::RegisterProperties(store);
-    store.Register(WidgetPropertyType::DIRECTION,
-        ConfigValue { static_cast<int>(WidgetDirection::LeftToRight) }, PropertyChangeEffect::Relayout);
+    store.Register(
+        WidgetPropertyType::DIRECTION, ConfigValue{ static_cast<int>(WidgetDirection::LeftToRight) },
+        PropertyChangeEffect::Relayout
+    );
 }
 
 bool LineIcon::ReadGeometry() {
     bool changed = ShapeIconBase::ReadGeometry();
     double value = properties_->GetAs<double>(WidgetPropertyType::DIRECTION, 1);
     auto direction = value >= 1 && value <= 4 && std::floor(value) == value
-        ? static_cast<WidgetDirection>(static_cast<int>(value)) : WidgetDirection::LeftToRight;
+        ? static_cast<WidgetDirection>(static_cast<int>(value))
+        : WidgetDirection::LeftToRight;
     changed |= UpdateValue(direction_, direction);
     return changed;
 }
@@ -41,8 +44,8 @@ bool LineIcon::IsDrawable() const {
 
 float LineIcon::BuildPath(lv_vector_path_t* path, float width, float height) const {
     bool horizontal = IsHorizontal();
-    lv_fpoint_t start { horizontal ? 0.0F : width / 2, horizontal ? height / 2 : 0.0F };
-    lv_fpoint_t end { horizontal ? width : width / 2, horizontal ? height / 2 : height };
+    lv_fpoint_t start{ horizontal ? 0.0F : width / 2, horizontal ? height / 2 : 0.0F };
+    lv_fpoint_t end{ horizontal ? width : width / 2, horizontal ? height / 2 : height };
     if(direction_ == WidgetDirection::RightToLeft || direction_ == WidgetDirection::BottomToTop)
         std::swap(start, end);
     lv_vector_path_move_to(path, &start);

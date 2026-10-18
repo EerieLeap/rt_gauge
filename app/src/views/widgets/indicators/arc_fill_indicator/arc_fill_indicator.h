@@ -28,10 +28,11 @@ protected:
     void OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) override;
 
 public:
-
 public:
     explicit ArcFillIndicator(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context);
-    WidgetType GetType() const override { return WidgetType::IndicatorArcFill; }
+    WidgetType GetType() const override {
+        return WidgetType::IndicatorArcFill;
+    }
 };
 
 } // namespace eerie_leap::views::widgets::indicators

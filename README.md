@@ -152,6 +152,28 @@ and the reproducible native simulator gallery.
 uploads and deletes its asset files (images, animations, scripts, logs), on CAN or on the console of a unit
 built with `app/bench.conf` (shell, SMP over the console, stack reports). See [tools/README.md](tools/README.md).
 
+### Formatting
+
+C and C++ sources follow [`.clang-format`](.clang-format), a copy of rt_core's, written for clang-format 23.1.1
+(`pip install clang-format==23.1.1`, already in the dev container; older majors reject the configuration).
+[`.clang-format-ignore`](.clang-format-ignore) lists what is never formatted: the zcbor codecs, LVGL font and image
+converter output, and the Zephyr drivers, boards and bindings, which keep Zephyr's style.
+
+```shell
+scripts/format.sh                     # list the files that need formatting
+scripts/format.sh --fix               # reformat them in place
+scripts/format.sh --changed [BASE]    # only files changed since the merge base with BASE (default origin/main)
+scripts/format.sh PATH...             # only these files or directories
+git clang-format                      # only the changed lines of staged files
+```
+
+The script exits 0 when clean, 1 when files need formatting and 2 on a setup error, such as a clang-format of another
+major. To keep a hand-aligned block as written, wrap it in `// clang-format off` … `// clang-format on` with a comment
+saying why. CI fails on unformatted code and when `.clang-format` differs from rt_core's.
+
+`git config blame.ignoreRevsFile .git-blame-ignore-revs` hides the reformat commit from `git blame`; GitHub reads the
+file by itself.
+
 ### Required tools
 
 #### CBOR

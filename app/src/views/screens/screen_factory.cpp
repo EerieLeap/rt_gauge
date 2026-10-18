@@ -20,7 +20,12 @@ void ScreenFactory::RegisterScreen(const ScreenType type, ScreenCreator creator)
     creators_[type] = std::move(creator);
 }
 
-std::shared_ptr<IScreen> ScreenFactory::CreateScreen(const ScreenType type, const uint32_t id, std::shared_ptr<Frame> parent, const WidgetContext& context) {
+std::shared_ptr<IScreen> ScreenFactory::CreateScreen(
+    const ScreenType type,
+    const uint32_t id,
+    std::shared_ptr<Frame> parent,
+    const WidgetContext& context
+) {
     auto it = creators_.find(type);
     if(it == creators_.end())
         throw std::runtime_error("Unknown screen type");
@@ -28,7 +33,11 @@ std::shared_ptr<IScreen> ScreenFactory::CreateScreen(const ScreenType type, cons
     return it->second(id, std::move(parent), context);
 }
 
-std::shared_ptr<IScreen> ScreenFactory::CreateScreen(std::shared_ptr<ScreenConfiguration> configuration, std::shared_ptr<Frame> parent, const WidgetContext& context) {
+std::shared_ptr<IScreen> ScreenFactory::CreateScreen(
+    std::shared_ptr<ScreenConfiguration> configuration,
+    std::shared_ptr<Frame> parent,
+    const WidgetContext& context
+) {
     auto screen = CreateScreen(configuration->type, configuration->id, std::move(parent), context);
     screen->Configure(std::move(configuration));
 

@@ -101,6 +101,36 @@
             "command": "rm -rf ./build",
             "group": "none",
             "detail": "Clean up the build directory"
+        },
+        {
+            "label": "Format: check",
+            "type": "shell",
+            "command": "scripts/format.sh",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": "none",
+            "detail": "List files that differ from the clang-format style"
+        },
+        {
+            "label": "Format: check changed",
+            "type": "shell",
+            "command": "scripts/format.sh --changed",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": "none",
+            "detail": "Check only the files changed since the merge base with origin/main"
+        },
+        {
+            "label": "Format: fix",
+            "type": "shell",
+            "command": "scripts/format.sh --fix",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": "none",
+            "detail": "Reformat the sources in place with clang-format"
         }
     ]
 }

@@ -1,0 +1,30 @@
+name: Format
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: format-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  clang-format:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true # only for comparing with rt_core's config
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      # The same version the sources are formatted with; majors differ in wrapping.
+      - run: pip install clang-format==23.1.1
+
+      - run: scripts/format.sh
+
+      - name: Same style as rt_core
+        run: cmp .clang-format modules/eerie_leap_rt_core/.clang-format

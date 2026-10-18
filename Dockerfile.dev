@@ -128,6 +128,10 @@ RUN source /home/${USERNAME}/zephyr/.venv/bin/activate && \
     west zephyr-export && \
     west blobs fetch hal_espressif
 
+# Pinned: Zephyr's requirements allow any clang-format >= 15, and majors differ in how they wrap.
+RUN source /home/${USERNAME}/zephyr/.venv/bin/activate && \
+    pip install clang-format==23.1.1
+
 RUN source /home/${USERNAME}/zephyr/.venv/bin/activate && \
     cd /home/${USERNAME}/zephyr/workspace/zephyr && \
     west sdk install

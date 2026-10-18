@@ -21,7 +21,8 @@ using eerie_leap::views::widgets::WidgetContext;
 
 class ScreenFactory {
 public:
-    using ScreenCreator = std::function<std::shared_ptr<IScreen>(const uint32_t id, std::shared_ptr<Frame> parent, const WidgetContext& context)>;
+    using ScreenCreator = std::function<
+        std::shared_ptr<IScreen>(const uint32_t id, std::shared_ptr<Frame> parent, const WidgetContext& context)>;
 
 private:
     std::unordered_map<ScreenType, ScreenCreator> creators_;
@@ -35,15 +36,21 @@ public:
 
     template<typename T>
     void RegisterScreen(const ScreenType type) {
-        creators_[type] = [](const uint32_t id, std::shared_ptr<Frame> parent, const WidgetContext& context) -> std::shared_ptr<IScreen> {
+        creators_[type] = [](const uint32_t id, std::shared_ptr<Frame> parent,
+                              const WidgetContext& context) -> std::shared_ptr<IScreen> {
             return std::make_shared<T>(id, std::move(parent), context);
         };
     }
 
     void RegisterScreen(const ScreenType type, ScreenCreator creator);
 
-    std::shared_ptr<IScreen> CreateScreen(const ScreenType type, const uint32_t id, std::shared_ptr<Frame> parent, const WidgetContext& context);
-    std::shared_ptr<IScreen> CreateScreen(std::shared_ptr<ScreenConfiguration> configuration, std::shared_ptr<Frame> parent, const WidgetContext& context);
+    std::shared_ptr<IScreen>
+    CreateScreen(const ScreenType type, const uint32_t id, std::shared_ptr<Frame> parent, const WidgetContext& context);
+    std::shared_ptr<IScreen> CreateScreen(
+        std::shared_ptr<ScreenConfiguration> configuration,
+        std::shared_ptr<Frame> parent,
+        const WidgetContext& context
+    );
 
     std::vector<ScreenType> GetAvailableTypes() const;
 };

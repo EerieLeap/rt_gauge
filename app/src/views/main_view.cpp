@@ -3,8 +3,8 @@
 #include <string>
 #include <utility>
 
-#include <zephyr/logging/log.h>
 #include <lvgl.h>
+#include <zephyr/logging/log.h>
 
 #include "domain/ui_domain/lvgl_lock.h"
 
@@ -21,10 +21,7 @@ using eerie_leap::domain::ui_domain::ScopedLvglLock;
 LOG_MODULE_REGISTER(main_view_logger);
 
 MainView::MainView() {
-    container_ = std::make_shared<Frame>(Frame::CreateWrapped()
-        .SetWidth(100, false)
-        .SetHeight(100, false)
-        .Build());
+    container_ = std::make_shared<Frame>(Frame::CreateWrapped().SetWidth(100, false).SetHeight(100, false).Build());
 }
 
 std::shared_ptr<Frame> MainView::GetContainer() const {
@@ -123,7 +120,8 @@ int MainView::SetActiveGroup(uint32_t screen_group_id) {
 
 int MainView::RenderGroupOrRollBack(
     const std::shared_ptr<ScreenGroup>& screen_group,
-    const std::shared_ptr<ScreenGroup>& previous_screen_group) {
+    const std::shared_ptr<ScreenGroup>& previous_screen_group
+) {
 
     int res = screen_group->EnsureRendered();
     if(res == 0)
@@ -174,26 +172,26 @@ std::shared_ptr<IScreen> MainView::GetScreen(uint32_t screen_id) const {
 }
 
 static void RenderCenterCrossHelperGuides(lv_obj_t* screen) {
-    lv_obj_t * panel1 = lv_obj_create(screen);
+    lv_obj_t* panel1 = lv_obj_create(screen);
     lv_obj_set_width(panel1, 2);
     lv_obj_set_height(panel1, 466);
     lv_obj_set_align(panel1, LV_ALIGN_CENTER);
     lv_obj_remove_flag(panel1, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_border_color(
-        panel1,
-        ThemeManager::GetInstance().GetCurrentTheme().GetPrimaryColor().ToLvColor(),
-        LV_PART_MAIN | LV_STATE_DEFAULT);
+        panel1, ThemeManager::GetInstance().GetCurrentTheme().GetPrimaryColor().ToLvColor(),
+        LV_PART_MAIN | LV_STATE_DEFAULT
+    );
     lv_obj_set_style_border_opa(panel1, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    lv_obj_t * panel2 = lv_obj_create(screen);
+    lv_obj_t* panel2 = lv_obj_create(screen);
     lv_obj_set_width(panel2, 466);
     lv_obj_set_height(panel2, 2);
     lv_obj_set_align(panel2, LV_ALIGN_CENTER);
     lv_obj_remove_flag(panel2, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_border_color(
-        panel2,
-        ThemeManager::GetInstance().GetCurrentTheme().GetPrimaryColor().ToLvColor(),
-        LV_PART_MAIN | LV_STATE_DEFAULT);
+        panel2, ThemeManager::GetInstance().GetCurrentTheme().GetPrimaryColor().ToLvColor(),
+        LV_PART_MAIN | LV_STATE_DEFAULT
+    );
     lv_obj_set_style_border_opa(panel2, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
 }
 
@@ -221,8 +219,12 @@ int MainView::DoRender() {
 }
 
 int MainView::ApplyTheme(const ITheme& theme) {
-    lv_obj_set_style_bg_color(container_->GetObject(), theme.GetBackgroundColor().ToLvColor(), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(container_->GetObject(), theme.GetBackgroundColor().ToLvOpa(), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(
+        container_->GetObject(), theme.GetBackgroundColor().ToLvColor(), LV_PART_MAIN | LV_STATE_DEFAULT
+    );
+    lv_obj_set_style_bg_opa(
+        container_->GetObject(), theme.GetBackgroundColor().ToLvOpa(), LV_PART_MAIN | LV_STATE_DEFAULT
+    );
 
     return 0;
 }

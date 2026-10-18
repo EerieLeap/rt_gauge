@@ -20,7 +20,9 @@ private:
 public:
     using ShapeIconBase::ShapeIconBase;
     static void RegisterProperties(WidgetPropertyStore& store);
-    [[nodiscard]] IconType GetIconType() const override { return IconType::Line; }
+    [[nodiscard]] IconType GetIconType() const override {
+        return IconType::Line;
+    }
 };
 
 } // namespace eerie_leap::views::widgets::basic::icons

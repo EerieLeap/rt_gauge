@@ -20,13 +20,13 @@
 
 #include "domain/sensor_domain/event_bus/sensor_events_channel.h"
 #include "domain/settings_domain/event_bus/settings_events_channel.h"
-#include "domain/ui_domain/models/property_binding.h"
-#include "domain/ui_domain/models/animation.h"
 #include "domain/ui_domain/lvgl_lock.h"
+#include "domain/ui_domain/models/animation.h"
+#include "domain/ui_domain/models/property_binding.h"
 #include "domain/ui_domain/models/widget_configuration.h"
 
-#include "subsys/event_bus/event_channel_id.h"
 #include "event_bus/event_channels.h"
+#include "subsys/event_bus/event_channel_id.h"
 
 #include "views/screens/screen.h"
 #include "views/screens/screen_group.h"
@@ -48,6 +48,7 @@ using eerie_leap::domain::sensor_domain::event_bus::SensorPayloadType;
 using eerie_leap::domain::settings_domain::event_bus::SettingsEventsChannel;
 using eerie_leap::domain::settings_domain::event_bus::SettingsEventType;
 using eerie_leap::domain::settings_domain::event_bus::SettingsPayloadType;
+using eerie_leap::domain::ui_domain::models::Animation;
 using eerie_leap::domain::ui_domain::models::PropertyBinding;
 using eerie_leap::domain::ui_domain::models::PropertyBindingDirection;
 using eerie_leap::domain::ui_domain::models::WidgetConfiguration;
@@ -68,7 +69,6 @@ using eerie_leap::views::widgets::PropertyChangeEffect;
 using eerie_leap::views::widgets::WidgetBase;
 using eerie_leap::views::widgets::WidgetContext;
 using eerie_leap::views::widgets::WidgetPropertyStore;
-using eerie_leap::domain::ui_domain::models::Animation;
 using views_test::CleanTestDisplay;
 using views_test::EnsureTestDisplay;
 
@@ -82,51 +82,67 @@ constexpr int NO_DISPATCH_TIMEOUT_MS = 200;
 
 K_THREAD_STACK_DEFINE(publisher_stack, 4096);
 
-constexpr WidgetPropertyType color_properties[] = {
-    WidgetPropertyType::COLOR_PRIMARY_ACTIVE, WidgetPropertyType::COLOR_PRIMARY_INACTIVE,
-    WidgetPropertyType::COLOR_SECONDARY_ACTIVE, WidgetPropertyType::COLOR_SECONDARY_INACTIVE,
-    WidgetPropertyType::COLOR_TERTIARY_ACTIVE, WidgetPropertyType::COLOR_TERTIARY_INACTIVE
-};
+constexpr WidgetPropertyType color_properties[] = { WidgetPropertyType::COLOR_PRIMARY_ACTIVE,
+    WidgetPropertyType::COLOR_PRIMARY_INACTIVE, WidgetPropertyType::COLOR_SECONDARY_ACTIVE,
+    WidgetPropertyType::COLOR_SECONDARY_INACTIVE, WidgetPropertyType::COLOR_TERTIARY_ACTIVE,
+    WidgetPropertyType::COLOR_TERTIARY_INACTIVE };
 
 std::shared_ptr<Frame> MakeRoot() {
-    return std::make_shared<Frame>(Frame::CreateWrapped()
-        .SetWidth(100, false)
-        .SetHeight(100, false)
-        .Build());
+    return std::make_shared<Frame>(Frame::CreateWrapped().SetWidth(100, false).SetHeight(100, false).Build());
 }
 
 // A widget with a property surface a test can watch, so the binding path is observed directly
 // rather than through whatever a real widget happens to draw.
 class ProbeWidget : public WidgetBase {
 public:
-    ProbeWidget(uint32_t id, std::shared_ptr<Frame> parent)
-        : WidgetBase(id, std::move(parent), WidgetContext { }) { }
+    ProbeWidget(uint32_t id, std::shared_ptr<Frame> parent) :
+        WidgetBase(id, std::move(parent), WidgetContext{}) {}
 
-    ~ProbeWidget() override { DetachDispatch(); }
+    ~ProbeWidget() override {
+        DetachDispatch();
+    }
 
-    WidgetType GetType() const override { return WidgetType::BasicIcon; }
+    WidgetType GetType() const override {
+        return WidgetType::BasicIcon;
+    }
 
-    ConfigValue Read(WidgetPropertyType type) const { return properties_->Get(type); }
-    double ReadNumber(WidgetPropertyType type) const { return ConfigValueAs<double>(Read(type), -1); }
-    void WriteLocal(WidgetPropertyType type, const ConfigValue& value) { SetPropertyLocal(type, value); }
-    std::shared_ptr<WidgetPropertyStore> GetStore() const { return properties_; }
-    size_t SubscriptionCount() const { return subscriptions_.size(); }
-    size_t OutboundBindingCount() const { return outbound_bindings_.size(); }
+    ConfigValue Read(WidgetPropertyType type) const {
+        return properties_->Get(type);
+    }
+    double ReadNumber(WidgetPropertyType type) const {
+        return ConfigValueAs<double>(Read(type), -1);
+    }
+    void WriteLocal(WidgetPropertyType type, const ConfigValue& value) {
+        SetPropertyLocal(type, value);
+    }
+    std::shared_ptr<WidgetPropertyStore> GetStore() const {
+        return properties_;
+    }
+    size_t SubscriptionCount() const {
+        return subscriptions_.size();
+    }
+    size_t OutboundBindingCount() const {
+        return outbound_bindings_.size();
+    }
 
     std::vector<WidgetPropertyType> notified;
 
 private:
-    int DoRender() override { return 0; }
-    int ApplyTheme(const ITheme&) override { return 0; }
+    int DoRender() override {
+        return 0;
+    }
+    int ApplyTheme(const ITheme&) override {
+        return 0;
+    }
 
     void RegisterProperties(WidgetPropertyStore& store) const override {
         WidgetBase::RegisterProperties(store);
 
-        store.Register(WidgetPropertyType::VALUE, ConfigValue { 0.0 }, PropertyChangeEffect::None);
-        store.Register(WidgetPropertyType::LABEL, ConfigValue { std::pmr::string { } }, PropertyChangeEffect::None);
+        store.Register(WidgetPropertyType::VALUE, ConfigValue{ 0.0 }, PropertyChangeEffect::None);
+        store.Register(WidgetPropertyType::LABEL, ConfigValue{ std::pmr::string{} }, PropertyChangeEffect::None);
 
         for(auto type : color_properties)
-            store.Register(type, ConfigValue { std::pmr::string { } }, PropertyChangeEffect::None);
+            store.Register(type, ConfigValue{ std::pmr::string{} }, PropertyChangeEffect::None);
     }
 
     void OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) override {
@@ -145,65 +161,53 @@ std::shared_ptr<WidgetConfiguration> MakeConfiguration() {
 }
 
 PropertyBinding SensorBinding(WidgetPropertyType target, const char* sensor_id) {
-    return PropertyBinding {
-        .target = target,
-        .event = {
-            .channel = EventChannelId::Sensors,
+    return PropertyBinding{ .target = target,
+        .event = { .channel = EventChannelId::Sensors,
             .event_type = std::to_underlying(SensorEventType::DataUpdated),
             .payload_key = std::to_underlying(SensorPayloadType::Value),
             .selector_key = std::to_underlying(SensorPayloadType::SensorId),
-            .selector_value = std::pmr::string(sensor_id, Mrm::GetExtPmr())
-        }
-    };
+            .selector_value = std::pmr::string(sensor_id, Mrm::GetExtPmr()) } };
 }
 
 PropertyBinding SettingBinding(PropertyBindingDirection direction) {
-    return PropertyBinding {
-        .target = WidgetPropertyType::VALUE,
-        .event = {
-            .channel = EventChannelId::Settings,
+    return PropertyBinding{ .target = WidgetPropertyType::VALUE,
+        .event = { .channel = EventChannelId::Settings,
             .event_type = std::to_underlying(SettingsEventType::Changed),
             .payload_key = std::to_underlying(SettingsPayloadType::Value),
             .selector_key = std::to_underlying(SettingsPayloadType::SettingId),
-            .selector_value = std::pmr::string(SETTING_ID, Mrm::GetExtPmr())
-        },
+            .selector_value = std::pmr::string(SETTING_ID, Mrm::GetExtPmr()) },
         .direction = direction,
-        .outbound_event_type = std::to_underlying(SettingsEventType::ChangeRequested)
-    };
+        .outbound_event_type = std::to_underlying(SettingsEventType::ChangeRequested) };
 }
 
 // Published synchronously so a test observes the result without waiting on the bus worker.
 void PublishSensor(const char* sensor_id, const EventData& value) {
-    SensorEventsChannel::GetInstance().Publish({
-        .source_id = 0,
-        .type = SensorEventType::DataUpdated,
-        .payload = {
-            { SensorPayloadType::SensorId, StringHelpers::GetHash(sensor_id) },
-            { SensorPayloadType::Value, value }
-        }
-    });
+    SensorEventsChannel::GetInstance().Publish(
+        { .source_id = 0,
+            .type = SensorEventType::DataUpdated,
+            .payload = { { SensorPayloadType::SensorId, StringHelpers::GetHash(sensor_id) },
+                { SensorPayloadType::Value, value } } }
+    );
 }
 
 void PublishSettingChanged(const EventData& value) {
-    SettingsEventsChannel::GetInstance().Publish({
-        .source_id = 0,
-        .type = SettingsEventType::Changed,
-        .payload = {
-            { SettingsPayloadType::SettingId, StringHelpers::GetHash(SETTING_ID) },
-            { SettingsPayloadType::Value, value }
-        }
-    });
+    SettingsEventsChannel::GetInstance().Publish(
+        { .source_id = 0,
+            .type = SettingsEventType::Changed,
+            .payload = { { SettingsPayloadType::SettingId, StringHelpers::GetHash(SETTING_ID) },
+                { SettingsPayloadType::Value, value } } }
+    );
 }
 
 // Watches what a widget publishes on an outbound binding.
 class ChangeRequestProbe {
 public:
-    ChangeRequestProbe() : state_(std::make_shared<State>()) {
+    ChangeRequestProbe() :
+        state_(std::make_shared<State>()) {
         k_sem_init(&state_->delivered, 0, K_SEM_MAX_LIMIT);
 
         subscription_ = CreateScopedSubscription(
-            SettingsEventsChannel::GetInstance(),
-            SettingsEventType::ChangeRequested,
+            SettingsEventsChannel::GetInstance(), SettingsEventType::ChangeRequested,
             [state = state_](const SettingsEventsChannel::EventMessage& event) {
                 if(auto it = event.payload.find(SettingsPayloadType::Value); it != event.payload.end())
                     state->value = std::get<float>(it->second);
@@ -213,15 +217,26 @@ public:
 
                 ++state->calls;
                 k_sem_give(&state->delivered);
-            });
+            }
+        );
     }
 
-    bool WaitForRequest() const { return k_sem_take(&state_->delivered, K_MSEC(DISPATCH_TIMEOUT_MS)) == 0; }
-    bool WaitForNoRequest() const { return k_sem_take(&state_->delivered, K_MSEC(NO_DISPATCH_TIMEOUT_MS)) != 0; }
+    bool WaitForRequest() const {
+        return k_sem_take(&state_->delivered, K_MSEC(DISPATCH_TIMEOUT_MS)) == 0;
+    }
+    bool WaitForNoRequest() const {
+        return k_sem_take(&state_->delivered, K_MSEC(NO_DISPATCH_TIMEOUT_MS)) != 0;
+    }
 
-    [[nodiscard]] int Calls() const { return state_->calls; }
-    [[nodiscard]] std::optional<float> Value() const { return state_->value; }
-    [[nodiscard]] std::optional<uint32_t> SettingId() const { return state_->setting_id; }
+    [[nodiscard]] int Calls() const {
+        return state_->calls;
+    }
+    [[nodiscard]] std::optional<float> Value() const {
+        return state_->value;
+    }
+    [[nodiscard]] std::optional<uint32_t> SettingId() const {
+        return state_->setting_id;
+    }
 
 private:
     struct State {
@@ -236,8 +251,8 @@ private:
 };
 
 // Configure -> render -> activate, which is the state a widget is in while events flow.
-std::unique_ptr<ProbeWidget> MakeActiveWidget(
-    std::shared_ptr<WidgetConfiguration> configuration, std::shared_ptr<Frame> parent = nullptr) {
+std::unique_ptr<ProbeWidget>
+MakeActiveWidget(std::shared_ptr<WidgetConfiguration> configuration, std::shared_ptr<Frame> parent = nullptr) {
     auto widget = std::make_unique<ProbeWidget>(1, parent != nullptr ? std::move(parent) : MakeRoot());
 
     widget->Configure(std::move(configuration));
@@ -291,19 +306,22 @@ ZTEST(widget_bindings, test_structural_configuration_is_not_replayed_or_mutated_
             widget.OnDeactivated();
         bool rejected = false;
         try {
-            widget.WriteLocal(WidgetPropertyType::CHILD_WIDGET_IDS, std::pmr::vector<int> { 99 });
+            widget.WriteLocal(WidgetPropertyType::CHILD_WIDGET_IDS, std::pmr::vector<int>{ 99 });
         } catch(const std::invalid_argument&) {
             rejected = true;
         }
         zassert_true(rejected);
         zassert_true(widget.GetConfiguration()->properties.at(WidgetPropertyType::CHILD_WIDGET_IDS) == children);
         zassert_false(widget.GetStore()->IsRegistered(WidgetPropertyType::CHILD_WIDGET_IDS));
-        zassert_equal(std::count(widget.notified.begin(), widget.notified.end(), WidgetPropertyType::CHILD_WIDGET_IDS), 0);
+        zassert_equal(
+            std::count(widget.notified.begin(), widget.notified.end(), WidgetPropertyType::CHILD_WIDGET_IDS), 0
+        );
     }
 }
 
 ZTEST(widget_bindings, test_structural_binding_rejection_leaves_no_partial_subscriptions) {
-    for(auto direction : { PropertyBindingDirection::In, PropertyBindingDirection::Out, PropertyBindingDirection::InOut }) {
+    for(auto direction :
+        { PropertyBindingDirection::In, PropertyBindingDirection::Out, PropertyBindingDirection::InOut }) {
         auto configuration = MakeConfiguration();
         configuration->bindings.push_back(SensorBinding(WidgetPropertyType::VALUE, SENSOR_ID));
         configuration->bindings.push_back(SettingBinding(PropertyBindingDirection::InOut));
@@ -394,8 +412,9 @@ ZTEST(widget_bindings, test_digital_color_binding_applies_rgba_and_resets_withou
     widget.OnActivated();
     auto* label = lv_obj_get_child(views_test::WidgetContent(widget), 0);
     zassert_equal(lv_obj_get_style_text_opa(label, LV_PART_MAIN), 128);
-    zassert_equal(lv_color_to_u32(lv_obj_get_style_text_color(label, LV_PART_MAIN)),
-        lv_color_to_u32(lv_color_hex(0x123456)));
+    zassert_equal(
+        lv_color_to_u32(lv_obj_get_style_text_color(label, LV_PART_MAIN)), lv_color_to_u32(lv_color_hex(0x123456))
+    );
     PublishSensor(SENSOR_ID, std::string("#abcdef00"));
     zassert_equal(lv_obj_get_style_text_opa(label, LV_PART_MAIN), 0);
     PublishSensor(SENSOR_ID, std::string("#abcdef"));
@@ -403,17 +422,16 @@ ZTEST(widget_bindings, test_digital_color_binding_applies_rgba_and_resets_withou
     PublishSensor(SENSOR_ID, std::string(""));
     const auto fallback = ThemeManager::GetInstance().GetCurrentTheme().GetPrimaryColor();
     zassert_equal(lv_obj_get_style_text_opa(label, LV_PART_MAIN), fallback.ToLvOpa());
-    zassert_equal(lv_color_to_u32(lv_obj_get_style_text_color(label, LV_PART_MAIN)),
-        lv_color_to_u32(fallback.ToLvColor()));
+    zassert_equal(
+        lv_color_to_u32(lv_obj_get_style_text_color(label, LV_PART_MAIN)), lv_color_to_u32(fallback.ToLvColor())
+    );
     zassert_equal(lv_obj_get_child(views_test::WidgetContent(widget), 0), label);
 }
 
 ZTEST(widget_bindings, test_color_store_rejects_invalid_updates_and_accepts_reset) {
     WidgetPropertyStore store;
-    const ConfigValue invalid_values[] = {
-        {}, 0, 255, 128.0, true, false, std::pmr::string("#3366FF"), std::pmr::string("#3366FF8G"),
-        std::pmr::string("#3366FF80\0", 10)
-    };
+    const ConfigValue invalid_values[] = { {}, 0, 255, 128.0, true, false, std::pmr::string("#3366FF"),
+        std::pmr::string("#3366FF8G"), std::pmr::string("#3366FF80\0", 10) };
     for(auto type : color_properties) {
         store.Register(type, std::pmr::string{}, PropertyChangeEffect::None);
         zassert_true(std::get<std::pmr::string>(store.Get(type)).empty());
@@ -438,14 +456,12 @@ ZTEST(widget_bindings, test_color_cache_maps_properties_independently_of_registr
         uint32_t rgb;
         uint8_t alpha;
     };
-    const ColorCase cases[] = {
-        { WidgetPropertyType::COLOR_TERTIARY_INACTIVE, "#11223300", 0x112233, 0 },
+    const ColorCase cases[] = { { WidgetPropertyType::COLOR_TERTIARY_INACTIVE, "#11223300", 0x112233, 0 },
         { WidgetPropertyType::COLOR_PRIMARY_ACTIVE, "#22334440", 0x223344, 64 },
         { WidgetPropertyType::COLOR_SECONDARY_INACTIVE, "#33445580", 0x334455, 128 },
         { WidgetPropertyType::COLOR_TERTIARY_ACTIVE, "#445566FF", 0x445566, 255 },
         { WidgetPropertyType::COLOR_PRIMARY_INACTIVE, "#55667720", 0x556677, 32 },
-        { WidgetPropertyType::COLOR_SECONDARY_ACTIVE, "#667788C0", 0x667788, 192 }
-    };
+        { WidgetPropertyType::COLOR_SECONDARY_ACTIVE, "#667788C0", 0x667788, 192 } };
     WidgetPropertyStore store;
     const LvglColor fallback(0xABCDEF, 64);
     auto check = [&](WidgetPropertyType type, LvglColor expected) {
@@ -486,9 +502,8 @@ ZTEST(widget_bindings, test_opacity_store_rejects_invalid_updates_without_changi
     WidgetPropertyStore store;
     store.Register(WidgetPropertyType::OPACITY, 255, PropertyChangeEffect::None);
     zassert_equal(std::get<int>(store.Get(WidgetPropertyType::OPACITY)), 255);
-    const ConfigValue invalid_values[] = {
-        {}, -1, 256, INT32_MIN, INT32_MAX, 0.0, 128.5, 255.0, true, false, std::pmr::string("128")
-    };
+    const ConfigValue invalid_values[] = { {}, -1, 256, INT32_MIN, INT32_MAX, 0.0, 128.5, 255.0, true, false,
+        std::pmr::string("128") };
     for(int opacity : { 0, 128, 255 }) {
         zassert_true(store.Set(WidgetPropertyType::OPACITY, opacity));
         for(const auto& value : invalid_values) {
@@ -499,14 +514,11 @@ ZTEST(widget_bindings, test_opacity_store_rejects_invalid_updates_without_changi
 }
 
 ZTEST(widget_bindings, test_color_bindings_preserve_exact_rgba_and_reject_invalid_input) {
-    const EventData invalid_values[] = {
-        true, false, std::string("#3366FF"), std::string("3366FF80"),
-        std::string("#3366FF8G"), std::string("#3366FF80\0", 10)
-    };
+    const EventData invalid_values[] = { true, false, std::string("#3366FF"), std::string("3366FF80"),
+        std::string("#3366FF8G"), std::string("#3366FF80\0", 10) };
     // Numbers are 0xRRGGBB values and bind as opaque colors.
-    const std::pair<EventData, const char*> numbers[] = {
-        { 0x3366FF, "#3366FFFF" }, { uint32_t{255}, "#0000FFFF" }, { 128.0F, "#000080FF" }
-    };
+    const std::pair<EventData, const char*> numbers[] = { { 0x3366FF, "#3366FFFF" }, { uint32_t{ 255 }, "#0000FFFF" },
+        { 128.0F, "#000080FF" } };
     for(auto type : color_properties) {
         auto configuration = MakeConfiguration();
         configuration->bindings.push_back(SensorBinding(type, SENSOR_ID));
@@ -536,15 +548,13 @@ ZTEST(widget_bindings, test_opacity_bindings_validate_before_numeric_coercion) {
     configuration->bindings.push_back(SensorBinding(WidgetPropertyType::OPACITY, SENSOR_ID));
     auto widget = MakeActiveWidget(std::move(configuration));
     zassert_equal(std::get<int>(widget->Read(WidgetPropertyType::OPACITY)), 255);
-    const EventData invalid_values[] = {
-        -1, 256, INT32_MIN, INT32_MAX, uint32_t{256}, UINT32_MAX,
-        0.0F, 128.5F, 255.0F, true, false, std::string("128")
-    };
-    const EventData valid_values[] = { 0, 128, 255, uint32_t{0}, uint32_t{128}, uint32_t{255} };
+    const EventData invalid_values[] = { -1, 256, INT32_MIN, INT32_MAX, uint32_t{ 256 }, UINT32_MAX, 0.0F, 128.5F,
+        255.0F, true, false, std::string("128") };
+    const EventData valid_values[] = { 0, 128, 255, uint32_t{ 0 }, uint32_t{ 128 }, uint32_t{ 255 } };
     for(const auto& opacity : valid_values) {
         PublishSensor(SENSOR_ID, opacity);
-        int expected = std::holds_alternative<int>(opacity)
-            ? std::get<int>(opacity) : static_cast<int>(std::get<uint32_t>(opacity));
+        int expected = std::holds_alternative<int>(opacity) ? std::get<int>(opacity)
+                                                            : static_cast<int>(std::get<uint32_t>(opacity));
         zassert_equal(std::get<int>(widget->Read(WidgetPropertyType::OPACITY)), expected);
         zassert_equal(widget->IsProcessingEligible(), expected > 0);
         for(const auto& value : invalid_values) {
@@ -557,24 +567,24 @@ ZTEST(widget_bindings, test_opacity_bindings_validate_before_numeric_coercion) {
 
 ZTEST(widget_bindings, test_animation_store_validates_before_mutation) {
     WidgetPropertyStore store;
-    store.Register(WidgetPropertyType::ANIMATION_TYPE,
-        static_cast<int>(Animation::DEFAULT_TYPE), PropertyChangeEffect::None);
+    store.Register(
+        WidgetPropertyType::ANIMATION_TYPE, static_cast<int>(Animation::DEFAULT_TYPE), PropertyChangeEffect::None
+    );
     store.Register(WidgetPropertyType::IS_ANIMATION_ACTIVE, Animation::DEFAULT_ACTIVE, PropertyChangeEffect::None);
-    store.Register(WidgetPropertyType::ANIMATION_DURATION_MS,
-        Animation::DEFAULT_DURATION_MS, PropertyChangeEffect::None);
+    store.Register(
+        WidgetPropertyType::ANIMATION_DURATION_MS, Animation::DEFAULT_DURATION_MS, PropertyChangeEffect::None
+    );
     zassert_equal(std::get<int>(store.Get(WidgetPropertyType::ANIMATION_TYPE)), 0);
     zassert_false(std::get<bool>(store.Get(WidgetPropertyType::IS_ANIMATION_ACTIVE)));
     zassert_equal(std::get<int>(store.Get(WidgetPropertyType::ANIMATION_DURATION_MS)), 1000);
 
-    const ConfigValue invalid_numbers[] = {
-        {}, INT32_MIN, -1, true, false, 0.0, 1.0, 2.0, 2.5, 1000.0,
-        static_cast<double>(INT32_MAX) + 1.0, std::pmr::string("2"),
-        std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity(),
-        -std::numeric_limits<double>::infinity()
-    };
+    const ConfigValue invalid_numbers[] = { {}, INT32_MIN, -1, true, false, 0.0, 1.0, 2.0, 2.5, 1000.0,
+        static_cast<double>(INT32_MAX) + 1.0, std::pmr::string("2"), std::numeric_limits<double>::quiet_NaN(),
+        std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity() };
     for(auto type : { WidgetPropertyType::ANIMATION_TYPE, WidgetPropertyType::ANIMATION_DURATION_MS }) {
         const std::vector<int> valid_values = type == WidgetPropertyType::ANIMATION_TYPE
-            ? std::vector<int>{ 0, 1, 2 } : std::vector<int>{ 2, 3, 1000, INT32_MAX };
+            ? std::vector<int>{ 0, 1, 2 }
+            : std::vector<int>{ 2, 3, 1000, INT32_MAX };
         for(int accepted : valid_values) {
             zassert_true(store.Set(type, accepted));
             auto reject = [&](const ConfigValue& value) {
@@ -592,10 +602,8 @@ ZTEST(widget_bindings, test_animation_store_validates_before_mutation) {
             }
         }
     }
-    const ConfigValue invalid_active[] = {
-        {}, 0, 1, -1, 2, 0.0, 1.0, 0.5, std::pmr::string("true"),
-        std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity()
-    };
+    const ConfigValue invalid_active[] = { {}, 0, 1, -1, 2, 0.0, 1.0, 0.5, std::pmr::string("true"),
+        std::numeric_limits<double>::quiet_NaN(), std::numeric_limits<double>::infinity() };
     for(bool accepted : { true, false }) {
         zassert_true(store.Set(WidgetPropertyType::IS_ANIMATION_ACTIVE, accepted));
         for(const auto& value : invalid_active) {
@@ -606,20 +614,19 @@ ZTEST(widget_bindings, test_animation_store_validates_before_mutation) {
 }
 
 ZTEST(widget_bindings, test_animation_numeric_bindings_reject_floats_overflow_and_invalid_values) {
-    const EventData invalid_numbers[] = {
-        INT32_MIN, -1, UINT32_MAX, static_cast<uint32_t>(INT32_MAX) + 1U,
-        true, false, 0.0F, 1.0F, 2.0F, 2.5F, 1000.0F, static_cast<float>(INT32_MAX), std::string("2"),
+    const EventData invalid_numbers[] = { INT32_MIN, -1, UINT32_MAX, static_cast<uint32_t>(INT32_MAX) + 1U, true, false,
+        0.0F, 1.0F, 2.0F, 2.5F, 1000.0F, static_cast<float>(INT32_MAX), std::string("2"),
         std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity(),
-        -std::numeric_limits<float>::infinity()
-    };
+        -std::numeric_limits<float>::infinity() };
     for(auto type : { WidgetPropertyType::ANIMATION_TYPE, WidgetPropertyType::ANIMATION_DURATION_MS }) {
         auto configuration = MakeConfiguration();
         configuration->bindings.push_back(SensorBinding(type, SENSOR_ID));
         auto widget = MakeActiveWidget(std::move(configuration));
         const std::vector<int> valid_values = type == WidgetPropertyType::ANIMATION_TYPE
-            ? std::vector<int>{ 0, 1, 2 } : std::vector<int>{ 2, 3, 1000, INT32_MAX };
+            ? std::vector<int>{ 0, 1, 2 }
+            : std::vector<int>{ 2, 3, 1000, INT32_MAX };
         for(int accepted : valid_values) {
-            for(const EventData& input : { EventData{accepted}, EventData{static_cast<uint32_t>(accepted)} }) {
+            for(const EventData& input : { EventData{ accepted }, EventData{ static_cast<uint32_t>(accepted) } }) {
                 PublishSensor(SENSOR_ID, input);
                 zassert_equal(std::get<int>(widget->Read(type)), accepted);
                 widget->notified.clear();
@@ -638,7 +645,7 @@ ZTEST(widget_bindings, test_animation_numeric_bindings_reject_floats_overflow_an
                     reject(static_cast<uint32_t>(INT32_MAX));
                 } else {
                     reject(1);
-                    reject(uint32_t{1});
+                    reject(uint32_t{ 1 });
                 }
             }
         }
@@ -649,15 +656,12 @@ ZTEST(widget_bindings, test_animation_active_binding_accepts_only_booleans_or_ex
     auto configuration = MakeConfiguration();
     configuration->bindings.push_back(SensorBinding(WidgetPropertyType::IS_ANIMATION_ACTIVE, SENSOR_ID));
     auto widget = MakeActiveWidget(std::move(configuration));
-    const EventData invalid_values[] = {
-        -1, 2, INT32_MIN, INT32_MAX, uint32_t{2}, UINT32_MAX, -1.0F, 0.5F, 2.0F,
+    const EventData invalid_values[] = { -1, 2, INT32_MIN, INT32_MAX, uint32_t{ 2 }, UINT32_MAX, -1.0F, 0.5F, 2.0F,
         std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity(),
-        -std::numeric_limits<float>::infinity(), std::string("true"), std::string("1")
-    };
+        -std::numeric_limits<float>::infinity(), std::string("true"), std::string("1") };
     for(bool accepted : { true, false }) {
-        const EventData valid_values[] = {
-            accepted, static_cast<int>(accepted), static_cast<uint32_t>(accepted), static_cast<float>(accepted)
-        };
+        const EventData valid_values[] = { accepted, static_cast<int>(accepted), static_cast<uint32_t>(accepted),
+            static_cast<float>(accepted) };
         for(const auto& value : valid_values) {
             PublishSensor(SENSOR_ID, value);
             zassert_equal(std::get<bool>(widget->Read(WidgetPropertyType::IS_ANIMATION_ACTIVE)), accepted);
@@ -861,7 +865,7 @@ ZTEST(widget_bindings, test_user_input_publishes_on_an_outbound_binding) {
 
     ChangeRequestProbe probe;
 
-    widget->WriteLocal(WidgetPropertyType::VALUE, ConfigValue { 55.0 });
+    widget->WriteLocal(WidgetPropertyType::VALUE, ConfigValue{ 55.0 });
 
     zassert_true(probe.WaitForRequest(), "Expected a change request.");
     zassert_equal(probe.Calls(), 1);
@@ -956,9 +960,7 @@ ZTEST(widget_bindings, test_management_updates_work_while_multiple_conditions_su
 }
 
 ZTEST(widget_bindings, test_invalid_management_flags_cannot_reactivate_a_widget) {
-    const EventData invalid_values[] = {
-        -1, 2, uint32_t{2}, UINT32_MAX, -0.5F, 1.5F, std::string("true")
-    };
+    const EventData invalid_values[] = { -1, 2, uint32_t{ 2 }, UINT32_MAX, -0.5F, 1.5F, std::string("true") };
     for(auto target : { WidgetPropertyType::IS_ACTIVE, WidgetPropertyType::IS_VISIBLE }) {
         auto configuration = MakeConfiguration();
         configuration->properties[target] = false;
@@ -1020,8 +1022,9 @@ ZTEST(widget_bindings, test_only_owning_widget_inactivity_suspends_descendant_tr
     owner_configuration->bindings.push_back(SensorBinding(WidgetPropertyType::OPACITY, "owner_opacity"));
     owner_configuration->bindings.push_back(SensorBinding(WidgetPropertyType::IS_ACTIVE, "owner_activity"));
     auto owner = MakeActiveWidget(std::move(owner_configuration));
-    auto parent = std::make_shared<Frame>(Frame::CreateWrapped(owner->GetContainer()->GetObject())
-        .SetProcessingParent(owner->GetContainer()).Build());
+    auto parent = std::make_shared<Frame>(
+        Frame::CreateWrapped(owner->GetContainer()->GetObject()).SetProcessingParent(owner->GetContainer()).Build()
+    );
     auto configuration = MakeConfiguration();
     configuration->bindings.push_back(SensorBinding(WidgetPropertyType::VALUE, SENSOR_ID));
     configuration->bindings.push_back(SensorBinding(WidgetPropertyType::OPACITY, "child_opacity"));
@@ -1106,11 +1109,11 @@ ZTEST(widget_bindings, test_suspended_local_updates_do_not_write_or_publish) {
         auto widget = MakeActiveWidget(std::move(configuration));
         ChangeRequestProbe probe;
         PublishSensor(SENSOR_ID, 0);
-        widget->WriteLocal(WidgetPropertyType::VALUE, ConfigValue{55.0});
+        widget->WriteLocal(WidgetPropertyType::VALUE, ConfigValue{ 55.0 });
         zassert_equal(widget->ReadNumber(WidgetPropertyType::VALUE), 7.0);
         zassert_true(probe.WaitForNoRequest());
         PublishSensor(SENSOR_ID, 1);
-        widget->WriteLocal(WidgetPropertyType::VALUE, ConfigValue{80.0});
+        widget->WriteLocal(WidgetPropertyType::VALUE, ConfigValue{ 80.0 });
         zassert_true(probe.WaitForRequest());
         zassert_equal(widget->ReadNumber(WidgetPropertyType::VALUE), 80.0);
     }
@@ -1200,16 +1203,21 @@ ZTEST(widget_bindings, test_waiting_binding_checks_activity_after_taking_the_lvg
         k_sem_init(&started, 0, 1);
         {
             eerie_leap::domain::ui_domain::ScopedLvglLock lvgl_guard;
-            k_thread_create(&publisher, publisher_stack, K_THREAD_STACK_SIZEOF(publisher_stack),
+            k_thread_create(
+                &publisher, publisher_stack, K_THREAD_STACK_SIZEOF(publisher_stack),
                 [](void* context, void*, void*) {
                     k_sem_give(static_cast<k_sem*>(context));
                     PublishSensor(SENSOR_ID, 55.0F);
-                }, &started, nullptr, nullptr, K_PRIO_COOP(0), 0, K_NO_WAIT);
+                },
+                &started, nullptr, nullptr, K_PRIO_COOP(0), 0, K_NO_WAIT
+            );
             zassert_equal(k_sem_take(&started, K_MSEC(DISPATCH_TIMEOUT_MS)), 0);
             PublishSensor(OTHER_SENSOR_ID, false);
         }
         zassert_equal(k_thread_join(&publisher, K_MSEC(DISPATCH_TIMEOUT_MS)), 0);
-        zassert_equal(widget->ReadNumber(WidgetPropertyType::VALUE), target == WidgetPropertyType::IS_ACTIVE ? 7.0 : 55.0);
+        zassert_equal(
+            widget->ReadNumber(WidgetPropertyType::VALUE), target == WidgetPropertyType::IS_ACTIVE ? 7.0 : 55.0
+        );
         zassert_true(widget->notified.empty());
     }
 }
@@ -1227,11 +1235,14 @@ ZTEST(widget_bindings, test_teardown_detaches_waiting_bindings_and_refresh_callb
     k_sem_init(&started, 0, 1);
     {
         eerie_leap::domain::ui_domain::ScopedLvglLock lvgl_guard;
-        k_thread_create(&publisher, publisher_stack, K_THREAD_STACK_SIZEOF(publisher_stack),
+        k_thread_create(
+            &publisher, publisher_stack, K_THREAD_STACK_SIZEOF(publisher_stack),
             [](void* context, void*, void*) {
                 k_sem_give(static_cast<k_sem*>(context));
                 PublishSensor(SENSOR_ID, 55.0F);
-            }, &started, nullptr, nullptr, K_PRIO_COOP(0), 0, K_NO_WAIT);
+            },
+            &started, nullptr, nullptr, K_PRIO_COOP(0), 0, K_NO_WAIT
+        );
         zassert_equal(k_sem_take(&started, K_MSEC(DISPATCH_TIMEOUT_MS)), 0);
         widget.reset();
     }
@@ -1302,11 +1313,14 @@ ZTEST(widget_bindings, test_generic_animation_teardown_detaches_waiting_setting_
                 lv_tick_inc(elapsed);
                 lv_anim_refr_now();
                 zassert_equal(lv_anim_count_running(), count + 1);
-                k_thread_create(&publisher, publisher_stack, K_THREAD_STACK_SIZEOF(publisher_stack),
+                k_thread_create(
+                    &publisher, publisher_stack, K_THREAD_STACK_SIZEOF(publisher_stack),
                     [](void* context, void*, void*) {
                         k_sem_give(static_cast<k_sem*>(context));
                         PublishSensor(SENSOR_ID, 2000);
-                    }, &started, nullptr, nullptr, K_PRIO_COOP(0), 0, K_NO_WAIT);
+                    },
+                    &started, nullptr, nullptr, K_PRIO_COOP(0), 0, K_NO_WAIT
+                );
                 zassert_equal(k_sem_take(&started, K_MSEC(DISPATCH_TIMEOUT_MS)), 0);
                 widget.reset();
                 zassert_equal(lv_anim_count_running(), count);
@@ -1341,24 +1355,31 @@ ZTEST(widget_bindings, test_waiting_animation_binding_checks_activity_under_lvgl
         k_sem_init(&started, 0, 1);
         {
             eerie_leap::domain::ui_domain::ScopedLvglLock lock;
-            k_thread_create(&publisher, publisher_stack, K_THREAD_STACK_SIZEOF(publisher_stack),
+            k_thread_create(
+                &publisher, publisher_stack, K_THREAD_STACK_SIZEOF(publisher_stack),
                 [](void* context, void*, void*) {
                     k_sem_give(static_cast<k_sem*>(context));
                     PublishSensor(SENSOR_ID, 2000);
-                }, &started, nullptr, nullptr, K_PRIO_COOP(0), 0, K_NO_WAIT);
+                },
+                &started, nullptr, nullptr, K_PRIO_COOP(0), 0, K_NO_WAIT
+            );
             zassert_equal(k_sem_take(&started, K_MSEC(DISPATCH_TIMEOUT_MS)), 0);
             PublishSensor(OTHER_SENSOR_ID, false);
         }
         zassert_equal(k_thread_join(&publisher, K_MSEC(DISPATCH_TIMEOUT_MS)), 0);
         eerie_leap::domain::ui_domain::ScopedLvglLock lock;
         zassert_equal(lv_anim_count_running(), count);
-        zassert_equal(std::get<int>(widget->Read(WidgetPropertyType::ANIMATION_DURATION_MS)),
-            gate == WidgetPropertyType::IS_ACTIVE ? 1000 : 2000);
+        zassert_equal(
+            std::get<int>(widget->Read(WidgetPropertyType::ANIMATION_DURATION_MS)),
+            gate == WidgetPropertyType::IS_ACTIVE ? 1000 : 2000
+        );
         PublishSensor(OTHER_SENSOR_ID, true);
         lv_tick_inc(250);
         lv_anim_refr_now();
-        zassert_equal(lv_obj_get_style_transform_rotation(views_test::WidgetContent(*widget), LV_PART_MAIN),
-            gate == WidgetPropertyType::IS_ACTIVE ? 900 : 450);
+        zassert_equal(
+            lv_obj_get_style_transform_rotation(views_test::WidgetContent(*widget), LV_PART_MAIN),
+            gate == WidgetPropertyType::IS_ACTIVE ? 900 : 450
+        );
     }
 }
 
@@ -1454,7 +1475,8 @@ ZTEST(widget_bindings, test_initial_value_replays_after_management_restoration) 
     for(auto target : { WidgetPropertyType::IS_ACTIVE, WidgetPropertyType::IS_VISIBLE, WidgetPropertyType::OPACITY }) {
         auto configuration = MakeConfiguration();
         configuration->properties[WidgetPropertyType::VALUE] = 42.0;
-        configuration->properties[target] = target == WidgetPropertyType::OPACITY ? ConfigValue{0} : ConfigValue{false};
+        configuration->properties[target] = target == WidgetPropertyType::OPACITY ? ConfigValue{ 0 }
+                                                                                  : ConfigValue{ false };
         configuration->bindings.push_back(SensorBinding(target, OTHER_SENSOR_ID));
         BarIndicator indicator(1, MakeRoot(), WidgetContext{});
         indicator.Configure(configuration);

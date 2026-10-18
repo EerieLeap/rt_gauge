@@ -8,8 +8,8 @@
 #include <zephyr/ztest.h>
 
 #include "domain/sensor_domain/event_bus/sensor_events_channel.h"
-#include "subsys/event_bus/event_channel_id.h"
 #include "event_bus/event_channels.h"
+#include "subsys/event_bus/event_channel_id.h"
 #include "views/animations/view_animator.h"
 #include "views/widgets/basic/icons/shape_icon/oval_icon/oval_icon.h"
 #include "views/widgets/controls/button_control/button_control.h"
@@ -48,13 +48,21 @@ struct AnimatorScene {
 
     AnimatorScene() {
         lv_obj_update_layout(layout.GetObject());
-        zassert_true(animator.Attach(presentation, layout, [](void* context) {
-            return *static_cast<bool*>(context);
-        }, &eligible));
+        zassert_true(animator.Attach(
+            presentation, layout,
+            [](void* context) {
+                return *static_cast<bool*>(context);
+            },
+            &eligible
+        ));
     }
 
-    int Opacity() { return lv_obj_get_style_opa_layered(presentation.GetObject(), LV_PART_MAIN); }
-    int Angle() { return lv_obj_get_style_transform_rotation(presentation.GetObject(), LV_PART_MAIN); }
+    int Opacity() {
+        return lv_obj_get_style_opa_layered(presentation.GetObject(), LV_PART_MAIN);
+    }
+    int Angle() {
+        return lv_obj_get_style_transform_rotation(presentation.GetObject(), LV_PART_MAIN);
+    }
 };
 
 void Advance(uint32_t elapsed) {
@@ -66,29 +74,33 @@ void OtherAnimation(void*, int32_t) {}
 
 std::shared_ptr<WidgetConfiguration> Configuration() {
     auto configuration = std::make_shared<WidgetConfiguration>(std::allocator_arg, std::pmr::get_default_resource());
-    configuration->bindings.push_back(PropertyBinding {
-        .target = WidgetPropertyType::VALUE,
-        .event = {
-            .channel = EventChannelId::Sensors,
-            .event_type = std::to_underlying(SensorEventType::DataUpdated),
-            .payload_key = std::to_underlying(SensorPayloadType::Value)
-        }
-    });
+    configuration->bindings.push_back(
+        PropertyBinding{ .target = WidgetPropertyType::VALUE,
+            .event = { .channel = EventChannelId::Sensors,
+                .event_type = std::to_underlying(SensorEventType::DataUpdated),
+                .payload_key = std::to_underlying(SensorPayloadType::Value) } }
+    );
     return configuration;
 }
 
 class PresentationProbe : public WidgetBase {
 public:
     using WidgetBase::WidgetBase;
-    ~PresentationProbe() override { DetachDispatch(); }
-    WidgetType GetType() const override { return WidgetType::BasicIcon; }
-    std::shared_ptr<Frame> Content() const { return content_frame_; }
+    ~PresentationProbe() override {
+        DetachDispatch();
+    }
+    WidgetType GetType() const override {
+        return WidgetType::BasicIcon;
+    }
+    std::shared_ptr<Frame> Content() const {
+        return content_frame_;
+    }
     double applied_value = 0;
 
 protected:
     void RegisterProperties(WidgetPropertyStore& store) const override {
         WidgetBase::RegisterProperties(store);
-        store.Register(WidgetPropertyType::VALUE, ConfigValue { 0.0 }, PropertyChangeEffect::None);
+        store.Register(WidgetPropertyType::VALUE, ConfigValue{ 0.0 }, PropertyChangeEffect::None);
     }
 
     void OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) override {
@@ -111,20 +123,26 @@ protected:
         return 0;
     }
 
-    int ApplyTheme(const ITheme&) override { return 0; }
+    int ApplyTheme(const ITheme&) override {
+        return 0;
+    }
 };
 
 class TestOval : public basic::icons::OvalIcon {
 public:
-    using OvalIcon::OvalIcon;
     using IconBase::IsProcessingEligible;
+    using OvalIcon::OvalIcon;
 };
 
 class LifecycleProbe : public WidgetBase {
 public:
     using WidgetBase::WidgetBase;
-    ~LifecycleProbe() override { DetachDispatch(); }
-    WidgetType GetType() const override { return WidgetType::BasicIcon; }
+    ~LifecycleProbe() override {
+        DetachDispatch();
+    }
+    WidgetType GetType() const override {
+        return WidgetType::BasicIcon;
+    }
     int render_result = 0;
     int theme_result = 0;
     double applied_value = 0;
@@ -134,7 +152,7 @@ public:
 protected:
     void RegisterProperties(WidgetPropertyStore& store) const override {
         WidgetBase::RegisterProperties(store);
-        store.Register(WidgetPropertyType::VALUE, ConfigValue { 0.0 }, PropertyChangeEffect::None);
+        store.Register(WidgetPropertyType::VALUE, ConfigValue{ 0.0 }, PropertyChangeEffect::None);
     }
     void OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) override {
         notified.push_back(type);
@@ -143,10 +161,14 @@ protected:
             starts_at_value = animation_start_calls;
         }
     }
-    void OnProcessingUpdated(bool) override { }
-    void OnProcessingSuspended() override { }
-    int DoRender() override { return render_result; }
-    int ApplyTheme(const ITheme&) override { return theme_result; }
+    void OnProcessingUpdated(bool) override {}
+    void OnProcessingSuspended() override {}
+    int DoRender() override {
+        return render_result;
+    }
+    int ApplyTheme(const ITheme&) override {
+        return theme_result;
+    }
 };
 
 std::shared_ptr<WidgetConfiguration> AnimationConfiguration(Animation::Type type = Animation::Type::Rotation) {
@@ -156,30 +178,28 @@ std::shared_ptr<WidgetConfiguration> AnimationConfiguration(Animation::Type type
     configuration->properties[WidgetPropertyType::IS_ANIMATION_ACTIVE] = true;
     configuration->properties[WidgetPropertyType::ANIMATION_DURATION_MS] = 1000;
     for(auto target : { WidgetPropertyType::ANIMATION_TYPE, WidgetPropertyType::IS_ANIMATION_ACTIVE,
-                       WidgetPropertyType::ANIMATION_DURATION_MS, WidgetPropertyType::IS_ACTIVE,
-                       WidgetPropertyType::IS_VISIBLE, WidgetPropertyType::OPACITY, WidgetPropertyType::VALUE,
-                       WidgetPropertyType::COLOR_PRIMARY_ACTIVE, WidgetPropertyType::ANCHOR_POINT_X,
-                       WidgetPropertyType::ANCHOR_POINT_Y }) {
-        configuration->bindings.push_back(PropertyBinding {
-            .target = target,
-            .event = {
-                .channel = EventChannelId::Sensors,
-                .event_type = std::to_underlying(SensorEventType::DataUpdated),
-                .payload_key = std::to_underlying(SensorPayloadType::Value),
-                .selector_key = std::to_underlying(SensorPayloadType::SensorId),
-                .selector_value = static_cast<int>(target)
-            }
-        });
+            WidgetPropertyType::ANIMATION_DURATION_MS, WidgetPropertyType::IS_ACTIVE, WidgetPropertyType::IS_VISIBLE,
+            WidgetPropertyType::OPACITY, WidgetPropertyType::VALUE, WidgetPropertyType::COLOR_PRIMARY_ACTIVE,
+            WidgetPropertyType::ANCHOR_POINT_X, WidgetPropertyType::ANCHOR_POINT_Y }) {
+        configuration->bindings.push_back(
+            PropertyBinding{ .target = target,
+                .event = { .channel = EventChannelId::Sensors,
+                    .event_type = std::to_underlying(SensorEventType::DataUpdated),
+                    .payload_key = std::to_underlying(SensorPayloadType::Value),
+                    .selector_key = std::to_underlying(SensorPayloadType::SensorId),
+                    .selector_value = static_cast<int>(target) } }
+        );
     }
     return configuration;
 }
 
 void Publish(WidgetPropertyType target, const eerie_leap::subsys::event_bus::EventData& value) {
-    SensorEventsChannel::GetInstance().Publish({
-        .source_id = 0,
-        .type = SensorEventType::DataUpdated,
-        .payload = {{ SensorPayloadType::SensorId, static_cast<int>(target) }, { SensorPayloadType::Value, value }}
-    });
+    SensorEventsChannel::GetInstance().Publish(
+        { .source_id = 0,
+            .type = SensorEventType::DataUpdated,
+            .payload = {
+                { SensorPayloadType::SensorId, static_cast<int>(target) }, { SensorPayloadType::Value, value } } }
+    );
 }
 
 void Refresh() {
@@ -189,7 +209,9 @@ void Refresh() {
 class TestButton : public controls::ButtonControl {
 public:
     using ButtonControl::ButtonControl;
-    ~TestButton() override { DetachDispatch(); }
+    ~TestButton() override {
+        DetachDispatch();
+    }
     int clicks = 0;
 
 protected:
@@ -222,7 +244,9 @@ public:
         lv_indev_set_gesture_min_distance(device_, 5);
     }
 
-    ~Pointer() { lv_indev_delete(device_); }
+    ~Pointer() {
+        lv_indev_delete(device_);
+    }
 
     void Send(int column, int row, lv_indev_state_t state) {
         point_ = { column, row };
@@ -251,16 +275,18 @@ class PresentationStyles {
         lv_obj_get_coords(self->content_, &bounds);
         lv_obj_get_transformed_area(self->content_, &bounds, LV_OBJ_POINT_TRANSFORM_FLAG_NONE);
         lv_obj_get_coords(self->layout_, &layout);
-        const auto margin = std::max({ 0, layout.x1 - bounds.x1, layout.y1 - bounds.y1,
-            bounds.x2 - layout.x2, bounds.y2 - layout.y2 });
+        const auto margin = std::max(
+            { 0, layout.x1 - bounds.x1, layout.y1 - bounds.y1, bounds.x2 - layout.x2, bounds.y2 - layout.y2 }
+        );
         lv_event_set_ext_draw_size(event, margin + 1);
     }
 
 public:
-    explicit PresentationStyles(const IWidget& widget)
-        : layout_(widget.GetContainer()->GetObject()), content_(views_test::WidgetContent(widget)),
-          layout_overflow_(lv_obj_has_flag(layout_, LV_OBJ_FLAG_OVERFLOW_VISIBLE)),
-          content_overflow_(lv_obj_has_flag(content_, LV_OBJ_FLAG_OVERFLOW_VISIBLE)) {
+    explicit PresentationStyles(const IWidget& widget) :
+        layout_(widget.GetContainer()->GetObject()),
+        content_(views_test::WidgetContent(widget)),
+        layout_overflow_(lv_obj_has_flag(layout_, LV_OBJ_FLAG_OVERFLOW_VISIBLE)),
+        content_overflow_(lv_obj_has_flag(content_, LV_OBJ_FLAG_OVERFLOW_VISIBLE)) {
         lv_obj_add_event_cb(layout_, DrawMargin, LV_EVENT_REFR_EXT_DRAW_SIZE, this);
     }
 
@@ -276,7 +302,9 @@ public:
         lv_obj_refresh_ext_draw_size(layout_);
     }
 
-    void Fade(lv_opa_t opacity) { lv_obj_set_style_opa_layered(content_, opacity, LV_PART_MAIN); }
+    void Fade(lv_opa_t opacity) {
+        lv_obj_set_style_opa_layered(content_, opacity, LV_PART_MAIN);
+    }
 
     void Reset() {
         lv_obj_set_style_transform_rotation(content_, 0, LV_PART_MAIN);
@@ -291,10 +319,12 @@ public:
 
 struct Scene {
     std::shared_ptr<Frame> root = std::make_shared<Frame>(
-        Frame::CreateWrapped().SetWidth(extent, true).SetHeight(extent, true).Build());
+        Frame::CreateWrapped().SetWidth(extent, true).SetHeight(extent, true).Build()
+    );
     std::shared_ptr<Frame> clip = std::make_shared<Frame>(
-        Frame::CreateWrapped(root->GetObject()).SetWidth(extent, true).SetHeight(extent, true).Build());
-    PresentationProbe widget { 1, clip, WidgetContext{} };
+        Frame::CreateWrapped(root->GetObject()).SetWidth(extent, true).SetHeight(extent, true).Build()
+    );
+    PresentationProbe widget{ 1, clip, WidgetContext{} };
 
     Scene() {
         lv_obj_set_style_bg_color(root->GetObject(), lv_color_black(), 0);
@@ -310,7 +340,8 @@ struct Scene {
     std::vector<lv_color32_t> Pixels() const {
         lv_obj_update_layout(root->GetObject());
         std::unique_ptr<lv_draw_buf_t, decltype(&lv_draw_buf_destroy)> snapshot(
-            lv_snapshot_take(root->GetObject(), LV_COLOR_FORMAT_ARGB8888), lv_draw_buf_destroy);
+            lv_snapshot_take(root->GetObject(), LV_COLOR_FORMAT_ARGB8888), lv_draw_buf_destroy
+        );
         zassert_not_null(snapshot);
         zassert_equal(snapshot->header.w, extent);
         zassert_equal(snapshot->header.h, extent);
@@ -371,9 +402,13 @@ ZTEST(widget_animations, test_widget_animation_adapter_stages_properties_until_s
     zassert_equal(store.GetAs<int>(WidgetPropertyType::ANIMATION_DURATION_MS, -1), 1000);
     WidgetAnimation animation;
     bool eligible = true;
-    zassert_true(animation.Attach(content, layout, [](void* context) {
-        return *static_cast<bool*>(context);
-    }, &eligible));
+    zassert_true(animation.Attach(
+        content, layout,
+        [](void* context) {
+            return *static_cast<bool*>(context);
+        },
+        &eligible
+    ));
     for(auto type : store.GetRegisteredTypes()) {
         zassert_equal(store.GetEffect(type), PropertyChangeEffect::None);
         zassert_true(animation.ApplyProperty(type, store.Get(type)));
@@ -410,7 +445,7 @@ ZTEST(widget_animations, test_widget_animation_adapter_stages_properties_until_s
 ZTEST(widget_animations, test_widget_animation_render_order_failures_and_recovery) {
     ScopedLvglLock lock;
     const auto count = lv_anim_count_running();
-    std::array<int, 3> order { 0, 1, 2 };
+    std::array<int, 3> order{ 0, 1, 2 };
     do {
         auto root = std::make_shared<Frame>(Frame::CreateWrapped().Build());
         LifecycleProbe widget(1, root, WidgetContext{});
@@ -512,14 +547,33 @@ ZTEST(widget_animations, test_widget_animation_restoration_batches_settings_and_
         widget.OnActivated();
         auto set_gate = [&](bool enabled) {
             switch(gate) {
-                case 0: Publish(WidgetPropertyType::IS_VISIBLE, enabled); break;
-                case 1: Publish(WidgetPropertyType::OPACITY, enabled ? 255 : 0); break;
-                case 2: if(enabled) widget.OnActivated(); else widget.OnDeactivated(); break;
-                case 3: lv_obj_set_flag(root->GetObject(), LV_OBJ_FLAG_HIDDEN, !enabled); break;
-                case 4: lv_obj_set_style_opa(root->GetObject(), enabled ? 255 : 0, LV_PART_MAIN); break;
-                case 5: lv_obj_set_style_opa_layered(root->GetObject(), enabled ? 255 : 0, LV_PART_MAIN); break;
-                case 6: root->SetProcessingEnabled(enabled); break;
-                case 7: Publish(WidgetPropertyType::IS_ACTIVE, enabled); break;
+                case 0:
+                    Publish(WidgetPropertyType::IS_VISIBLE, enabled);
+                    break;
+                case 1:
+                    Publish(WidgetPropertyType::OPACITY, enabled ? 255 : 0);
+                    break;
+                case 2:
+                    if(enabled)
+                        widget.OnActivated();
+                    else
+                        widget.OnDeactivated();
+                    break;
+                case 3:
+                    lv_obj_set_flag(root->GetObject(), LV_OBJ_FLAG_HIDDEN, !enabled);
+                    break;
+                case 4:
+                    lv_obj_set_style_opa(root->GetObject(), enabled ? 255 : 0, LV_PART_MAIN);
+                    break;
+                case 5:
+                    lv_obj_set_style_opa_layered(root->GetObject(), enabled ? 255 : 0, LV_PART_MAIN);
+                    break;
+                case 6:
+                    root->SetProcessingEnabled(enabled);
+                    break;
+                case 7:
+                    Publish(WidgetPropertyType::IS_ACTIVE, enabled);
+                    break;
             }
         };
         Advance(250);
@@ -567,7 +621,7 @@ ZTEST(widget_animations, test_animator_start_failure_stays_neutral_and_retries_o
             AnimatorScene scene;
             const auto count = lv_anim_count_running();
             const auto attempts = animation_start_calls;
-            ViewAnimator::Settings settings { type, true, 1000 };
+            ViewAnimator::Settings settings{ type, true, 1000 };
             fail_next_animation_start = true;
             scene.animator.Synchronize(settings);
             zassert_equal(animation_start_calls, attempts + 1);
@@ -589,8 +643,13 @@ ZTEST(widget_animations, test_animator_start_failure_stays_neutral_and_retries_o
                 scene.animator.Synchronize(settings);
                 scene.eligible = true;
             } else {
-                zassert_true(scene.animator.Attach(scene.presentation, scene.layout,
-                    [](void* context) { return *static_cast<bool*>(context); }, &scene.eligible));
+                zassert_true(scene.animator.Attach(
+                    scene.presentation, scene.layout,
+                    [](void* context) {
+                        return *static_cast<bool*>(context);
+                    },
+                    &scene.eligible
+                ));
             }
             scene.animator.Synchronize(settings);
             zassert_equal(animation_start_calls, attempts + 2);
@@ -606,7 +665,7 @@ ZTEST(widget_animations, test_animator_defaults_and_stop_are_neutral_without_reg
     {
         AnimatorScene scene;
         for(auto settings : { ViewAnimator::Settings{}, ViewAnimator::Settings{ Animation::Type::None, true, 1000 },
-                             ViewAnimator::Settings{ Animation::Type::Blinking, false, 1000 } }) {
+                ViewAnimator::Settings{ Animation::Type::Blinking, false, 1000 } }) {
             scene.animator.Synchronize(settings);
             zassert_false(scene.animator.IsRunning());
             zassert_equal(scene.Opacity(), 255);
@@ -626,9 +685,9 @@ ZTEST(widget_animations, test_animator_rejects_invalid_settings_without_changing
     Advance(250);
     const auto attempts = animation_start_calls;
     for(auto settings : { ViewAnimator::Settings{ Animation::Type::Rotation, true, -1 },
-                         ViewAnimator::Settings{ Animation::Type::Rotation, true, 0 },
-                         ViewAnimator::Settings{ Animation::Type::Rotation, true, 1 },
-                         ViewAnimator::Settings{ static_cast<Animation::Type>(3), true, 1000 } }) {
+            ViewAnimator::Settings{ Animation::Type::Rotation, true, 0 },
+            ViewAnimator::Settings{ Animation::Type::Rotation, true, 1 },
+            ViewAnimator::Settings{ static_cast<Animation::Type>(3), true, 1000 } }) {
         scene.animator.Synchronize(settings);
         zassert_true(scene.animator.IsRunning());
         zassert_equal(scene.Angle(), 900);
@@ -696,7 +755,7 @@ ZTEST(widget_animations, test_animator_same_settings_preserve_phase_and_changed_
     ScopedLvglLock lock;
     const auto count = lv_anim_count_running();
     AnimatorScene scene;
-    ViewAnimator::Settings settings { Animation::Type::Rotation, true, 1000 };
+    ViewAnimator::Settings settings{ Animation::Type::Rotation, true, 1000 };
     scene.animator.Synchronize(settings);
     Advance(250);
     auto* registration = lv_anim_get(&scene.animator, nullptr);
@@ -743,7 +802,7 @@ ZTEST(widget_animations, test_animator_checks_eligibility_at_each_execution_and_
     ScopedLvglLock lock;
     for(auto type : { Animation::Type::Blinking, Animation::Type::Rotation }) {
         AnimatorScene scene;
-        const ViewAnimator::Settings settings { type, true, 1000 };
+        const ViewAnimator::Settings settings{ type, true, 1000 };
         scene.eligible = false;
         scene.animator.Synchronize(settings);
         zassert_false(scene.animator.IsRunning());
@@ -778,10 +837,14 @@ ZTEST(widget_animations, test_animator_synchronous_first_callback_can_suspend_wi
         int calls = 0;
         bool reject_start = true;
     } eligibility;
-    zassert_true(scene.animator.Attach(scene.presentation, scene.layout, [](void* context) {
-        auto* state = static_cast<Eligibility*>(context);
-        return ++state->calls != 2 || !state->reject_start;
-    }, &eligibility));
+    zassert_true(scene.animator.Attach(
+        scene.presentation, scene.layout,
+        [](void* context) {
+            auto* state = static_cast<Eligibility*>(context);
+            return ++state->calls != 2 || !state->reject_start;
+        },
+        &eligibility
+    ));
     scene.animator.Synchronize({ Animation::Type::Blinking, true, 1000 });
     zassert_equal(eligibility.calls, 2);
     zassert_false(scene.animator.IsRunning());
@@ -806,7 +869,7 @@ ZTEST(widget_animations, test_animator_cancellation_uses_exact_executor_and_dele
     auto* same_variable = lv_anim_start(&other);
     lv_anim_set_var(&other, scene.presentation.GetObject());
     auto* same_target = lv_anim_start(&other);
-    const ViewAnimator::Settings settings { Animation::Type::Blinking, true, 1000 };
+    const ViewAnimator::Settings settings{ Animation::Type::Blinking, true, 1000 };
     scene.animator.Synchronize(settings);
     Advance(250);
     auto* owned = lv_anim_get(&scene.animator, nullptr);
@@ -836,21 +899,43 @@ ZTEST(widget_animations, test_animator_live_reattachment_resets_old_target_witho
     AnimatorScene first;
     AnimatorScene second;
     Frame replacement = Frame::CreatePresentation(first.layout.GetObject()).Build();
-    const ViewAnimator::Settings fade { Animation::Type::Blinking, true, 1000 };
+    const ViewAnimator::Settings fade{ Animation::Type::Blinking, true, 1000 };
     first.animator.Synchronize(fade);
     second.animator.Synchronize({ Animation::Type::Rotation, true, 1000 });
     Advance(250);
     zassert_equal(lv_anim_count_running(), count + 2);
     Frame empty = Frame::Create(nullptr);
-    zassert_false(first.animator.Attach(empty, first.layout, [](void*) { return true; }, nullptr));
-    zassert_false(first.animator.Attach(first.presentation, empty, [](void*) { return true; }, nullptr));
+    zassert_false(first.animator.Attach(
+        empty, first.layout,
+        [](void*) {
+            return true;
+        },
+        nullptr
+    ));
+    zassert_false(first.animator.Attach(
+        first.presentation, empty,
+        [](void*) {
+            return true;
+        },
+        nullptr
+    ));
     zassert_false(first.animator.Attach(first.presentation, first.layout, nullptr, nullptr));
-    zassert_false(first.animator.Attach(first.presentation, second.layout,
-        [](void*) { return true; }, nullptr));
+    zassert_false(first.animator.Attach(
+        first.presentation, second.layout,
+        [](void*) {
+            return true;
+        },
+        nullptr
+    ));
     zassert_true(first.animator.IsRunning());
     const auto callbacks = lv_obj_get_event_count(first.layout.GetObject());
-    zassert_true(first.animator.Attach(replacement, first.layout,
-        [](void*) { return true; }, nullptr));
+    zassert_true(first.animator.Attach(
+        replacement, first.layout,
+        [](void*) {
+            return true;
+        },
+        nullptr
+    ));
     zassert_equal(first.Opacity(), 255);
     zassert_false(first.animator.IsRunning());
     zassert_equal(lv_obj_get_event_count(first.layout.GetObject()), callbacks);
@@ -873,16 +958,28 @@ ZTEST(widget_animations, test_animator_target_and_wrapper_deletion_cancel_and_al
     for(auto type : { Animation::Type::Blinking, Animation::Type::Rotation }) {
         for(bool delete_wrapper : { false, true }) {
             ViewAnimator animator;
-            auto layout = std::make_unique<Frame>(Frame::CreateWrapped().SetWidth(64, true).SetHeight(24, true).Build());
+            auto layout = std::make_unique<Frame>(
+                Frame::CreateWrapped().SetWidth(64, true).SetHeight(24, true).Build()
+            );
             auto target = std::make_unique<Frame>(Frame::CreatePresentation(layout->GetObject()).Build());
             const auto callbacks = lv_obj_get_event_count(layout->GetObject());
-            zassert_true(animator.Attach(*target, *layout, [](void*) { return true; }, nullptr));
+            zassert_true(animator.Attach(
+                *target, *layout,
+                [](void*) {
+                    return true;
+                },
+                nullptr
+            ));
             animator.Synchronize({ type, true, 1000 });
             Advance(500);
             if(delete_wrapper) {
-                lv_obj_add_event_cb(layout->GetObject(), [](lv_event_t* event) {
-                    static_cast<std::unique_ptr<Frame>*>(lv_event_get_user_data(event))->reset();
-                }, LV_EVENT_DELETE, &target);
+                lv_obj_add_event_cb(
+                    layout->GetObject(),
+                    [](lv_event_t* event) {
+                        static_cast<std::unique_ptr<Frame>*>(lv_event_get_user_data(event))->reset();
+                    },
+                    LV_EVENT_DELETE, &target
+                );
                 layout.reset();
                 zassert_is_null(target.get());
             } else {
@@ -898,7 +995,13 @@ ZTEST(widget_animations, test_animator_target_and_wrapper_deletion_cancel_and_al
             zassert_false(animator.IsRunning());
             Frame replacement = Frame::CreateWrapped().Build();
             Frame content = Frame::CreatePresentation(replacement.GetObject()).Build();
-            zassert_true(animator.Attach(content, replacement, [](void*) { return true; }, nullptr));
+            zassert_true(animator.Attach(
+                content, replacement,
+                [](void*) {
+                    return true;
+                },
+                nullptr
+            ));
             animator.Synchronize({ type, true, 1000 });
             zassert_true(animator.IsRunning());
             animator.Detach();
@@ -925,7 +1028,13 @@ ZTEST(widget_animations, test_animator_scope_exit_restores_flags_margins_and_cal
                 const auto content_callbacks = lv_obj_get_event_count(content);
                 {
                     ViewAnimator animator;
-                    zassert_true(animator.Attach(scene.presentation, scene.layout, [](void*) { return true; }, nullptr));
+                    zassert_true(animator.Attach(
+                        scene.presentation, scene.layout,
+                        [](void*) {
+                            return true;
+                        },
+                        nullptr
+                    ));
                     animator.Synchronize({ type, true, 1000 });
                     Advance(elapsed);
                     zassert_equal(lv_anim_count_running(), count + 1);
@@ -948,9 +1057,14 @@ ZTEST(widget_animations, test_animator_rotation_pixels_resize_and_external_clipp
     Scene scene;
     const auto baseline = scene.Pixels();
     ViewAnimator animator;
-    zassert_true(animator.Attach(*scene.widget.Content(), *scene.widget.GetContainer(),
-        [](void*) { return true; }, nullptr));
-    const ViewAnimator::Settings settings { Animation::Type::Rotation, true, 1000 };
+    zassert_true(animator.Attach(
+        *scene.widget.Content(), *scene.widget.GetContainer(),
+        [](void*) {
+            return true;
+        },
+        nullptr
+    ));
+    const ViewAnimator::Settings settings{ Animation::Type::Rotation, true, 1000 };
     animator.Synchronize(settings);
     Advance(125);
     auto pixels = scene.Pixels();
@@ -986,8 +1100,13 @@ ZTEST(widget_animations, test_animator_fade_renders_full_mid_zero_and_return_wit
     auto* leaf = lv_obj_get_child(presentation, 0);
     lv_obj_set_style_bg_opa(leaf, 128, LV_PART_MAIN);
     ViewAnimator animator;
-    zassert_true(animator.Attach(*scene.widget.Content(), *scene.widget.GetContainer(),
-        [](void*) { return true; }, nullptr));
+    zassert_true(animator.Attach(
+        *scene.widget.Content(), *scene.widget.GetContainer(),
+        [](void*) {
+            return true;
+        },
+        nullptr
+    ));
     animator.Synchronize({ Animation::Type::Blinking, true, 1000 });
     CheckPixel(scene.Pixels(), 20, 40, 64, 0);
     Advance(250);
@@ -996,11 +1115,9 @@ ZTEST(widget_animations, test_animator_fade_renders_full_mid_zero_and_return_wit
     CheckPixel(scene.Pixels(), 20, 40, 0, 0);
     zassert_true(animator.IsRunning());
     zassert_true(scene.widget.IsProcessingEligible());
-    SensorEventsChannel::GetInstance().Publish({
-        .source_id = 0,
-        .type = SensorEventType::DataUpdated,
-        .payload = {{ SensorPayloadType::Value, 62.0F }}
-    });
+    SensorEventsChannel::GetInstance().Publish(
+        { .source_id = 0, .type = SensorEventType::DataUpdated, .payload = { { SensorPayloadType::Value, 62.0F } } }
+    );
     zassert_equal(scene.widget.applied_value, 62.0);
     Advance(250);
     CheckPixel(scene.Pixels(), 20, 40, 32, 0);
@@ -1027,8 +1144,8 @@ ZTEST(widget_animations, test_presentation_frame_is_neutral_stable_and_not_an_in
     zassert_equal(lv_obj_get_style_pad_bottom(content, LV_PART_MAIN), 0);
     zassert_equal(lv_obj_get_style_opa_layered(content, LV_PART_MAIN), LV_OPA_COVER);
     zassert_equal(lv_obj_get_style_transform_rotation(content, LV_PART_MAIN), 0);
-    for(auto flag : { LV_OBJ_FLAG_CLICKABLE, LV_OBJ_FLAG_CLICK_FOCUSABLE, LV_OBJ_FLAG_SCROLLABLE,
-                     LV_OBJ_FLAG_SCROLL_ON_FOCUS })
+    for(auto flag :
+        { LV_OBJ_FLAG_CLICKABLE, LV_OBJ_FLAG_CLICK_FOCUSABLE, LV_OBJ_FLAG_SCROLLABLE, LV_OBJ_FLAG_SCROLL_ON_FOCUS })
         zassert_false(lv_obj_has_flag(content, flag));
     zassert_true(lv_obj_has_flag(content, LV_OBJ_FLAG_GESTURE_BUBBLE));
     zassert_is_null(lv_obj_get_user_data(content));
@@ -1062,11 +1179,9 @@ ZTEST(widget_animations, test_presentation_opacity_preserves_widget_icon_and_des
     lv_refr_now(nullptr);
     check(true);
     zassert_true(scene.widget.IsTrackingEligible());
-    SensorEventsChannel::GetInstance().Publish({
-        .source_id = 0,
-        .type = SensorEventType::DataUpdated,
-        .payload = {{ SensorPayloadType::Value, 42.0F }}
-    });
+    SensorEventsChannel::GetInstance().Publish(
+        { .source_id = 0, .type = SensorEventType::DataUpdated, .payload = { { SensorPayloadType::Value, 42.0F } } }
+    );
     zassert_equal(scene.widget.applied_value, 42.0);
     zassert_equal(descendant.applied_value, 42.0);
 
@@ -1205,7 +1320,9 @@ ZTEST(widget_animations, test_retained_rotation_is_not_rewritten_on_refresh) {
     // Static, so a failed assertion cannot leave the display callback pointing at a dead frame.
     static int invalidations;
     invalidations = 0;
-    const lv_event_cb_t count = [](lv_event_t*) { ++invalidations; };
+    const lv_event_cb_t count = [](lv_event_t*) {
+        ++invalidations;
+    };
     auto* display = lv_display_get_default();
     lv_display_add_event_cb(display, count, LV_EVENT_INVALIDATE_AREA, nullptr);
     for(int frame = 0; frame < 3; ++frame)
@@ -1236,7 +1353,9 @@ ZTEST(widget_animations, test_anchor_resolves_only_once_the_widget_rotates) {
     auto* content = widget.Content()->GetObject();
     static int layouts;
     layouts = 0;
-    const lv_event_cb_t count = [](lv_event_t*) { ++layouts; };
+    const lv_event_cb_t count = [](lv_event_t*) {
+        ++layouts;
+    };
     auto* display = lv_display_get_default();
     lv_display_add_event_cb(display, count, LV_EVENT_UPDATE_LAYOUT_COMPLETED, nullptr);
     Refresh();
@@ -1423,9 +1542,13 @@ ZTEST(widget_animations, test_presentation_preserves_button_bubbling_and_slider_
         lv_obj_add_flag(scene.widget.GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN);
         lv_obj_remove_flag(scene.root->GetObject(), LV_OBJ_FLAG_GESTURE_BUBBLE);
         int gestures = 0;
-        lv_obj_add_event_cb(scene.root->GetObject(), [](lv_event_t* event) {
-            ++*static_cast<int*>(lv_event_get_user_data(event));
-        }, LV_EVENT_GESTURE, &gestures);
+        lv_obj_add_event_cb(
+            scene.root->GetObject(),
+            [](lv_event_t* event) {
+                ++*static_cast<int*>(lv_event_get_user_data(event));
+            },
+            LV_EVENT_GESTURE, &gestures
+        );
         std::unique_ptr<WidgetBase> control;
         if(slider)
             control = std::make_unique<controls::SliderControl>(2, scene.clip, WidgetContext{});

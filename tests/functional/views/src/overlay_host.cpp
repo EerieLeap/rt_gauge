@@ -3,8 +3,8 @@
 #include <memory>
 #include <stdexcept>
 
-#include <zephyr/ztest.h>
 #include <lvgl.h>
+#include <zephyr/ztest.h>
 
 #include "domain/ui_domain/services/navigation_service.h"
 
@@ -34,8 +34,9 @@ private:
     std::shared_ptr<int> deactivations_;
 
 public:
-    CountingScreen(uint32_t id, std::shared_ptr<Frame> parent, std::shared_ptr<int> deactivations)
-        : FakeScreen(id, id, 0, true, std::move(parent)), deactivations_(std::move(deactivations)) {}
+    CountingScreen(uint32_t id, std::shared_ptr<Frame> parent, std::shared_ptr<int> deactivations) :
+        FakeScreen(id, id, 0, true, std::move(parent)),
+        deactivations_(std::move(deactivations)) {}
 
     void OnDeactivated() override {
         FakeScreen::OnDeactivated();
@@ -84,13 +85,10 @@ Overlay MakeOverlay(const std::shared_ptr<OverlayHost>& host, uint32_t id) {
 
     screen_group->AddScreen(screen);
 
-    return Overlay { std::move(screen_group), std::move(screen), std::move(deactivations) };
+    return Overlay{ std::move(screen_group), std::move(screen), std::move(deactivations) };
 }
 
-int PushOverlay(
-    const std::shared_ptr<OverlayHost>& host,
-    uint32_t id,
-    const OverlayOptions& options = {}) {
+int PushOverlay(const std::shared_ptr<OverlayHost>& host, uint32_t id, const OverlayOptions& options = {}) {
 
     auto overlay = MakeOverlay(host, id);
 
@@ -196,7 +194,7 @@ ZTEST(overlay_host, test_push_refuses_to_stack_without_bound) {
 ZTEST(overlay_host, test_a_modal_push_puts_the_group_above_its_scrim) {
     auto host = MakeHost();
 
-    zassert_ok(PushOverlay(host, 1, OverlayOptions { .is_modal = true }));
+    zassert_ok(PushOverlay(host, 1, OverlayOptions{ .is_modal = true }));
 
     zassert_equal(ChildCount(host), 2);
 
@@ -211,7 +209,7 @@ ZTEST(overlay_host, test_a_modal_push_puts_the_group_above_its_scrim) {
 ZTEST(overlay_host, test_a_non_modal_push_has_no_scrim) {
     auto host = MakeHost();
 
-    zassert_ok(PushOverlay(host, 1, OverlayOptions { .is_modal = false }));
+    zassert_ok(PushOverlay(host, 1, OverlayOptions{ .is_modal = false }));
 
     zassert_equal(ChildCount(host), 1);
 }
@@ -355,7 +353,7 @@ ZTEST(overlay_host, test_a_scrim_tap_is_ignored_when_it_cannot_dismiss) {
     auto navigation_service = MakeNavigationWithOverlay();
     auto host = MakeHost(navigation_service);
 
-    zassert_ok(PushOverlay(host, 1, OverlayOptions { .close_on_scrim_tap = false }));
+    zassert_ok(PushOverlay(host, 1, OverlayOptions{ .close_on_scrim_tap = false }));
 
     lv_obj_send_event(lv_obj_get_child(host->GetContainer()->GetObject(), 0), LV_EVENT_CLICKED, nullptr);
 
@@ -366,7 +364,7 @@ ZTEST(overlay_host, test_an_overlay_closes_itself_when_its_time_is_up) {
     auto navigation_service = MakeNavigationWithOverlay();
     auto host = MakeHost(navigation_service);
 
-    zassert_ok(PushOverlay(host, 1, OverlayOptions { .auto_close_ms = 10 }));
+    zassert_ok(PushOverlay(host, 1, OverlayOptions{ .auto_close_ms = 10 }));
     zassert_true(navigation_service->IsOverlayActive());
 
     RunTimersFor(40);
@@ -380,7 +378,7 @@ ZTEST(overlay_host, test_popping_cancels_a_pending_auto_close) {
     auto navigation_service = MakeNavigationWithOverlay();
     auto host = MakeHost(navigation_service);
 
-    zassert_ok(PushOverlay(host, 1, OverlayOptions { .auto_close_ms = 10 }));
+    zassert_ok(PushOverlay(host, 1, OverlayOptions{ .auto_close_ms = 10 }));
     zassert_ok(host->Pop());
 
     RunTimersFor(40);
@@ -392,7 +390,7 @@ ZTEST(overlay_host, test_an_overlay_stacked_on_top_takes_over_closing) {
     auto navigation_service = MakeNavigationWithOverlay();
     auto host = MakeHost(navigation_service);
 
-    zassert_ok(PushOverlay(host, 1, OverlayOptions { .auto_close_ms = 10 }));
+    zassert_ok(PushOverlay(host, 1, OverlayOptions{ .auto_close_ms = 10 }));
     zassert_ok(PushOverlay(host, 2));
 
     RunTimersFor(40);

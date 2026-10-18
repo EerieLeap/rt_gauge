@@ -1,7 +1,7 @@
 #include <exception>
 
-#include <zephyr/logging/log.h>
 #include <lvgl.h>
+#include <zephyr/logging/log.h>
 
 #include "domain/ui_domain/lvgl_lock.h"
 #include "views/screens/widget_assembly.h"
@@ -15,18 +15,18 @@ using eerie_leap::domain::ui_domain::ScopedLvglLock;
 
 LOG_MODULE_REGISTER(screen_logger);
 
-Screen::Screen(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context)
-        : id_(id),
-        parent_(parent),
-        context_(std::move(context)) {
+Screen::Screen(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context) :
+    id_(id),
+    parent_(parent),
+    context_(std::move(context)) {
 
     widgets_ = std::make_shared<std::vector<std::unique_ptr<IWidget>>>();
 
     container_ = std::make_shared<Frame>(Frame::CreateWrapped(parent->GetObject())
-        .SetProcessingParent(parent)
-        .SetWidth(100, false)
-        .SetHeight(100, false)
-        .Build());
+            .SetProcessingParent(parent)
+            .SetWidth(100, false)
+            .SetHeight(100, false)
+            .Build());
 }
 
 int Screen::DoRender() {

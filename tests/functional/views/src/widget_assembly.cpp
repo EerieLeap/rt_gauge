@@ -54,8 +54,9 @@ class Node : public WidgetBase {
     WidgetType type_;
 
 public:
-    Node(uint32_t id, std::shared_ptr<Frame> parent, WidgetType type)
-        : WidgetBase(id, std::move(parent), WidgetContext {}), type_(type) {
+    Node(uint32_t id, std::shared_ptr<Frame> parent, WidgetType type) :
+        WidgetBase(id, std::move(parent), WidgetContext{}),
+        type_(type) {
         if(journal.fail_construction == id)
             throw std::runtime_error("Construction failed");
         journal.constructed.push_back(id);
@@ -102,9 +103,12 @@ protected:
 // Accepts any number of children, which fill its mount.
 class Group : public Node {
 public:
-    Group(uint32_t id, std::shared_ptr<Frame> parent) : Node(id, std::move(parent), WidgetType::BasicArcIcon) {}
+    Group(uint32_t id, std::shared_ptr<Frame> parent) :
+        Node(id, std::move(parent), WidgetType::BasicArcIcon) {}
 
-    ~Group() override { DetachDispatch(); }
+    ~Group() override {
+        DetachDispatch();
+    }
 
     static void ValidateChildren(const WidgetConfiguration&, std::span<const WidgetConfiguration* const>) {}
 
@@ -118,9 +122,12 @@ class Pair : public Node {
     IWidget* right_ = nullptr;
 
 public:
-    Pair(uint32_t id, std::shared_ptr<Frame> parent) : Node(id, std::move(parent), WidgetType::BasicIcon) {}
+    Pair(uint32_t id, std::shared_ptr<Frame> parent) :
+        Node(id, std::move(parent), WidgetType::BasicIcon) {}
 
-    ~Pair() override { DetachDispatch(); }
+    ~Pair() override {
+        DetachDispatch();
+    }
 
     static void ValidateChildren(const WidgetConfiguration&, std::span<const WidgetConfiguration* const> children) {
         if(children.size() != 2 || children[1]->type != WidgetType::IndicatorDigital)
@@ -149,18 +156,26 @@ class Registration {
 public:
     Registration() {
         auto& factory = WidgetFactory::GetInstance();
-        factory.RegisterWidget(WidgetType::IndicatorDigital,
+        factory.RegisterWidget(
+            WidgetType::IndicatorDigital,
             [](uint32_t id, std::shared_ptr<Frame> parent, const WidgetContext&) -> std::unique_ptr<IWidget> {
                 return std::make_unique<Node>(id, std::move(parent), WidgetType::IndicatorDigital);
-            });
-        factory.RegisterWidget(WidgetType::BasicArcIcon,
+            }
+        );
+        factory.RegisterWidget(
+            WidgetType::BasicArcIcon,
             [](uint32_t id, std::shared_ptr<Frame> parent, const WidgetContext&) -> std::unique_ptr<IWidget> {
                 return std::make_unique<Group>(id, std::move(parent));
-            }, Group::ValidateChildren);
-        factory.RegisterWidget(WidgetType::BasicIcon,
+            },
+            Group::ValidateChildren
+        );
+        factory.RegisterWidget(
+            WidgetType::BasicIcon,
             [](uint32_t id, std::shared_ptr<Frame> parent, const WidgetContext&) -> std::unique_ptr<IWidget> {
                 return std::make_unique<Pair>(id, std::move(parent));
-            }, Pair::ValidateChildren);
+            },
+            Pair::ValidateChildren
+        );
     }
 
     ~Registration() {
@@ -203,8 +218,12 @@ std::shared_ptr<ScreenConfiguration> Screen(std::pmr::memory_resource* resource 
     return screen;
 }
 
-std::shared_ptr<WidgetConfiguration> Add(ScreenConfiguration& screen, uint32_t id, WidgetType type,
-    std::initializer_list<int> children = {}, int32_t z_index = 0) {
+std::shared_ptr<WidgetConfiguration>
+Add(ScreenConfiguration& screen,
+    uint32_t id,
+    WidgetType type,
+    std::initializer_list<int> children = {},
+    int32_t z_index = 0) {
     auto widget = std::make_shared<WidgetConfiguration>(std::allocator_arg, std::pmr::get_default_resource());
     widget->id = id;
     widget->type = type;
@@ -213,13 +232,14 @@ std::shared_ptr<WidgetConfiguration> Add(ScreenConfiguration& screen, uint32_t i
     widget->size_grid = { 1, 1 };
     if(children.size() != 0)
         widget->properties[WidgetPropertyType::CHILD_WIDGET_IDS] = std::pmr::vector<int>(children);
-    widget->bindings.push_back(PropertyBinding {
-        .target = WidgetPropertyType::VALUE, .event = { .channel = EventChannelId::Sensors,
-            .event_type = std::to_underlying(SensorEventType::DataUpdated),
-            .payload_key = std::to_underlying(SensorPayloadType::Value),
-            .selector_key = std::to_underlying(SensorPayloadType::SensorId),
-            .selector_value = static_cast<int>(id) }
-    });
+    widget->bindings.push_back(
+        PropertyBinding{ .target = WidgetPropertyType::VALUE,
+            .event = { .channel = EventChannelId::Sensors,
+                .event_type = std::to_underlying(SensorEventType::DataUpdated),
+                .payload_key = std::to_underlying(SensorPayloadType::Value),
+                .selector_key = std::to_underlying(SensorPayloadType::SensorId),
+                .selector_value = static_cast<int>(id) } }
+    );
     screen.widget_configurations.push_back(widget);
     return widget;
 }
@@ -230,9 +250,10 @@ void Validate(const ScreenConfiguration& screen) {
     });
 }
 
-WidgetAssembly::Roots Assemble(const std::shared_ptr<ScreenConfiguration>& screen, const std::shared_ptr<Frame>& container) {
+WidgetAssembly::Roots
+Assemble(const std::shared_ptr<ScreenConfiguration>& screen, const std::shared_ptr<Frame>& container) {
     Validate(*screen);
-    return WidgetAssembly::Assemble(screen, container, WidgetContext {});
+    return WidgetAssembly::Assemble(screen, container, WidgetContext{});
 }
 
 std::shared_ptr<Frame> Container() {
@@ -265,14 +286,17 @@ int32_t DrawingIndex(const IWidget& widget) {
 }
 
 void Publish(uint32_t id, float value) {
-    SensorEventsChannel::GetInstance().Publish({
-        .source_id = 0, .type = SensorEventType::DataUpdated,
-        .payload = { { SensorPayloadType::SensorId, id }, { SensorPayloadType::Value, value } }
-    });
+    SensorEventsChannel::GetInstance().Publish(
+        { .source_id = 0,
+            .type = SensorEventType::DataUpdated,
+            .payload = { { SensorPayloadType::SensorId, id }, { SensorPayloadType::Value, value } } }
+    );
 }
 
 bool AllExpired(const std::vector<std::weak_ptr<WidgetPropertyStore>>& stores, size_t from = 0) {
-    return std::all_of(stores.begin() + from, stores.end(), [](const auto& store) { return store.expired(); });
+    return std::all_of(stores.begin() + from, stores.end(), [](const auto& store) {
+        return store.expired();
+    });
 }
 
 void* SetUp() {
@@ -282,7 +306,7 @@ void* SetUp() {
 }
 
 void Before(void*) {
-    journal = Journal {};
+    journal = Journal{};
     registration.emplace();
 }
 
@@ -309,17 +333,17 @@ ZTEST(widget_assembly, test_builds_each_definition_once_under_its_owner_mount_wi
 
     zassert_equal(journal.live, 6);
     // Siblings are created in drawing order: equal z-index keeps definition order (5 before 0).
-    zassert_true((journal.constructed == std::vector<uint32_t> { 1, 9, 2, 7, 5, 0 }), "Owners precede descendants");
-    zassert_true((journal.configured == std::vector<uint32_t> { 0, 5, 2, 7, 1, 9 }), "Descendants precede owners");
-    zassert_true((Ids(roots) == std::vector<uint32_t> { 1, 9 }));
+    zassert_true((journal.constructed == std::vector<uint32_t>{ 1, 9, 2, 7, 5, 0 }), "Owners precede descendants");
+    zassert_true((journal.configured == std::vector<uint32_t>{ 0, 5, 2, 7, 1, 9 }), "Descendants precede owners");
+    zassert_true((Ids(roots) == std::vector<uint32_t>{ 1, 9 }));
     zassert_equal(lv_obj_get_child_count(container->GetObject()), 2);
     for(const auto& root : roots)
         zassert_equal(Parent(*root), container->GetObject());
 
     const auto& group = *roots[0];
-    zassert_true((Ids(group.GetChildren()) == std::vector<uint32_t> { 2, 7 }));
+    zassert_true((Ids(group.GetChildren()) == std::vector<uint32_t>{ 2, 7 }));
     const auto& pair = *group.GetChildren()[0];
-    zassert_true((Ids(pair.GetChildren()) == std::vector<uint32_t> { 0, 5 }));
+    zassert_true((Ids(pair.GetChildren()) == std::vector<uint32_t>{ 0, 5 }));
     for(const auto* owner : { &group, &pair }) {
         for(const auto& child : owner->GetChildren())
             zassert_equal(Parent(*child), owner->GetChildMount()->GetObject());
@@ -350,12 +374,12 @@ ZTEST(widget_assembly, test_z_index_orders_siblings_without_reordering_semantic_
 
     const auto roots = Assemble(screen, container);
 
-    zassert_true((Ids(roots) == std::vector<uint32_t> { 8, 1, 9 }), "Roots keep definition order");
+    zassert_true((Ids(roots) == std::vector<uint32_t>{ 8, 1, 9 }), "Roots keep definition order");
     zassert_equal(DrawingIndex(*roots[2]), 0);
     zassert_equal(DrawingIndex(*roots[1]), 1);
     zassert_equal(DrawingIndex(*roots[0]), 2);
     const auto children = roots[1]->GetChildren();
-    zassert_true((Ids(children) == std::vector<uint32_t> { 4, 2, 3 }), "Children keep reference order");
+    zassert_true((Ids(children) == std::vector<uint32_t>{ 4, 2, 3 }), "Children keep reference order");
     zassert_equal(DrawingIndex(*children[1]), 0);
     zassert_equal(DrawingIndex(*children[2]), 1, "Equal z-index keeps definition order");
     zassert_equal(DrawingIndex(*children[0]), 2);
@@ -393,10 +417,12 @@ ZTEST(widget_assembly, test_roots_use_the_screen_grid_and_children_use_owner_loc
     zassert_equal(halves[1]->GetPositionPx().x, width / 2);
     const auto& filler = *roots[1]->GetChildren()[0];
     zassert_equal(filler.GetSizePx().width, 0, "Child grid geometry is never converted against the screen");
-    zassert_equal(lv_obj_get_width(filler.GetContainer()->GetObject()),
-        lv_obj_get_width(roots[1]->GetChildMount()->GetObject()));
-    zassert_equal(lv_obj_get_height(filler.GetContainer()->GetObject()),
-        lv_obj_get_height(roots[1]->GetChildMount()->GetObject()));
+    zassert_equal(
+        lv_obj_get_width(filler.GetContainer()->GetObject()), lv_obj_get_width(roots[1]->GetChildMount()->GetObject())
+    );
+    zassert_equal(
+        lv_obj_get_height(filler.GetContainer()->GetObject()), lv_obj_get_height(roots[1]->GetChildMount()->GetObject())
+    );
 }
 
 ZTEST(widget_assembly, test_failures_release_every_object_and_leave_other_trees_untouched) {
@@ -424,7 +450,7 @@ ZTEST(widget_assembly, test_failures_release_every_object_and_leave_other_trees_
         const auto first_store = journal.stores.size();
         bool failed = false;
         try {
-            WidgetAssembly::Assemble(candidate, container, WidgetContext {});
+            WidgetAssembly::Assemble(candidate, container, WidgetContext{});
         } catch(const std::exception&) {
             failed = true;
         }
@@ -445,7 +471,7 @@ ZTEST(widget_assembly, test_failures_release_every_object_and_leave_other_trees_
     expect_rollback("Owner configuration failure after children subscribed");
     journal.fail_configuration.reset();
     // Unchanged-after-validation is a precondition; this test composite rejects the order itself.
-    pair->properties[WidgetPropertyType::CHILD_WIDGET_IDS] = std::pmr::vector<int> { 14, 13 };
+    pair->properties[WidgetPropertyType::CHILD_WIDGET_IDS] = std::pmr::vector<int>{ 14, 13 };
     expect_rollback("Runtime child-order rejection");
 
     Publish(2, 64.0F);
@@ -494,7 +520,7 @@ ZTEST(widget_assembly, test_assembly_metadata_is_bounded_and_released_at_the_gra
 
     const auto baseline = resource.outstanding;
     resource.peak = baseline;
-    const auto roots = WidgetAssembly::Assemble(screen, container, WidgetContext {});
+    const auto roots = WidgetAssembly::Assemble(screen, container, WidgetContext{});
 
     zassert_equal(resource.outstanding, baseline, "Assembly metadata is released once the tree is built");
     zassert_true(resource.peak - baseline <= metadata_budget, "Metadata peak %zu", resource.peak - baseline);
@@ -508,7 +534,7 @@ ZTEST(widget_assembly, test_assembly_metadata_is_bounded_and_released_at_the_gra
 
 ZTEST(widget_assembly, test_screen_replaces_its_tree_only_after_the_candidate_assembles) {
     auto container = Container();
-    eerie_leap::views::screens::Screen screen(42, container, WidgetContext {});
+    eerie_leap::views::screens::Screen screen(42, container, WidgetContext{});
     auto first = Screen();
     Add(*first, 1, WidgetType::BasicArcIcon, { 2 });
     Add(*first, 2, WidgetType::IndicatorDigital);
@@ -516,7 +542,7 @@ ZTEST(widget_assembly, test_screen_replaces_its_tree_only_after_the_candidate_as
     Validate(*first);
     screen.Configure(first);
     const auto roots = screen.GetWidgets();
-    zassert_true((Ids(*roots) == std::vector<uint32_t> { 1, 3 }), "Referenced children are not roots");
+    zassert_true((Ids(*roots) == std::vector<uint32_t>{ 1, 3 }), "Referenced children are not roots");
     zassert_equal(Parent(*(*roots)[0]->GetChildren()[0]), (*roots)[0]->GetChildMount()->GetObject());
     zassert_equal(journal.live, 3);
     auto* screen_object = screen.GetContainer()->GetObject();
@@ -552,7 +578,7 @@ ZTEST(widget_assembly, test_screen_replaces_its_tree_only_after_the_candidate_as
     journal.fail_configuration.reset();
 
     screen.Configure(runtime);
-    zassert_true((Ids(*roots) == std::vector<uint32_t> { 10 }), "Holders see the replacement tree");
+    zassert_true((Ids(*roots) == std::vector<uint32_t>{ 10 }), "Holders see the replacement tree");
     zassert_equal(screen.GetConfiguration(), runtime);
     zassert_equal(journal.live, 2, "The previous tree is released after replacement");
     zassert_equal(lv_obj_get_child_count(screen_object), 1);
@@ -561,7 +587,7 @@ ZTEST(widget_assembly, test_screen_replaces_its_tree_only_after_the_candidate_as
 ZTEST(widget_assembly, test_a_widget_render_failure_stays_local_to_that_widget) {
     auto container = Container();
     auto group = std::make_shared<ScreenGroup>(0, container);
-    auto screen = std::make_shared<eerie_leap::views::screens::Screen>(42, group->GetContainer(), WidgetContext {});
+    auto screen = std::make_shared<eerie_leap::views::screens::Screen>(42, group->GetContainer(), WidgetContext{});
     auto configuration = Screen();
     Add(*configuration, 1, WidgetType::BasicArcIcon, { 2 });
     Add(*configuration, 2, WidgetType::IndicatorDigital);

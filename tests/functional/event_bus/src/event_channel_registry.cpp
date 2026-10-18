@@ -47,7 +47,8 @@ constexpr int BUS_STACK_SIZE = 4096;
 // Channels are inert until a bus drains them, so the suite owns one.
 class TestEventBus : public EventBus {
 public:
-    TestEventBus() : EventBus("registry_test_bus", BUS_STACK_SIZE) {
+    TestEventBus() :
+        EventBus("registry_test_bus", BUS_STACK_SIZE) {
         RegisterChannel(LoggingEventsChannel::GetInstance());
         RegisterChannel(SettingsEventsChannel::GetInstance());
     }
@@ -57,26 +58,30 @@ public:
 // the enums. Widget bindings go through SubscribeEventBinding(), which the last case covers.
 class ErasedProbe {
 public:
-    ErasedProbe(EventChannelId channel_id, uint32_t event_type, uint32_t payload_key,
-        ErasedEventFilter selector = { }) {
+    ErasedProbe(EventChannelId channel_id, uint32_t event_type, uint32_t payload_key, ErasedEventFilter selector = {}) {
         auto* channel = EventChannelRegistry::GetInstance().Find(channel_id);
         if(channel == nullptr)
             return;
 
         subscription_ = channel->SubscribeErased(
-            event_type,
-            selector,
-            [this, payload_key](const ErasedPayloadView& view) {
+            event_type, selector, [this, payload_key](const ErasedPayloadView& view) {
                 ++calls_;
 
                 if(const auto* value = view.Find(payload_key))
                     last_value_ = *value;
-            });
+            }
+        );
     }
 
-    [[nodiscard]] bool IsSubscribed() const { return subscription_ != nullptr; }
-    [[nodiscard]] int Calls() const { return calls_; }
-    [[nodiscard]] const std::optional<EventData>& LastValue() const { return last_value_; }
+    [[nodiscard]] bool IsSubscribed() const {
+        return subscription_ != nullptr;
+    }
+    [[nodiscard]] int Calls() const {
+        return calls_;
+    }
+    [[nodiscard]] const std::optional<EventData>& LastValue() const {
+        return last_value_;
+    }
 
 private:
     AnySubscription subscription_;
@@ -85,22 +90,20 @@ private:
 };
 
 void PublishLoggingStatus(bool is_active) {
-    LoggingEventsChannel::GetInstance().Publish({
-        .source_id = 0x7E57,
-        .type = LoggingEventType::StatusUpdated,
-        .payload = { { LoggingPayloadType::IsActive, is_active } }
-    });
+    LoggingEventsChannel::GetInstance().Publish(
+        { .source_id = 0x7E57,
+            .type = LoggingEventType::StatusUpdated,
+            .payload = { { LoggingPayloadType::IsActive, is_active } } }
+    );
 }
 
 void PublishSettingChanged(const char* setting_id, float value) {
-    SettingsEventsChannel::GetInstance().Publish({
-        .source_id = 0x7E57,
-        .type = SettingsEventType::Changed,
-        .payload = {
-            { SettingsPayloadType::SettingId, StringHelpers::GetHash(setting_id) },
-            { SettingsPayloadType::Value, value }
-        }
-    });
+    SettingsEventsChannel::GetInstance().Publish(
+        { .source_id = 0x7E57,
+            .type = SettingsEventType::Changed,
+            .payload = { { SettingsPayloadType::SettingId, StringHelpers::GetHash(setting_id) },
+                { SettingsPayloadType::Value, value } } }
+    );
 }
 
 void* RegisterChannels() {
@@ -133,9 +136,9 @@ ZTEST(event_channel_registry, test_unregistered_channel_resolves_to_null) {
 
 ZTEST(event_channel_registry, test_erased_subscribe_delivers_the_payload_key) {
     ErasedProbe probe(
-        EventChannelId::Logging,
-        std::to_underlying(LoggingEventType::StatusUpdated),
-        std::to_underlying(LoggingPayloadType::IsActive));
+        EventChannelId::Logging, std::to_underlying(LoggingEventType::StatusUpdated),
+        std::to_underlying(LoggingPayloadType::IsActive)
+    );
 
     zassert_true(probe.IsSubscribed());
 
@@ -147,10 +150,7 @@ ZTEST(event_channel_registry, test_erased_subscribe_delivers_the_payload_key) {
 }
 
 ZTEST(event_channel_registry, test_erased_subscribe_reports_a_missing_key) {
-    ErasedProbe probe(
-        EventChannelId::Logging,
-        std::to_underlying(LoggingEventType::StatusUpdated),
-        0xDEAD);
+    ErasedProbe probe(EventChannelId::Logging, std::to_underlying(LoggingEventType::StatusUpdated), 0xDEAD);
 
     PublishLoggingStatus(true);
 
@@ -168,10 +168,9 @@ ZTEST(event_channel_registry, test_erased_filter_rejects_before_the_handler) {
     };
 
     ErasedProbe probe(
-        EventChannelId::Logging,
-        std::to_underlying(LoggingEventType::StatusUpdated),
-        std::to_underlying(LoggingPayloadType::IsActive),
-        is_active);
+        EventChannelId::Logging, std::to_underlying(LoggingEventType::StatusUpdated),
+        std::to_underlying(LoggingPayloadType::IsActive), is_active
+    );
 
     PublishLoggingStatus(false);
     zassert_equal(probe.Calls(), 0);
@@ -183,18 +182,18 @@ ZTEST(event_channel_registry, test_erased_filter_rejects_before_the_handler) {
 ZTEST(event_channel_registry, test_erased_subscription_unsubscribes_on_destruction) {
     {
         ErasedProbe probe(
-            EventChannelId::Logging,
-            std::to_underlying(LoggingEventType::StatusUpdated),
-            std::to_underlying(LoggingPayloadType::IsActive));
+            EventChannelId::Logging, std::to_underlying(LoggingEventType::StatusUpdated),
+            std::to_underlying(LoggingPayloadType::IsActive)
+        );
 
         PublishLoggingStatus(true);
         zassert_equal(probe.Calls(), 1);
     }
 
     ErasedProbe observer(
-        EventChannelId::Logging,
-        std::to_underlying(LoggingEventType::StatusUpdated),
-        std::to_underlying(LoggingPayloadType::IsActive));
+        EventChannelId::Logging, std::to_underlying(LoggingEventType::StatusUpdated),
+        std::to_underlying(LoggingPayloadType::IsActive)
+    );
 
     PublishLoggingStatus(false);
 
@@ -207,28 +206,28 @@ ZTEST(event_channel_registry, test_erased_publish_reaches_a_typed_subscriber) {
     std::optional<float> value;
 
     auto subscription = CreateScopedSubscription(
-        SettingsEventsChannel::GetInstance(),
-        SettingsEventType::ChangeRequested,
+        SettingsEventsChannel::GetInstance(), SettingsEventType::ChangeRequested,
         [&](const SettingsEventsChannel::EventMessage& event) {
             if(auto it = event.payload.find(SettingsPayloadType::SettingId); it != event.payload.end())
                 setting_ids.push_back(std::get<uint32_t>(it->second));
 
             if(auto it = event.payload.find(SettingsPayloadType::Value); it != event.payload.end())
                 value = std::get<float>(it->second);
-        });
+        }
+    );
 
     zassert_not_null(subscription.get());
 
     auto* channel = EventChannelRegistry::GetInstance().Find(EventChannelId::Settings);
     zassert_not_null(channel);
 
-    std::array<std::pair<uint32_t, EventData>, 2> payload {
-        std::pair { std::to_underlying(SettingsPayloadType::Value), EventData { 42.0F } },
-        std::pair { std::to_underlying(SettingsPayloadType::SettingId), EventData { uint32_t { 7 } } }
-    };
+    std::array<std::pair<uint32_t, EventData>, 2> payload{ std::pair{ std::to_underlying(SettingsPayloadType::Value),
+                                                               EventData{ 42.0F } },
+        std::pair{ std::to_underlying(SettingsPayloadType::SettingId), EventData{ uint32_t{ 7 } } } };
 
     channel->PublishErasedAsync(
-        std::to_underlying(SettingsEventType::ChangeRequested), 0x7E57, ErasedPayload { payload });
+        std::to_underlying(SettingsEventType::ChangeRequested), 0x7E57, ErasedPayload{ payload }
+    );
 
     k_msleep(200);
 
@@ -245,14 +244,15 @@ ZTEST(event_channel_registry, test_a_binding_resolves_the_settings_channel_with_
     auto value = std::make_shared<std::optional<EventData>>();
 
     auto subscription = SubscribeEventBinding(
-        EventBinding {
-            .channel = EventChannelId::Settings,
+        EventBinding{ .channel = EventChannelId::Settings,
             .event_type = std::to_underlying(SettingsEventType::Changed),
             .payload_key = std::to_underlying(SettingsPayloadType::Value),
             .selector_key = std::to_underlying(SettingsPayloadType::SettingId),
-            .selector_value = std::pmr::string("display.brightness")
-        },
-        [value](const EventData& data) { *value = data; });
+            .selector_value = std::pmr::string("display.brightness") },
+        [value](const EventData& data) {
+            *value = data;
+        }
+    );
 
     zassert_not_null(subscription.get());
 

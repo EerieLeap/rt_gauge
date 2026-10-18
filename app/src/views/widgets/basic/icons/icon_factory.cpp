@@ -1,10 +1,10 @@
-#include "views/widgets/basic/icons/label_icon/label_icon.h"
 #include "views/widgets/basic/icons/image_icon/image_icon.h"
-#include "views/widgets/basic/icons/shape_icon/rectangle_icon/rectangle_icon.h"
+#include "views/widgets/basic/icons/label_icon/label_icon.h"
 #include "views/widgets/basic/icons/shape_icon/isosceles_triangle_icon/isosceles_triangle_icon.h"
-#include "views/widgets/basic/icons/shape_icon/right_triangle_icon/right_triangle_icon.h"
-#include "views/widgets/basic/icons/shape_icon/oval_icon/oval_icon.h"
 #include "views/widgets/basic/icons/shape_icon/line_icon/line_icon.h"
+#include "views/widgets/basic/icons/shape_icon/oval_icon/oval_icon.h"
+#include "views/widgets/basic/icons/shape_icon/rectangle_icon/rectangle_icon.h"
+#include "views/widgets/basic/icons/shape_icon/right_triangle_icon/right_triangle_icon.h"
 
 #include "icon_factory.h"
 
@@ -23,9 +23,13 @@ IconFactory& IconFactory::GetInstance() {
 
 template<typename T>
 void IconFactory::Register(const IconType type) {
-    Register(type, [](std::shared_ptr<Frame> parent) -> std::unique_ptr<IIcon> {
-        return std::make_unique<T>(std::move(parent));
-    }, T::RegisterProperties);
+    Register(
+        type,
+        [](std::shared_ptr<Frame> parent) -> std::unique_ptr<IIcon> {
+            return std::make_unique<T>(std::move(parent));
+        },
+        T::RegisterProperties
+    );
 }
 
 void IconFactory::Register(const IconType type, IconCreator creator, PropertyRegistrar registrar) {
@@ -38,9 +42,13 @@ void IconFactory::RegisterProperties(IconType type, WidgetPropertyStore& store) 
         it->second.register_properties(store);
 }
 
-std::unique_ptr<IIcon> IconFactory::Create(const IconType type, std::shared_ptr<WidgetPropertyStore> properties, std::shared_ptr<Frame> parent) {
+std::unique_ptr<IIcon> IconFactory::Create(
+    const IconType type,
+    std::shared_ptr<WidgetPropertyStore> properties,
+    std::shared_ptr<Frame> parent
+) {
     auto it = registrations_.find(type);
-    if (it == registrations_.end())
+    if(it == registrations_.end())
         throw std::runtime_error("Unknown widget type");
 
     auto icon = it->second.create(parent);
@@ -57,7 +65,7 @@ std::vector<IconType> IconFactory::GetAvailableTypes() const {
     std::vector<IconType> types;
     types.reserve(registrations_.size());
 
-    for (const auto& [type, registration] : registrations_)
+    for(const auto& [type, registration] : registrations_)
         types.push_back(type);
 
     return types;

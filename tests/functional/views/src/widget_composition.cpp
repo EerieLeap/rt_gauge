@@ -44,8 +44,9 @@ std::shared_ptr<ScreenConfiguration> Screen() {
 }
 
 void Children(WidgetConfiguration& owner, std::initializer_list<int> ids) {
-    owner.properties[WidgetPropertyType::CHILD_WIDGET_IDS] =
-        std::pmr::vector<int>(ids, owner.properties.get_allocator().resource());
+    owner.properties[WidgetPropertyType::CHILD_WIDGET_IDS] = std::pmr::vector<int>(
+        ids, owner.properties.get_allocator().resource()
+    );
 }
 
 std::string CompositionError(const ScreenConfiguration& screen) {
@@ -73,19 +74,20 @@ class ReadoutAndButton : public basic::ArcIconWidget {
 public:
     using ArcIconWidget::ArcIconWidget;
 
-    static void ValidateChildren(const WidgetConfiguration&,
-        std::span<const WidgetConfiguration* const> children) {
+    static void ValidateChildren(const WidgetConfiguration&, std::span<const WidgetConfiguration* const> children) {
         if(children.size() != 2)
             throw std::invalid_argument("Expected 2 children in order: readout, button.");
         constexpr WidgetType types[] = { WidgetType::IndicatorDigital, WidgetType::ControlButton };
         constexpr const char* roles[] = { "readout", "button" };
         for(size_t i = 0; i < children.size(); ++i) {
-            const auto prefix = "Child index " + std::to_string(i) + ", ID " + std::to_string(children[i]->id)
-                + " (" + roles[i] + "): ";
+            const auto prefix = "Child index " + std::to_string(i) + ", ID " + std::to_string(children[i]->id) + " ("
+                + roles[i] + "): ";
             if(children[i]->type != types[i])
                 throw std::invalid_argument(prefix + "unsupported configuration for this role.");
-            if(children[i]->position_grid.x != static_cast<int>(i) || children[i]->position_grid.y != 0
-                || children[i]->size_grid.width != 1 || children[i]->size_grid.height != 1)
+            if(children[i]->position_grid.x != static_cast<int>(i)
+                || children[i]->position_grid.y != 0
+                || children[i]->size_grid.width != 1
+                || children[i]->size_grid.height != 1)
                 throw std::invalid_argument(prefix + "invalid parent-local placement.");
         }
     }
@@ -96,11 +98,14 @@ public:
     int creation_count = 0;
 
     TestRegistration() {
-        WidgetFactory::GetInstance().RegisterWidget(WidgetType::BasicArcIcon,
+        WidgetFactory::GetInstance().RegisterWidget(
+            WidgetType::BasicArcIcon,
             [this](uint32_t, std::shared_ptr<Frame>, const WidgetContext&) -> std::unique_ptr<IWidget> {
                 ++creation_count;
                 throw std::runtime_error("Preflight must not construct widgets");
-            }, ReadoutAndButton::ValidateChildren);
+            },
+            ReadoutAndButton::ValidateChildren
+        );
     }
 
     ~TestRegistration() {
@@ -168,12 +173,12 @@ ZTEST(widget_composition, test_dial_fill_slot_checks_outer_geometry_but_not_loca
     needle->properties[WidgetPropertyType::ANCHOR_POINT_Y] = 7;
     screen->widget_configurations = { needle, dial };
     zassert_true(CompositionError(*screen).empty());
-    for(auto position : { WidgetPosition { -1, 0 }, WidgetPosition { 0, 1 }, WidgetPosition { 100, 0 } }) {
+    for(auto position : { WidgetPosition{ -1, 0 }, WidgetPosition{ 0, 1 }, WidgetPosition{ 100, 0 } }) {
         needle->position_grid = position;
         ExpectError(*screen, { "Widget ID: 9", "Child index 0, ID 12 (needle)", "position (0, 0)" });
     }
     needle->position_grid = { 0, 0 };
-    for(auto size : { WidgetSize { 0, 1 }, WidgetSize { 1, 0 }, WidgetSize { 2, 1 }, WidgetSize { 1, 100 } }) {
+    for(auto size : { WidgetSize{ 0, 1 }, WidgetSize{ 1, 0 }, WidgetSize{ 2, 1 }, WidgetSize{ 1, 100 } }) {
         needle->size_grid = size;
         ExpectError(*screen, { "Widget ID: 9", "Child index 0, ID 12 (needle)", "size (1, 1)" });
     }
@@ -202,16 +207,16 @@ ZTEST(widget_composition, test_dial_rejects_inbound_animation_type_bindings_and_
     Children(*dial, { 12 });
     screen->widget_configurations = { dial, needle };
     for(auto direction : { PropertyBindingDirection::In, PropertyBindingDirection::InOut }) {
-        needle->bindings = { PropertyBinding {
-            .target = WidgetPropertyType::ANIMATION_TYPE, .event = { .channel = EventChannelId::Sensors }, .direction = direction
-        } };
+        needle->bindings = { PropertyBinding{ .target = WidgetPropertyType::ANIMATION_TYPE,
+            .event = { .channel = EventChannelId::Sensors },
+            .direction = direction } };
         ExpectError(*screen, { "Widget ID: 9", "Child index 0, ID 12 (needle)", "inbound ANIMATION_TYPE" });
     }
     needle->bindings[0].direction = PropertyBindingDirection::Out;
     zassert_true(CompositionError(*screen).empty());
     needle->bindings[0].direction = PropertyBindingDirection::In;
     for(auto target : { WidgetPropertyType::IS_ANIMATION_ACTIVE, WidgetPropertyType::ANIMATION_DURATION_MS,
-        WidgetPropertyType::ANCHOR_POINT_X, WidgetPropertyType::VALUE }) {
+            WidgetPropertyType::ANCHOR_POINT_X, WidgetPropertyType::VALUE }) {
         needle->bindings[0].target = target;
         zassert_true(CompositionError(*screen).empty());
     }
@@ -300,7 +305,9 @@ ZTEST(widget_composition, test_central_validator_rejects_invalid_structure_befor
     Children(*owner, { 12 });
     screen->widget_configurations = { owner, child };
     int validation_count = 0;
-    const auto validate_children = [&](const auto&, auto) { ++validation_count; };
+    const auto validate_children = [&](const auto&, auto) {
+        ++validation_count;
+    };
     auto check = [&](const char* reason) {
         std::string message;
         try {
@@ -386,9 +393,12 @@ ZTEST(widget_composition, test_a_legacy_dial_is_neither_saved_nor_loaded_under_w
         }
         return {};
     };
-    for(const auto& error : {
-            error_of([&] { with_widget_rules.Serialize(*configuration); }),
-            error_of([&] { with_widget_rules.Deserialize(std::pmr::get_default_resource(), *encoded); }) }) {
+    for(const auto& error : { error_of([&] {
+                                 with_widget_rules.Serialize(*configuration);
+                             }),
+            error_of([&] {
+                with_widget_rules.Deserialize(std::pmr::get_default_resource(), *encoded);
+            }) }) {
         for(const auto* fragment : { "Screen ID: 42, Widget ID: 9", "exactly 1 child", "received 0" })
             zassert_true(error.find(fragment) != std::string::npos, "Missing '%s' in '%s'", fragment, error.c_str());
     }

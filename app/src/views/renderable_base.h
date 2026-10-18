@@ -33,7 +33,7 @@ public:
 
     virtual ~RenderableBase() {
         ThemeManager::GetInstance().UnregisterObserver(this);
-        is_ready_= false;
+        is_ready_ = false;
     }
 
     std::shared_ptr<Frame> GetContainer() const override {
@@ -62,4 +62,4 @@ public:
     }
 };
 
-} // namespace eerie_leap
+} // namespace eerie_leap::views

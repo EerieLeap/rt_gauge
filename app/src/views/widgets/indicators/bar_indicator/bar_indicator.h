@@ -30,7 +30,9 @@ public:
 
 public:
     explicit BarIndicator(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context);
-    WidgetType GetType() const override { return WidgetType::IndicatorBar; }
+    WidgetType GetType() const override {
+        return WidgetType::IndicatorBar;
+    }
 };
 
 } // namespace eerie_leap::views::widgets::indicators

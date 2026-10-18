@@ -17,12 +17,12 @@ namespace config_services = eerie_leap::configuration::services;
 using eerie_leap::domain::configuration_domain::utilities::CborConfigurationManagerBase;
 using eerie_leap::domain::configuration_domain::utilities::IConfigurationManager;
 
-using eerie_leap::domain::display_domain::models::DisplayConfiguration;
 using eerie_leap::domain::display_domain::configuration::parsers::DisplayConfigurationCborParser;
+using eerie_leap::domain::display_domain::models::DisplayConfiguration;
 
-class DisplayConfigurationManager
-    : public CborConfigurationManagerBase<DisplayConfiguration, CborDisplayConfig>,
-      public IConfigurationManager {
+class DisplayConfigurationManager :
+    public CborConfigurationManagerBase<DisplayConfiguration, CborDisplayConfig>,
+    public IConfigurationManager {
 private:
     DisplayConfigurationCborParser cbor_parser_;
 
@@ -34,7 +34,8 @@ private:
 
 public:
     explicit DisplayConfigurationManager(
-        std::unique_ptr<config_services::CborConfigurationService<CborDisplayConfig>> cbor_configuration_service);
+        std::unique_ptr<config_services::CborConfigurationService<CborDisplayConfig>> cbor_configuration_service
+    );
 
     void RegisterConfigurationUpdatedHandler(ConfigurationUpdatedHandler handler) override;
 

@@ -27,7 +27,8 @@ public:
     ViewAnimator(ViewAnimator&&) = delete;
     ViewAnimator& operator=(ViewAnimator&&) = delete;
 
-    bool Attach(utilitites::Frame& presentation, utilitites::Frame& layout, EligibilityCallback eligible, void* context);
+    bool
+    Attach(utilitites::Frame& presentation, utilitites::Frame& layout, EligibilityCallback eligible, void* context);
     void Synchronize(const Settings& settings);
     // Retained absolute rotation, independent of blinking and animation resets.
     // The widget rejects a competing rotation animation before calling this.

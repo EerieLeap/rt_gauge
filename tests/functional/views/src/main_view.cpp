@@ -3,8 +3,8 @@
 #include <memory>
 #include <vector>
 
-#include <zephyr/ztest.h>
 #include <lvgl.h>
+#include <zephyr/ztest.h>
 
 #include "views/main_view.h"
 
@@ -26,7 +26,9 @@ private:
 
 public:
     MainView::RenderDispatcher GetDispatcher() {
-        return [this](std::function<void()> work) { work_.push_back(std::move(work)); };
+        return [this](std::function<void()> work) {
+            work_.push_back(std::move(work));
+        };
     }
 
     size_t Pending() const {

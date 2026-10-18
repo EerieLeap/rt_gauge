@@ -37,7 +37,9 @@ WidgetAssembly::Roots WidgetAssembly::Assemble(
     auto construct = [&](std::span<const size_t> indices, const std::shared_ptr<Frame>& mount) {
         siblings.assign(indices.begin(), indices.end());
         // Creation order is sibling drawing order; semantic child order is untouched.
-        std::ranges::sort(siblings, {}, [&](size_t i) { return std::pair { definitions[i]->z_index, i }; });
+        std::ranges::sort(siblings, {}, [&](size_t i) {
+            return std::pair{ definitions[i]->z_index, i };
+        });
         for(auto i : siblings)
             instances[i] = factory.CreateWidget(definitions[i]->type, definitions[i]->id, mount, context);
     };

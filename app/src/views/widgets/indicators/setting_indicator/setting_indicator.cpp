@@ -14,17 +14,17 @@ using namespace eerie_leap::domain::ui_domain::models;
 using namespace eerie_leap::views::utilitites;
 using namespace eerie_leap::views::themes;
 
-SettingIndicator::SettingIndicator(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context)
-    : SettingWidgetBase(id, std::move(parent), std::move(context)) {}
+SettingIndicator::SettingIndicator(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context) :
+    SettingWidgetBase(id, std::move(parent), std::move(context)) {}
 
 void SettingIndicator::RegisterProperties(WidgetPropertyStore& store) const {
     SettingWidgetBase::RegisterProperties(store);
 
     store.RegisterColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE);
 
-    store.Register(WidgetPropertyType::LABEL, ConfigValue { std::pmr::string { } }, PropertyChangeEffect::Repaint);
-    store.Register(WidgetPropertyType::UNIT, ConfigValue { std::pmr::string { } }, PropertyChangeEffect::Repaint);
-    store.Register(WidgetPropertyType::VALUE_PRECISION, ConfigValue { 0 }, PropertyChangeEffect::Repaint);
+    store.Register(WidgetPropertyType::LABEL, ConfigValue{ std::pmr::string{} }, PropertyChangeEffect::Repaint);
+    store.Register(WidgetPropertyType::UNIT, ConfigValue{ std::pmr::string{} }, PropertyChangeEffect::Repaint);
+    store.Register(WidgetPropertyType::VALUE_PRECISION, ConfigValue{ 0 }, PropertyChangeEffect::Repaint);
 }
 
 int SettingIndicator::ApplyTheme(const ITheme& theme) {
@@ -84,12 +84,10 @@ void SettingIndicator::UpdateText() {
 
     char text[128];
     if(HasSetting())
-        snprintf(text, sizeof(text), "%s%s%.*f%s",
-            label_.c_str(),
-            label_.empty() ? "" : " ",
-            value_precision_,
-            properties_->GetAs<double>(WidgetPropertyType::VALUE, 0),
-            unit_.c_str());
+        snprintf(
+            text, sizeof(text), "%s%s%.*f%s", label_.c_str(), label_.empty() ? "" : " ", value_precision_,
+            properties_->GetAs<double>(WidgetPropertyType::VALUE, 0), unit_.c_str()
+        );
     else
         snprintf(text, sizeof(text), "%s", label_.c_str());
 

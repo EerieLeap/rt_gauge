@@ -11,8 +11,8 @@ using namespace eerie_leap::domain::ui_domain::models;
 using namespace eerie_leap::views::utilitites;
 using namespace eerie_leap::views::themes;
 
-ToggleControl::ToggleControl(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context)
-    : ControlBase(id, std::move(parent), std::move(context), true) {}
+ToggleControl::ToggleControl(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context) :
+    ControlBase(id, std::move(parent), std::move(context), true) {}
 
 // A toggle carries a boolean where the base assumes a number.
 void ToggleControl::RegisterProperties(WidgetPropertyStore& store) const {
@@ -23,12 +23,14 @@ void ToggleControl::RegisterProperties(WidgetPropertyStore& store) const {
     store.RegisterColor(WidgetPropertyType::COLOR_SECONDARY_ACTIVE);
     store.RegisterColor(WidgetPropertyType::COLOR_SECONDARY_INACTIVE);
 
-    store.Register(WidgetPropertyType::VALUE, ConfigValue { false }, PropertyChangeEffect::None);
+    store.Register(WidgetPropertyType::VALUE, ConfigValue{ false }, PropertyChangeEffect::None);
 }
 
 int ToggleControl::ApplyTheme(const ITheme& theme) {
     const auto active = properties_->ResolveColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE, theme.GetPrimaryColor());
-    const auto inactive = properties_->ResolveColor(WidgetPropertyType::COLOR_PRIMARY_INACTIVE, theme.GetSurfaceColor());
+    const auto inactive = properties_->ResolveColor(
+        WidgetPropertyType::COLOR_PRIMARY_INACTIVE, theme.GetSurfaceColor()
+    );
 
     lv_obj_set_style_bg_color(lv_switch_, inactive.ToLvColor(), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(lv_switch_, inactive.ToLvOpa(), LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -39,8 +41,10 @@ int ToggleControl::ApplyTheme(const ITheme& theme) {
 
     for(bool checked : { false, true }) {
         const auto state = checked ? LV_STATE_CHECKED : LV_STATE_DEFAULT;
-        const auto secondary = properties_->ResolveColor(checked ? WidgetPropertyType::COLOR_SECONDARY_ACTIVE
-            : WidgetPropertyType::COLOR_SECONDARY_INACTIVE, theme.GetAccentColor());
+        const auto secondary = properties_->ResolveColor(
+            checked ? WidgetPropertyType::COLOR_SECONDARY_ACTIVE : WidgetPropertyType::COLOR_SECONDARY_INACTIVE,
+            theme.GetAccentColor()
+        );
         lv_obj_set_style_bg_color(lv_switch_, secondary.ToLvColor(), LV_PART_KNOB | state);
         lv_obj_set_style_bg_opa(lv_switch_, secondary.ToLvOpa(), LV_PART_KNOB | state);
     }
@@ -73,9 +77,8 @@ void ToggleControl::OnControlEvent(lv_event_code_t code) {
     if(code != LV_EVENT_VALUE_CHANGED)
         return;
 
-    SetPropertyLocal(
-        WidgetPropertyType::VALUE,
-        ConfigValue { lv_obj_has_state(lv_switch_, LV_STATE_CHECKED) });}
+    SetPropertyLocal(WidgetPropertyType::VALUE, ConfigValue{ lv_obj_has_state(lv_switch_, LV_STATE_CHECKED) });
+}
 
 void ToggleControl::UpdateSwitch() {
     if(lv_switch_ == nullptr)

@@ -8,9 +8,10 @@ using namespace eerie_leap::configuration::services;
 
 UiConfigurationManager::UiConfigurationManager(
     std::unique_ptr<CborConfigurationService<CborUiConfig>> cbor_configuration_service,
-    UiConfigurationValidator::ChildValidator validate_children)
-        : CborConfigurationManagerBase("UI", std::move(cbor_configuration_service)),
-        cbor_parser_(std::move(validate_children)) {
+    UiConfigurationValidator::ChildValidator validate_children
+) :
+    CborConfigurationManagerBase("UI", std::move(cbor_configuration_service)),
+    cbor_parser_(std::move(validate_children)) {
 
     LoadOrCreateDefault();
 }

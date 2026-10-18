@@ -33,8 +33,11 @@ struct WidgetComposition {
     // not changed since. Builds relationships only; it does not repeat validation.
     static WidgetComposition Build(const ScreenConfiguration& configuration);
 
-    explicit WidgetComposition(std::pmr::memory_resource* resource)
-        : nodes(resource), children(resource), roots(resource), postorder(resource) {}
+    explicit WidgetComposition(std::pmr::memory_resource* resource) :
+        nodes(resource),
+        children(resource),
+        roots(resource),
+        postorder(resource) {}
 
     WidgetComposition(const WidgetComposition&) = delete;
     WidgetComposition& operator=(const WidgetComposition&) = delete;

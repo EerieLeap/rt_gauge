@@ -11,8 +11,8 @@ namespace eerie_leap::domain::ui_domain::services {
 
 LOG_MODULE_REGISTER(ui_input_service_logger);
 
-UiInputService::UiInputService(std::shared_ptr<NavigationService> navigation_service)
-    : navigation_service_(std::move(navigation_service)) {
+UiInputService::UiInputService(std::shared_ptr<NavigationService> navigation_service) :
+    navigation_service_(std::move(navigation_service)) {
 
     SetGestureMapping(LV_DIR_LEFT, NavigationIntent::NextGroup);
     SetGestureMapping(LV_DIR_RIGHT, NavigationIntent::PreviousGroup);
@@ -25,11 +25,16 @@ UiInputService::~UiInputService() {
 
 std::optional<size_t> UiInputService::ToIndex(lv_dir_t direction) {
     switch(direction) {
-        case LV_DIR_LEFT: return 0;
-        case LV_DIR_RIGHT: return 1;
-        case LV_DIR_TOP: return 2;
-        case LV_DIR_BOTTOM: return 3;
-        default: return std::nullopt;
+        case LV_DIR_LEFT:
+            return 0;
+        case LV_DIR_RIGHT:
+            return 1;
+        case LV_DIR_TOP:
+            return 2;
+        case LV_DIR_BOTTOM:
+            return 3;
+        default:
+            return std::nullopt;
     }
 }
 

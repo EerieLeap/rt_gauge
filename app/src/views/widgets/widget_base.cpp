@@ -31,39 +31,46 @@ using eerie_leap::utilities::reflection::GetCallerName;
 
 LOG_MODULE_REGISTER(widget_base_logger);
 
-void WidgetBase::ValidateChildren(
-    const WidgetConfiguration&,
-    std::span<const WidgetConfiguration* const> children
-) {
+void WidgetBase::ValidateChildren(const WidgetConfiguration&, std::span<const WidgetConfiguration* const> children) {
     if(!children.empty()) {
-        throw std::invalid_argument("Leaf widget expects 0 children; child index 0, ID "
-            + std::to_string(children.front()->id) + " is not allowed.");
+        throw std::invalid_argument(
+            "Leaf widget expects 0 children; child index 0, ID " + std::to_string(children.front()->id)
+            + " is not allowed."
+        );
     }
 }
 
-WidgetBase::WidgetBase(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context)
-    : id_(id), properties_(std::make_shared<WidgetPropertyStore>()), parent_(std::move(parent)),
+WidgetBase::WidgetBase(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context) :
+    id_(id),
+    properties_(std::make_shared<WidgetPropertyStore>()),
+    parent_(std::move(parent)),
     dispatch_guard_(std::make_shared<WidgetDispatchGuard>(this)),
     context_(std::move(context)) {
 
     container_ = std::make_shared<Frame>(Frame::CreateWrapped(parent_->GetObject())
-        .SetProcessingParent(parent_)
-        .SetWidth(100, false)
-        .SetHeight(100, false)
-        .Build());
+            .SetProcessingParent(parent_)
+            .SetWidth(100, false)
+            .SetHeight(100, false)
+            .Build());
     container_->SetProcessingEnabled(false);
 
-    content_frame_ = std::make_shared<Frame>(Frame::CreatePresentation(container_->GetObject())
-        .SetProcessingParent(container_)
-        .Build());
+    content_frame_ = std::make_shared<Frame>(
+        Frame::CreatePresentation(container_->GetObject()).SetProcessingParent(container_).Build()
+    );
     container_->SetChild(content_frame_);
 
-    transform_.Attach(id_, content_frame_, container_, {
-        .is_ready = [](void* context) { return static_cast<WidgetBase*>(context)->IsReady(); },
-        .is_processing_eligible = [](void* context) {
-            return static_cast<WidgetBase*>(context)->IsProcessingEligible();
-        }
-    }, this);
+    transform_.Attach(
+        id_, content_frame_, container_,
+        { .is_ready =
+                [](void* context) {
+                    return static_cast<WidgetBase*>(context)->IsReady();
+                },
+            .is_processing_eligible =
+                [](void* context) {
+                    return static_cast<WidgetBase*>(context)->IsProcessingEligible();
+                } },
+        this
+    );
 
     lv_display_add_event_cb(lv_obj_get_display(container_->GetObject()), RefreshCallback, LV_EVENT_REFR_START, this);
 }
@@ -132,7 +139,7 @@ void WidgetBase::SetChildren(Children children) {
     UpdateChildrenLayout();
 }
 
-void WidgetBase::OnChildrenAttached(std::span<const std::unique_ptr<IWidget>>) { }
+void WidgetBase::OnChildrenAttached(std::span<const std::unique_ptr<IWidget>>) {}
 
 void WidgetBase::OnParentAttached() {
     ScopedLvglLock lvgl_guard;
@@ -140,7 +147,7 @@ void WidgetBase::OnParentAttached() {
     lv_display_remove_event_cb_with_user_data(lv_obj_get_display(container_->GetObject()), RefreshCallback, this);
 }
 
-void WidgetBase::LayoutChildren() { }
+void WidgetBase::LayoutChildren() {}
 
 void WidgetBase::UpdateChildrenLayout() {
     if(detached_ || children_.empty() || laying_out_children_)
@@ -246,7 +253,10 @@ bool WidgetBase::IsTrackingEligible() const {
 bool WidgetBase::IsProcessingEligible() const {
     ScopedLvglLock lvgl_guard;
 
-    if(detached_ || !is_group_active_ || !IsActive() || !IsVisible()
+    if(detached_
+        || !is_group_active_
+        || !IsActive()
+        || !IsVisible()
         || properties_->GetAs<int>(WidgetPropertyType::OPACITY, 255) == 0
         || !parent_->IsProcessingEnabled())
         return false;
@@ -289,10 +299,10 @@ void WidgetBase::OnDeactivated() {
 }
 
 void WidgetBase::RegisterProperties(WidgetPropertyStore& store) const {
-    store.Register(WidgetPropertyType::IS_ACTIVE, ConfigValue { true }, PropertyChangeEffect::None);
-    store.Register(WidgetPropertyType::IS_VISIBLE, ConfigValue { true }, PropertyChangeEffect::None);
-    store.Register(WidgetPropertyType::OPACITY, ConfigValue { 255 }, PropertyChangeEffect::None);
-    store.Register(WidgetPropertyType::IS_SMOOTHED, ConfigValue { false }, PropertyChangeEffect::None);
+    store.Register(WidgetPropertyType::IS_ACTIVE, ConfigValue{ true }, PropertyChangeEffect::None);
+    store.Register(WidgetPropertyType::IS_VISIBLE, ConfigValue{ true }, PropertyChangeEffect::None);
+    store.Register(WidgetPropertyType::OPACITY, ConfigValue{ 255 }, PropertyChangeEffect::None);
+    store.Register(WidgetPropertyType::IS_SMOOTHED, ConfigValue{ false }, PropertyChangeEffect::None);
     WidgetTransform::RegisterProperties(store);
 }
 
@@ -329,8 +339,9 @@ void WidgetBase::UpdateProcessingState() {
     // A partially rendered composite must not let descendants process or animate.
     content_frame_->SetProcessingEnabled(children_.empty() || IsReady());
     container_->SetTrackingEnabled(IsActive());
-    container_->SetProcessingEnabled(is_group_active_ && IsActive() && IsVisible()
-        && properties_->GetAs<int>(WidgetPropertyType::OPACITY, 255) > 0);
+    container_->SetProcessingEnabled(
+        is_group_active_ && IsActive() && IsVisible() && properties_->GetAs<int>(WidgetPropertyType::OPACITY, 255) > 0
+    );
     const bool enabled = IsReady() && IsProcessingEligible();
     if(was_processing_ && !enabled)
         OnProcessingSuspended();
@@ -342,11 +353,11 @@ void WidgetBase::UpdateProcessingState() {
         transform_.Synchronize();
 }
 
-void WidgetBase::OnProcessingSuspended() { }
+void WidgetBase::OnProcessingSuspended() {}
 
-void WidgetBase::OnProcessingUpdated(bool) { }
+void WidgetBase::OnProcessingUpdated(bool) {}
 
-void WidgetBase::OnConfigured() { }
+void WidgetBase::OnConfigured() {}
 
 std::vector<WidgetPropertyType> WidgetBase::GetSupportedProperties() const {
     WidgetPropertyStore declared;
@@ -401,15 +412,13 @@ void WidgetBase::SetPropertyLocal(WidgetPropertyType type, const ConfigValue& va
         if(binding.target != type)
             continue;
 
-        std::array<std::pair<uint32_t, EventData>, 2> payload {
-            std::pair { binding.payload_key, ToEventData(value) },
-            std::pair { binding.selector_key, binding.selector_value.value_or(EventData { }) }
-        };
+        std::array<std::pair<uint32_t, EventData>, 2> payload{ std::pair{ binding.payload_key, ToEventData(value) },
+            std::pair{ binding.selector_key, binding.selector_value.value_or(EventData{}) } };
 
         binding.channel->PublishErasedAsync(
-            binding.event_type,
-            caller.hash,
-            ErasedPayload { payload.data(), binding.selector_value.has_value() ? 2U : 1U });
+            binding.event_type, caller.hash,
+            ErasedPayload{ payload.data(), binding.selector_value.has_value() ? 2U : 1U }
+        );
     }
 }
 
@@ -423,8 +432,7 @@ void WidgetBase::ResolveBindings() {
 
     for(const auto& binding : configuration_->bindings) {
         if(!properties_->IsRegistered(binding.target)) {
-            LOG_WRN("Widget %u binds unsupported property %u.",
-                id_, static_cast<unsigned>(binding.target));
+            LOG_WRN("Widget %u binds unsupported property %u.", id_, static_cast<unsigned>(binding.target));
 
             continue;
         }
@@ -432,21 +440,22 @@ void WidgetBase::ResolveBindings() {
         // Looked up here as well as when subscribing, because an outbound binding needs the channel.
         auto* channel = registry.Find(binding.event.channel);
         if(channel == nullptr) {
-            LOG_WRN("Widget %u binds property %u to an unregistered channel.",
-                id_, static_cast<unsigned>(binding.target));
+            LOG_WRN(
+                "Widget %u binds property %u to an unregistered channel.", id_, static_cast<unsigned>(binding.target)
+            );
 
             continue;
         }
 
         if(binding.direction != PropertyBindingDirection::In) {
-            outbound_bindings_.push_back(OutboundBinding {
-                .target = binding.target,
-                .channel = channel,
-                .event_type = binding.outbound_event_type,
-                .payload_key = binding.event.payload_key,
-                .selector_key = binding.event.selector_key,
-                .selector_value = ToSelectorValue(binding.event.selector_value)
-            });
+            outbound_bindings_.push_back(
+                OutboundBinding{ .target = binding.target,
+                    .channel = channel,
+                    .event_type = binding.outbound_event_type,
+                    .payload_key = binding.event.payload_key,
+                    .selector_key = binding.event.selector_key,
+                    .selector_value = ToSelectorValue(binding.event.selector_value) }
+            );
         }
 
         if(binding.direction == PropertyBindingDirection::Out)
@@ -454,13 +463,8 @@ void WidgetBase::ResolveBindings() {
 
         auto subscription = SubscribeEventBinding(
             binding.event,
-            [
-                this,
-                store = properties_,
-                guard = dispatch_guard_,
-                target = binding.target,
-                effect = properties_->GetEffect(binding.target)
-            ](const EventData& data) {
+            [this, store = properties_, guard = dispatch_guard_, target = binding.target,
+                effect = properties_->GetEffect(binding.target)](const EventData& data) {
                 ScopedLvglLock lvgl_guard;
 
                 guard->Dispatch([&] {
@@ -473,7 +477,8 @@ void WidgetBase::ResolveBindings() {
 
                     NotifyPropertyChanged(target, value, effect);
                 });
-            });
+            }
+        );
 
         // The channel resolved, so only a selector that cannot select or a refused subscription
         // gets here.
@@ -567,8 +572,7 @@ void WidgetBase::Configure(std::shared_ptr<WidgetConfiguration> configuration) {
         if(WidgetPropertyValidator::IsStructuralProperty(type))
             continue;
 
-        if(!properties_->Set(type, value)
-            && std::find(supported.begin(), supported.end(), type) == supported.end())
+        if(!properties_->Set(type, value) && std::find(supported.begin(), supported.end(), type) == supported.end())
             LOG_WRN("Widget %u does not support property %u.", id_, static_cast<unsigned>(type));
     }
 
@@ -607,8 +611,7 @@ WidgetPosition WidgetBase::GetPositionPx() const {
 void WidgetBase::SetPositionPx(const WidgetPosition& position_px) {
     position_px_ = position_px;
 
-    container_->SetXOffset(position_px.x, true)
-        .SetYOffset(position_px.y, true);
+    container_->SetXOffset(position_px.x, true).SetYOffset(position_px.y, true);
 }
 
 WidgetSize WidgetBase::GetSizePx() const {
@@ -620,8 +623,7 @@ void WidgetBase::SetSizePx(const WidgetSize& size_px) {
 
     size_px_ = size_px;
 
-    container_->SetHeight(size_px.height, true)
-        .SetWidth(size_px.width, true);
+    container_->SetHeight(size_px.height, true).SetWidth(size_px.width, true);
 
     UpdateChildrenLayout();
     transform_.UpdateAnchor();

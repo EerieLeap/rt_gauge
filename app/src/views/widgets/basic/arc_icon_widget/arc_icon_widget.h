@@ -16,8 +16,15 @@ private:
     int ApplyTheme(const ITheme& theme) override;
 
 public:
-    ArcIconWidget(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context, IconType icon_type = IconType::None);
-    [[nodiscard]] WidgetType GetType() const override { return WidgetType::BasicArcIcon; }
+    ArcIconWidget(
+        uint32_t id,
+        std::shared_ptr<Frame> parent,
+        WidgetContext context,
+        IconType icon_type = IconType::None
+    );
+    [[nodiscard]] WidgetType GetType() const override {
+        return WidgetType::BasicArcIcon;
+    }
 
 protected:
     void RegisterProperties(WidgetPropertyStore& store) const override;

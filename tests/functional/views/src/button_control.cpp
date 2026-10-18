@@ -57,7 +57,8 @@ constexpr int BUS_STACK_SIZE = 4096;
 // NavigationEventChannel is inert until a bus drains it.
 class ButtonBus : public EventBus {
 public:
-    ButtonBus() : EventBus("button_test_bus", BUS_STACK_SIZE) {
+    ButtonBus() :
+        EventBus("button_test_bus", BUS_STACK_SIZE) {
         RegisterChannel(NavigationEventChannel::GetInstance());
     }
 };
@@ -68,9 +69,11 @@ public:
         k_sem_init(&delivered_, 0, K_SEM_MAX_LIMIT);
 
         subscription_ = CreateScopedSubscription(
-            NavigationEventChannel::GetInstance(),
-            NavigationEventType::Changed,
-            [this](const NavigationEventChannel::EventMessage& event) { Record(event); });
+            NavigationEventChannel::GetInstance(), NavigationEventType::Changed,
+            [this](const NavigationEventChannel::EventMessage& event) {
+                Record(event);
+            }
+        );
     }
 
     NavigationProbe(const NavigationProbe&) = delete;
@@ -80,9 +83,15 @@ public:
         return k_sem_take(&delivered_, K_MSEC(timeout_ms)) == 0;
     }
 
-    [[nodiscard]] const std::vector<NavigationAction>& Actions() const { return actions_; }
-    [[nodiscard]] const std::vector<uint32_t>& TargetGroupIds() const { return target_group_ids_; }
-    [[nodiscard]] const std::vector<uint32_t>& TargetScreenIds() const { return target_screen_ids_; }
+    [[nodiscard]] const std::vector<NavigationAction>& Actions() const {
+        return actions_;
+    }
+    [[nodiscard]] const std::vector<uint32_t>& TargetGroupIds() const {
+        return target_group_ids_;
+    }
+    [[nodiscard]] const std::vector<uint32_t>& TargetScreenIds() const {
+        return target_screen_ids_;
+    }
 
 private:
     k_sem delivered_{};
@@ -111,10 +120,7 @@ private:
 };
 
 std::shared_ptr<Frame> MakeRoot() {
-    return std::make_shared<Frame>(Frame::CreateWrapped()
-        .SetWidth(200, false)
-        .SetHeight(200, false)
-        .Build());
+    return std::make_shared<Frame>(Frame::CreateWrapped().SetWidth(200, false).SetHeight(200, false).Build());
 }
 
 std::shared_ptr<WidgetConfiguration> MakeConfiguration() {
@@ -133,10 +139,11 @@ std::shared_ptr<WidgetConfiguration> MakeConfiguration() {
 // Builds a rendered button bound to `navigation_service` and clicks it.
 void Click(
     const std::shared_ptr<NavigationService>& navigation_service,
-    const std::shared_ptr<WidgetConfiguration>& configuration) {
+    const std::shared_ptr<WidgetConfiguration>& configuration
+) {
 
     auto root = MakeRoot();
-    ButtonControl button(0, root, WidgetContext { .navigation_service = navigation_service });
+    ButtonControl button(0, root, WidgetContext{ .navigation_service = navigation_service });
 
     button.Configure(configuration);
     zassert_equal(button.Render(), 0, "Expected the button to render.");
@@ -191,8 +198,7 @@ ZTEST(button_control, test_a_button_can_show_a_target_screen_as_an_overlay) {
     NavigationProbe probe;
 
     auto configuration = MakeConfiguration();
-    configuration->properties[WidgetPropertyType::NAVIGATION_INTENT] =
-        static_cast<int>(NavigationIntent::ShowOverlay);
+    configuration->properties[WidgetPropertyType::NAVIGATION_INTENT] = static_cast<int>(NavigationIntent::ShowOverlay);
     configuration->properties[WidgetPropertyType::TARGET_SCREEN_GROUP] = 7;
 
     Click(navigation_service, configuration);
@@ -218,8 +224,7 @@ ZTEST(button_control, test_a_button_can_close_the_active_overlay) {
     zassert_true(probe.WaitForEvent(), "Expected the overlay to open.");
 
     auto configuration = MakeConfiguration();
-    configuration->properties[WidgetPropertyType::NAVIGATION_INTENT] =
-        static_cast<int>(NavigationIntent::CloseOverlay);
+    configuration->properties[WidgetPropertyType::NAVIGATION_INTENT] = static_cast<int>(NavigationIntent::CloseOverlay);
 
     Click(navigation_service, configuration);
 
@@ -239,8 +244,7 @@ ZTEST(button_control, test_a_show_overlay_button_without_a_target_does_nothing) 
     NavigationProbe probe;
 
     auto configuration = MakeConfiguration();
-    configuration->properties[WidgetPropertyType::NAVIGATION_INTENT] =
-        static_cast<int>(NavigationIntent::ShowOverlay);
+    configuration->properties[WidgetPropertyType::NAVIGATION_INTENT] = static_cast<int>(NavigationIntent::ShowOverlay);
 
     Click(navigation_service, configuration);
 
@@ -273,8 +277,7 @@ ZTEST(button_control, test_a_button_can_carry_an_intent_that_needs_no_target) {
     NavigationProbe probe;
 
     auto configuration = MakeConfiguration();
-    configuration->properties[WidgetPropertyType::NAVIGATION_INTENT] =
-        static_cast<int>(NavigationIntent::NextGroup);
+    configuration->properties[WidgetPropertyType::NAVIGATION_INTENT] = static_cast<int>(NavigationIntent::NextGroup);
 
     Click(navigation_service, configuration);
 
@@ -295,8 +298,9 @@ ZTEST(button_control, test_suspended_buttons_do_not_navigate_or_use_disabled_col
         auto configuration = MakeConfiguration();
         configuration->properties[WidgetPropertyType::TARGET_SCREEN_GROUP] = 1;
         configuration->properties[target] = target == WidgetPropertyType::OPACITY
-            ? eerie_leap::utilities::type::ConfigValue{0} : eerie_leap::utilities::type::ConfigValue{false};
-        ButtonControl button(0, root, WidgetContext { .navigation_service = navigation_service });
+            ? eerie_leap::utilities::type::ConfigValue{ 0 }
+            : eerie_leap::utilities::type::ConfigValue{ false };
+        ButtonControl button(0, root, WidgetContext{ .navigation_service = navigation_service });
         button.Configure(configuration);
         zassert_equal(button.Render(), 0);
         button.OnActivated();
@@ -308,7 +312,7 @@ ZTEST(button_control, test_suspended_buttons_do_not_navigate_or_use_disabled_col
     auto root = MakeRoot();
     auto configuration = MakeConfiguration();
     configuration->properties[WidgetPropertyType::TARGET_SCREEN_GROUP] = 1;
-    ButtonControl button(0, root, WidgetContext { .navigation_service = navigation_service });
+    ButtonControl button(0, root, WidgetContext{ .navigation_service = navigation_service });
     button.Configure(configuration);
     zassert_equal(button.Render(), 0);
     button.OnActivated();

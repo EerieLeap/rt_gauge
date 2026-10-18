@@ -42,7 +42,8 @@ constexpr int WORK_QUEUE_PRIORITY = 10;
 // SettingsEventsChannel is inert until a bus drains it, so the suite owns one.
 class TestEventBus : public EventBus {
 public:
-    TestEventBus() : EventBus("settings_test_bus", BUS_STACK_SIZE) {
+    TestEventBus() :
+        EventBus("settings_test_bus", BUS_STACK_SIZE) {
         RegisterChannel(SettingsEventsChannel::GetInstance());
     }
 };
@@ -50,12 +51,12 @@ public:
 // Records the setting ids carried by every PersistRequested it sees.
 class PersistProbe {
 public:
-    PersistProbe() : state_(std::make_shared<State>()) {
+    PersistProbe() :
+        state_(std::make_shared<State>()) {
         k_sem_init(&state_->delivered, 0, K_SEM_MAX_LIMIT);
 
         subscription_ = CreateScopedSubscription(
-            SettingsEventsChannel::GetInstance(),
-            SettingsEventType::PersistRequested,
+            SettingsEventsChannel::GetInstance(), SettingsEventType::PersistRequested,
             [state = state_](const SettingsEventsChannel::EventMessage& event) {
                 auto it = event.payload.find(SettingsPayloadType::SettingId);
                 if(it != event.payload.end()) {
@@ -64,15 +65,26 @@ public:
                 }
 
                 k_sem_give(&state->delivered);
-            });
+            }
+        );
     }
 
-    [[nodiscard]] bool IsSubscribed() const { return subscription_ != nullptr; }
-    bool WaitForEvent() const { return k_sem_take(&state_->delivered, K_MSEC(DISPATCH_TIMEOUT_MS)) == 0; }
-    bool WaitForNoEvent() const { return k_sem_take(&state_->delivered, K_MSEC(NO_DISPATCH_TIMEOUT_MS)) != 0; }
+    [[nodiscard]] bool IsSubscribed() const {
+        return subscription_ != nullptr;
+    }
+    bool WaitForEvent() const {
+        return k_sem_take(&state_->delivered, K_MSEC(DISPATCH_TIMEOUT_MS)) == 0;
+    }
+    bool WaitForNoEvent() const {
+        return k_sem_take(&state_->delivered, K_MSEC(NO_DISPATCH_TIMEOUT_MS)) != 0;
+    }
 
-    [[nodiscard]] size_t Count() const { return state_->setting_ids.size(); }
-    [[nodiscard]] const std::vector<uint32_t>& SettingIds() const { return state_->setting_ids; }
+    [[nodiscard]] size_t Count() const {
+        return state_->setting_ids.size();
+    }
+    [[nodiscard]] const std::vector<uint32_t>& SettingIds() const {
+        return state_->setting_ids;
+    }
 
 private:
     struct State {
@@ -85,11 +97,11 @@ private:
 };
 
 void PublishChanged(uint32_t setting_id) {
-    SettingsEventsChannel::GetInstance().PublishAsync({
-        .source_id = 0,
-        .type = SettingsEventType::Changed,
-        .payload = { { SettingsPayloadType::SettingId, setting_id } }
-    });
+    SettingsEventsChannel::GetInstance().PublishAsync(
+        { .source_id = 0,
+            .type = SettingsEventType::Changed,
+            .payload = { { SettingsPayloadType::SettingId, setting_id } } }
+    );
 }
 
 uint32_t BrightnessId() {
@@ -101,7 +113,8 @@ uint32_t BrightnessId() {
 std::shared_ptr<WorkQueueThread> SharedWorkQueueThread() {
     static std::shared_ptr<WorkQueueThread> thread = [] {
         auto created = std::make_shared<WorkQueueThread>(
-            "settings_persistence_test", WORK_QUEUE_STACK_SIZE, WORK_QUEUE_PRIORITY, false, Mrm::GetExtPmr());
+            "settings_persistence_test", WORK_QUEUE_STACK_SIZE, WORK_QUEUE_PRIORITY, false, Mrm::GetExtPmr()
+        );
 
         created->Initialize();
 
@@ -207,11 +220,9 @@ ZTEST(settings_persistence_service, test_a_change_without_a_setting_id_is_ignore
 
     PersistProbe probe;
 
-    SettingsEventsChannel::GetInstance().PublishAsync({
-        .source_id = 0,
-        .type = SettingsEventType::Changed,
-        .payload = { { SettingsPayloadType::Value, 42 } }
-    });
+    SettingsEventsChannel::GetInstance().PublishAsync(
+        { .source_id = 0, .type = SettingsEventType::Changed, .payload = { { SettingsPayloadType::Value, 42 } } }
+    );
 
     zassert_true(probe.WaitForNoEvent(), "Expected an unidentified change to be dropped.");
     zassert_equal(probe.Count(), 0U);

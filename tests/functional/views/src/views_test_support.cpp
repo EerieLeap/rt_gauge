@@ -2,8 +2,8 @@
 #include <cerrno>
 #include <utility>
 
-#include <zephyr/ztest.h>
 #include <lvgl.h>
+#include <zephyr/ztest.h>
 
 #include "subsys/assets/asset_provider.h"
 #include "subsys/device_tree/dt_fs.h"
@@ -40,8 +40,8 @@ constexpr int32_t buffer_lines = 10;
 constexpr int32_t max_bytes_per_pixel = 4;
 
 // A provider keeps only a span of its extensions.
-constexpr std::array<std::string_view, 1> image_extensions { ".bin" };
-constexpr std::array<std::string_view, 1> animation_extensions { ".json" };
+constexpr std::array<std::string_view, 1> image_extensions{ ".bin" };
+constexpr std::array<std::string_view, 1> animation_extensions{ ".json" };
 
 uint8_t draw_buffer[display_width * buffer_lines * max_bytes_per_pixel];
 lv_display_t* test_display = nullptr;
@@ -60,12 +60,7 @@ void EnsureTestDisplay() {
         return;
 
     test_display = lv_display_create(display_width, display_height);
-    lv_display_set_buffers(
-        test_display,
-        draw_buffer,
-        nullptr,
-        sizeof(draw_buffer),
-        LV_DISPLAY_RENDER_MODE_PARTIAL);
+    lv_display_set_buffers(test_display, draw_buffer, nullptr, sizeof(draw_buffer), LV_DISPLAY_RENDER_MODE_PARTIAL);
     lv_display_set_flush_cb(test_display, FlushCb);
 }
 
@@ -91,15 +86,16 @@ std::shared_ptr<AssetsManager> MakeAssetsManager(AssetKind kind, std::shared_ptr
     const bool is_image = kind == AssetKind::IMAGES;
 
     auto assets = std::make_shared<AssetsManager>();
-    zassert_true(assets->Register(AssetProvider {
-        .kind = kind,
-        .name = is_image ? "images" : "animations",
-        .store = std::move(store),
-        .extensions = is_image ? image_extensions : animation_extensions,
-        .access = static_cast<uint8_t>(
-            ToMask(AssetAccess::READ) | ToMask(AssetAccess::WRITE) | ToMask(AssetAccess::DELETE)),
-        .max_size = 1024 * 1024
-    }));
+    zassert_true(assets->Register(
+        AssetProvider{ .kind = kind,
+            .name = is_image ? "images" : "animations",
+            .store = std::move(store),
+            .extensions = is_image ? image_extensions : animation_extensions,
+            .access = static_cast<uint8_t>(
+                ToMask(AssetAccess::READ) | ToMask(AssetAccess::WRITE) | ToMask(AssetAccess::DELETE)
+            ),
+            .max_size = 1024 * 1024 }
+    ));
 
     return assets;
 }
@@ -120,7 +116,8 @@ void InjectChildren(
     IWidget& owner,
     WidgetConfiguration& owner_configuration,
     std::initializer_list<std::shared_ptr<WidgetConfiguration>> children,
-    const WidgetContext& context) {
+    const WidgetContext& context
+) {
 
     auto& factory = WidgetFactory::GetInstance();
     std::pmr::vector<int> ids(owner_configuration.properties.get_allocator().resource());
@@ -138,12 +135,13 @@ FakeScreen::FakeScreen(
     uint32_t screen_group_id,
     int32_t z_index,
     bool is_visible,
-    std::shared_ptr<Frame> parent)
-    : id_(id),
-      screen_group_id_(screen_group_id),
-      z_index_(z_index),
-      is_visible_(is_visible),
-      parent_(std::move(parent)) {}
+    std::shared_ptr<Frame> parent
+) :
+    id_(id),
+    screen_group_id_(screen_group_id),
+    z_index_(z_index),
+    is_visible_(is_visible),
+    parent_(std::move(parent)) {}
 
 void FakeScreen::FailNextRenders() {
     fails_to_render_ = true;
@@ -155,10 +153,9 @@ int FakeScreen::DoRender() {
     if(fails_to_render_)
         return -EIO;
 
-    container_ = std::make_shared<Frame>(Frame::CreateWrapped(parent_->GetObject())
-        .SetWidth(100, false)
-        .SetHeight(100, false)
-        .Build());
+    container_ = std::make_shared<Frame>(
+        Frame::CreateWrapped(parent_->GetObject()).SetWidth(100, false).SetHeight(100, false).Build()
+    );
 
     return 0;
 }

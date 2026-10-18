@@ -7,8 +7,10 @@
 
 namespace eerie_leap::views::utilitites {
 
-GridLayout::GridLayout(const GridSettings& grid, int32_t screen_width, int32_t screen_height)
-    : grid_(grid), screen_width_(screen_width), screen_height_(screen_height) {
+GridLayout::GridLayout(const GridSettings& grid, int32_t screen_width, int32_t screen_height) :
+    grid_(grid),
+    screen_width_(screen_width),
+    screen_height_(screen_height) {
 
     if(screen_width_ <= 0 || screen_height_ <= 0)
         throw std::invalid_argument("Invalid active screen size.");
@@ -23,7 +25,7 @@ GridLayout::GridLayout(const GridSettings& grid, int32_t screen_width, int32_t s
 GridLayout GridLayout::FromActiveScreen(const GridSettings& grid) {
     lv_obj_t* active_screen = lv_screen_active();
 
-    return {grid, lv_obj_get_width(active_screen), lv_obj_get_height(active_screen)};
+    return { grid, lv_obj_get_width(active_screen), lv_obj_get_height(active_screen) };
 }
 
 WidgetSize GridLayout::ToPx(const WidgetSize& size_grid) const {
@@ -45,7 +47,7 @@ WidgetSize GridLayout::ToPx(const WidgetSize& size_grid) const {
     else
         height = (screen_height_ / grid_.height) * size_grid.height - grid_.spacing_px * 2;
 
-    return {.width = width, .height = height};
+    return { .width = width, .height = height };
 }
 
 WidgetPosition GridLayout::ToPx(const WidgetPosition& position_grid, const WidgetSize& size_px) const {
@@ -58,7 +60,7 @@ WidgetPosition GridLayout::ToPx(const WidgetPosition& position_grid, const Widge
     int x = cell_width * position_grid.x;
     int y = screen_height_ - cell_height * position_grid.y - size_px.height;
 
-    return {.x = x, .y = std::abs(y)};
+    return { .x = x, .y = std::abs(y) };
 }
 
 } // namespace eerie_leap::views::utilitites

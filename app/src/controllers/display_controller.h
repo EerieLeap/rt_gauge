@@ -34,7 +34,8 @@ public:
     DisplayController(
         std::shared_ptr<IFsService> fs_service,
         std::shared_ptr<WorkQueueThread> config_work_queue_thread,
-        std::shared_ptr<ConfigurationService> configuration_service);
+        std::shared_ptr<ConfigurationService> configuration_service
+    );
 
     int Initialize();
 

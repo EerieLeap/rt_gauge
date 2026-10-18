@@ -17,13 +17,13 @@
 
 namespace eerie_leap::domain::display_domain::services {
 
+using eerie_leap::domain::display_domain::configuration::DisplayConfigurationManager;
+using eerie_leap::domain::display_domain::models::DisplayConfiguration;
+using eerie_leap::domain::settings_domain::event_bus::SettingsEventsChannel;
 using eerie_leap::subsys::event_bus::AnySubscription;
 using eerie_leap::subsys::threading::WorkQueueTask;
 using eerie_leap::subsys::threading::WorkQueueTaskResult;
 using eerie_leap::subsys::threading::WorkQueueThread;
-using eerie_leap::domain::display_domain::configuration::DisplayConfigurationManager;
-using eerie_leap::domain::display_domain::models::DisplayConfiguration;
-using eerie_leap::domain::settings_domain::event_bus::SettingsEventsChannel;
 
 // Owns the panel state (brightness, blanking) and its persistence. The only
 // place in the app that talks to the display driver outside of LVGL's own
@@ -68,7 +68,8 @@ private:
 public:
     DisplayService(
         std::shared_ptr<DisplayConfigurationManager> configuration_manager,
-        std::shared_ptr<WorkQueueThread> config_work_queue_thread);
+        std::shared_ptr<WorkQueueThread> config_work_queue_thread
+    );
 
     ~DisplayService();
 

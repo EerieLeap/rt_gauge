@@ -40,7 +40,8 @@ private:
 
     // A widget declares roughly ten properties, so a scan beats hashing and allocates once.
     std::vector<Entry> entries_;
-    using ColorCache = std::array<std::optional<eerie_leap::utilities::type::Color>,
+    using ColorCache = std::array<
+        std::optional<eerie_leap::utilities::type::Color>,
         eerie_leap::domain::ui_domain::utilities::WidgetPropertyValidator::color_properties.size()>;
     ColorCache colors_;
     ColorCache applied_colors_;
@@ -60,8 +61,8 @@ public:
 
     void RegisterColor(WidgetPropertyType type);
     void ApplyColor(WidgetPropertyType type);
-    eerie_leap::views::utilities::LvglColor ResolveColor(
-        WidgetPropertyType type, eerie_leap::views::utilities::LvglColor fallback) const;
+    eerie_leap::views::utilities::LvglColor
+    ResolveColor(WidgetPropertyType type, eerie_leap::views::utilities::LvglColor fallback) const;
 
     bool IsRegistered(WidgetPropertyType type) const;
     PropertyChangeEffect GetEffect(WidgetPropertyType type) const;

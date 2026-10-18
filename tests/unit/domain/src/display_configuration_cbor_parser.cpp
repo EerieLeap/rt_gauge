@@ -10,9 +10,9 @@
 #include "domain/display_domain/configuration/parsers/display_configuration_cbor_parser.h"
 #include "domain/display_domain/models/display_configuration.h"
 
-using eerie_leap::utilities::memory::Mrm;
-using eerie_leap::domain::display_domain::models::DisplayConfiguration;
 using eerie_leap::domain::display_domain::configuration::parsers::DisplayConfigurationCborParser;
+using eerie_leap::domain::display_domain::models::DisplayConfiguration;
+using eerie_leap::utilities::memory::Mrm;
 
 namespace {
 
@@ -30,13 +30,11 @@ std::string ThrownMessage(Fn&& fn) {
 }
 
 CborDisplayConfig MakeCborConfig() {
-    return CborDisplayConfig {
-        .version = DisplayConfigurationCborParser::configuration_version,
+    return CborDisplayConfig{ .version = DisplayConfigurationCborParser::configuration_version,
         .brightness = 200,
         .blanking_enabled = true,
         .screen_timeout_s = 45,
-        .theme_id = 3
-    };
+        .theme_id = 3 };
 }
 
 } // namespace
@@ -102,17 +100,17 @@ ZTEST(display_configuration_cbor_parser, test_deserialize_rejects_another_versio
     auto config = MakeCborConfig();
     config.version = DisplayConfigurationCborParser::configuration_version + 1;
 
-    auto message = ThrownMessage([&] { parser.Deserialize(Mrm::GetDefaultPmr(), config); });
+    auto message = ThrownMessage([&] {
+        parser.Deserialize(Mrm::GetDefaultPmr(), config);
+    });
 
     zassert_equal(
         message,
         "Invalid Display configuration. Unsupported version: "
             + std::to_string(DisplayConfigurationCborParser::configuration_version + 1)
-            + ". Expected: "
-            + std::to_string(DisplayConfigurationCborParser::configuration_version)
-            + ".",
-        "%s",
-        message.c_str());
+            + ". Expected: " + std::to_string(DisplayConfigurationCborParser::configuration_version) + ".",
+        "%s", message.c_str()
+    );
 }
 
 // The schema stores brightness as a uint; the model is a uint8_t.
@@ -122,13 +120,14 @@ ZTEST(display_configuration_cbor_parser, test_deserialize_rejects_out_of_range_b
     auto config = MakeCborConfig();
     config.brightness = 256;
 
-    auto message = ThrownMessage([&] { parser.Deserialize(Mrm::GetDefaultPmr(), config); });
+    auto message = ThrownMessage([&] {
+        parser.Deserialize(Mrm::GetDefaultPmr(), config);
+    });
 
     zassert_equal(
-        message,
-        "Invalid Display configuration. Brightness must be between 0 and 255. Value: 256.",
-        "%s",
-        message.c_str());
+        message, "Invalid Display configuration. Brightness must be between 0 and 255. Value: 256.", "%s",
+        message.c_str()
+    );
 }
 
 ZTEST(display_configuration_cbor_parser, test_deserialize_accepts_the_brightness_bounds) {

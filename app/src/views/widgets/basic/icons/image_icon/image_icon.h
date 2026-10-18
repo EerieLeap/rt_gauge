@@ -1,8 +1,8 @@
 #pragma once
 
-#include <string>
-#include <optional>
 #include <memory_resource>
+#include <optional>
+#include <string>
 
 #include <lvgl.h>
 
@@ -33,7 +33,9 @@ public:
     int DoRender() override;
     void Configure(std::shared_ptr<WidgetPropertyStore> properties) override;
 
-    [[nodiscard]] IconType GetIconType() const override { return IconType::Image; }
+    [[nodiscard]] IconType GetIconType() const override {
+        return IconType::Image;
+    }
 };
 
 } // namespace eerie_leap::views::widgets::basic::icons

@@ -14,8 +14,8 @@ namespace eerie_leap::domain::ui_domain::services {
 
 using namespace eerie_leap::domain::ui_domain::event_bus;
 
-using eerie_leap::utilities::reflection::GetCallerName;
 using eerie_leap::domain::ui_domain::models::NavigationAction;
+using eerie_leap::utilities::reflection::GetCallerName;
 
 LOG_MODULE_REGISTER(navigation_service_logger);
 
@@ -24,14 +24,12 @@ namespace {
 void PublishNavigation(NavigationAction action, NavigationPayloadType target_type, uint32_t target_id) {
     static constexpr auto caller = GetCallerName();
 
-    NavigationEventChannel::GetInstance().PublishAsync({
-        .source_id = caller.hash,
-        .type = NavigationEventType::Changed,
-        .payload = {
-            { NavigationPayloadType::Action, static_cast<uint32_t>(action) },
-            { target_type, target_id }
-        }
-    });
+    NavigationEventChannel::GetInstance().PublishAsync(
+        { .source_id = caller.hash,
+            .type = NavigationEventType::Changed,
+            .payload = {
+                { NavigationPayloadType::Action, static_cast<uint32_t>(action) }, { target_type, target_id } } }
+    );
 }
 
 } // namespace
@@ -89,7 +87,11 @@ std::optional<size_t> NavigationService::GetActiveIndex() const {
     return static_cast<size_t>(std::distance(screen_group_ids_.begin(), it));
 }
 
-int NavigationService::RequestGroup(uint32_t screen_group_id, bool record_history, std::optional<uint32_t>& screen_group_to_publish) {
+int NavigationService::RequestGroup(
+    uint32_t screen_group_id,
+    bool record_history,
+    std::optional<uint32_t>& screen_group_to_publish
+) {
     if(active_overlay_screen_id_.has_value())
         return -EBUSY;
 
@@ -152,7 +154,10 @@ int NavigationService::Previous() {
 
     int res = -ENOENT;
     if(auto index = GetActiveIndex())
-        res = RequestGroup(screen_group_ids_[(*index + screen_group_ids_.size() - 1) % screen_group_ids_.size()], true, screen_group_to_publish);
+        res = RequestGroup(
+            screen_group_ids_[(*index + screen_group_ids_.size() - 1) % screen_group_ids_.size()], true,
+            screen_group_to_publish
+        );
 
     k_mutex_unlock(&lock_);
 

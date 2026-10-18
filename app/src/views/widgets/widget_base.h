@@ -59,8 +59,8 @@ protected:
 
     std::shared_ptr<WidgetConfiguration> configuration_;
     std::shared_ptr<WidgetPropertyStore> properties_;
-    WidgetPosition position_px_ {};
-    WidgetSize size_px_ {};
+    WidgetPosition position_px_{};
+    WidgetSize size_px_{};
 
     std::shared_ptr<Frame> parent_;
     // Stable presentation target beneath the public layout/management container.
@@ -138,8 +138,8 @@ protected:
 public:
     // Object-free composition contract. Leaves accept absent/empty child lists.
     // Composites hide this with their own count, order, and local-layout checks.
-    static void ValidateChildren(const WidgetConfiguration& configuration,
-        std::span<const WidgetConfiguration* const> children);
+    static void
+    ValidateChildren(const WidgetConfiguration& configuration, std::span<const WidgetConfiguration* const> children);
 
     WidgetBase(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context);
     ~WidgetBase() override;

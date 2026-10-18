@@ -8,8 +8,8 @@
 
 namespace eerie_leap::views::widgets {
 
-using eerie_leap::subsys::assets::AssetsManager;
 using eerie_leap::domain::ui_domain::services::NavigationService;
+using eerie_leap::subsys::assets::AssetsManager;
 
 // Everything the view layer may hand to a screen or a widget, passed at
 // construction instead of a per-dependency setter on IWidget.
