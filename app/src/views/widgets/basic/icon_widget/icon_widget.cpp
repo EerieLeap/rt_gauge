@@ -6,8 +6,8 @@
 
 #include "domain/ui_domain/models/widget_property.h"
 
-#include "views/utilitites/positioning_helpers.h"
 #include "views/themes/theme_manager.h"
+#include "views/utilitites/positioning_helpers.h"
 
 #include "views/widgets/basic/icons/icon_factory.h"
 
@@ -41,8 +41,9 @@ void IconWidget::ValidateChildren(
         throw std::invalid_argument("ICON_TYPE must name an implemented icon type.");
 }
 
-IconWidget::IconWidget(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context, IconType icon_type)
-    : WidgetBase(id, std::move(parent), std::move(context)), icon_type_(icon_type) {}
+IconWidget::IconWidget(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context, IconType icon_type) :
+    WidgetBase(id, std::move(parent), std::move(context)),
+    icon_type_(icon_type) {}
 
 IconWidget::~IconWidget() {
     DetachDispatch();
@@ -102,9 +103,9 @@ void IconWidget::OnProcessingUpdated(bool enabled) {
 void IconWidget::RegisterProperties(WidgetPropertyStore& store) const {
     WidgetBase::RegisterProperties(store);
 
-    store.Register(WidgetPropertyType::ICON_TYPE, ConfigValue { 0 }, PropertyChangeEffect::Rebuild);
-    store.Register(WidgetPropertyType::POSITION_X, ConfigValue { 0 }, PropertyChangeEffect::Relayout);
-    store.Register(WidgetPropertyType::POSITION_Y, ConfigValue { 0 }, PropertyChangeEffect::Relayout);
+    store.Register(WidgetPropertyType::ICON_TYPE, ConfigValue{ 0 }, PropertyChangeEffect::Rebuild);
+    store.Register(WidgetPropertyType::POSITION_X, ConfigValue{ 0 }, PropertyChangeEffect::Relayout);
+    store.Register(WidgetPropertyType::POSITION_Y, ConfigValue{ 0 }, PropertyChangeEffect::Relayout);
 
     // ICON_TYPE is seeded after registration, so resolve it from configuration
     // here. A constructor-fixed icon wins.

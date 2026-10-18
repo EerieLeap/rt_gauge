@@ -1,8 +1,8 @@
 #pragma once
 
+#include "views/assets/fonts/fonts_register.h"
 #include "views/utilities/lvgl_color.h"
 #include "views/utilities/lvgl_font.h"
-#include "views/assets/fonts/fonts_register.h"
 
 namespace eerie_leap::views::themes {
 

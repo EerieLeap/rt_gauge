@@ -30,21 +30,22 @@ constexpr const char* rotation_conflict =
 
 } // namespace
 
-void DialIndicator::ValidateChildren(const WidgetConfiguration&,
-    std::span<const WidgetConfiguration* const> children) {
+void DialIndicator::ValidateChildren(const WidgetConfiguration&, std::span<const WidgetConfiguration* const> children) {
     if(children.size() != 1)
         throw std::invalid_argument(NeedleCountError(children.size()));
 
     const auto& needle = *children.front();
-    if(needle.position_grid.x != 0 || needle.position_grid.y != 0
-        || needle.size_grid.width != 1 || needle.size_grid.height != 1)
+    if(needle.position_grid.x != 0
+        || needle.position_grid.y != 0
+        || needle.size_grid.width != 1
+        || needle.size_grid.height != 1)
         throw std::invalid_argument(NeedleError(needle.id, "fill slot requires position (0, 0) and size (1, 1)."));
     if(!WidgetTransform::CanSetRotation(needle))
         throw std::invalid_argument(NeedleError(needle.id, rotation_conflict));
 }
 
-DialIndicator::DialIndicator(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context)
-    : IndicatorBase(id, std::move(parent), std::move(context)) {}
+DialIndicator::DialIndicator(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context) :
+    IndicatorBase(id, std::move(parent), std::move(context)) {}
 
 DialIndicator::~DialIndicator() {
     DetachDispatch();
@@ -90,8 +91,8 @@ void DialIndicator::UpdateIndicator(float value) {
 void DialIndicator::RegisterProperties(WidgetPropertyStore& store) const {
     IndicatorBase::RegisterProperties(store);
 
-    store.Register(WidgetPropertyType::START_ANGLE, ConfigValue { DEFAULT_START_ANGLE }, PropertyChangeEffect::Repaint);
-    store.Register(WidgetPropertyType::END_ANGLE, ConfigValue { DEFAULT_END_ANGLE }, PropertyChangeEffect::Repaint);
+    store.Register(WidgetPropertyType::START_ANGLE, ConfigValue{ DEFAULT_START_ANGLE }, PropertyChangeEffect::Repaint);
+    store.Register(WidgetPropertyType::END_ANGLE, ConfigValue{ DEFAULT_END_ANGLE }, PropertyChangeEffect::Repaint);
 }
 
 void DialIndicator::OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) {

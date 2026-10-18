@@ -5,8 +5,8 @@
 #include <utility>
 #include <variant>
 
-#include <zephyr/logging/log.h>
 #include <eerie_memory.hpp>
+#include <zephyr/logging/log.h>
 
 #include "utilities/memory/memory_resource_manager.h"
 #include "utilities/reflection/caller_name.h"
@@ -21,30 +21,30 @@
 #include "domain/settings_domain/event_bus/settings_event_type.h"
 #include "domain/settings_domain/event_bus/settings_events_channel.h"
 #include "domain/settings_domain/event_bus/settings_payload_type.h"
+#include "domain/settings_domain/models/setting_id.h"
 #include "domain/ui_domain/event_bus/navigation_event_channel.h"
 #include "domain/ui_domain/lvgl_lock.h"
+#include "domain/ui_domain/models/animation.h"
+#include "domain/ui_domain/models/icon_type.h"
 #include "domain/ui_domain/models/navigation_intent.h"
 #include "domain/ui_domain/models/property_binding.h"
 #include "domain/ui_domain/models/widget_configuration.h"
-#include "domain/ui_domain/models/widget_type.h"
-#include "domain/ui_domain/models/widget_property.h"
-#include "domain/ui_domain/models/icon_type.h"
 #include "domain/ui_domain/models/widget_direction.h"
 #include "domain/ui_domain/models/widget_fill_mode.h"
-#include "domain/ui_domain/models/animation.h"
-#include "domain/settings_domain/models/setting_id.h"
+#include "domain/ui_domain/models/widget_property.h"
+#include "domain/ui_domain/models/widget_type.h"
 
 #include "subsys/assets/asset_kind.h"
 #include "subsys/assets/asset_provider.h"
 #include "subsys/event_bus/event_channel_id.h"
 
+#include "views/assets/animations/animations_register.h"
+#include "views/assets/images/images_register.h"
 #include "views/screens/screen_factory.h"
-#include "views/themes/theme_manager.h"
 #include "views/themes/dark_bw_theme.h"
+#include "views/themes/theme_manager.h"
 #include "views/widgets/indicators/horizontal_chart_indicator/horizontal_chart_indicator.h"
 #include "views/widgets/widget_factory.h"
-#include "views/assets/images/images_register.h"
-#include "views/assets/animations/animations_register.h"
 
 #include "ui_controller.h"
 
@@ -61,26 +61,24 @@ using namespace eerie_leap::views::assets::animations;
 
 namespace config_services = eerie_leap::configuration::services;
 
-using eerie_leap::views::widgets::WidgetFactory;
-using eerie_leap::subsys::assets::AssetAccess;
-using eerie_leap::subsys::assets::AssetKind;
-using eerie_leap::subsys::assets::AssetProvider;
+using eerie_leap::domain::settings_domain::event_bus::SettingsEventsChannel;
+using eerie_leap::domain::settings_domain::models::SettingId;
 using eerie_leap::domain::ui_domain::ScopedLvglLock;
 using eerie_leap::domain::ui_domain::event_bus::NavigationEventType;
 using eerie_leap::domain::ui_domain::event_bus::NavigationPayloadType;
-using eerie_leap::domain::settings_domain::event_bus::SettingsEventsChannel;
+using eerie_leap::domain::ui_domain::models::Animation;
+using eerie_leap::subsys::assets::AssetAccess;
+using eerie_leap::subsys::assets::AssetKind;
+using eerie_leap::subsys::assets::AssetProvider;
 using eerie_leap::subsys::event_bus::CreateScopedSubscription;
 using eerie_leap::utilities::reflection::GetCallerName;
-using eerie_leap::domain::settings_domain::models::SettingId;
-using eerie_leap::domain::ui_domain::models::Animation;
+using eerie_leap::views::widgets::WidgetFactory;
 
 LOG_MODULE_REGISTER(ui_controller_logger);
 
 namespace {
 
-std::optional<uint32_t> GetPayloadId(
-    const NavigationEventChannel::EventMessage& event,
-    NavigationPayloadType key) {
+std::optional<uint32_t> GetPayloadId(const NavigationEventChannel::EventMessage& event, NavigationPayloadType key) {
 
     auto it = event.payload.find(key);
     if(it == event.payload.end())
@@ -105,40 +103,28 @@ using eerie_leap::domain::settings_domain::event_bus::SettingsPayloadType;
 using eerie_leap::subsys::event_bus::EventChannelId;
 
 PropertyBinding SensorBinding(const char* sensor_id) {
-    return PropertyBinding {
-        .target = WidgetPropertyType::VALUE,
-        .event = {
-            .channel = EventChannelId::Sensors,
+    return PropertyBinding{ .target = WidgetPropertyType::VALUE,
+        .event = { .channel = EventChannelId::Sensors,
             .event_type = std::to_underlying(SensorEventType::DataUpdated),
             .payload_key = std::to_underlying(SensorPayloadType::Value),
             .selector_key = std::to_underlying(SensorPayloadType::SensorId),
-            .selector_value = std::pmr::string(sensor_id, Mrm::GetExtPmr())
-        }
-    };
+            .selector_value = std::pmr::string(sensor_id, Mrm::GetExtPmr()) } };
 }
 
 PropertyBinding LoggingBinding(WidgetPropertyType target) {
-    return PropertyBinding {
-        .target = target,
-        .event = {
-            .channel = EventChannelId::Logging,
+    return PropertyBinding{ .target = target,
+        .event = { .channel = EventChannelId::Logging,
             .event_type = std::to_underlying(LoggingEventType::StatusUpdated),
-            .payload_key = std::to_underlying(LoggingPayloadType::IsActive)
-        }
-    };
+            .payload_key = std::to_underlying(LoggingPayloadType::IsActive) } };
 }
 
 PropertyBinding SensorToColorBinding(WidgetPropertyType target, const char* sensor_id) {
-    return PropertyBinding {
-        .target = target,
-        .event = {
-            .channel = EventChannelId::Sensors,
+    return PropertyBinding{ .target = target,
+        .event = { .channel = EventChannelId::Sensors,
             .event_type = std::to_underlying(SensorEventType::DataUpdated),
             .payload_key = std::to_underlying(SensorPayloadType::Value),
             .selector_key = std::to_underlying(SensorPayloadType::SensorId),
-            .selector_value = std::pmr::string(sensor_id, Mrm::GetExtPmr())
-        }
-    };
+            .selector_value = std::pmr::string(sensor_id, Mrm::GetExtPmr()) } };
 }
 
 PropertyBinding SettingBinding(
@@ -146,32 +132,33 @@ PropertyBinding SettingBinding(
     SettingsEventType event,
     SettingsPayloadType key,
     const char* setting_id,
-    PropertyBindingDirection direction = PropertyBindingDirection::In) {
+    PropertyBindingDirection direction = PropertyBindingDirection::In
+) {
 
-    return PropertyBinding {
-        .target = target,
-        .event = {
-            .channel = EventChannelId::Settings,
+    return PropertyBinding{ .target = target,
+        .event = { .channel = EventChannelId::Settings,
             .event_type = std::to_underlying(event),
             .payload_key = std::to_underlying(key),
             .selector_key = std::to_underlying(SettingsPayloadType::SettingId),
-            .selector_value = std::pmr::string(setting_id, Mrm::GetExtPmr())
-        },
+            .selector_value = std::pmr::string(setting_id, Mrm::GetExtPmr()) },
         .direction = direction,
-        .outbound_event_type = std::to_underlying(SettingsEventType::ChangeRequested)
-    };
+        .outbound_event_type = std::to_underlying(SettingsEventType::ChangeRequested) };
 }
 
 // Everything a control needs to track one setting: the value both ways, the range inbound.
 void AddSettingBindings(WidgetConfiguration& widget, const char* setting_id, PropertyBindingDirection direction) {
     widget.bindings.push_back(SettingBinding(
-        WidgetPropertyType::VALUE, SettingsEventType::Changed, SettingsPayloadType::Value, setting_id, direction));
+        WidgetPropertyType::VALUE, SettingsEventType::Changed, SettingsPayloadType::Value, setting_id, direction
+    ));
     widget.bindings.push_back(SettingBinding(
-        WidgetPropertyType::MIN_VALUE, SettingsEventType::RangeChanged, SettingsPayloadType::MinValue, setting_id));
+        WidgetPropertyType::MIN_VALUE, SettingsEventType::RangeChanged, SettingsPayloadType::MinValue, setting_id
+    ));
     widget.bindings.push_back(SettingBinding(
-        WidgetPropertyType::MAX_VALUE, SettingsEventType::RangeChanged, SettingsPayloadType::MaxValue, setting_id));
-    widget.bindings.push_back(SettingBinding(
-        WidgetPropertyType::STEP, SettingsEventType::RangeChanged, SettingsPayloadType::Step, setting_id));
+        WidgetPropertyType::MAX_VALUE, SettingsEventType::RangeChanged, SettingsPayloadType::MaxValue, setting_id
+    ));
+    widget.bindings.push_back(
+        SettingBinding(WidgetPropertyType::STEP, SettingsEventType::RangeChanged, SettingsPayloadType::Step, setting_id)
+    );
 }
 
 } // namespace
@@ -180,11 +167,12 @@ UiController::UiController(
     std::shared_ptr<IFsService> fs_service,
     std::shared_ptr<WorkQueueThread> config_work_queue_thread,
     std::shared_ptr<ConfigurationService> configuration_service,
-    std::shared_ptr<AssetsManager> assets_manager)
-        : fs_service_(std::move(fs_service)),
-        config_work_queue_thread_(std::move(config_work_queue_thread)),
-        configuration_service_(std::move(configuration_service)),
-        assets_manager_(std::move(assets_manager)) {
+    std::shared_ptr<AssetsManager> assets_manager
+) :
+    fs_service_(std::move(fs_service)),
+    config_work_queue_thread_(std::move(config_work_queue_thread)),
+    configuration_service_(std::move(configuration_service)),
+    assets_manager_(std::move(assets_manager)) {
 
     if(assets_manager_ == nullptr)
         assets_manager_ = std::make_shared<AssetsManager>();
@@ -217,15 +205,18 @@ int UiController::Initialize() {
     ui_renderer_service_->Start();
 
     auto cbor_ui_config_service = std::make_unique<config_services::CborConfigurationService<CborUiConfig>>(
-        UI_CONFIGURATION_NAME, fs_service_, config_work_queue_thread_);
+        UI_CONFIGURATION_NAME, fs_service_, config_work_queue_thread_
+    );
     ui_configuration_manager_ = std::make_shared<UiConfigurationManager>(
-        std::move(cbor_ui_config_service),
-        [](const auto& owner, auto children) {
-            WidgetFactory::GetInstance().ValidateChildren(owner, children); });
+        std::move(cbor_ui_config_service), [](const auto& owner, auto children) {
+            WidgetFactory::GetInstance().ValidateChildren(owner, children);
+        }
+    );
 
     if(configuration_service_ != nullptr)
         configuration_service_->RegisterCborConfigurationManager(
-            ConfigurationService::Type::Ui, ui_configuration_manager_);
+            ConfigurationService::Type::Ui, ui_configuration_manager_
+        );
 
     RegisterAssets();
 
@@ -246,30 +237,25 @@ int UiController::Initialize() {
     }
 
     ui_render_work_queue_thread_ = std::make_unique<WorkQueueThread>(
-        "ui_render_work_q",
-        ui_render_work_queue_stack_size_,
-        ui_render_work_queue_priority_);
+        "ui_render_work_q", ui_render_work_queue_stack_size_, ui_render_work_queue_priority_
+    );
 
     if(ui_render_work_queue_thread_->Initialize()) {
         // Keeps the event bus worker - and the LVGL lock it holds while
         // dispatching - out of the multi-frame first render of a screen group.
-        main_view_->SetRenderDispatcher(
-            [work_queue = ui_render_work_queue_thread_.get()](std::function<void()> work) {
-                try {
-                    work_queue->Run(std::move(work));
-                } catch(const std::exception& e) {
-                    LOG_ERR("Failed to queue a screen group render. %s", e.what());
-                }
-            });
+        main_view_->SetRenderDispatcher([work_queue = ui_render_work_queue_thread_.get()](std::function<void()> work) {
+            try {
+                work_queue->Run(std::move(work));
+            } catch(const std::exception& e) {
+                LOG_ERR("Failed to queue a screen group render. %s", e.what());
+            }
+        });
     } else {
         LOG_ERR("Failed to start the UI render work queue, rendering inline.");
         ui_render_work_queue_thread_.reset();
     }
 
-    widget_context_ = WidgetContext {
-        .assets_manager = assets_manager_,
-        .navigation_service = navigation_service_
-    };
+    widget_context_ = WidgetContext{ .assets_manager = assets_manager_, .navigation_service = navigation_service_ };
 
     if(Configure(ui_configuration_manager_->Get()) != 0)
         LOG_ERR("Failed to configure the UI from the stored configuration.");
@@ -292,27 +278,28 @@ void UiController::RegisterAssets() {
     // Widgets keep RAM copies of what they load, so a client may overwrite or delete a file a widget
     // shows: nothing is ever in use, and the change appears at the widget's next render.
     constexpr auto access = static_cast<uint8_t>(
-        ToMask(AssetAccess::READ) | ToMask(AssetAccess::WRITE) | ToMask(AssetAccess::DELETE));
+        ToMask(AssetAccess::READ) | ToMask(AssetAccess::WRITE) | ToMask(AssetAccess::DELETE)
+    );
 
-    images_registered_ = assets_manager_->Register(AssetProvider {
-        .kind = AssetKind::IMAGES,
-        .name = "images",
-        .store = images_store_,
-        .extensions = IMAGE_EXTENSIONS,
-        .access = access,
-        .max_size = CONFIG_EERIE_LEAP_UI_IMAGE_MAX_SIZE
-    });
+    images_registered_ = assets_manager_->Register(
+        AssetProvider{ .kind = AssetKind::IMAGES,
+            .name = "images",
+            .store = images_store_,
+            .extensions = IMAGE_EXTENSIONS,
+            .access = access,
+            .max_size = CONFIG_EERIE_LEAP_UI_IMAGE_MAX_SIZE }
+    );
     if(!images_registered_)
         LOG_ERR("Failed to register the image assets, the registry has them already.");
 
-    animations_registered_ = assets_manager_->Register(AssetProvider {
-        .kind = AssetKind::ANIMATIONS,
-        .name = "animations",
-        .store = animations_store_,
-        .extensions = ANIMATION_EXTENSIONS,
-        .access = access,
-        .max_size = CONFIG_EERIE_LEAP_UI_ANIMATION_MAX_SIZE
-    });
+    animations_registered_ = assets_manager_->Register(
+        AssetProvider{ .kind = AssetKind::ANIMATIONS,
+            .name = "animations",
+            .store = animations_store_,
+            .extensions = ANIMATION_EXTENSIONS,
+            .access = access,
+            .max_size = CONFIG_EERIE_LEAP_UI_ANIMATION_MAX_SIZE }
+    );
     if(!animations_registered_)
         LOG_ERR("Failed to register the animation assets, the registry has them already.");
 }
@@ -321,15 +308,10 @@ void UiController::ConfigureGestures() {
     if(ui_input_service_ == nullptr)
         return;
 
-    ui_input_service_->SetGestureMapping(
-        LV_DIR_BOTTOM,
-        NavigationIntent::CloseOverlay);
+    ui_input_service_->SetGestureMapping(LV_DIR_BOTTOM, NavigationIntent::CloseOverlay);
 
     if(default_overlay_screen_id_.has_value())
-        ui_input_service_->SetGestureMapping(
-            LV_DIR_TOP,
-            NavigationIntent::ShowOverlay,
-            *default_overlay_screen_id_);
+        ui_input_service_->SetGestureMapping(LV_DIR_TOP, NavigationIntent::ShowOverlay, *default_overlay_screen_id_);
 }
 
 int UiController::Start() {
@@ -397,17 +379,18 @@ int UiController::Configure(std::shared_ptr<UiConfiguration> config) {
 void UiController::RequestSettingsState() const {
     static constexpr auto caller = GetCallerName();
 
-    SettingsEventsChannel::GetInstance().PublishAsync({
-        .source_id = caller.hash,
-        .type = SettingsEventType::StateRequested
-    });
+    SettingsEventsChannel::GetInstance().PublishAsync(
+        { .source_id = caller.hash, .type = SettingsEventType::StateRequested }
+    );
 }
 
 void UiController::SubscribeToNavigation() {
     navigation_subscription_ = CreateScopedSubscription(
-        NavigationEventChannel::GetInstance(),
-        NavigationEventType::Changed,
-        [this](const NavigationEventChannel::EventMessage& event) { OnNavigationChanged(event); });
+        NavigationEventChannel::GetInstance(), NavigationEventType::Changed,
+        [this](const NavigationEventChannel::EventMessage& event) {
+            OnNavigationChanged(event);
+        }
+    );
 
     if(navigation_subscription_ == nullptr)
         LOG_ERR("Failed to subscribe to navigation events.");
@@ -511,15 +494,11 @@ std::shared_ptr<NavigationService> UiController::GetNavigationService() const {
     return navigation_service_;
 }
 
-std::shared_ptr<IScreen> UiController::CreateScreen(
-    std::shared_ptr<ScreenConfiguration> configuration,
-    std::shared_ptr<Frame> parent) {
+std::shared_ptr<IScreen>
+UiController::CreateScreen(std::shared_ptr<ScreenConfiguration> configuration, std::shared_ptr<Frame> parent) {
 
     try {
-        return ScreenFactory::GetInstance().CreateScreen(
-            configuration,
-            std::move(parent),
-            widget_context_);
+        return ScreenFactory::GetInstance().CreateScreen(configuration, std::move(parent), widget_context_);
     } catch(const std::exception& e) {
         LOG_ERR("Failed to create screen with ID: %d. %s", configuration->id, e.what());
         return nullptr;
@@ -939,8 +918,7 @@ void UiController::SetupTestConfiguration() {
     widget3_1->size_grid.height = 60;
     widget3_1->z_index = 0;
     widget3_1->properties[WidgetPropertyType::LABEL] = "Close";
-    widget3_1->properties[WidgetPropertyType::NAVIGATION_INTENT] =
-        static_cast<int>(NavigationIntent::CloseOverlay);
+    widget3_1->properties[WidgetPropertyType::NAVIGATION_INTENT] = static_cast<int>(NavigationIntent::CloseOverlay);
     screen_configuration_3->AddWidget(std::move(widget3_1));
 
     ui_configuration->screen_configurations.push_back(std::move(screen_configuration_3));
@@ -969,13 +947,9 @@ void UiController::SetupTestAssets() {
     if(images_store_->Exists("ui_img_norma_al88.bin"))
         return;
 
-    images_store_->Save(
-        "ui_img_norma_al88.bin",
-        ui_img_norma_al88_data);
+    images_store_->Save("ui_img_norma_al88.bin", ui_img_norma_al88_data);
 
-    images_store_->Save(
-        "ui_img_arrow_al88.bin",
-        ui_img_arrow_al88_data);
+    images_store_->Save("ui_img_arrow_al88.bin", ui_img_arrow_al88_data);
 }
 
 } // namespace eerie_leap::controllers

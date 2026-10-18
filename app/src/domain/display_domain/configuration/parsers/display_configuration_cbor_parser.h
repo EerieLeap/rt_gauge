@@ -21,7 +21,8 @@ public:
     DisplayConfigurationCborParser() = default;
 
     eerie_memory::pmr_unique_ptr<CborDisplayConfig> Serialize(const DisplayConfiguration& configuration);
-    eerie_memory::pmr_unique_ptr<DisplayConfiguration> Deserialize(std::pmr::memory_resource* mr, const CborDisplayConfig& config);
+    eerie_memory::pmr_unique_ptr<DisplayConfiguration>
+    Deserialize(std::pmr::memory_resource* mr, const CborDisplayConfig& config);
 };
 
 } // namespace eerie_leap::domain::display_domain::configuration::parsers

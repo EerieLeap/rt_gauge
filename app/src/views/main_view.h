@@ -10,8 +10,8 @@
 #include <lvgl.h>
 
 #include "views/renderable_base.h"
-#include "views/screens/screen_group.h"
 #include "views/screens/i_screen.h"
+#include "views/screens/screen_group.h"
 
 namespace eerie_leap::views {
 
@@ -32,7 +32,8 @@ private:
 
     int RenderGroupOrRollBack(
         const std::shared_ptr<ScreenGroup>& screen_group,
-        const std::shared_ptr<ScreenGroup>& previous_screen_group);
+        const std::shared_ptr<ScreenGroup>& previous_screen_group
+    );
 
     int DoRender() override;
     int ApplyTheme(const ITheme& theme) override;

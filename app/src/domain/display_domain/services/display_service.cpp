@@ -19,13 +19,13 @@
 
 namespace eerie_leap::domain::display_domain::services {
 
+using eerie_leap::domain::settings_domain::models::SettingId;
+using eerie_leap::domain::ui_domain::ScopedLvglLock;
 using eerie_leap::subsys::device_tree::DtDisplay;
 using eerie_leap::subsys::event_bus::CreateScopedSubscription;
 using eerie_leap::subsys::threading::ScopedMutex;
 using eerie_leap::utilities::reflection::GetCallerName;
 using eerie_leap::utilities::string::StringHelpers;
-using eerie_leap::domain::settings_domain::models::SettingId;
-using eerie_leap::domain::ui_domain::ScopedLvglLock;
 
 using namespace eerie_leap::domain::settings_domain::event_bus;
 
@@ -51,17 +51,17 @@ bool IsBrightnessSetting(const SettingsEventsChannel::EventMessage& event) {
 
 // A request that names no setting is addressed to every owner.
 bool IsBrightnessStateRequest(const SettingsEventsChannel::EventMessage& event) {
-    return event.payload.find(SettingsPayloadType::SettingId) == event.payload.end()
-        || IsBrightnessSetting(event);
+    return event.payload.find(SettingsPayloadType::SettingId) == event.payload.end() || IsBrightnessSetting(event);
 }
 
 } // namespace
 
 DisplayService::DisplayService(
     std::shared_ptr<DisplayConfigurationManager> configuration_manager,
-    std::shared_ptr<WorkQueueThread> config_work_queue_thread)
-    : configuration_manager_(std::move(configuration_manager)),
-      config_work_queue_thread_(std::move(config_work_queue_thread)) {
+    std::shared_ptr<WorkQueueThread> config_work_queue_thread
+) :
+    configuration_manager_(std::move(configuration_manager)),
+    config_work_queue_thread_(std::move(config_work_queue_thread)) {
 
     k_mutex_init(&lock_);
 }
@@ -115,25 +115,26 @@ int DisplayService::Initialize() {
 
 void DisplayService::SubscribeSettings() {
     change_requested_subscription_ = CreateScopedSubscription(
-        SettingsEventsChannel::GetInstance(),
-        SettingsEventType::ChangeRequested,
-        IsBrightnessSetting,
-        [this](const SettingsEventsChannel::EventMessage& event) { OnBrightnessChangeRequested(event); });
+        SettingsEventsChannel::GetInstance(), SettingsEventType::ChangeRequested, IsBrightnessSetting,
+        [this](const SettingsEventsChannel::EventMessage& event) {
+            OnBrightnessChangeRequested(event);
+        }
+    );
 
     state_requested_subscription_ = CreateScopedSubscription(
-        SettingsEventsChannel::GetInstance(),
-        SettingsEventType::StateRequested,
-        IsBrightnessStateRequest,
+        SettingsEventsChannel::GetInstance(), SettingsEventType::StateRequested, IsBrightnessStateRequest,
         [this](const SettingsEventsChannel::EventMessage&) {
             PublishBrightnessRange();
             PublishBrightnessValue();
-        });
+        }
+    );
 
     persist_requested_subscription_ = CreateScopedSubscription(
-        SettingsEventsChannel::GetInstance(),
-        SettingsEventType::PersistRequested,
-        IsBrightnessSetting,
-        [this](const SettingsEventsChannel::EventMessage&) { Persist(); });
+        SettingsEventsChannel::GetInstance(), SettingsEventType::PersistRequested, IsBrightnessSetting,
+        [this](const SettingsEventsChannel::EventMessage&) {
+            Persist();
+        }
+    );
 
     PublishBrightnessRange();
     PublishBrightnessValue();
@@ -168,29 +169,25 @@ void DisplayService::OnBrightnessChangeRequested(const SettingsEventsChannel::Ev
 void DisplayService::PublishBrightnessValue() const {
     static constexpr auto caller = GetCallerName();
 
-    SettingsEventsChannel::GetInstance().PublishAsync({
-        .source_id = caller.hash,
-        .type = SettingsEventType::Changed,
-        .payload = {
-            { SettingsPayloadType::SettingId, BrightnessSettingId() },
-            { SettingsPayloadType::Value, static_cast<int>(GetBrightness()) }
-        }
-    });
+    SettingsEventsChannel::GetInstance().PublishAsync(
+        { .source_id = caller.hash,
+            .type = SettingsEventType::Changed,
+            .payload = { { SettingsPayloadType::SettingId, BrightnessSettingId() },
+                { SettingsPayloadType::Value, static_cast<int>(GetBrightness()) } } }
+    );
 }
 
 void DisplayService::PublishBrightnessRange() const {
     static constexpr auto caller = GetCallerName();
 
-    SettingsEventsChannel::GetInstance().PublishAsync({
-        .source_id = caller.hash,
-        .type = SettingsEventType::RangeChanged,
-        .payload = {
-            { SettingsPayloadType::SettingId, BrightnessSettingId() },
-            { SettingsPayloadType::MinValue, static_cast<float>(brightness_min_) },
-            { SettingsPayloadType::MaxValue, static_cast<float>(brightness_max_) },
-            { SettingsPayloadType::Step, static_cast<float>(brightness_step_) }
-        }
-    });
+    SettingsEventsChannel::GetInstance().PublishAsync(
+        { .source_id = caller.hash,
+            .type = SettingsEventType::RangeChanged,
+            .payload = { { SettingsPayloadType::SettingId, BrightnessSettingId() },
+                { SettingsPayloadType::MinValue, static_cast<float>(brightness_min_) },
+                { SettingsPayloadType::MaxValue, static_cast<float>(brightness_max_) },
+                { SettingsPayloadType::Step, static_cast<float>(brightness_step_) } } }
+    );
 }
 
 bool DisplayService::IsInitialized() const {
@@ -228,9 +225,7 @@ int DisplayService::ApplyBlanking(bool enabled) {
 
     ScopedLvglLock lvgl_guard;
 
-    int res = enabled
-        ? display_blanking_on(DtDisplay::Get())
-        : display_blanking_off(DtDisplay::Get());
+    int res = enabled ? display_blanking_on(DtDisplay::Get()) : display_blanking_off(DtDisplay::Get());
 
     if(res == -ENOTSUP || res == -ENOSYS)
         return 0;
@@ -310,9 +305,7 @@ int DisplayService::Persist() {
 WorkQueueTaskResult DisplayService::PersistWork(PersistTask* task) {
     task->service->WriteConfiguration();
 
-    return {
-        .reschedule = false
-    };
+    return { .reschedule = false };
 }
 
 void DisplayService::WriteConfiguration() {

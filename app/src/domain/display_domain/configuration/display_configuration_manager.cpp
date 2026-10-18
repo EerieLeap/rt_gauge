@@ -15,7 +15,8 @@ using namespace eerie_leap::configuration::services;
 LOG_MODULE_REGISTER(display_config_ctrl_logger);
 
 DisplayConfigurationManager::DisplayConfigurationManager(
-    std::unique_ptr<CborConfigurationService<CborDisplayConfig>> cbor_configuration_service) :
+    std::unique_ptr<CborConfigurationService<CborDisplayConfig>> cbor_configuration_service
+) :
     CborConfigurationManagerBase("Display", std::move(cbor_configuration_service)) {
 
     LoadOrCreateDefault();
@@ -53,7 +54,7 @@ pmr_unique_ptr<DisplayConfiguration> DisplayConfigurationManager::Deserialize(co
 }
 
 bool DisplayConfigurationManager::CreateDefaultConfiguration() {
-    return Update(DisplayConfiguration {});
+    return Update(DisplayConfiguration{});
 }
 
 } // namespace eerie_leap::domain::display_domain::configuration

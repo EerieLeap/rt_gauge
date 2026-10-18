@@ -1,7 +1,7 @@
 #include "domain/ui_domain/models/widget_property.h"
 
-#include "views/utilitites/positioning_helpers.h"
 #include "views/themes/theme_manager.h"
+#include "views/utilitites/positioning_helpers.h"
 
 #include "arc_icon_widget.h"
 
@@ -12,8 +12,8 @@ using namespace eerie_leap::domain::ui_domain::models;
 using namespace eerie_leap::views::utilitites;
 using namespace eerie_leap::views::themes;
 
-ArcIconWidget::ArcIconWidget(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context, IconType icon_type)
-    : IconWidget(id, std::move(parent), std::move(context), icon_type) {}
+ArcIconWidget::ArcIconWidget(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context, IconType icon_type) :
+    IconWidget(id, std::move(parent), std::move(context), icon_type) {}
 
 int ArcIconWidget::ApplyTheme(const ITheme& theme) {
     IconWidget::ApplyTheme(theme);
@@ -24,11 +24,9 @@ int ArcIconWidget::ApplyTheme(const ITheme& theme) {
     lv_coord_t icon_height = lv_obj_get_height(icon_->GetContainer()->GetObject());
 
     PositioningHelpers::PlaceObjectOnCircle(
-        icon_->GetContainer()->GetObject(),
-        position_x_,
-        position_y_,
-        radius - icon_height / 2 - edge_offset_px_,
-        position_angle_ - 90.0F);
+        icon_->GetContainer()->GetObject(), position_x_, position_y_, radius - icon_height / 2 - edge_offset_px_,
+        position_angle_ - 90.0F
+    );
 
     return 0;
 }
@@ -36,8 +34,8 @@ int ArcIconWidget::ApplyTheme(const ITheme& theme) {
 void ArcIconWidget::RegisterProperties(WidgetPropertyStore& store) const {
     IconWidget::RegisterProperties(store);
 
-    store.Register(WidgetPropertyType::POSITION_ANGLE, ConfigValue { -90.0 }, PropertyChangeEffect::Relayout);
-    store.Register(WidgetPropertyType::EDGE_OFFSET, ConfigValue { 0 }, PropertyChangeEffect::Relayout);
+    store.Register(WidgetPropertyType::POSITION_ANGLE, ConfigValue{ -90.0 }, PropertyChangeEffect::Relayout);
+    store.Register(WidgetPropertyType::EDGE_OFFSET, ConfigValue{ 0 }, PropertyChangeEffect::Relayout);
 }
 
 void ArcIconWidget::OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) {

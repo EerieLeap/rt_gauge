@@ -7,8 +7,8 @@
 #include <memory>
 #include <vector>
 
-#include <zephyr/ztest.h>
 #include <libs/thorvg/thorvg_capi.h>
+#include <zephyr/ztest.h>
 
 #include "domain/sensor_domain/event_bus/sensor_events_channel.h"
 #include "domain/ui_domain/models/widget_direction.h"
@@ -39,13 +39,8 @@ using eerie_leap::views::widgets::indicators::BarIndicator;
 
 namespace {
 
-constexpr std::array shape_types {
-    IconType::Rectangle,
-    IconType::TriangleIsosceles,
-    IconType::TriangleRight,
-    IconType::Oval,
-    IconType::Line
-};
+constexpr std::array shape_types{ IconType::Rectangle, IconType::TriangleIsosceles, IconType::TriangleRight,
+    IconType::Oval, IconType::Line };
 
 std::shared_ptr<Frame> MakeRoot() {
     return std::make_shared<Frame>(Frame::CreateWrapped().SetWidth(200, true).SetHeight(200, true).Build());
@@ -58,7 +53,8 @@ std::shared_ptr<WidgetConfiguration> Configuration(
     WidgetFillMode fill = WidgetFillMode::Filled,
     int radius_px = 0,
     int stroke_px = 4,
-    WidgetDirection direction = WidgetDirection::LeftToRight) {
+    WidgetDirection direction = WidgetDirection::LeftToRight
+) {
 
     auto configuration = std::make_shared<WidgetConfiguration>(std::allocator_arg, std::pmr::get_default_resource());
     configuration->type = WidgetType::BasicIcon;
@@ -77,7 +73,7 @@ std::shared_ptr<WidgetConfiguration> Configuration(
 }
 
 std::unique_ptr<IconWidget> MakeWidget(std::shared_ptr<WidgetConfiguration> configuration) {
-    auto widget = std::make_unique<IconWidget>(1, MakeRoot(), WidgetContext {});
+    auto widget = std::make_unique<IconWidget>(1, MakeRoot(), WidgetContext{});
     widget->Configure(std::move(configuration));
     zassert_equal(widget->Render(), 0);
     widget->OnActivated();
@@ -106,17 +102,26 @@ std::vector<uint8_t> Pixels(const IconWidget& widget) {
     return { image.data, image.data + image.data_size };
 }
 
-std::vector<uint8_t> PolygonPixels(std::vector<lv_fpoint_t> vertices,
-    WidgetFillMode fill = WidgetFillMode::Filled, int radius = 0, int stroke = 4) {
+std::vector<uint8_t> PolygonPixels(
+    std::vector<lv_fpoint_t> vertices,
+    WidgetFillMode fill = WidgetFillMode::Filled,
+    int radius = 0,
+    int stroke = 4
+) {
     // A test-only shape demonstrates reuse without adding a new public icon type.
     class TestPolygonIcon : public PolygonIconBase {
         Polygon vertices_;
-        Polygon GetVertices(float, float) const override { return vertices_; }
+        Polygon GetVertices(float, float) const override {
+            return vertices_;
+        }
 
     public:
-        TestPolygonIcon(std::shared_ptr<Frame> parent, Polygon vertices)
-            : PolygonIconBase(std::move(parent)), vertices_(std::move(vertices)) {}
-        IconType GetIconType() const override { return IconType::None; }
+        TestPolygonIcon(std::shared_ptr<Frame> parent, Polygon vertices) :
+            PolygonIconBase(std::move(parent)),
+            vertices_(std::move(vertices)) {}
+        IconType GetIconType() const override {
+            return IconType::None;
+        }
     };
     TestPolygonIcon icon(MakeRoot(), std::move(vertices));
     auto properties = std::make_shared<WidgetPropertyStore>();
@@ -149,7 +154,7 @@ void SavePreview(const lv_draw_buf_t& snapshot, const char* name, int variant) {
     for(uint32_t y = 0; y < snapshot.header.h; ++y) {
         auto pixels = reinterpret_cast<const lv_color32_t*>(snapshot.data + y * snapshot.header.stride);
         for(uint32_t x = 0; x < snapshot.header.w; ++x) {
-            uint8_t rgb[] { pixels[x].red, pixels[x].green, pixels[x].blue };
+            uint8_t rgb[]{ pixels[x].red, pixels[x].green, pixels[x].blue };
             zassert_equal(std::fwrite(rgb, 1, sizeof(rgb), file), sizeof(rgb));
         }
     }
@@ -158,22 +163,18 @@ void SavePreview(const lv_draw_buf_t& snapshot, const char* name, int variant) {
 }
 
 void Bind(WidgetConfiguration& configuration, WidgetPropertyType type) {
-    configuration.bindings.push_back(PropertyBinding {
-        .target = type,
-        .event = {
-            .channel = EventChannelId::Sensors,
-            .event_type = std::to_underlying(SensorEventType::DataUpdated),
-            .payload_key = std::to_underlying(SensorPayloadType::Value)
-        }
-    });
+    configuration.bindings.push_back(
+        PropertyBinding{ .target = type,
+            .event = { .channel = EventChannelId::Sensors,
+                .event_type = std::to_underlying(SensorEventType::DataUpdated),
+                .payload_key = std::to_underlying(SensorPayloadType::Value) } }
+    );
 }
 
 void Publish(float value) {
-    SensorEventsChannel::GetInstance().Publish({
-        .source_id = 0,
-        .type = SensorEventType::DataUpdated,
-        .payload = {{ SensorPayloadType::Value, value }}
-    });
+    SensorEventsChannel::GetInstance().Publish(
+        { .source_id = 0, .type = SensorEventType::DataUpdated, .payload = { { SensorPayloadType::Value, value } } }
+    );
 }
 
 void* SetUp() {
@@ -198,10 +199,8 @@ ZTEST(shape_icons, test_vector_backend_respects_disabled_document_loaders) {
     zassert_not_null(picture.get());
 #if !LV_USE_LOTTIE
     constexpr char svg[] = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"2\" height=\"2\">"
-        "<rect width=\"2\" height=\"2\"/></svg>";
-    zassert_equal(
-        tvg_picture_load_data(picture.get(), svg, sizeof(svg) - 1, "svg", true),
-        TVG_RESULT_NOT_SUPPORTED);
+                           "<rect width=\"2\" height=\"2\"/></svg>";
+    zassert_equal(tvg_picture_load_data(picture.get(), svg, sizeof(svg) - 1, "svg", true), TVG_RESULT_NOT_SUPPORTED);
     zassert_is_null(tvg_lottie_animation_new());
 #endif
     uint32_t pixel = 0xFFFFFFFF;
@@ -216,8 +215,8 @@ ZTEST(shape_icons, test_factory_registers_all_shapes_and_widgets_report_their_pr
         zassert_equal(Mask(*widget).header.w, 64);
         zassert_equal(Mask(*widget).header.h, 48);
         auto supported = widget->GetSupportedProperties();
-        for(auto property : { WidgetPropertyType::WIDTH_PX, WidgetPropertyType::HEIGHT_PX,
-                              WidgetPropertyType::STROKE_PX })
+        for(auto property :
+            { WidgetPropertyType::WIDTH_PX, WidgetPropertyType::HEIGHT_PX, WidgetPropertyType::STROKE_PX })
             zassert_true(std::find(supported.begin(), supported.end(), property) != supported.end());
         auto supports = [&](WidgetPropertyType property) {
             return std::find(supported.begin(), supported.end(), property) != supported.end();
@@ -240,15 +239,21 @@ ZTEST(shape_icons, test_icon_metadata_is_specific_before_rendering) {
         zassert_equal(lv_obj_get_child_count(root->GetObject()), before);
         zassert_equal(store.IsRegistered(WidgetPropertyType::LABEL), type == IconType::Label);
         zassert_equal(store.IsRegistered(WidgetPropertyType::FILE_PATH), type == IconType::Image);
-        zassert_equal(store.IsRegistered(WidgetPropertyType::WIDTH_PX),
-            std::find(shape_types.begin(), shape_types.end(), type) != shape_types.end());
+        zassert_equal(
+            store.IsRegistered(WidgetPropertyType::WIDTH_PX),
+            std::find(shape_types.begin(), shape_types.end(), type) != shape_types.end()
+        );
     }
-    IconWidget line(1, root, WidgetContext {}, IconType::Line);
+    IconWidget line(1, root, WidgetContext{}, IconType::Line);
     auto line_properties = line.GetSupportedProperties();
-    zassert_true(std::find(line_properties.begin(), line_properties.end(), WidgetPropertyType::DIRECTION)
-        != line_properties.end());
-    zassert_true(std::find(line_properties.begin(), line_properties.end(), WidgetPropertyType::FILL_MODE)
-        == line_properties.end());
+    zassert_true(
+        std::find(line_properties.begin(), line_properties.end(), WidgetPropertyType::DIRECTION)
+        != line_properties.end()
+    );
+    zassert_true(
+        std::find(line_properties.begin(), line_properties.end(), WidgetPropertyType::FILL_MODE)
+        == line_properties.end()
+    );
 }
 
 ZTEST(shape_icons, test_irrelevant_bindings_do_not_reconfigure_a_shape) {
@@ -278,8 +283,10 @@ ZTEST(shape_icons, test_default_shapes_have_visible_geometry) {
         auto widget = MakeWidget(configuration);
         zassert_equal(Mask(*widget).header.w, 32);
         zassert_equal(Mask(*widget).header.h, 32);
-        zassert_within(Alpha(*widget, 16, 24), type == IconType::Line ? 0 : 255, 1,
-            "Type %d: alpha %u", static_cast<int>(type), Alpha(*widget, 16, 24));
+        zassert_within(
+            Alpha(*widget, 16, 24), type == IconType::Line ? 0 : 255, 1, "Type %d: alpha %u", static_cast<int>(type),
+            Alpha(*widget, 16, 24)
+        );
     }
 }
 
@@ -321,7 +328,7 @@ ZTEST(shape_icons, test_triangles_have_distinct_geometry_and_rounded_outline_cor
 }
 
 ZTEST(shape_icons, test_polygon_base_supports_rounded_pentagons_in_both_windings) {
-    std::vector<lv_fpoint_t> vertices { { 32, 0 }, { 64, 24 }, { 52, 64 }, { 12, 64 }, { 0, 24 } };
+    std::vector<lv_fpoint_t> vertices{ { 32, 0 }, { 64, 24 }, { 52, 64 }, { 12, 64 }, { 0, 24 } };
     for(auto fill : { WidgetFillMode::Filled, WidgetFillMode::Outline }) {
         for(int radius : { 0, 8, 999 }) {
             auto pixels = PolygonPixels(vertices, fill, radius);
@@ -342,7 +349,7 @@ ZTEST(shape_icons, test_polygon_base_supports_rounded_pentagons_in_both_windings
 ZTEST(shape_icons, test_polygon_outline_keeps_uniform_inset_when_a_short_edge_disappears) {
     // The diagonal cut at the top right disappears from the inner contour at
     // this stroke width. The remaining hole is the square [16,48] x [16,48].
-    std::vector<lv_fpoint_t> vertices { { 0, 0 }, { 56, 0 }, { 64, 8 }, { 64, 64 }, { 0, 64 } };
+    std::vector<lv_fpoint_t> vertices{ { 0, 0 }, { 56, 0 }, { 64, 8 }, { 64, 64 }, { 0, 64 } };
     auto pixels = PolygonPixels(vertices, WidgetFillMode::Outline, 0, 16);
     for(int y = 12; y < 52; ++y) {
         for(int x = 12; x < 52; ++x) {
@@ -356,14 +363,13 @@ ZTEST(shape_icons, test_polygon_outline_keeps_uniform_inset_when_a_short_edge_di
 }
 
 ZTEST(shape_icons, test_polygon_base_rejects_degenerate_and_nonconvex_geometry) {
-    for(const std::vector<lv_fpoint_t>& vertices : {
-            std::vector<lv_fpoint_t> {},
-            { { 0, 0 }, { 64, 0 } },
-            { { 0, 0 }, { 32, 32 }, { 64, 64 } },
-            { { 0, 0 }, { 64, 0 }, { 32, 16 }, { 64, 64 }, { 0, 64 } },
+    for(const std::vector<lv_fpoint_t>& vertices : { std::vector<lv_fpoint_t>{}, { { 0, 0 }, { 64, 0 } },
+            { { 0, 0 }, { 32, 32 }, { 64, 64 } }, { { 0, 0 }, { 64, 0 }, { 32, 16 }, { 64, 64 }, { 0, 64 } },
             { { 0, 0 }, { 64, 64 }, { 0, 64 }, { 64, 0 } } }) {
         auto pixels = PolygonPixels(vertices, WidgetFillMode::Outline, 8);
-        zassert_true(std::all_of(pixels.begin(), pixels.end(), [](uint8_t alpha) { return alpha == 0; }));
+        zassert_true(std::all_of(pixels.begin(), pixels.end(), [](uint8_t alpha) {
+            return alpha == 0;
+        }));
     }
 }
 
@@ -383,15 +389,18 @@ ZTEST(shape_icons, test_line_direction_controls_orientation_and_reversal_preserv
     auto left = MakeWidget(Configuration(IconType::Line));
     zassert_within(Alpha(*left, 1, 24), 255, 1);
     zassert_equal(Alpha(*left, 32, 1), 0);
-    auto right = MakeWidget(Configuration(IconType::Line, 64, 48, WidgetFillMode::Outline, 20, 4,
-        WidgetDirection::RightToLeft));
+    auto right = MakeWidget(
+        Configuration(IconType::Line, 64, 48, WidgetFillMode::Outline, 20, 4, WidgetDirection::RightToLeft)
+    );
     zassert_true(Pixels(*left) == Pixels(*right));
-    auto down = MakeWidget(Configuration(IconType::Line, 64, 48, WidgetFillMode::Filled, 0, 4,
-        WidgetDirection::TopToBottom));
+    auto down = MakeWidget(
+        Configuration(IconType::Line, 64, 48, WidgetFillMode::Filled, 0, 4, WidgetDirection::TopToBottom)
+    );
     zassert_within(Alpha(*down, 32, 1), 255, 1);
     zassert_equal(Alpha(*down, 1, 24), 0);
-    auto up = MakeWidget(Configuration(IconType::Line, 64, 48, WidgetFillMode::Filled, 0, 4,
-        WidgetDirection::BottomToTop));
+    auto up = MakeWidget(
+        Configuration(IconType::Line, 64, 48, WidgetFillMode::Filled, 0, 4, WidgetDirection::BottomToTop)
+    );
     zassert_true(Pixels(*up) == Pixels(*down));
 }
 
@@ -400,8 +409,9 @@ ZTEST(shape_icons, test_lines_allow_zero_unused_dimension_and_keep_the_entire_st
     zassert_equal(Mask(*horizontal).header.h, 7);
     zassert_within(Alpha(*horizontal, 32, 0), 255, 1);
     zassert_within(Alpha(*horizontal, 32, 6), 255, 1);
-    auto vertical = MakeWidget(Configuration(IconType::Line, 0, 48, WidgetFillMode::Filled, 0, 7,
-        WidgetDirection::TopToBottom));
+    auto vertical = MakeWidget(
+        Configuration(IconType::Line, 0, 48, WidgetFillMode::Filled, 0, 7, WidgetDirection::TopToBottom)
+    );
     zassert_equal(Mask(*vertical).header.w, 7);
     zassert_within(Alpha(*vertical, 0, 24), 255, 1);
     zassert_within(Alpha(*vertical, 6, 24), 255, 1);
@@ -427,7 +437,9 @@ ZTEST(shape_icons, test_large_radii_and_thicknesses_fit_small_shapes) {
     for(auto type : { IconType::Rectangle, IconType::TriangleIsosceles, IconType::TriangleRight, IconType::Oval }) {
         auto widget = MakeWidget(Configuration(type, 8, 8, WidgetFillMode::Outline, 999, 999));
         auto pixels = Pixels(*widget);
-        zassert_true(std::any_of(pixels.begin(), pixels.end(), [](uint8_t alpha) { return alpha > 0; }));
+        zassert_true(std::any_of(pixels.begin(), pixels.end(), [](uint8_t alpha) {
+            return alpha > 0;
+        }));
     }
     auto pixel = MakeWidget(Configuration(IconType::Rectangle, 1, 1));
     zassert_within(Alpha(*pixel, 0, 0), 255, 1);
@@ -451,11 +463,9 @@ ZTEST(shape_icons, test_async_binding_rasterizes_on_the_event_bus_worker) {
     auto configuration = Configuration(IconType::TriangleIsosceles, 64, 48, WidgetFillMode::Outline, 10);
     Bind(*configuration, WidgetPropertyType::WIDTH_PX);
     auto widget = MakeWidget(configuration);
-    SensorEventsChannel::GetInstance().PublishAsync({
-        .source_id = 0,
-        .type = SensorEventType::DataUpdated,
-        .payload = {{ SensorPayloadType::Value, 96.0F }}
-    });
+    SensorEventsChannel::GetInstance().PublishAsync(
+        { .source_id = 0, .type = SensorEventType::DataUpdated, .payload = { { SensorPayloadType::Value, 96.0F } } }
+    );
     int64_t deadline = k_uptime_get() + 1000;
     bool updated = false;
     while(!updated && k_uptime_get() < deadline) {
@@ -491,10 +501,11 @@ ZTEST(shape_icons, test_overlay_redraw_preserves_the_underlying_shape) {
 
 ZTEST(shape_icons, test_bound_fill_radius_thickness_and_direction_refresh_the_mask) {
     for(auto property : { WidgetPropertyType::FILL_MODE, WidgetPropertyType::CORNER_RAD_PX,
-                         WidgetPropertyType::STROKE_PX, WidgetPropertyType::DIRECTION }) {
+            WidgetPropertyType::STROKE_PX, WidgetPropertyType::DIRECTION }) {
         auto type = property == WidgetPropertyType::DIRECTION ? IconType::Line : IconType::Rectangle;
-        auto configuration = Configuration(type, 64, 48,
-            property == WidgetPropertyType::STROKE_PX ? WidgetFillMode::Outline : WidgetFillMode::Filled);
+        auto configuration = Configuration(
+            type, 64, 48, property == WidgetPropertyType::STROKE_PX ? WidgetFillMode::Outline : WidgetFillMode::Filled
+        );
         Bind(*configuration, property);
         auto widget = MakeWidget(configuration);
         auto before = Pixels(*widget);
@@ -507,7 +518,7 @@ ZTEST(shape_icons, test_arc_repositions_when_shape_height_changes) {
     auto configuration = Configuration(IconType::Rectangle, 32, 32);
     configuration->properties[WidgetPropertyType::POSITION_ANGLE] = 0;
     Bind(*configuration, WidgetPropertyType::HEIGHT_PX);
-    auto widget = std::make_unique<ArcIconWidget>(1, MakeRoot(), WidgetContext {});
+    auto widget = std::make_unique<ArcIconWidget>(1, MakeRoot(), WidgetContext{});
     widget->Configure(configuration);
     zassert_true(widget->SetRotation(0));
     zassert_equal(widget->Render(), 0);
@@ -523,7 +534,9 @@ ZTEST(shape_icons, test_arc_repositions_when_shape_height_changes) {
     zassert_within(after_offset, 68, 1, "Resized arc offset: %d", after_offset);
     zassert_equal(lv_obj_get_y(ImageObject(*widget)), 68 + after_offset);
     zassert_equal(lv_obj_get_style_transform_pivot_y(ImageObject(*widget), LV_PART_MAIN), 32);
-    zassert_equal(lv_obj_get_style_transform_pivot_y(views_test::WidgetContent(*widget), LV_PART_MAIN), 100 + after_offset);
+    zassert_equal(
+        lv_obj_get_style_transform_pivot_y(views_test::WidgetContent(*widget), LV_PART_MAIN), 100 + after_offset
+    );
 }
 
 ZTEST(shape_icons, test_arc_position_angle_and_edge_offset_remain_leaf_owned) {
@@ -555,7 +568,9 @@ ZTEST(shape_icons, test_arc_position_angle_and_edge_offset_remain_leaf_owned) {
 
 ZTEST(shape_icons, test_theme_and_visibility_preserve_geometry_and_part_opacity) {
     class BlueTheme : public DefaultTheme {
-        LvglColor GetAccentColor() const override { return LvglColor(0x3366FF, 128); }
+        LvglColor GetAccentColor() const override {
+            return LvglColor(0x3366FF, 128);
+        }
     };
     auto configuration = Configuration(IconType::Rectangle, 32, 32);
     Bind(*configuration, WidgetPropertyType::IS_VISIBLE);
@@ -564,8 +579,10 @@ ZTEST(shape_icons, test_theme_and_visibility_preserve_geometry_and_part_opacity)
     ThemeManager::GetInstance().SetTheme(std::make_shared<BlueTheme>());
     zassert_equal(Mask(*widget).data, data);
     zassert_equal(lv_obj_get_style_opa(ImageObject(*widget), LV_PART_MAIN), 128);
-    zassert_equal(lv_color_to_u32(lv_obj_get_style_image_recolor(ImageObject(*widget), LV_PART_MAIN)),
-        lv_color_to_u32(lv_color_hex(0x3366FF)));
+    zassert_equal(
+        lv_color_to_u32(lv_obj_get_style_image_recolor(ImageObject(*widget), LV_PART_MAIN)),
+        lv_color_to_u32(lv_color_hex(0x3366FF))
+    );
     Publish(0);
     zassert_true(lv_obj_has_flag(widget->GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN));
     zassert_equal(lv_obj_get_style_opa(ImageObject(*widget), LV_PART_MAIN), 128);
@@ -595,20 +612,21 @@ ZTEST(shape_icons, test_inactive_shapes_keep_their_appearance_across_theme_chang
 }
 
 ZTEST(shape_icons, test_rendered_gallery_preserves_background_and_recolors_masks) {
-    constexpr std::array names { "rectangle", "triangle_isosceles", "triangle_right", "oval", "line" };
+    constexpr std::array names{ "rectangle", "triangle_isosceles", "triangle_right", "oval", "line" };
     for(size_t i = 0; i < shape_types.size(); ++i) {
         for(int variant = 0; variant < 4; ++variant) {
-            auto widget = MakeWidget(Configuration(shape_types[i], 64, 48,
-                variant % 2 == 0 ? WidgetFillMode::Filled : WidgetFillMode::Outline,
-                variant >= 2 ? 12 : 0, 4,
-                variant >= 2 ? WidgetDirection::TopToBottom : WidgetDirection::LeftToRight));
+            auto widget = MakeWidget(Configuration(
+                shape_types[i], 64, 48, variant % 2 == 0 ? WidgetFillMode::Filled : WidgetFillMode::Outline,
+                variant >= 2 ? 12 : 0, 4, variant >= 2 ? WidgetDirection::TopToBottom : WidgetDirection::LeftToRight
+            ));
             auto root = lv_obj_get_parent(widget->GetContainer()->GetObject());
             lv_obj_set_size(root, 96, 72);
             lv_obj_set_style_bg_color(root, lv_color_hex(0xF3F4F6), 0);
             lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
             lv_obj_update_layout(root);
             std::unique_ptr<lv_draw_buf_t, decltype(&lv_draw_buf_destroy)> snapshot(
-                lv_snapshot_take(root, LV_COLOR_FORMAT_ARGB8888), lv_draw_buf_destroy);
+                lv_snapshot_take(root, LV_COLOR_FORMAT_ARGB8888), lv_draw_buf_destroy
+            );
             zassert_not_null(snapshot);
             zassert_equal(snapshot->header.w, 96);
             zassert_equal(snapshot->header.h, 72);
@@ -635,7 +653,7 @@ ZTEST(shape_icons, test_repeated_render_and_destruction_leave_no_duplicate_owner
     auto root = MakeRoot();
     for(auto type : shape_types) {
         {
-            IconWidget widget(1, root, WidgetContext {});
+            IconWidget widget(1, root, WidgetContext{});
             widget.Configure(Configuration(type));
             zassert_equal(widget.Render(), 0);
             zassert_equal(widget.Render(), 0);
@@ -647,13 +665,15 @@ ZTEST(shape_icons, test_repeated_render_and_destruction_leave_no_duplicate_owner
 
 ZTEST(shape_icons, test_widget_direction_preserves_bar_orientation_and_ranges) {
     auto root = MakeRoot();
-    for(auto direction : { WidgetDirection::LeftToRight, WidgetDirection::RightToLeft,
-                          WidgetDirection::TopToBottom, WidgetDirection::BottomToTop }) {
+    for(auto direction : { WidgetDirection::LeftToRight, WidgetDirection::RightToLeft, WidgetDirection::TopToBottom,
+            WidgetDirection::BottomToTop }) {
         auto bar = Frame::Create(lv_bar_create(root->GetObject())).Build();
         BarIndicator::UpdateDirection(bar.GetObject(), direction, 0, 100);
         bool horizontal = direction == WidgetDirection::LeftToRight || direction == WidgetDirection::RightToLeft;
-        zassert_equal(lv_bar_get_orientation(bar.GetObject()),
-            horizontal ? LV_BAR_ORIENTATION_HORIZONTAL : LV_BAR_ORIENTATION_VERTICAL);
+        zassert_equal(
+            lv_bar_get_orientation(bar.GetObject()),
+            horizontal ? LV_BAR_ORIENTATION_HORIZONTAL : LV_BAR_ORIENTATION_VERTICAL
+        );
         zassert_equal(lv_bar_get_min_value(bar.GetObject()), direction == WidgetDirection::TopToBottom ? 100 : 0);
         zassert_equal(lv_bar_get_max_value(bar.GetObject()), direction == WidgetDirection::TopToBottom ? 0 : 100);
     }

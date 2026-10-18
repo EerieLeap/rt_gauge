@@ -25,8 +25,10 @@ public:
 
     static bool IsValidAnchorValue(WidgetPropertyType type, const ConfigValue& value) {
         const auto* coordinate = std::get_if<int>(&value);
-        return IsAnchorProperty(type) && coordinate != nullptr
-            && *coordinate >= -1 && *coordinate <= max_anchor_coordinate;
+        return IsAnchorProperty(type)
+            && coordinate != nullptr
+            && *coordinate >= -1
+            && *coordinate <= max_anchor_coordinate;
     }
 
     static constexpr bool IsStructuralProperty(WidgetPropertyType type) {
@@ -66,14 +68,10 @@ public:
             || type == WidgetPropertyType::OPACITY;
     }
 
-    inline static constexpr std::array color_properties {
-        WidgetPropertyType::COLOR_PRIMARY_ACTIVE,
-        WidgetPropertyType::COLOR_PRIMARY_INACTIVE,
-        WidgetPropertyType::COLOR_SECONDARY_ACTIVE,
-        WidgetPropertyType::COLOR_SECONDARY_INACTIVE,
-        WidgetPropertyType::COLOR_TERTIARY_ACTIVE,
-        WidgetPropertyType::COLOR_TERTIARY_INACTIVE
-    };
+    inline static constexpr std::array color_properties{ WidgetPropertyType::COLOR_PRIMARY_ACTIVE,
+        WidgetPropertyType::COLOR_PRIMARY_INACTIVE, WidgetPropertyType::COLOR_SECONDARY_ACTIVE,
+        WidgetPropertyType::COLOR_SECONDARY_INACTIVE, WidgetPropertyType::COLOR_TERTIARY_ACTIVE,
+        WidgetPropertyType::COLOR_TERTIARY_INACTIVE };
 
     static constexpr std::optional<std::size_t> GetColorPropertyIndex(WidgetPropertyType type) {
         for(std::size_t index = 0; index < color_properties.size(); ++index) {

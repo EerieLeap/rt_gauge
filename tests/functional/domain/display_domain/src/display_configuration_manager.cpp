@@ -18,11 +18,11 @@
 
 using eerie_leap::configuration::cbor::CborSerializer;
 using eerie_leap::configuration::services::CborConfigurationService;
-using eerie_leap::subsys::device_tree::DtFs;
-using eerie_leap::subsys::fs::services::FsService;
 using eerie_leap::domain::configuration_domain::services::ConfigurationService;
 using eerie_leap::domain::display_domain::configuration::DisplayConfigurationManager;
 using eerie_leap::domain::display_domain::models::DisplayConfiguration;
+using eerie_leap::subsys::device_tree::DtFs;
+using eerie_leap::subsys::fs::services::FsService;
 
 namespace {
 
@@ -32,11 +32,11 @@ std::shared_ptr<DisplayConfigurationManager> MakeManager() {
 
     fs_service->Format();
 
-    auto cbor_display_configuration_service =
-        std::make_unique<CborConfigurationService<CborDisplayConfig>>("display_config", fs_service);
+    auto cbor_display_configuration_service = std::make_unique<CborConfigurationService<CborDisplayConfig>>(
+        "display_config", fs_service
+    );
 
-    return std::make_shared<DisplayConfigurationManager>(
-        std::move(cbor_display_configuration_service));
+    return std::make_shared<DisplayConfigurationManager>(std::move(cbor_display_configuration_service));
 }
 
 DisplayConfiguration MakeConfiguration() {
@@ -105,7 +105,9 @@ ZTEST(display_configuration_manager, test_apply_cbor_configuration_notifies_the_
     auto cbor = manager->GetCborConfiguration();
 
     int notifications = 0;
-    manager->RegisterConfigurationUpdatedHandler([&notifications] { notifications++; });
+    manager->RegisterConfigurationUpdatedHandler([&notifications] {
+        notifications++;
+    });
 
     // A local update is the service telling the manager what it already applied.
     zassert_true(manager->Update(MakeConfiguration()));
@@ -121,7 +123,9 @@ ZTEST(display_configuration_manager, test_a_throwing_handler_does_not_fail_the_a
     zassert_true(manager->Update(MakeConfiguration()));
     auto cbor = manager->GetCborConfiguration();
 
-    manager->RegisterConfigurationUpdatedHandler([] { throw std::runtime_error("boom"); });
+    manager->RegisterConfigurationUpdatedHandler([] {
+        throw std::runtime_error("boom");
+    });
 
     zassert_true(manager->ApplyCborConfiguration(std::span<const uint8_t>(cbor.data(), cbor.size())));
 }
@@ -131,7 +135,7 @@ ZTEST(display_configuration_manager, test_garbage_cbor_is_rejected) {
 
     zassert_true(manager->Update(MakeConfiguration()));
 
-    std::vector<uint8_t> garbage = {0xFF, 0xFF, 0xFF, 0xFF};
+    std::vector<uint8_t> garbage = { 0xFF, 0xFF, 0xFF, 0xFF };
 
     std::array<char, 96> reason{};
     zassert_false(manager->ApplyCborConfiguration(std::span<const uint8_t>(garbage.data(), garbage.size()), reason));
@@ -150,15 +154,20 @@ ZTEST(display_configuration_manager, test_a_rejected_configuration_reports_why) 
     cbor_config->brightness = 300;
 
     int notifications = 0;
-    manager->RegisterConfigurationUpdatedHandler([&notifications] { notifications++; });
+    manager->RegisterConfigurationUpdatedHandler([&notifications] {
+        notifications++;
+    });
 
     ConfigurationService configuration_service;
     configuration_service.RegisterCborConfigurationManager(ConfigurationService::Type::Display, manager);
 
     std::array<char, 96> reason{};
     zassert_false(configuration_service.ApplyCborConfiguration(
-        ConfigurationService::Type::Display, serializer.Serialize(*cbor_config), reason));
-    zassert_str_equal(reason.data(), "Invalid Display configuration. Brightness must be between 0 and 255. Value: 300.");
+        ConfigurationService::Type::Display, serializer.Serialize(*cbor_config), reason
+    ));
+    zassert_str_equal(
+        reason.data(), "Invalid Display configuration. Brightness must be between 0 and 255. Value: 300."
+    );
     zassert_equal(notifications, 0);
     zassert_equal(manager->Get(true)->brightness, 42);
 }
@@ -178,8 +187,8 @@ ZTEST(display_configuration_manager, test_the_configuration_service_routes_the_d
     zassert_true(manager->Update(replacement));
 
     zassert_true(configuration_service.ApplyCborConfiguration(
-        ConfigurationService::Type::Display,
-        std::span<const uint8_t>(cbor.data(), cbor.size())));
+        ConfigurationService::Type::Display, std::span<const uint8_t>(cbor.data(), cbor.size())
+    ));
 
     zassert_equal(manager->Get(true)->brightness, 42);
 }
@@ -192,8 +201,9 @@ ZTEST(display_configuration_manager, test_update_and_apply_are_reported_to_the_c
     configuration_service.RegisterCborConfigurationManager(ConfigurationService::Type::Display, manager);
 
     std::vector<ConfigurationService::Type> reports;
-    configuration_service.RegisterConfigurationStoredHandler(
-        [&reports](ConfigurationService::Type type) { reports.push_back(type); });
+    configuration_service.RegisterConfigurationStoredHandler([&reports](ConfigurationService::Type type) {
+        reports.push_back(type);
+    });
 
     zassert_true(manager->Update(MakeConfiguration()));
     zassert_equal(reports.size(), 1U);
@@ -201,10 +211,11 @@ ZTEST(display_configuration_manager, test_update_and_apply_are_reported_to_the_c
 
     const auto cbor = configuration_service.GetCborConfiguration(ConfigurationService::Type::Display);
     zassert_true(configuration_service.ApplyCborConfiguration(
-        ConfigurationService::Type::Display, std::span<const uint8_t>(cbor.data(), cbor.size())));
+        ConfigurationService::Type::Display, std::span<const uint8_t>(cbor.data(), cbor.size())
+    ));
     zassert_equal(reports.size(), 2U, "and so is an apply, which also tells the driver's handler");
 
-    std::vector<uint8_t> garbage = {0xFF, 0xFF, 0xFF, 0xFF};
+    std::vector<uint8_t> garbage = { 0xFF, 0xFF, 0xFF, 0xFF };
     zassert_false(configuration_service.ApplyCborConfiguration(ConfigurationService::Type::Display, garbage));
     zassert_equal(reports.size(), 2U, "A rejected write is not");
 
@@ -219,10 +230,14 @@ ZTEST(display_configuration_manager, test_update_own_setting_is_not_reported) {
     configuration_service.RegisterCborConfigurationManager(ConfigurationService::Type::Display, manager);
 
     int reports = 0;
-    configuration_service.RegisterConfigurationStoredHandler([&reports](ConfigurationService::Type) { reports++; });
+    configuration_service.RegisterConfigurationStoredHandler([&reports](ConfigurationService::Type) {
+        reports++;
+    });
 
     int notifications = 0;
-    manager->RegisterConfigurationUpdatedHandler([&notifications] { notifications++; });
+    manager->RegisterConfigurationUpdatedHandler([&notifications] {
+        notifications++;
+    });
 
     zassert_true(manager->UpdateOwnSetting(MakeConfiguration()));
 

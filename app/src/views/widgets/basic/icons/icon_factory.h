@@ -1,7 +1,7 @@
 #pragma once
 
-#include <memory>
 #include <functional>
+#include <memory>
 #include <unordered_map>
 #include <vector>
 
@@ -34,7 +34,8 @@ public:
 
     void RegisterProperties(IconType type, WidgetPropertyStore& store) const;
 
-    std::unique_ptr<IIcon> Create(const IconType type, std::shared_ptr<WidgetPropertyStore> properties, std::shared_ptr<Frame> parent);
+    std::unique_ptr<IIcon>
+    Create(const IconType type, std::shared_ptr<WidgetPropertyStore> properties, std::shared_ptr<Frame> parent);
 
     bool IsAvailable(IconType type) const;
     std::vector<IconType> GetAvailableTypes() const;

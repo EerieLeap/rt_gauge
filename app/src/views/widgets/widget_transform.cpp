@@ -24,10 +24,12 @@ bool WidgetTransform::Attach(
     Callbacks callbacks,
     void* context
 ) {
-    if(presentation == nullptr || layout == nullptr
-        || presentation->GetObject() == nullptr || layout->GetObject() == nullptr
-        || callbacks.is_ready == nullptr || callbacks.is_processing_eligible == nullptr
-    ) {
+    if(presentation == nullptr
+        || layout == nullptr
+        || presentation->GetObject() == nullptr
+        || layout->GetObject() == nullptr
+        || callbacks.is_ready == nullptr
+        || callbacks.is_processing_eligible == nullptr) {
         return false;
     }
 
@@ -38,11 +40,15 @@ bool WidgetTransform::Attach(
     layout_ = std::move(layout);
     callbacks_ = callbacks;
     context_ = context;
-    if(!animation_.Attach(*presentation_, *layout_, [](void* context) {
-        const auto* transform = static_cast<WidgetTransform*>(context);
-        return transform->callbacks_.is_ready(transform->context_)
-            && transform->callbacks_.is_processing_eligible(transform->context_);
-    }, this)) {
+    if(!animation_.Attach(
+           *presentation_, *layout_,
+           [](void* context) {
+               const auto* transform = static_cast<WidgetTransform*>(context);
+               return transform->callbacks_.is_ready(transform->context_)
+                   && transform->callbacks_.is_processing_eligible(transform->context_);
+           },
+           this
+       )) {
         Detach();
         return false;
     }
@@ -71,8 +77,8 @@ void WidgetTransform::Detach() {
 }
 
 void WidgetTransform::RegisterProperties(WidgetPropertyStore& store) {
-    store.Register(WidgetPropertyType::ANCHOR_POINT_X, ConfigValue { -1 }, PropertyChangeEffect::Repaint);
-    store.Register(WidgetPropertyType::ANCHOR_POINT_Y, ConfigValue { -1 }, PropertyChangeEffect::Repaint);
+    store.Register(WidgetPropertyType::ANCHOR_POINT_X, ConfigValue{ -1 }, PropertyChangeEffect::Repaint);
+    store.Register(WidgetPropertyType::ANCHOR_POINT_Y, ConfigValue{ -1 }, PropertyChangeEffect::Repaint);
     WidgetAnimation::RegisterProperties(store);
 }
 
@@ -116,8 +122,7 @@ namespace {
 bool HasRotationBinding(const WidgetConfiguration& configuration) {
     for(const auto& binding : configuration.bindings) {
         // An inbound type binding could select a competing rotation later.
-        if(binding.target == WidgetPropertyType::ANIMATION_TYPE
-            && binding.direction != PropertyBindingDirection::Out)
+        if(binding.target == WidgetPropertyType::ANIMATION_TYPE && binding.direction != PropertyBindingDirection::Out)
             return true;
     }
     return false;
@@ -177,10 +182,8 @@ void WidgetTransform::UpdateAnchor() {
 
     updating_anchor_ = true;
     lv_obj_update_layout(presentation);
-    const lv_point_t local {
-        anchor_point_.x == -1 ? lv_obj_get_width(bounds) / 2 : anchor_point_.x,
-        anchor_point_.y == -1 ? lv_obj_get_height(bounds) / 2 : lv_obj_get_height(bounds) - anchor_point_.y
-    };
+    const lv_point_t local{ anchor_point_.x == -1 ? lv_obj_get_width(bounds) / 2 : anchor_point_.x,
+        anchor_point_.y == -1 ? lv_obj_get_height(bounds) / 2 : lv_obj_get_height(bounds) - anchor_point_.y };
 
     lv_area_t bounds_area;
     lv_area_t presentation_area;
@@ -189,8 +192,10 @@ void WidgetTransform::UpdateAnchor() {
     const int64_t translated_x = static_cast<int64_t>(local.x) + bounds_area.x1 - presentation_area.x1;
     const int64_t translated_y = static_cast<int64_t>(local.y) + bounds_area.y1 - presentation_area.y1;
 
-    if(translated_x < LV_COORD_MIN || translated_x > LV_COORD_MAX
-        || translated_y < LV_COORD_MIN || translated_y > LV_COORD_MAX) {
+    if(translated_x < LV_COORD_MIN
+        || translated_x > LV_COORD_MAX
+        || translated_y < LV_COORD_MIN
+        || translated_y > LV_COORD_MAX) {
         LOG_WRN("Widget %u anchor cannot be represented in presentation coordinates.", id_);
         updating_anchor_ = false;
         return;

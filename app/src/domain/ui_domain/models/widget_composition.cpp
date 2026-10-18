@@ -43,7 +43,10 @@ WidgetComposition WidgetComposition::Build(const ScreenConfiguration& configurat
             composition.roots.push_back(i);
     }
 
-    struct Visit { size_t index; size_t next_child; };
+    struct Visit {
+        size_t index;
+        size_t next_child;
+    };
     std::pmr::vector<Visit> stack(resource);
     stack.reserve(max_depth);
     for(auto root : composition.roots) {

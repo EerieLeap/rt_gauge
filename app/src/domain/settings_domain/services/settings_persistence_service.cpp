@@ -21,8 +21,8 @@ using namespace eerie_leap::domain::settings_domain::event_bus;
 
 LOG_MODULE_REGISTER(settings_persistence_service_logger);
 
-SettingsPersistenceService::SettingsPersistenceService(std::shared_ptr<WorkQueueThread> work_queue_thread)
-    : work_queue_thread_(std::move(work_queue_thread)) {
+SettingsPersistenceService::SettingsPersistenceService(std::shared_ptr<WorkQueueThread> work_queue_thread) :
+    work_queue_thread_(std::move(work_queue_thread)) {
 
     k_mutex_init(&lock_);
 }
@@ -44,8 +44,7 @@ int SettingsPersistenceService::Initialize() {
     persist_task_ = work_queue_thread_->CreateTask(PersistWork, std::move(task));
 
     changed_subscription_ = CreateScopedSubscription(
-        SettingsEventsChannel::GetInstance(),
-        SettingsEventType::Changed,
+        SettingsEventsChannel::GetInstance(), SettingsEventType::Changed,
         [this](const SettingsEventsChannel::EventMessage& event) {
             auto it = event.payload.find(SettingsPayloadType::SettingId);
             if(it == event.payload.end())
@@ -58,13 +57,15 @@ int SettingsPersistenceService::Initialize() {
             {
                 ScopedMutex guard(lock_);
 
-                if(std::find(pending_setting_ids_.begin(), pending_setting_ids_.end(), *setting_id) == pending_setting_ids_.end())
+                if(std::find(pending_setting_ids_.begin(), pending_setting_ids_.end(), *setting_id)
+                    == pending_setting_ids_.end())
                     pending_setting_ids_.push_back(*setting_id);
             }
 
             // Every change pushes the deadline out, so a drag reaches flash once.
             persist_task_->Reschedule(persist_debounce_);
-        });
+        }
+    );
 
     if(changed_subscription_ == nullptr) {
         LOG_ERR("Failed to subscribe to setting changes.");
@@ -77,9 +78,7 @@ int SettingsPersistenceService::Initialize() {
 WorkQueueTaskResult SettingsPersistenceService::PersistWork(PersistTask* task) {
     task->service->PublishPendingPersistRequests();
 
-    return {
-        .reschedule = false
-    };
+    return { .reschedule = false };
 }
 
 void SettingsPersistenceService::PublishPendingPersistRequests() {
@@ -92,11 +91,11 @@ void SettingsPersistenceService::PublishPendingPersistRequests() {
     }
 
     for(auto setting_id : setting_ids) {
-        SettingsEventsChannel::GetInstance().PublishAsync({
-            .source_id = caller.hash,
-            .type = SettingsEventType::PersistRequested,
-            .payload = { { SettingsPayloadType::SettingId, setting_id } }
-        });
+        SettingsEventsChannel::GetInstance().PublishAsync(
+            { .source_id = caller.hash,
+                .type = SettingsEventType::PersistRequested,
+                .payload = { { SettingsPayloadType::SettingId, setting_id } } }
+        );
     }
 }
 

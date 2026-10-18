@@ -7,10 +7,10 @@
 
 #include <zephyr/ztest.h>
 
-#include "subsys/assets/asset_kind.h"
-#include "subsys/assets/assets_manager.h"
 #include "domain/ui_domain/lvgl_lock.h"
 #include "event_bus/event_channels.h"
+#include "subsys/assets/asset_kind.h"
+#include "subsys/assets/assets_manager.h"
 #include "views/assets/animations/animations_register.h"
 #include "views/widgets/basic/lottie_widget/lottie_widget.h"
 #include "views/widgets/widget_factory.h"
@@ -70,7 +70,7 @@ WidgetContext Context() {
     zassert_true(store->Save("spinner.json", Bytes(ui_lottie_spinner_json)));
     zassert_true(store->Save("fade.json", Bytes(fade_json)));
     zassert_true(store->Save("broken.json", Bytes("{\"v\":\"5.7.4\"")));
-    return WidgetContext { .assets_manager = views_test::MakeAssetsManager(AssetKind::ANIMATIONS, std::move(store)) };
+    return WidgetContext{ .assets_manager = views_test::MakeAssetsManager(AssetKind::ANIMATIONS, std::move(store)) };
 }
 
 std::shared_ptr<WidgetConfiguration> Configuration(const char* file_path, int width = 0, int height = 0) {
@@ -240,9 +240,9 @@ ZTEST(lottie_widget, test_an_animation_is_served_by_the_animations_kind_only) {
     // The same store, which holds spinner.json, under the other kind.
     auto store = views_test::MakeAssetStore("lottie-widget");
     zassert_true(store->Exists("spinner.json"));
-    for(const auto& assets : { views_test::MakeAssetsManager(AssetKind::IMAGES, store),
-                               std::make_shared<AssetsManager>() }) {
-        LottieWidget widget(1, MakeRoot(), WidgetContext { .assets_manager = assets });
+    for(const auto& assets :
+        { views_test::MakeAssetsManager(AssetKind::IMAGES, store), std::make_shared<AssetsManager>() }) {
+        LottieWidget widget(1, MakeRoot(), WidgetContext{ .assets_manager = assets });
         widget.Configure(Configuration("spinner.json"));
         zassert_not_equal(widget.Render(), 0);
         zassert_is_null(LottieObject(widget));
@@ -253,7 +253,7 @@ ZTEST(lottie_widget, test_validation_requires_a_file_path) {
     auto configuration = Configuration("spinner.json");
     zassert_false(IsRejected(*configuration));
 
-    for(auto value : { ConfigValue { std::pmr::string() }, ConfigValue { 1 } }) {
+    for(auto value : { ConfigValue{ std::pmr::string() }, ConfigValue{ 1 } }) {
         configuration->properties[WidgetPropertyType::FILE_PATH] = value;
         zassert_true(IsRejected(*configuration));
     }

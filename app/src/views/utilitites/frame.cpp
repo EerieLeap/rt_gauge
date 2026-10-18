@@ -16,7 +16,8 @@ constexpr lv_obj_flag_t presentation_flag = LV_OBJ_FLAG_USER_1;
 
 } // namespace
 
-Frame::Frame() : lv_object_(nullptr) { }
+Frame::Frame() :
+    lv_object_(nullptr) {}
 
 Frame::~Frame() {
     ScopedLvglLock lvgl_guard;
@@ -29,12 +30,12 @@ Frame::~Frame() {
     }
 }
 
-Frame::Frame(Frame&& other) noexcept
-        : lv_object_(other.lv_object_),
-        child_(std::move(other.child_)),
-        processing_parent_(std::move(other.processing_parent_)),
-        is_processing_enabled_(other.is_processing_enabled_),
-        is_tracking_enabled_(other.is_tracking_enabled_) {
+Frame::Frame(Frame&& other) noexcept :
+    lv_object_(other.lv_object_),
+    child_(std::move(other.child_)),
+    processing_parent_(std::move(other.processing_parent_)),
+    is_processing_enabled_(other.is_processing_enabled_),
+    is_tracking_enabled_(other.is_tracking_enabled_) {
 
     other.lv_object_ = nullptr;
 }
@@ -86,8 +87,12 @@ Frame Frame::Build() {
 Frame Frame::CreatePresentation(lv_obj_t* parent) {
     auto frame = CreateWrapped(parent);
     lv_obj_add_flag(frame.lv_object_, static_cast<lv_obj_flag_t>(presentation_flag | LV_OBJ_FLAG_GESTURE_BUBBLE));
-    lv_obj_remove_flag(frame.lv_object_, static_cast<lv_obj_flag_t>(LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CLICK_FOCUSABLE
-        | LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_ON_FOCUS));
+    lv_obj_remove_flag(
+        frame.lv_object_,
+        static_cast<lv_obj_flag_t>(
+            LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CLICK_FOCUSABLE | LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_ON_FOCUS
+        )
+    );
     lv_obj_set_style_transform_pivot_x(frame.lv_object_, lv_pct(50), LV_PART_MAIN);
     lv_obj_set_style_transform_pivot_y(frame.lv_object_, lv_pct(50), LV_PART_MAIN);
     frame.SetWidth(100, false).SetHeight(100, false);

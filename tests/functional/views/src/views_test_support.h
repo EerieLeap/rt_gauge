@@ -8,11 +8,11 @@
 
 #include <lvgl.h>
 
+#include "domain/ui_domain/models/icon_type.h"
+#include "domain/ui_domain/models/widget_configuration.h"
 #include "subsys/assets/asset_kind.h"
 #include "subsys/assets/asset_store.h"
 #include "subsys/assets/assets_manager.h"
-#include "domain/ui_domain/models/icon_type.h"
-#include "domain/ui_domain/models/widget_configuration.h"
 #include "views/renderable_base.h"
 #include "views/screens/i_screen.h"
 #include "views/utilitites/frame.h"
@@ -41,12 +41,14 @@ std::shared_ptr<eerie_leap::subsys::assets::AssetStore> MakeAssetStore(std::stri
 // and ANIMATIONS are supported.
 std::shared_ptr<eerie_leap::subsys::assets::AssetsManager> MakeAssetsManager(
     eerie_leap::subsys::assets::AssetKind kind,
-    std::shared_ptr<eerie_leap::subsys::assets::AssetStore> store);
+    std::shared_ptr<eerie_leap::subsys::assets::AssetStore> store
+);
 
 // A fill-slot BasicIcon needle for a dial. Labels get text so they can render.
 std::shared_ptr<eerie_leap::domain::ui_domain::models::WidgetConfiguration> NeedleConfiguration(
     uint32_t id,
-    eerie_leap::domain::ui_domain::models::IconType type = eerie_leap::domain::ui_domain::models::IconType::Label);
+    eerie_leap::domain::ui_domain::models::IconType type = eerie_leap::domain::ui_domain::models::IconType::Label
+);
 
 // Builds each child through the factory under the owner's mount, records their IDs
 // on the owner's configuration in order, and injects them. Configure the owner next.
@@ -54,12 +56,12 @@ void InjectChildren(
     eerie_leap::views::widgets::IWidget& owner,
     eerie_leap::domain::ui_domain::models::WidgetConfiguration& owner_configuration,
     std::initializer_list<std::shared_ptr<eerie_leap::domain::ui_domain::models::WidgetConfiguration>> children,
-    const eerie_leap::views::widgets::WidgetContext& context = {});
+    const eerie_leap::views::widgets::WidgetContext& context = {}
+);
 
 // The real Screen pulls in a widget tree, a grid layout and a configuration;
 // the group only ever calls the interface below.
-class FakeScreen : public eerie_leap::views::RenderableBase,
-                   public eerie_leap::views::screens::IScreen {
+class FakeScreen : public eerie_leap::views::RenderableBase, public eerie_leap::views::screens::IScreen {
 private:
     uint32_t id_;
     uint32_t screen_group_id_;
@@ -77,7 +79,8 @@ public:
         uint32_t screen_group_id,
         int32_t z_index,
         bool is_visible,
-        std::shared_ptr<eerie_leap::views::utilitites::Frame> parent);
+        std::shared_ptr<eerie_leap::views::utilitites::Frame> parent
+    );
 
     int render_count = 0;
     int activated_count = 0;

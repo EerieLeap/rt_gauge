@@ -12,7 +12,7 @@ namespace eerie_leap::views::widgets::basic::icons {
 class ShapeIconBase : public IconBase {
 private:
     lv_obj_t* image_object_ = nullptr;
-    lv_image_dsc_t image_ {};
+    lv_image_dsc_t image_{};
     std::pmr::vector<uint8_t> mask_;
 
     void UpdateImage();

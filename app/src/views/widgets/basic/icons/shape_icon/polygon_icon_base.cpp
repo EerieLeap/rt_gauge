@@ -62,8 +62,7 @@ float AppendPolygon(lv_vector_path_t* path, const Polygon& vertices, float radiu
         for(size_t i = 0; i < vertices.size(); ++i) {
             size_t next = (i + 1) % vertices.size();
             // Adjacent corner arcs must not consume more than their shared edge.
-            radius = std::min<double>(radius, Distance(vertices[i], vertices[next])
-                / (tangents[i] + tangents[next]));
+            radius = std::min<double>(radius, Distance(vertices[i], vertices[next]) / (tangents[i] + tangents[next]));
         }
     }
 
@@ -81,14 +80,10 @@ float AppendPolygon(lv_vector_path_t* path, const Polygon& vertices, float radiu
         auto next = vertices[(i + 1) % vertices.size()];
         double previous_scale = radius * tangents[i] / Distance(vertex, previous);
         double next_scale = radius * tangents[i] / Distance(vertex, next);
-        lv_fpoint_t start {
-            static_cast<float>(vertex.x + (previous.x - vertex.x) * previous_scale),
-            static_cast<float>(vertex.y + (previous.y - vertex.y) * previous_scale)
-        };
-        lv_fpoint_t end {
-            static_cast<float>(vertex.x + (next.x - vertex.x) * next_scale),
-            static_cast<float>(vertex.y + (next.y - vertex.y) * next_scale)
-        };
+        lv_fpoint_t start{ static_cast<float>(vertex.x + (previous.x - vertex.x) * previous_scale),
+            static_cast<float>(vertex.y + (previous.y - vertex.y) * previous_scale) };
+        lv_fpoint_t end{ static_cast<float>(vertex.x + (next.x - vertex.x) * next_scale),
+            static_cast<float>(vertex.y + (next.y - vertex.y) * next_scale) };
         if(i == 0)
             lv_vector_path_move_to(path, &start);
         else
@@ -124,10 +119,10 @@ Polygon InsetPolygon(const Polygon& vertices, float stroke) {
             double distance = Cross(a, b, point) - offset;
             if((distance >= 0) != (previous_distance >= 0)) {
                 double ratio = previous_distance / (previous_distance - distance);
-                append({
-                    static_cast<float>(previous.x + (point.x - previous.x) * ratio),
-                    static_cast<float>(previous.y + (point.y - previous.y) * ratio)
-                });
+                append(
+                    { static_cast<float>(previous.x + (point.x - previous.x) * ratio),
+                        static_cast<float>(previous.y + (point.y - previous.y) * ratio) }
+                );
             }
 
             if(distance >= 0)
@@ -151,7 +146,7 @@ Polygon InsetPolygon(const Polygon& vertices, float stroke) {
 
 void PolygonIconBase::RegisterProperties(WidgetPropertyStore& store) {
     ClosedShapeIconBase::RegisterProperties(store);
-    store.Register(WidgetPropertyType::CORNER_RAD_PX, ConfigValue { 0 }, PropertyChangeEffect::Repaint);
+    store.Register(WidgetPropertyType::CORNER_RAD_PX, ConfigValue{ 0 }, PropertyChangeEffect::Repaint);
 }
 
 bool PolygonIconBase::ReadGeometry() {

@@ -5,13 +5,13 @@
 #include <utility>
 #include <vector>
 
+#include <eerie_memory.hpp>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
-#include <eerie_memory.hpp>
 
-#include "utilities/memory/memory_resource_manager.h"
-#include "utilities/dev_tools/system_info.h"
 #include "utilities/dev_tools/coredump_reporter.h"
+#include "utilities/dev_tools/system_info.h"
+#include "utilities/memory/memory_resource_manager.h"
 #include "utilities/string/string_helpers.h"
 
 #include "subsys/assets/assets_manager.h"
@@ -25,12 +25,12 @@
 #include "subsys/fs/services/fs_service.h"
 #include "subsys/gpio/gpio_factory.hpp"
 #include "subsys/threading/work_queue_thread.h"
-#include "subsys/time/time_service.h"
-#include "subsys/time/rtc_provider.h"
 #include "subsys/time/boot_elapsed_time_provider.h"
+#include "subsys/time/rtc_provider.h"
+#include "subsys/time/time_service.h"
 
-#include "domain/configuration_domain/services/configuration_service.h"
 #include "domain/canbus_domain/models/canbus_configuration.h"
+#include "domain/configuration_domain/services/configuration_service.h"
 #include "domain/logging_domain/control/canbus_com_logging_command_sender.h"
 #include "domain/logging_domain/control/configuration/logging_control_configuration_manager.h"
 #include "domain/logging_domain/control/configuration_update_logging_stop.h"
@@ -48,13 +48,13 @@
 
 #include "event_bus/event_channels.h"
 
-#include "controllers/system_controller.h"
-#include "controllers/canbus_controller.h"
-#include "controllers/sensors_controller.h"
 #include "controllers/ble_controller.h"
+#include "controllers/canbus_controller.h"
+#include "controllers/display_controller.h"
 #include "controllers/logging_controller.h"
 #include "controllers/management_controller.h"
-#include "controllers/display_controller.h"
+#include "controllers/sensors_controller.h"
+#include "controllers/system_controller.h"
 #include "controllers/ui_controller.h"
 
 using namespace eerie_memory;
@@ -103,7 +103,8 @@ void SetupTestSensors(std::shared_ptr<SensorsConfigurationManager> sensors_confi
 void SetupTestLoggingButton(std::shared_ptr<SensorsConfigurationManager> sensors_configuration_manager);
 void SetupTestLoggingTrigger(
     std::shared_ptr<LoggingControlConfigurationManager> logging_control_configuration_manager,
-    int gpio_channel_count);
+    int gpio_channel_count
+);
 
 namespace {
 
@@ -160,11 +161,7 @@ int main() {
     // publisher does.
     InitializeEventChannels();
 
-    DtConfigurator::Initialize(
-        DtFeature::INTERNAL_FS
-        | DtFeature::GPIO
-        | DtFeature::DISPLAY
-        | DtFeature::CANBUS);
+    DtConfigurator::Initialize(DtFeature::INTERNAL_FS | DtFeature::GPIO | DtFeature::DISPLAY | DtFeature::CANBUS);
 
     auto fs_service = std::make_shared<FsService>(DtFs::GetInternalFsMp());
     if(!fs_service->Initialize()) {
@@ -183,16 +180,14 @@ int main() {
     int config_work_queue_stack_size = 6144;
     int config_work_queue_priority = 5;
     auto config_work_queue_thread = std::make_shared<WorkQueueThread>(
-        "config_work_queue",
-        config_work_queue_stack_size,
-        config_work_queue_priority);
+        "config_work_queue", config_work_queue_stack_size, config_work_queue_priority
+    );
     if(!config_work_queue_thread->Initialize()) {
         LOG_ERR("Failed to initialize the configuration work queue.");
         return -1;
     }
 
-    auto system_controller = std::make_shared<SystemController>(
-        fs_service, config_work_queue_thread);
+    auto system_controller = std::make_shared<SystemController>(fs_service, config_work_queue_thread);
     if(system_controller->Initialize() != 0)
         LOG_ERR("Failed to initialize the system controller.");
 
@@ -211,9 +206,8 @@ int main() {
         LOG_ERR("Failed to initialize the settings persistence service.");
 
     auto display_controller = std::make_shared<DisplayController>(
-        fs_service,
-        config_work_queue_thread,
-        configuration_service);
+        fs_service, config_work_queue_thread, configuration_service
+    );
     if(display_controller->Initialize() != 0) {
         LOG_ERR("Failed to initialize the display controller.");
         return -1;
@@ -222,10 +216,8 @@ int main() {
     auto sensor_readings_frame = std::make_shared<SensorReadingsFrame>();
 
     auto ui_controller = std::make_shared<UiController>(
-        fs_service,
-        config_work_queue_thread,
-        configuration_service,
-        assets_manager);
+        fs_service, config_work_queue_thread, configuration_service, assets_manager
+    );
     if(ui_controller->Initialize() != 0) {
         LOG_ERR("Failed to initialize the UI controller.");
         return -1;
@@ -242,28 +234,23 @@ int main() {
     // The gauge has no SD service, so the controllers below register no asset kind; the registry is
     // passed for uniformity with the units that do.
     auto canbus_controller = std::make_shared<CanbusController>(
-        fs_service,
-        config_work_queue_thread,
-        configuration_service,
+        fs_service, config_work_queue_thread, configuration_service,
         nullptr, // sd_fs_service
-        assets_manager);
+        assets_manager
+    );
     // if(canbus_controller->Initialize(SetupCanbusConfiguration) != 0)
     if(canbus_controller->Initialize() != 0)
         LOG_ERR("Failed to initialize the CANBus controller.");
     canbus_controller->Start();
 
     auto sensors_controller = std::make_shared<SensorsController>(
-        fs_service,
-        config_work_queue_thread,
-        configuration_service,
-        time_service,
-        sensor_readings_frame,
-        canbus_controller->GetService(),
-        gpio,
+        fs_service, config_work_queue_thread, configuration_service, time_service, sensor_readings_frame,
+        canbus_controller->GetService(), gpio,
         nullptr, // adc_manager
         nullptr, // adc_configuration_manager
         nullptr, // sd_fs_service
-        assets_manager);
+        assets_manager
+    );
     // TODO: For test purposes only
     // if(sensors_controller->Initialize(SetupTestSensors) != 0)
     if(sensors_controller->Initialize(SetupTestLoggingButton) != 0)
@@ -274,35 +261,32 @@ int main() {
     // Built after SensorsController::Initialize(), whose sensors it checks its triggers against, and
     // before SensorsController::Start(), so its triggers subscribe before the first reading.
     auto logging_controller = std::make_shared<LoggingController>(
-        fs_service,
-        config_work_queue_thread,
-        configuration_service,
-        sensors_controller->GetConfigurationManager(),
-        canbus_controller->GetComService(),
-        sensor_events_publisher,
-        nullptr, // sd_fs_service
-        nullptr, // time_service
-        nullptr, // sensor_readings_frame
+        fs_service, config_work_queue_thread, configuration_service, sensors_controller->GetConfigurationManager(),
+        canbus_controller->GetComService(), sensor_events_publisher,
+        nullptr,       // sd_fs_service
+        nullptr,       // time_service
+        nullptr,       // sensor_readings_frame
         std::string{}, // tool_id
-        assets_manager);
+        assets_manager
+    );
     // Only when the controller could not be initialized: sends the logging stop for a stored configuration.
     std::unique_ptr<ConfigurationUpdateLoggingStop> configuration_update_logging_stop;
     // The count the sensors manager was built with, which the button's sensor and trigger agree on.
     const int gpio_channel_count = gpio != nullptr ? gpio->GetChannelCount() : 0;
     // TODO: For test purposes only
     if(logging_controller->Initialize([gpio_channel_count](auto logging_control_configuration_manager) {
-            SetupTestLoggingTrigger(logging_control_configuration_manager, gpio_channel_count);
-        }) != 0) {
+           SetupTestLoggingTrigger(logging_control_configuration_manager, gpio_channel_count);
+       })
+        != 0) {
         LOG_WRN("Logging controller is not available.");
 
         // It would have told the units that log about a configuration stored here; the broadcast alone
         // still can.
         if(canbus_controller->GetComService() != nullptr) {
             configuration_update_logging_stop = std::make_unique<ConfigurationUpdateLoggingStop>(
-                configuration_service,
-                config_work_queue_thread,
-                nullptr,
-                std::make_shared<CanbusComLoggingCommandSender>(canbus_controller->GetComService()));
+                configuration_service, config_work_queue_thread, nullptr,
+                std::make_shared<CanbusComLoggingCommandSender>(canbus_controller->GetComService())
+            );
             if(!configuration_update_logging_stop->Initialize())
                 configuration_update_logging_stop.reset();
         }
@@ -324,20 +308,17 @@ int main() {
     const auto canbus_com_service = canbus_controller->GetComService();
     const auto system_configuration = system_controller->GetConfigurationManager()->Get();
     auto management_controller = std::make_shared<ManagementController>(
-        configuration_service,
-        config_work_queue_thread,
+        configuration_service, config_work_queue_thread,
         canbus_com_service != nullptr ? canbus_com_service->GetNetworkInfo() : nullptr,
-        system_configuration != nullptr ? system_configuration->build_number : 0,
-        sensors_controller->GetCapabilities(),
-        nullptr,
-        assets_manager);
+        system_configuration != nullptr ? system_configuration->build_number : 0, sensors_controller->GetCapabilities(),
+        nullptr, assets_manager
+    );
     if(management_controller->Initialize() != 0)
         LOG_ERR("Failed to initialize the management controller.");
 
     auto ble_controller = std::make_shared<BleController>(
-        sensors_controller->GetProcessingService(),
-        sensor_readings_frame,
-        canbus_com_service);
+        sensors_controller->GetProcessingService(), sensor_readings_frame, canbus_com_service
+    );
     if(ble_controller->Initialize() == 0)
         ble_controller->Start();
     else
@@ -346,7 +327,7 @@ int main() {
     // SystemInfo::PrintStackInfo();
     SystemInfo::PrintThreadIds();
 
-	while(true) {
+    while(true) {
         // SystemInfo::PrintHeapInfo();
         // SystemInfo::PrintStackInfo();
         // SystemInfo::PrintThreadIds();
@@ -365,9 +346,9 @@ int main() {
         // TODO: For test purposes only
         // sensors_controller->EmulateReadings();
         // k_msleep(20);
-	}
+    }
 
-	return 0;
+    return 0;
 }
 
 void SetupCanbusConfiguration(std::shared_ptr<CanbusConfigurationManager> canbus_configuration_manager) {
@@ -412,8 +393,8 @@ void SetupCanbusConfiguration(std::shared_ptr<CanbusConfigurationManager> canbus
     }
 
     canbus_configuration->channel_configurations.emplace(
-        canbus_channel_configuration_0.bus_channel,
-        std::move(canbus_channel_configuration_0));
+        canbus_channel_configuration_0.bus_channel, std::move(canbus_channel_configuration_0)
+    );
 
     canbus_configuration_manager->Update(*canbus_configuration);
 }
@@ -444,7 +425,9 @@ void SetupTestSensors(std::shared_ptr<SensorsConfigurationManager> sensors_confi
         sensor->metadata.description = "Test Sensor 1";
 
         sensor->configuration.type = SensorType::CANBUS_ANALOG;
-        sensor->configuration.canbus_source = make_unique_pmr<CanbusSource>(Mrm::GetExtPmr(), 0, 100 + i, "sensor_" + std::to_string(i));
+        sensor->configuration.canbus_source = make_unique_pmr<CanbusSource>(
+            Mrm::GetExtPmr(), 0, 100 + i, "sensor_" + std::to_string(i)
+        );
 
         sensors.push_back(sensor);
     }
@@ -463,7 +446,9 @@ void SetupTestLoggingButton(std::shared_ptr<SensorsConfigurationManager> sensors
     if(const auto stored_sensors = sensors_configuration_manager->Get(); stored_sensors != nullptr)
         sensors = *stored_sensors;
 
-    if(std::ranges::any_of(sensors, [](const auto& sensor) { return sensor->id == LOGGING_BUTTON_SENSOR_ID; }))
+    if(std::ranges::any_of(sensors, [](const auto& sensor) {
+           return sensor->id == LOGGING_BUTTON_SENSOR_ID;
+       }))
         return;
 
     // A sensors configuration stored before indicator conditioning does not decode, and the manager
@@ -486,7 +471,10 @@ void SetupTestLoggingButton(std::shared_ptr<SensorsConfigurationManager> sensors
 
     LOG_INF("Logging button added to the sensors configuration.");
     if(is_replacing_rejected)
-        LOG_WRN("The stored sensors configuration could not be read; it was replaced by one holding only the logging button.");
+        LOG_WRN(
+            "The stored sensors configuration could not be read; it was replaced by one holding only the logging "
+            "button."
+        );
 }
 
 // TODO: For test purposes only
@@ -494,7 +482,8 @@ void SetupTestLoggingButton(std::shared_ptr<SensorsConfigurationManager> sensors
 // GPIO channel. The rest of the stored configuration stays as it is.
 void SetupTestLoggingTrigger(
     std::shared_ptr<LoggingControlConfigurationManager> logging_control_configuration_manager,
-    int gpio_channel_count) {
+    int gpio_channel_count
+) {
 
     if(!HasLoggingButton(gpio_channel_count))
         return;
@@ -515,7 +504,10 @@ void SetupTestLoggingTrigger(
     if(logging_control_configuration_manager->Update(*logging_control_configuration)) {
         LOG_INF("Logging button trigger added to the logging control configuration.");
         if(is_replacing_rejected)
-            LOG_WRN("The stored logging control configuration could not be read; it was replaced by one holding only the logging button trigger.");
+            LOG_WRN(
+                "The stored logging control configuration could not be read; it was replaced by one holding only the "
+                "logging button trigger."
+            );
     } else
         LOG_ERR("Failed to add the logging button trigger to the logging control configuration.");
 }

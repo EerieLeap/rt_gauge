@@ -1,7 +1,7 @@
 #include "icon_base.h"
 
-#include "domain/ui_domain/models/widget_property.h"
 #include "domain/ui_domain/lvgl_lock.h"
+#include "domain/ui_domain/models/widget_property.h"
 
 namespace eerie_leap::views::widgets::basic::icons {
 
@@ -10,13 +10,12 @@ using namespace eerie_leap::domain::ui_domain::models;
 using namespace eerie_leap::views::utilitites;
 using eerie_leap::domain::ui_domain::ScopedLvglLock;
 
-IconBase::IconBase(std::shared_ptr<Frame> parent)
-    : parent_(std::move(parent)) {
+IconBase::IconBase(std::shared_ptr<Frame> parent) :
+    parent_(std::move(parent)) {
 
-    container_ = std::make_shared<Frame>(Frame::CreateWrapped(parent_->GetObject())
-        .SetWidth(100, false)
-        .SetHeight(100, false)
-        .Build());
+    container_ = std::make_shared<Frame>(
+        Frame::CreateWrapped(parent_->GetObject()).SetWidth(100, false).SetHeight(100, false).Build()
+    );
 }
 
 void IconBase::SetAssetsManager(std::shared_ptr<AssetsManager> ui_assets_manager) {

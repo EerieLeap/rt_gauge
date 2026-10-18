@@ -3,8 +3,8 @@
 #include <stdexcept>
 #include <utility>
 
-#include <zephyr/logging/log.h>
 #include <lvgl.h>
+#include <zephyr/logging/log.h>
 
 #include "domain/ui_domain/lvgl_lock.h"
 
@@ -40,17 +40,16 @@ OverlayHost::Entry::~Entry() {
     // screen_group and scrim follow, each taking its LVGL objects with it.
 }
 
-OverlayHost::OverlayHost(std::shared_ptr<NavigationService> navigation_service)
-    : navigation_service_(std::move(navigation_service)) {
+OverlayHost::OverlayHost(std::shared_ptr<NavigationService> navigation_service) :
+    navigation_service_(std::move(navigation_service)) {
 
     lv_obj_t* top_layer = lv_layer_top();
     if(top_layer == nullptr)
         throw std::runtime_error("No display to host overlays on");
 
-    container_ = std::make_shared<Frame>(Frame::CreateWrapped(top_layer)
-        .SetWidth(100, false)
-        .SetHeight(100, false)
-        .Build());
+    container_ = std::make_shared<Frame>(
+        Frame::CreateWrapped(top_layer).SetWidth(100, false).SetHeight(100, false).Build()
+    );
 
     lv_obj_remove_flag(container_->GetObject(), LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_flag(container_->GetObject(), LV_OBJ_FLAG_HIDDEN);
@@ -139,7 +138,8 @@ int OverlayHost::Pop() {
 }
 
 void OverlayHost::DismissAll() {
-    while(Pop() == 0) { }
+    while(Pop() == 0) {
+    }
 }
 
 bool OverlayHost::IsEmpty() const {
@@ -155,10 +155,9 @@ ScreenGroup* OverlayHost::GetTopGroup() const {
 }
 
 std::shared_ptr<Frame> OverlayHost::CreateScrim(bool close_on_tap) {
-    auto scrim = std::make_shared<Frame>(Frame::CreateWrapped(container_->GetObject())
-        .SetWidth(100, false)
-        .SetHeight(100, false)
-        .Build());
+    auto scrim = std::make_shared<Frame>(
+        Frame::CreateWrapped(container_->GetObject()).SetWidth(100, false).SetHeight(100, false).Build()
+    );
 
     // What makes the overlay modal, rather than a decoration the user can reach past.
     lv_obj_add_flag(scrim->GetObject(), LV_OBJ_FLAG_CLICKABLE);

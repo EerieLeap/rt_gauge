@@ -2,11 +2,11 @@
 
 #include <zephyr/ztest.h>
 
-#include "domain/ui_domain/models/widget_property.h"
 #include "domain/ui_domain/models/animation.h"
+#include "domain/ui_domain/models/icon_type.h"
 #include "domain/ui_domain/models/widget_direction.h"
 #include "domain/ui_domain/models/widget_fill_mode.h"
-#include "domain/ui_domain/models/icon_type.h"
+#include "domain/ui_domain/models/widget_property.h"
 #include "utilities/type/color.h"
 
 using namespace eerie_leap::domain::ui_domain::models;
@@ -16,53 +16,23 @@ ZTEST_SUITE(widget_property, NULL, NULL, NULL, NULL, NULL);
 
 namespace {
 
-constexpr std::array all_types = {
-    WidgetPropertyType::NONE,
-    WidgetPropertyType::IS_ACTIVE,
-    WidgetPropertyType::IS_SMOOTHED,
-    WidgetPropertyType::MIN_VALUE,
-    WidgetPropertyType::MAX_VALUE,
-    WidgetPropertyType::CHART_POINT_COUNT,
-    WidgetPropertyType::CHART_TYPE,
-    WidgetPropertyType::LABEL,
-    WidgetPropertyType::VALUE_PRECISION,
-    WidgetPropertyType::EDGE_OFFSET,
-    WidgetPropertyType::POSITION_X,
-    WidgetPropertyType::POSITION_Y,
-    WidgetPropertyType::POSITION_ANGLE,
-    WidgetPropertyType::ICON_TYPE,
-    WidgetPropertyType::START_ANGLE,
-    WidgetPropertyType::END_ANGLE,
-    WidgetPropertyType::FILE_PATH,
-    WidgetPropertyType::IMG_WIDTH,
-    WidgetPropertyType::IMG_HEIGHT,
-    WidgetPropertyType::ANCHOR_POINT_X,
-    WidgetPropertyType::ANCHOR_POINT_Y,
-    WidgetPropertyType::DIRECTION,
-    WidgetPropertyType::SETTING_ID,
-    WidgetPropertyType::STEP,
-    WidgetPropertyType::UNIT,
-    WidgetPropertyType::TARGET_SCREEN_GROUP,
-    WidgetPropertyType::IS_VISIBLE,
-    WidgetPropertyType::VALUE,
-    WidgetPropertyType::NAVIGATION_INTENT,
-    WidgetPropertyType::WIDTH_PX,
-    WidgetPropertyType::HEIGHT_PX,
-    WidgetPropertyType::STROKE_PX,
-    WidgetPropertyType::CORNER_RAD_PX,
-    WidgetPropertyType::FILL_MODE,
-    WidgetPropertyType::OPACITY,
-    WidgetPropertyType::COLOR_PRIMARY_ACTIVE,
-    WidgetPropertyType::COLOR_PRIMARY_INACTIVE,
-    WidgetPropertyType::COLOR_SECONDARY_ACTIVE,
-    WidgetPropertyType::COLOR_SECONDARY_INACTIVE,
-    WidgetPropertyType::COLOR_TERTIARY_ACTIVE,
-    WidgetPropertyType::COLOR_TERTIARY_INACTIVE,
-    WidgetPropertyType::ANIMATION_TYPE,
-    WidgetPropertyType::IS_ANIMATION_ACTIVE,
-    WidgetPropertyType::ANIMATION_DURATION_MS,
-    WidgetPropertyType::CHILD_WIDGET_IDS
-};
+constexpr std::array all_types = { WidgetPropertyType::NONE, WidgetPropertyType::IS_ACTIVE,
+    WidgetPropertyType::IS_SMOOTHED, WidgetPropertyType::MIN_VALUE, WidgetPropertyType::MAX_VALUE,
+    WidgetPropertyType::CHART_POINT_COUNT, WidgetPropertyType::CHART_TYPE, WidgetPropertyType::LABEL,
+    WidgetPropertyType::VALUE_PRECISION, WidgetPropertyType::EDGE_OFFSET, WidgetPropertyType::POSITION_X,
+    WidgetPropertyType::POSITION_Y, WidgetPropertyType::POSITION_ANGLE, WidgetPropertyType::ICON_TYPE,
+    WidgetPropertyType::START_ANGLE, WidgetPropertyType::END_ANGLE, WidgetPropertyType::FILE_PATH,
+    WidgetPropertyType::IMG_WIDTH, WidgetPropertyType::IMG_HEIGHT, WidgetPropertyType::ANCHOR_POINT_X,
+    WidgetPropertyType::ANCHOR_POINT_Y, WidgetPropertyType::DIRECTION, WidgetPropertyType::SETTING_ID,
+    WidgetPropertyType::STEP, WidgetPropertyType::UNIT, WidgetPropertyType::TARGET_SCREEN_GROUP,
+    WidgetPropertyType::IS_VISIBLE, WidgetPropertyType::VALUE, WidgetPropertyType::NAVIGATION_INTENT,
+    WidgetPropertyType::WIDTH_PX, WidgetPropertyType::HEIGHT_PX, WidgetPropertyType::STROKE_PX,
+    WidgetPropertyType::CORNER_RAD_PX, WidgetPropertyType::FILL_MODE, WidgetPropertyType::OPACITY,
+    WidgetPropertyType::COLOR_PRIMARY_ACTIVE, WidgetPropertyType::COLOR_PRIMARY_INACTIVE,
+    WidgetPropertyType::COLOR_SECONDARY_ACTIVE, WidgetPropertyType::COLOR_SECONDARY_INACTIVE,
+    WidgetPropertyType::COLOR_TERTIARY_ACTIVE, WidgetPropertyType::COLOR_TERTIARY_INACTIVE,
+    WidgetPropertyType::ANIMATION_TYPE, WidgetPropertyType::IS_ANIMATION_ACTIVE,
+    WidgetPropertyType::ANIMATION_DURATION_MS, WidgetPropertyType::CHILD_WIDGET_IDS };
 
 } // namespace
 
@@ -129,27 +99,25 @@ ZTEST(widget_property, test_color_parser_requires_explicit_rgba) {
 
     auto parsed = Color::TryParse("#12345678");
     zassert_true(parsed.has_value());
-    zassert_true((*parsed == Color { 0x12, 0x34, 0x56, 0x78 }));
+    zassert_true((*parsed == Color{ 0x12, 0x34, 0x56, 0x78 }));
     parsed = Color::TryParse("#FFFFFFFF");
     zassert_true(parsed.has_value());
-    zassert_true((*parsed == Color { 255, 255, 255, 255 }));
+    zassert_true((*parsed == Color{ 255, 255, 255, 255 }));
 }
 
 ZTEST(widget_property, test_color_parser_distinguishes_transparent_override_from_reset) {
     const auto transparent = Color::TryParse("#00000000");
     zassert_true(transparent.has_value());
-    zassert_true((*transparent == Color { 0, 0, 0, 0 }));
+    zassert_true((*transparent == Color{ 0, 0, 0, 0 }));
     const auto reset = Color::TryParse("");
     zassert_true(reset.has_value());
     zassert_false(reset->has_value());
 }
 
 ZTEST(widget_property, test_color_parser_reports_invalid_argument_for_malformed_input) {
-    constexpr std::string_view invalid_values[] = {
-        "#3366FF", "3366FF80", "#1234567", "#123456789", " #12345678", "#12345678 ",
-        "#GG345678", "#12GG5678", "#1234GG78", "#123456GG", "#+1345678", "#-1345678", "#1 345678",
-        "#0x345678", "#1234567#", std::string_view("#1234567\0", 9), std::string_view("#12345678\0", 10)
-    };
+    constexpr std::string_view invalid_values[] = { "#3366FF", "3366FF80", "#1234567", "#123456789", " #12345678",
+        "#12345678 ", "#GG345678", "#12GG5678", "#1234GG78", "#123456GG", "#+1345678", "#-1345678", "#1 345678",
+        "#0x345678", "#1234567#", std::string_view("#1234567\0", 9), std::string_view("#12345678\0", 10) };
     for(auto text : invalid_values) {
         const auto parsed = Color::TryParse(text);
         zassert_false(parsed.has_value(), "Accepted malformed color: %.*s", static_cast<int>(text.size()), text.data());

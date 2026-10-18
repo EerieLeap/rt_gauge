@@ -14,7 +14,7 @@ namespace eerie_leap::utilities::memory {
 
 namespace {
 
-std::atomic<k_tid_t> scope_owner { nullptr };
+std::atomic<k_tid_t> scope_owner{ nullptr };
 // Only the owning thread touches it.
 std::pmr::memory_resource* scope_resource = nullptr;
 
@@ -41,8 +41,7 @@ ScopedNewResource::~ScopedNewResource() {
 } // namespace eerie_leap::utilities::memory
 
 // Zephyr places the libc arena between these on Espressif SoCs, so `delete` can tell its blocks apart.
-#if defined(CONFIG_COMMON_LIBC_MALLOC) && defined(CONFIG_HAS_ESPRESSIF_HAL) \
-    && CONFIG_COMMON_LIBC_MALLOC_ARENA_SIZE < 0
+#if defined(CONFIG_COMMON_LIBC_MALLOC) && defined(CONFIG_HAS_ESPRESSIF_HAL) && CONFIG_COMMON_LIBC_MALLOC_ARENA_SIZE < 0
 
 extern char _heap_sentry[];
 
@@ -75,7 +74,11 @@ std::pmr::memory_resource* CurrentResource() {
 void* AllocateFromResource(std::pmr::memory_resource* resource, std::size_t size) {
     // A resource that itself uses plain `new` must reach libc rather than recurse.
     in_scope_resource = true;
-    struct Restore { ~Restore() { in_scope_resource = false; } } restore;
+    struct Restore {
+        ~Restore() {
+            in_scope_resource = false;
+        }
+    } restore;
 
     const std::size_t bytes = header_bytes + size;
     auto* block = static_cast<std::byte*>(resource->allocate(bytes, block_alignment));

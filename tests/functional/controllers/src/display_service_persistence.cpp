@@ -36,7 +36,9 @@ bool FlushQueue(WorkQueueThread& queue) {
     auto done = std::make_shared<k_sem>();
     k_sem_init(done.get(), 0, 1);
 
-    queue.Run([done] { k_sem_give(done.get()); });
+    queue.Run([done] {
+        k_sem_give(done.get());
+    });
 
     return k_sem_take(done.get(), K_SECONDS(5)) == 0;
 }
@@ -55,17 +57,21 @@ ZTEST(display_service_persistence, test_the_brightness_the_unit_persists_is_stor
     fs_service->Format();
 
     auto queue = std::make_shared<WorkQueueThread>(
-        "display_persist_wq", CONFIG_WORK_QUEUE_STACK_SIZE, CONFIG_WORK_QUEUE_PRIORITY);
+        "display_persist_wq", CONFIG_WORK_QUEUE_STACK_SIZE, CONFIG_WORK_QUEUE_PRIORITY
+    );
     zassert_true(queue->Initialize(), "Expected the config work queue to start.");
 
     auto manager = std::make_shared<DisplayConfigurationManager>(
-        std::make_unique<CborConfigurationService<CborDisplayConfig>>("display_config", fs_service, queue));
+        std::make_unique<CborConfigurationService<CborDisplayConfig>>("display_config", fs_service, queue)
+    );
 
     auto configuration_service = std::make_shared<ConfigurationService>();
     configuration_service->RegisterCborConfigurationManager(ConfigurationService::Type::Display, manager);
 
     auto reports = std::make_shared<std::atomic<int>>(0);
-    configuration_service->RegisterConfigurationStoredHandler([reports](ConfigurationService::Type) { (*reports)++; });
+    configuration_service->RegisterConfigurationStoredHandler([reports](ConfigurationService::Type) {
+        (*reports)++;
+    });
 
     {
         DisplayService service(manager, queue);
@@ -81,7 +87,8 @@ ZTEST(display_service_persistence, test_the_brightness_the_unit_persists_is_stor
 
     const auto cbor = configuration_service->GetCborConfiguration(ConfigurationService::Type::Display);
     zassert_true(configuration_service->ApplyCborConfiguration(
-        ConfigurationService::Type::Display, std::span<const uint8_t>(cbor.data(), cbor.size())));
+        ConfigurationService::Type::Display, std::span<const uint8_t>(cbor.data(), cbor.size())
+    ));
     zassert_equal(reports->load(), 1, "while a configuration written to the unit is");
 
     configuration_service->RegisterConfigurationStoredHandler(nullptr);

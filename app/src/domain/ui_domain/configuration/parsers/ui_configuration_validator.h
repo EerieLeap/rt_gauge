@@ -8,8 +8,8 @@
 
 namespace eerie_leap::domain::ui_domain::configuration::parsers {
 
-using eerie_leap::domain::ui_domain::models::UiConfiguration;
 using eerie_leap::domain::ui_domain::models::ScreenConfiguration;
+using eerie_leap::domain::ui_domain::models::UiConfiguration;
 using eerie_leap::domain::ui_domain::models::WidgetConfiguration;
 
 class UiConfigurationValidator {
@@ -26,12 +26,12 @@ private:
     static void ValidateScreens(const UiConfiguration& configuration, const ChildValidator& validate_children);
 
     static void ValidateWidgetType(const ScreenConfiguration& screen_configuration);
-    static void ValidateWidgetSize(
-        const ScreenConfiguration& screen_configuration,
-        std::span<const std::optional<size_t>> parents);
+    static void
+    ValidateWidgetSize(const ScreenConfiguration& screen_configuration, std::span<const std::optional<size_t>> parents);
     static void ValidateWidgetPosition(
         const ScreenConfiguration& screen_configuration,
-        std::span<const std::optional<size_t>> parents);
+        std::span<const std::optional<size_t>> parents
+    );
     static void ValidateWidgetProperties(const ScreenConfiguration& screen_configuration);
     static void ValidateWidgetBindings(const ScreenConfiguration& screen_configuration);
 

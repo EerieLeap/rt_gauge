@@ -7,11 +7,11 @@
 
 #include <lvgl.h>
 
-#include "domain/ui_domain/models/widget_type.h"
-#include "domain/ui_domain/models/widget_position.h"
-#include "domain/ui_domain/models/widget_size.h"
 #include "domain/ui_domain/models/widget_configuration.h"
+#include "domain/ui_domain/models/widget_position.h"
 #include "domain/ui_domain/models/widget_property.h"
+#include "domain/ui_domain/models/widget_size.h"
+#include "domain/ui_domain/models/widget_type.h"
 #include "views/i_renderable.h"
 
 namespace eerie_leap::views::widgets {

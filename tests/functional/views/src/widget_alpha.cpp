@@ -10,12 +10,12 @@
 #include "domain/sensor_domain/event_bus/sensor_events_channel.h"
 #include "domain/ui_domain/models/icon_type.h"
 #include "domain/ui_domain/models/widget_fill_mode.h"
-#include "subsys/event_bus/event_channel_id.h"
 #include "event_bus/event_channels.h"
+#include "subsys/event_bus/event_channel_id.h"
 #include "views/themes/default_theme.h"
+#include "views/widgets/indicators/horizontal_chart_indicator/horizontal_chart_indicator.h"
 #include "views/widgets/widget_base.h"
 #include "views/widgets/widget_factory.h"
-#include "views/widgets/indicators/horizontal_chart_indicator/horizontal_chart_indicator.h"
 
 #include "views_test_support.h"
 
@@ -38,11 +38,19 @@ constexpr int rounding = 10;
 
 class AlphaTheme : public DefaultTheme {
     uint8_t alpha_;
+
 public:
-    explicit AlphaTheme(uint8_t alpha) : alpha_(alpha) {}
-    LvglColor GetPrimaryColor() const override { return LvglColor(0xFFFFFF, alpha_); }
-    LvglColor GetSecondaryColor() const override { return LvglColor(0xFFFFFF, alpha_); }
-    LvglColor GetAccentColor() const override { return LvglColor(0xFFFFFF, alpha_); }
+    explicit AlphaTheme(uint8_t alpha) :
+        alpha_(alpha) {}
+    LvglColor GetPrimaryColor() const override {
+        return LvglColor(0xFFFFFF, alpha_);
+    }
+    LvglColor GetSecondaryColor() const override {
+        return LvglColor(0xFFFFFF, alpha_);
+    }
+    LvglColor GetAccentColor() const override {
+        return LvglColor(0xFFFFFF, alpha_);
+    }
 };
 
 void Theme(int alpha) {
@@ -50,14 +58,12 @@ void Theme(int alpha) {
 }
 
 void Publish(WidgetPropertyType target, const EventData& value) {
-    SensorEventsChannel::GetInstance().Publish({
-        .source_id = 0,
-        .type = SensorEventType::DataUpdated,
-        .payload = {
-            { SensorPayloadType::SensorId, static_cast<int>(target) },
-            { SensorPayloadType::Value, value }
-        }
-    });
+    SensorEventsChannel::GetInstance().Publish(
+        { .source_id = 0,
+            .type = SensorEventType::DataUpdated,
+            .payload = {
+                { SensorPayloadType::SensorId, static_cast<int>(target) }, { SensorPayloadType::Value, value } } }
+    );
 }
 
 std::string White(int alpha) {
@@ -76,9 +82,11 @@ std::shared_ptr<WidgetConfiguration> Configuration(WidgetType type, IconType ico
 
 struct Scene {
     std::shared_ptr<Frame> root = std::make_shared<Frame>(
-        Frame::CreateWrapped().SetWidth(extent, true).SetHeight(extent, true).Build());
+        Frame::CreateWrapped().SetWidth(extent, true).SetHeight(extent, true).Build()
+    );
     std::shared_ptr<Frame> parent = std::make_shared<Frame>(
-        Frame::CreateWrapped(root->GetObject()).SetWidth(extent, true).SetHeight(extent, true).Build());
+        Frame::CreateWrapped(root->GetObject()).SetWidth(extent, true).SetHeight(extent, true).Build()
+    );
     std::unique_ptr<IWidget> widget;
 
     explicit Scene(std::shared_ptr<WidgetConfiguration> configuration) {
@@ -87,16 +95,14 @@ struct Scene {
         // Discover icon-specific properties before binding; only supported keys get subscriptions.
         widget = WidgetFactory::GetInstance().CreateWidget(configuration, parent, WidgetContext{});
         for(auto target : widget->GetSupportedProperties()) {
-            configuration->bindings.push_back(PropertyBinding {
-                .target = target,
-                .event = {
-                    .channel = EventChannelId::Sensors,
-                    .event_type = std::to_underlying(SensorEventType::DataUpdated),
-                    .payload_key = std::to_underlying(SensorPayloadType::Value),
-                    .selector_key = std::to_underlying(SensorPayloadType::SensorId),
-                    .selector_value = static_cast<int>(target)
-                }
-            });
+            configuration->bindings.push_back(
+                PropertyBinding{ .target = target,
+                    .event = { .channel = EventChannelId::Sensors,
+                        .event_type = std::to_underlying(SensorEventType::DataUpdated),
+                        .payload_key = std::to_underlying(SensorPayloadType::Value),
+                        .selector_key = std::to_underlying(SensorPayloadType::SensorId),
+                        .selector_value = static_cast<int>(target) } }
+            );
         }
         widget->Configure(configuration);
         zassert_equal(widget->Render(), 0);
@@ -104,14 +110,21 @@ struct Scene {
         lv_obj_update_layout(root->GetObject());
     }
 
-    lv_obj_t* Outer() const { return widget->GetContainer()->GetObject(); }
-    lv_obj_t* Inner() const { return lv_obj_get_child(views_test::WidgetContent(*widget), 0); }
-    WidgetBase& Base() const { return *dynamic_cast<WidgetBase*>(widget.get()); }
+    lv_obj_t* Outer() const {
+        return widget->GetContainer()->GetObject();
+    }
+    lv_obj_t* Inner() const {
+        return lv_obj_get_child(views_test::WidgetContent(*widget), 0);
+    }
+    WidgetBase& Base() const {
+        return *dynamic_cast<WidgetBase*>(widget.get());
+    }
 
     std::unique_ptr<lv_draw_buf_t, decltype(&lv_draw_buf_destroy)> Snapshot() const {
         lv_obj_update_layout(root->GetObject());
         std::unique_ptr<lv_draw_buf_t, decltype(&lv_draw_buf_destroy)> snapshot(
-            lv_snapshot_take(root->GetObject(), LV_COLOR_FORMAT_ARGB8888), lv_draw_buf_destroy);
+            lv_snapshot_take(root->GetObject(), LV_COLOR_FORMAT_ARGB8888), lv_draw_buf_destroy
+        );
         zassert_not_null(snapshot);
         zassert_equal(snapshot->header.w, extent);
         zassert_equal(snapshot->header.h, extent);
@@ -167,7 +180,9 @@ void* Setup() {
     return nullptr;
 }
 
-void Before(void*) { Theme(255); }
+void Before(void*) {
+    Theme(255);
+}
 
 void Clean(void* fixture) {
     ThemeManager::GetInstance().SetTheme(std::make_shared<DefaultTheme>());
@@ -209,8 +224,8 @@ ZTEST(widget_alpha, test_chart_pixels_compose_series_alpha_once_and_preserve_his
 }
 
 ZTEST(widget_alpha, test_shape_masks_compose_coverage_and_alpha_without_rasterizing_again) {
-    for(auto type : { IconType::Rectangle, IconType::TriangleIsosceles, IconType::TriangleRight,
-                     IconType::Oval, IconType::Line }) {
+    for(auto type :
+        { IconType::Rectangle, IconType::TriangleIsosceles, IconType::TriangleRight, IconType::Oval, IconType::Line }) {
         for(auto fill : { WidgetFillMode::Filled, WidgetFillMode::Outline }) {
             auto configuration = Configuration(WidgetType::BasicIcon, type);
             configuration->properties[WidgetPropertyType::WIDTH_PX] = 43;
@@ -239,8 +254,10 @@ ZTEST(widget_alpha, test_shape_masks_compose_coverage_and_alpha_without_rasteriz
                     antialiased += coverage > 0 && coverage < 255;
                     const int expected = (coverage * 128 * 128 + 32512) / (255 * 255);
                     const int actual = pixels[(bounds.y1 + y) * extent + bounds.x1 + x];
-                    zassert_within(actual, expected, rounding, "shape=%d coverage=%d actual=%d expected=%d",
-                        static_cast<int>(type), coverage, actual, expected);
+                    zassert_within(
+                        actual, expected, rounding, "shape=%d coverage=%d actual=%d expected=%d",
+                        static_cast<int>(type), coverage, actual, expected
+                    );
                 }
             }
             zassert_true(antialiased > 0);
@@ -332,8 +349,9 @@ ZTEST(widget_alpha, test_segment_animation_recolors_displayed_state_without_jump
     for(uint32_t i = 0; i < count; ++i) {
         auto* segment = lv_obj_get_child(views_test::WidgetContent(*scene.widget), i);
         segments.push_back(segment);
-        active.push_back(lv_color_to_u32(lv_obj_get_style_arc_color(segment, LV_PART_INDICATOR))
-            == lv_color_to_u32(lv_color_white()));
+        active.push_back(
+            lv_color_to_u32(lv_obj_get_style_arc_color(segment, LV_PART_INDICATOR)) == lv_color_to_u32(lv_color_white())
+        );
     }
     zassert_true(active.front());
     zassert_false(active.back());
@@ -382,8 +400,8 @@ ZTEST(widget_alpha, test_control_style_changes_preserve_values_states_and_event_
     for(auto type : { WidgetType::ControlSlider, WidgetType::ControlToggle, WidgetType::ControlButton }) {
         auto configuration = Configuration(type);
         configuration->properties[WidgetPropertyType::MAX_VALUE] = 100.0;
-        configuration->properties[WidgetPropertyType::VALUE] = type == WidgetType::ControlToggle
-            ? ConfigValue{true} : ConfigValue{42.0};
+        configuration->properties[WidgetPropertyType::VALUE] = type == WidgetType::ControlToggle ? ConfigValue{ true }
+                                                                                                 : ConfigValue{ 42.0 };
         Scene scene(configuration);
         auto* object = scene.Inner();
         lv_obj_add_state(object, LV_STATE_PRESSED);
@@ -394,9 +412,8 @@ ZTEST(widget_alpha, test_control_style_changes_preserve_values_states_and_event_
         for(int alpha : { 0, 128, 255 }) {
             Theme(alpha);
             for(auto property : { primary, inactive, WidgetPropertyType::COLOR_SECONDARY_ACTIVE,
-                                 WidgetPropertyType::COLOR_SECONDARY_INACTIVE,
-                                 WidgetPropertyType::COLOR_TERTIARY_ACTIVE,
-                                 WidgetPropertyType::COLOR_TERTIARY_INACTIVE }) {
+                    WidgetPropertyType::COLOR_SECONDARY_INACTIVE, WidgetPropertyType::COLOR_TERTIARY_ACTIVE,
+                    WidgetPropertyType::COLOR_TERTIARY_INACTIVE }) {
                 if(std::find(supported.begin(), supported.end(), property) != supported.end())
                     Publish(property, White(alpha));
             }

@@ -15,7 +15,8 @@ class SettingsEventsChannel : public EventChannel<SettingsEventType, SettingsPay
 private:
     static constexpr size_t k_max_queued_events = 16;
 
-    SettingsEventsChannel() : EventChannel("settings_events", k_max_queued_events) { }
+    SettingsEventsChannel() :
+        EventChannel("settings_events", k_max_queued_events) {}
 
 public:
     static SettingsEventsChannel& GetInstance() {

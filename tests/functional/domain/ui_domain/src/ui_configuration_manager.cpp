@@ -1,18 +1,18 @@
 #include <array>
+#include <eerie_memory.hpp>
 #include <memory>
 #include <memory_resource>
 #include <stdexcept>
 #include <vector>
 #include <zephyr/kernel.h>
 #include <zephyr/ztest.h>
-#include <eerie_memory.hpp>
 
 #include "configuration/cbor/cbor_ui_config/cbor_ui_config.h"
 #include "configuration/services/cbor_configuration_service.h"
 
 #include "domain/configuration_domain/services/configuration_service.h"
-#include "domain/ui_domain/configuration/ui_configuration_manager.h"
 #include "domain/ui_domain/configuration/parsers/ui_configuration_cbor_parser.h"
+#include "domain/ui_domain/configuration/ui_configuration_manager.h"
 #include "domain/ui_domain/models/widget_property.h"
 
 #include "subsys/device_tree/dt_fs.h"
@@ -116,7 +116,9 @@ std::shared_ptr<UiConfiguration> ui_configuration_manager_test_SetupTestUiConfig
     widget3->properties[WidgetPropertyType::MAX_VALUE] = 100;
     widget3->properties[WidgetPropertyType::LABEL] = "2348664336";
     widget3->properties[WidgetPropertyType::CHART_POINT_COUNT] = 35;
-    widget3->properties[WidgetPropertyType::CHART_TYPE] = static_cast<std::uint16_t>(HorizontalChartIndicatorType::Line);
+    widget3->properties[WidgetPropertyType::CHART_TYPE] = static_cast<std::uint16_t>(
+        HorizontalChartIndicatorType::Line
+    );
     screen_configuration->AddWidget(std::move(widget3));
 
     ui_configuration->screen_configurations.push_back(std::move(screen_configuration));
@@ -130,9 +132,10 @@ ZTEST(ui_configuration_manager, test_UiConfigurationManager_Save_config_successf
 
     fs_service->Format();
 
-    auto cbor_ui_configuration_service = std::make_unique<CborConfigurationService<CborUiConfig>>("ui_config", fs_service);
-    auto ui_configuration_manager = std::make_shared<UiConfigurationManager>(
-        std::move(cbor_ui_configuration_service));
+    auto cbor_ui_configuration_service = std::make_unique<CborConfigurationService<CborUiConfig>>(
+        "ui_config", fs_service
+    );
+    auto ui_configuration_manager = std::make_shared<UiConfigurationManager>(std::move(cbor_ui_configuration_service));
 
     auto ui_configuration = ui_configuration_manager_test_SetupTestUiConfiguration();
     bool result = ui_configuration_manager->Update(ui_configuration);
@@ -145,9 +148,10 @@ ZTEST(ui_configuration_manager, test_UiConfigurationManager_Save_config_and_Load
 
     fs_service->Format();
 
-    auto cbor_ui_configuration_service = std::make_unique<CborConfigurationService<CborUiConfig>>("ui_config", fs_service);
-    auto ui_configuration_manager = std::make_shared<UiConfigurationManager>(
-        std::move(cbor_ui_configuration_service));
+    auto cbor_ui_configuration_service = std::make_unique<CborConfigurationService<CborUiConfig>>(
+        "ui_config", fs_service
+    );
+    auto ui_configuration_manager = std::make_shared<UiConfigurationManager>(std::move(cbor_ui_configuration_service));
 
     auto ui_configuration = ui_configuration_manager_test_SetupTestUiConfiguration();
     bool result = ui_configuration_manager->Update(ui_configuration);
@@ -158,31 +162,86 @@ ZTEST(ui_configuration_manager, test_UiConfigurationManager_Save_config_and_Load
     zassert_equal(saved_ui_configuration->active_screen_group_id, ui_configuration->active_screen_group_id);
 
     for(std::size_t i = 0; i < ui_configuration->screen_configurations.size(); i++) {
-        zassert_equal(saved_ui_configuration->screen_configurations[i]->id, ui_configuration->screen_configurations[i]->id);
-        zassert_equal(saved_ui_configuration->screen_configurations[i]->screen_group_id, ui_configuration->screen_configurations[i]->screen_group_id);
-        zassert_equal(saved_ui_configuration->screen_configurations[i]->type, ui_configuration->screen_configurations[i]->type);
-        zassert_equal(saved_ui_configuration->screen_configurations[i]->z_index, ui_configuration->screen_configurations[i]->z_index);
-        zassert_equal(saved_ui_configuration->screen_configurations[i]->is_visible, ui_configuration->screen_configurations[i]->is_visible);
-        zassert_equal(saved_ui_configuration->screen_configurations[i]->grid.snap_enabled, ui_configuration->screen_configurations[i]->grid.snap_enabled);
-        zassert_equal(saved_ui_configuration->screen_configurations[i]->grid.width, ui_configuration->screen_configurations[i]->grid.width);
-        zassert_equal(saved_ui_configuration->screen_configurations[i]->grid.height, ui_configuration->screen_configurations[i]->grid.height);
-        zassert_equal(saved_ui_configuration->screen_configurations[i]->grid.spacing_px, ui_configuration->screen_configurations[i]->grid.spacing_px);
+        zassert_equal(
+            saved_ui_configuration->screen_configurations[i]->id, ui_configuration->screen_configurations[i]->id
+        );
+        zassert_equal(
+            saved_ui_configuration->screen_configurations[i]->screen_group_id,
+            ui_configuration->screen_configurations[i]->screen_group_id
+        );
+        zassert_equal(
+            saved_ui_configuration->screen_configurations[i]->type, ui_configuration->screen_configurations[i]->type
+        );
+        zassert_equal(
+            saved_ui_configuration->screen_configurations[i]->z_index,
+            ui_configuration->screen_configurations[i]->z_index
+        );
+        zassert_equal(
+            saved_ui_configuration->screen_configurations[i]->is_visible,
+            ui_configuration->screen_configurations[i]->is_visible
+        );
+        zassert_equal(
+            saved_ui_configuration->screen_configurations[i]->grid.snap_enabled,
+            ui_configuration->screen_configurations[i]->grid.snap_enabled
+        );
+        zassert_equal(
+            saved_ui_configuration->screen_configurations[i]->grid.width,
+            ui_configuration->screen_configurations[i]->grid.width
+        );
+        zassert_equal(
+            saved_ui_configuration->screen_configurations[i]->grid.height,
+            ui_configuration->screen_configurations[i]->grid.height
+        );
+        zassert_equal(
+            saved_ui_configuration->screen_configurations[i]->grid.spacing_px,
+            ui_configuration->screen_configurations[i]->grid.spacing_px
+        );
 
         for(std::size_t j = 0; j < ui_configuration->screen_configurations[i]->widget_configurations.size(); j++) {
-            zassert_equal(saved_ui_configuration->screen_configurations[i]->widget_configurations[j]->type, ui_configuration->screen_configurations[i]->widget_configurations[j]->type);
-            zassert_equal(saved_ui_configuration->screen_configurations[i]->widget_configurations[j]->id, ui_configuration->screen_configurations[i]->widget_configurations[j]->id);
-            zassert_equal(saved_ui_configuration->screen_configurations[i]->widget_configurations[j]->position_grid.x, ui_configuration->screen_configurations[i]->widget_configurations[j]->position_grid.x);
-            zassert_equal(saved_ui_configuration->screen_configurations[i]->widget_configurations[j]->position_grid.y, ui_configuration->screen_configurations[i]->widget_configurations[j]->position_grid.y);
-            zassert_equal(saved_ui_configuration->screen_configurations[i]->widget_configurations[j]->size_grid.width, ui_configuration->screen_configurations[i]->widget_configurations[j]->size_grid.width);
-            zassert_equal(saved_ui_configuration->screen_configurations[i]->widget_configurations[j]->size_grid.height, ui_configuration->screen_configurations[i]->widget_configurations[j]->size_grid.height);
-            zassert_equal(saved_ui_configuration->screen_configurations[i]->widget_configurations[j]->z_index, ui_configuration->screen_configurations[i]->widget_configurations[j]->z_index);
-            zassert_equal(saved_ui_configuration->screen_configurations[i]->widget_configurations[j]->properties.size(), ui_configuration->screen_configurations[i]->widget_configurations[j]->properties.size());
+            zassert_equal(
+                saved_ui_configuration->screen_configurations[i]->widget_configurations[j]->type,
+                ui_configuration->screen_configurations[i]->widget_configurations[j]->type
+            );
+            zassert_equal(
+                saved_ui_configuration->screen_configurations[i]->widget_configurations[j]->id,
+                ui_configuration->screen_configurations[i]->widget_configurations[j]->id
+            );
+            zassert_equal(
+                saved_ui_configuration->screen_configurations[i]->widget_configurations[j]->position_grid.x,
+                ui_configuration->screen_configurations[i]->widget_configurations[j]->position_grid.x
+            );
+            zassert_equal(
+                saved_ui_configuration->screen_configurations[i]->widget_configurations[j]->position_grid.y,
+                ui_configuration->screen_configurations[i]->widget_configurations[j]->position_grid.y
+            );
+            zassert_equal(
+                saved_ui_configuration->screen_configurations[i]->widget_configurations[j]->size_grid.width,
+                ui_configuration->screen_configurations[i]->widget_configurations[j]->size_grid.width
+            );
+            zassert_equal(
+                saved_ui_configuration->screen_configurations[i]->widget_configurations[j]->size_grid.height,
+                ui_configuration->screen_configurations[i]->widget_configurations[j]->size_grid.height
+            );
+            zassert_equal(
+                saved_ui_configuration->screen_configurations[i]->widget_configurations[j]->z_index,
+                ui_configuration->screen_configurations[i]->widget_configurations[j]->z_index
+            );
+            zassert_equal(
+                saved_ui_configuration->screen_configurations[i]->widget_configurations[j]->properties.size(),
+                ui_configuration->screen_configurations[i]->widget_configurations[j]->properties.size()
+            );
             for(auto& property : ui_configuration->screen_configurations[i]->widget_configurations[j]->properties) {
-                zassert_true(saved_ui_configuration->screen_configurations[i]->widget_configurations[j]->properties[property.first] == ui_configuration->screen_configurations[i]->widget_configurations[j]->properties[property.first]);
+                zassert_true(
+                    saved_ui_configuration->screen_configurations[i]
+                        ->widget_configurations[j]
+                        ->properties[property.first]
+                    == ui_configuration->screen_configurations[i]->widget_configurations[j]->properties[property.first]
+                );
             }
 
             const auto& bindings = ui_configuration->screen_configurations[i]->widget_configurations[j]->bindings;
-            const auto& saved_bindings = saved_ui_configuration->screen_configurations[i]->widget_configurations[j]->bindings;
+            const auto& saved_bindings =
+                saved_ui_configuration->screen_configurations[i]->widget_configurations[j]->bindings;
 
             zassert_equal(saved_bindings.size(), bindings.size());
 
@@ -209,8 +268,10 @@ ZTEST(ui_configuration_manager, test_UiConfigurationManager_validates_once_per_b
 
     size_t checks = 0;
     auto ui_configuration_manager = std::make_shared<UiConfigurationManager>(
-        std::make_unique<CborConfigurationService<CborUiConfig>>("ui_config", fs_service),
-        [&](const auto&, auto) { ++checks; });
+        std::make_unique<CborConfigurationService<CborUiConfig>>("ui_config", fs_service), [&](const auto&, auto) {
+            ++checks;
+        }
+    );
     auto ui_configuration = ui_configuration_manager_test_SetupTestUiConfiguration();
     const auto widget_count = ui_configuration->screen_configurations[0]->widget_configurations.size();
 
@@ -249,11 +310,14 @@ const std::pmr::vector<int>* ChildIds(const WidgetConfiguration& widget) {
 ZTEST(ui_configuration_manager, test_UiConfigurationManager_persists_ordered_child_ids_through_storage) {
     auto fs_service = FormattedFs();
     auto ui_configuration_manager = std::make_shared<UiConfigurationManager>(
-        std::make_unique<CborConfigurationService<CborUiConfig>>("ui_config", fs_service));
+        std::make_unique<CborConfigurationService<CborUiConfig>>("ui_config", fs_service)
+    );
     auto ui_configuration = ui_configuration_manager_test_SetupTestUiConfiguration();
     auto& widgets = ui_configuration->screen_configurations[0]->widget_configurations;
     // Widget 2 (z 2) comes before widget 1 (z 0), and ID order, in the owner's list.
-    widgets[0]->properties[WidgetPropertyType::CHILD_WIDGET_IDS] = std::pmr::vector<int>({ 2, 1 }, Mrm::GetDefaultPmr());
+    widgets[0]->properties[WidgetPropertyType::CHILD_WIDGET_IDS] = std::pmr::vector<int>(
+        { 2, 1 }, Mrm::GetDefaultPmr()
+    );
     widgets[1]->properties[WidgetPropertyType::CHILD_WIDGET_IDS] = std::pmr::vector<int>(Mrm::GetDefaultPmr());
     widgets[2]->properties[WidgetPropertyType::ANCHOR_POINT_X] = 7;
     widgets[2]->properties[WidgetPropertyType::ANCHOR_POINT_Y] = 7;
@@ -281,7 +345,8 @@ ZTEST(ui_configuration_manager, test_UiConfigurationManager_rejects_invalid_comp
         [&](const auto&, auto children) {
             if(reject_children && !children.empty())
                 throw std::invalid_argument("This owner accepts no children.");
-        });
+        }
+    );
 
     auto composed = ui_configuration_manager_test_SetupTestUiConfiguration();
     composed->screen_configurations[0]->widget_configurations[0]->properties[WidgetPropertyType::CHILD_WIDGET_IDS] =
@@ -303,8 +368,9 @@ ZTEST(ui_configuration_manager, test_UiConfigurationManager_rejects_invalid_comp
     expect_plain_stored("Rejected save");
     std::array<char, 128> reason{};
     zassert_false(ui_configuration_manager->ApplyCborConfiguration(exported, reason));
-    zassert_str_equal(reason.data(),
-        "Invalid UI Widget configuration. Screen ID: 8, Widget ID: 0. This owner accepts no children.");
+    zassert_str_equal(
+        reason.data(), "Invalid UI Widget configuration. Screen ID: 8, Widget ID: 0. This owner accepts no children."
+    );
     expect_plain_stored("Rejected import");
 
     reject_children = false;
@@ -329,9 +395,10 @@ ZTEST(ui_configuration_manager, test_UiConfigurationManager_falls_back_when_the_
     auto writer_service = std::make_unique<CborConfigurationService<CborUiConfig>>("ui_config", fs_service);
     zassert_true(writer_service->Save(stale_config.get()));
 
-    auto cbor_ui_configuration_service = std::make_unique<CborConfigurationService<CborUiConfig>>("ui_config", fs_service);
-    auto ui_configuration_manager = std::make_shared<UiConfigurationManager>(
-        std::move(cbor_ui_configuration_service));
+    auto cbor_ui_configuration_service = std::make_unique<CborConfigurationService<CborUiConfig>>(
+        "ui_config", fs_service
+    );
+    auto ui_configuration_manager = std::make_shared<UiConfigurationManager>(std::move(cbor_ui_configuration_service));
 
     // The default configuration rather than a crash or a half-decoded one.
     auto configuration = ui_configuration_manager->Get();
@@ -349,14 +416,17 @@ ZTEST(ui_configuration_manager, test_an_update_is_reported_to_the_configuration_
     fs_service->Format();
 
     auto ui_configuration_manager = std::make_shared<UiConfigurationManager>(
-        std::make_unique<CborConfigurationService<CborUiConfig>>("ui_config", fs_service));
+        std::make_unique<CborConfigurationService<CborUiConfig>>("ui_config", fs_service)
+    );
 
     eerie_leap::domain::configuration_domain::services::ConfigurationService configuration_service;
     using Type = eerie_leap::domain::configuration_domain::services::ConfigurationService::Type;
     configuration_service.RegisterCborConfigurationManager(Type::Ui, ui_configuration_manager);
 
     std::vector<Type> reports;
-    configuration_service.RegisterConfigurationStoredHandler([&reports](Type type) { reports.push_back(type); });
+    configuration_service.RegisterConfigurationStoredHandler([&reports](Type type) {
+        reports.push_back(type);
+    });
 
     zassert_true(ui_configuration_manager->Update(ui_configuration_manager_test_SetupTestUiConfiguration()));
 

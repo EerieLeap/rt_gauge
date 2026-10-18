@@ -26,8 +26,8 @@ protected:
 
 public:
     // The leaf rule, plus an ICON_TYPE the icon factory implements: without one nothing renders.
-    static void ValidateChildren(const WidgetConfiguration& configuration,
-        std::span<const WidgetConfiguration* const> children);
+    static void
+    ValidateChildren(const WidgetConfiguration& configuration, std::span<const WidgetConfiguration* const> children);
 
     IconWidget(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context, IconType icon_type = IconType::None);
     ~IconWidget() override;
@@ -41,7 +41,9 @@ protected:
 public:
     int ApplyTheme(const ITheme& theme) override;
 
-    WidgetType GetType() const override { return WidgetType::BasicIcon; }
+    WidgetType GetType() const override {
+        return WidgetType::BasicIcon;
+    }
 };
 
 } // namespace eerie_leap::views::widgets::basic

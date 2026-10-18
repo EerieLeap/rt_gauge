@@ -37,7 +37,9 @@ protected:
     void OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) override;
 
 public:
-    WidgetType GetType() const override { return WidgetType::IndicatorSetting; }
+    WidgetType GetType() const override {
+        return WidgetType::IndicatorSetting;
+    }
 };
 
 } // namespace eerie_leap::views::widgets::indicators

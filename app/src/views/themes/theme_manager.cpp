@@ -16,8 +16,8 @@ using eerie_leap::domain::ui_domain::ScopedLvglLock;
 
 LOG_MODULE_REGISTER(theme_manager_logger);
 
-ThemeManager::ThemeManager()
-    : current_theme_(std::make_shared<DefaultTheme>()) {
+ThemeManager::ThemeManager() :
+    current_theme_(std::make_shared<DefaultTheme>()) {
     k_mutex_init(&observers_lock_);
 }
 
@@ -53,10 +53,7 @@ void ThemeManager::RegisterObserver(IThemeObserver* observer) {
 void ThemeManager::UnregisterObserver(IThemeObserver* observer) {
     k_mutex_lock(&observers_lock_, K_FOREVER);
 
-    observers_.erase(
-        std::remove(observers_.begin(), observers_.end(), observer),
-        observers_.end()
-    );
+    observers_.erase(std::remove(observers_.begin(), observers_.end(), observer), observers_.end());
 
     k_mutex_unlock(&observers_lock_);
 }

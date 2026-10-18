@@ -9,7 +9,8 @@ using namespace eerie_leap::utilities::type;
 using namespace eerie_leap::domain::ui_domain::models;
 using namespace eerie_leap::views::themes;
 
-LabelIcon::LabelIcon(std::shared_ptr<Frame> parent) : IconBase(std::move(parent)) { }
+LabelIcon::LabelIcon(std::shared_ptr<Frame> parent) :
+    IconBase(std::move(parent)) {}
 
 void LabelIcon::RegisterProperties(WidgetPropertyStore& store) {
     IconBase::RegisterProperties(store);
@@ -17,12 +18,14 @@ void LabelIcon::RegisterProperties(WidgetPropertyStore& store) {
     store.RegisterColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE);
     store.RegisterColor(WidgetPropertyType::COLOR_SECONDARY_ACTIVE);
 
-    store.Register(WidgetPropertyType::LABEL, ConfigValue { std::pmr::string { } }, PropertyChangeEffect::Rebuild);
+    store.Register(WidgetPropertyType::LABEL, ConfigValue{ std::pmr::string{} }, PropertyChangeEffect::Rebuild);
 }
 
 int LabelIcon::ApplyTheme(const ITheme& theme) {
     const auto primary = properties_->ResolveColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE, theme.GetAccentColor());
-    const auto secondary = properties_->ResolveColor(WidgetPropertyType::COLOR_SECONDARY_ACTIVE, theme.GetPrimaryColor());
+    const auto secondary = properties_->ResolveColor(
+        WidgetPropertyType::COLOR_SECONDARY_ACTIVE, theme.GetPrimaryColor()
+    );
 
     lv_obj_set_style_bg_color(container_->GetObject(), primary.ToLvColor(), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(container_->GetObject(), primary.ToLvOpa(), LV_PART_MAIN | LV_STATE_DEFAULT);

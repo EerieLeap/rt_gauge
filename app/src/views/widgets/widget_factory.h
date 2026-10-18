@@ -1,28 +1,29 @@
 #pragma once
 
-#include <memory>
 #include <functional>
+#include <memory>
 #include <span>
 #include <unordered_map>
 #include <vector>
 
 #include "domain/ui_domain/models/widget_type.h"
 
+#include "views/utilitites/frame.h"
 #include "views/widgets/i_widget.h"
 #include "views/widgets/widget_context.h"
-#include "views/utilitites/frame.h"
 
 namespace eerie_leap::views::widgets {
 
-using eerie_leap::domain::ui_domain::models::WidgetType;
 using eerie_leap::domain::ui_domain::models::WidgetConfiguration;
+using eerie_leap::domain::ui_domain::models::WidgetType;
 
 using eerie_leap::views::utilitites::Frame;
 using eerie_leap::views::widgets::IWidget;
 
 class WidgetFactory {
 public:
-    using WidgetCreator = std::function<std::unique_ptr<IWidget>(const uint32_t id, std::shared_ptr<Frame> container, const WidgetContext& context)>;
+    using WidgetCreator = std::function<
+        std::unique_ptr<IWidget>(const uint32_t id, std::shared_ptr<Frame> container, const WidgetContext& context)>;
     using ChildValidator = std::function<void(const WidgetConfiguration&, std::span<const WidgetConfiguration* const>)>;
 
 private:
@@ -41,10 +42,13 @@ public:
 
     template<typename T>
     void RegisterWidget(const WidgetType type) {
-        RegisterWidget(type,
+        RegisterWidget(
+            type,
             [](uint32_t id, std::shared_ptr<Frame> parent, const WidgetContext& context) -> std::unique_ptr<IWidget> {
                 return std::make_unique<T>(id, std::move(parent), context);
-            }, T::ValidateChildren);
+            },
+            T::ValidateChildren
+        );
     }
     void RegisterWidget(const WidgetType type, WidgetCreator creator, ChildValidator validator = {});
 
@@ -52,13 +56,22 @@ public:
     // children have already passed reference, ownership, type, and binding checks.
     void ValidateChildren(const WidgetConfiguration& owner, std::span<const WidgetConfiguration* const> children) const;
 
-    std::unique_ptr<IWidget> CreateWidget(const WidgetType type, const uint32_t id, std::shared_ptr<Frame> parent, const WidgetContext& context);
+    std::unique_ptr<IWidget>
+    CreateWidget(const WidgetType type, const uint32_t id, std::shared_ptr<Frame> parent, const WidgetContext& context);
     // Childless convenience path: constructs and configures one widget.
-    std::unique_ptr<IWidget> CreateWidget(std::shared_ptr<WidgetConfiguration> configuration, std::shared_ptr<Frame> parent, const WidgetContext& context);
+    std::unique_ptr<IWidget> CreateWidget(
+        std::shared_ptr<WidgetConfiguration> configuration,
+        std::shared_ptr<Frame> parent,
+        const WidgetContext& context
+    );
 
     // Injects children, already configured under the widget's child mount in
     // CHILD_WIDGET_IDS order, then configures the receiving widget once.
-    void ConfigureWidget(IWidget& widget, std::shared_ptr<WidgetConfiguration> configuration, IWidget::Children children) const;
+    void ConfigureWidget(
+        IWidget& widget,
+        std::shared_ptr<WidgetConfiguration> configuration,
+        IWidget::Children children
+    ) const;
 
     std::vector<WidgetType> GetAvailableTypes() const;
 };

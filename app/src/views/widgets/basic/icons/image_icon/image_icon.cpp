@@ -2,12 +2,12 @@
 
 #include <zephyr/logging/log.h>
 
-#include "utilities/memory/memory_resource_manager.h"
+#include "domain/ui_domain/lvgl_lock.h"
+#include "domain/ui_domain/models/widget_property.h"
 #include "subsys/assets/asset_kind.h"
 #include "subsys/assets/asset_provider.h"
 #include "subsys/assets/asset_store.h"
-#include "domain/ui_domain/lvgl_lock.h"
-#include "domain/ui_domain/models/widget_property.h"
+#include "utilities/memory/memory_resource_manager.h"
 #include "views/themes/theme_manager.h"
 
 #include <misc/cache/instance/lv_image_cache.h>
@@ -40,8 +40,8 @@ uint64_t GetImageBytes(int width, int height) {
 
 } // namespace
 
-ImageIcon::ImageIcon(std::shared_ptr<Frame> parent)
-    : IconBase(std::move(parent)) {}
+ImageIcon::ImageIcon(std::shared_ptr<Frame> parent) :
+    IconBase(std::move(parent)) {}
 
 ImageIcon::~ImageIcon() {
     ScopedLvglLock lvgl_guard;
@@ -56,9 +56,9 @@ ImageIcon::~ImageIcon() {
 
 void ImageIcon::RegisterProperties(WidgetPropertyStore& store) {
     IconBase::RegisterProperties(store);
-    store.Register(WidgetPropertyType::FILE_PATH, ConfigValue { std::pmr::string { } }, PropertyChangeEffect::Rebuild);
-    store.Register(WidgetPropertyType::IMG_WIDTH, ConfigValue { 0 }, PropertyChangeEffect::Rebuild);
-    store.Register(WidgetPropertyType::IMG_HEIGHT, ConfigValue { 0 }, PropertyChangeEffect::Rebuild);
+    store.Register(WidgetPropertyType::FILE_PATH, ConfigValue{ std::pmr::string{} }, PropertyChangeEffect::Rebuild);
+    store.Register(WidgetPropertyType::IMG_WIDTH, ConfigValue{ 0 }, PropertyChangeEffect::Rebuild);
+    store.Register(WidgetPropertyType::IMG_HEIGHT, ConfigValue{ 0 }, PropertyChangeEffect::Rebuild);
 }
 
 int ImageIcon::ApplyTheme(const ITheme&) {
@@ -97,8 +97,10 @@ lv_obj_t* ImageIcon::Create(lv_obj_t* parent) {
     // A client can upload any file under an image's name, and LVGL reads width x height pixels from it.
     // Refused before it replaces image_data_, which a rendered image may still be showing.
     if(image_data.size() < GetImageBytes(image_width_, image_height_)) {
-        LOG_ERR("Image '%s' holds %zu bytes, too few for %dx%d pixels.",
-            file_path_.c_str(), image_data.size(), image_width_, image_height_);
+        LOG_ERR(
+            "Image '%s' holds %zu bytes, too few for %dx%d pixels.", file_path_.c_str(), image_data.size(),
+            image_width_, image_height_
+        );
         return nullptr;
     }
 
@@ -138,8 +140,11 @@ void ImageIcon::Configure(std::shared_ptr<WidgetPropertyStore> properties) {
     image_width_ = properties_->GetAs<int>(WidgetPropertyType::IMG_WIDTH, 0);
     image_height_ = properties_->GetAs<int>(WidgetPropertyType::IMG_HEIGHT, 0);
 
-    if(!IsReady() || image_width_ <= 0 || image_height_ <= 0
-        || image_width_ > UINT16_MAX || image_height_ > UINT16_MAX
+    if(!IsReady()
+        || image_width_ <= 0
+        || image_height_ <= 0
+        || image_width_ > UINT16_MAX
+        || image_height_ > UINT16_MAX
         || (lv_image_descriptor_.header.w == image_width_ && lv_image_descriptor_.header.h == image_height_))
         return;
 

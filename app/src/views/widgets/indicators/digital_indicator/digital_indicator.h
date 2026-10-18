@@ -22,10 +22,11 @@ protected:
     void OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) override;
 
 public:
-
 public:
     explicit DigitalIndicator(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context);
-    WidgetType GetType() const override { return WidgetType::IndicatorDigital; }
+    WidgetType GetType() const override {
+        return WidgetType::IndicatorDigital;
+    }
 };
 
 } // namespace eerie_leap::views::widgets::indicators

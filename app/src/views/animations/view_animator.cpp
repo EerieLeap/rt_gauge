@@ -12,11 +12,17 @@ ViewAnimator::~ViewAnimator() {
     Detach();
 }
 
-bool ViewAnimator::Attach(utilitites::Frame& presentation, utilitites::Frame& layout,
-    EligibilityCallback eligible, void* context) {
+bool ViewAnimator::Attach(
+    utilitites::Frame& presentation,
+    utilitites::Frame& layout,
+    EligibilityCallback eligible,
+    void* context
+) {
     auto* presentation_object = presentation.GetObject();
     auto* layout_object = layout.GetObject();
-    if(presentation_object == nullptr || layout_object == nullptr || eligible == nullptr
+    if(presentation_object == nullptr
+        || layout_object == nullptr
+        || eligible == nullptr
         || lv_obj_get_parent(presentation_object) != layout_object)
         return false;
 
@@ -34,8 +40,10 @@ bool ViewAnimator::Attach(utilitites::Frame& presentation, utilitites::Frame& la
 void ViewAnimator::Synchronize(const Settings& settings) {
     if(presentation_ == nullptr || layout_ == nullptr)
         return;
-    if(settings.duration_ms < Animation::MIN_DURATION_MS || settings.duration_ms > Animation::MAX_DURATION_MS
-        || (settings.type != Animation::Type::None && settings.type != Animation::Type::Blinking
+    if(settings.duration_ms < Animation::MIN_DURATION_MS
+        || settings.duration_ms > Animation::MAX_DURATION_MS
+        || (settings.type != Animation::Type::None
+            && settings.type != Animation::Type::Blinking
             && settings.type != Animation::Type::Rotation))
         return;
 
@@ -222,15 +230,17 @@ void ViewAnimator::ObjectEvent(lv_event_t* event) {
         self->OnObjectDeleted(object);
     } else if(code == LV_EVENT_SIZE_CHANGED && self->rotation_prepared_) {
         self->RefreshDrawMargin();
-    } else if(code == LV_EVENT_REFR_EXT_DRAW_SIZE && object == self->layout_
-        && self->rotation_prepared_ && self->presentation_ != nullptr) {
+    } else if(code == LV_EVENT_REFR_EXT_DRAW_SIZE
+        && object == self->layout_
+        && self->rotation_prepared_
+        && self->presentation_ != nullptr) {
         lv_area_t bounds;
         lv_area_t layout;
         lv_obj_get_coords(self->presentation_, &bounds);
         lv_obj_get_transformed_area(self->presentation_, &bounds, LV_OBJ_POINT_TRANSFORM_FLAG_NONE);
         lv_obj_get_coords(self->layout_, &layout);
-        const auto margin = std::max<int32_t>({ 0, layout.x1 - bounds.x1, layout.y1 - bounds.y1,
-            bounds.x2 - layout.x2, bounds.y2 - layout.y2 });
+        const auto margin = std::max<int32_t>({ 0, layout.x1 - bounds.x1, layout.y1 - bounds.y1, bounds.x2 - layout.x2,
+            bounds.y2 - layout.y2 });
         lv_event_set_ext_draw_size(event, margin + 1);
     }
 }

@@ -3,8 +3,8 @@
 #include <memory>
 #include <new>
 
-#include <zephyr/logging/log.h>
 #include <misc/cache/instance/lv_image_cache.h>
+#include <zephyr/logging/log.h>
 
 #include "utilities/memory/memory_resource_manager.h"
 #include "views/themes/theme_manager.h"
@@ -35,7 +35,12 @@ using DrawDescriptor = std::unique_ptr<lv_draw_vector_dsc_t, decltype(&lv_draw_v
 
 } // namespace
 
-int ShapeIconBase::ReadPixels(const WidgetPropertyStore& store, WidgetPropertyType type, int fallback, bool is_dimension) {
+int ShapeIconBase::ReadPixels(
+    const WidgetPropertyStore& store,
+    WidgetPropertyType type,
+    int fallback,
+    bool is_dimension
+) {
     double value = store.GetAs<double>(type, fallback);
     if(!std::isfinite(value) || (is_dimension && (value < 0 || value > max_dimension)))
         return is_dimension ? -1 : 0;
@@ -43,8 +48,9 @@ int ShapeIconBase::ReadPixels(const WidgetPropertyStore& store, WidgetPropertyTy
     return static_cast<int>(std::clamp(value, 0.0, static_cast<double>(max_dimension)));
 }
 
-ShapeIconBase::ShapeIconBase(std::shared_ptr<Frame> parent)
-    : IconBase(std::move(parent)), mask_(Mrm::GetExtPmr()) {}
+ShapeIconBase::ShapeIconBase(std::shared_ptr<Frame> parent) :
+    IconBase(std::move(parent)),
+    mask_(Mrm::GetExtPmr()) {}
 
 ShapeIconBase::~ShapeIconBase() {
     // The widget can still hold the shared Frame while this icon releases its pixels.
@@ -58,9 +64,9 @@ void ShapeIconBase::RegisterProperties(WidgetPropertyStore& store) {
 
     store.RegisterColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE);
 
-    store.Register(WidgetPropertyType::WIDTH_PX, ConfigValue { 32 }, PropertyChangeEffect::Relayout);
-    store.Register(WidgetPropertyType::HEIGHT_PX, ConfigValue { 32 }, PropertyChangeEffect::Relayout);
-    store.Register(WidgetPropertyType::STROKE_PX, ConfigValue { 2 }, PropertyChangeEffect::Relayout);
+    store.Register(WidgetPropertyType::WIDTH_PX, ConfigValue{ 32 }, PropertyChangeEffect::Relayout);
+    store.Register(WidgetPropertyType::HEIGHT_PX, ConfigValue{ 32 }, PropertyChangeEffect::Relayout);
+    store.Register(WidgetPropertyType::STROKE_PX, ConfigValue{ 2 }, PropertyChangeEffect::Relayout);
 }
 
 int ShapeIconBase::ApplyTheme(const ITheme& theme) {
@@ -148,7 +154,9 @@ void ShapeIconBase::Rasterize(lv_vector_path_t* path, int width_px, int height_p
     // an intermediate buffer as large as the display. Only the alpha mask persists.
     // Discard a small halo around each tile so clipping at the rasterizer's edge
     // cannot leave isolated antialiasing pixels along tile boundaries.
-    DrawBuffer tile(lv_draw_buf_create(tile_extent, tile_extent, LV_COLOR_FORMAT_ARGB8888, LV_STRIDE_AUTO), lv_draw_buf_destroy);
+    DrawBuffer tile(
+        lv_draw_buf_create(tile_extent, tile_extent, LV_COLOR_FORMAT_ARGB8888, LV_STRIDE_AUTO), lv_draw_buf_destroy
+    );
     if(tile == nullptr)
         throw std::bad_alloc();
     auto canvas_frame = Frame::Create(lv_canvas_create(parent_->GetObject())).Build();
@@ -179,7 +187,9 @@ void ShapeIconBase::Rasterize(lv_vector_path_t* path, int width_px, int height_p
             lv_canvas_finish_layer(canvas, &layer);
 
             for(int row = 0; row < std::min(tile_size, height_px - y); ++row) {
-                auto pixels = reinterpret_cast<const lv_color32_t*>(tile->data + (row + tile_padding) * tile->header.stride);
+                auto pixels = reinterpret_cast<const lv_color32_t*>(
+                    tile->data + (row + tile_padding) * tile->header.stride
+                );
                 for(int column = 0; column < std::min(tile_size, width_px - x); ++column)
                     mask_[(y + row) * stride + x + column] = pixels[column + tile_padding].alpha;
             }

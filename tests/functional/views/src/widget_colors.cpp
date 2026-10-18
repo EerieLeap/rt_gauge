@@ -9,19 +9,19 @@
 
 #include <zephyr/ztest.h>
 
-#include "subsys/assets/asset_kind.h"
-#include "domain/ui_domain/models/animation.h"
 #include "domain/sensor_domain/event_bus/sensor_events_channel.h"
-#include "subsys/event_bus/event_channel_id.h"
+#include "domain/ui_domain/models/animation.h"
 #include "event_bus/event_channels.h"
-#include "views/themes/default_theme.h"
-#include "views/themes/dark_theme.h"
+#include "subsys/assets/asset_kind.h"
+#include "subsys/event_bus/event_channel_id.h"
 #include "views/themes/dark_bw_theme.h"
-#include "views/widgets/widget_factory.h"
-#include "views/widgets/widget_base.h"
+#include "views/themes/dark_theme.h"
+#include "views/themes/default_theme.h"
 #include "views/widgets/basic/icon_widget/icon_widget.h"
 #include "views/widgets/basic/icons/icon_factory.h"
 #include "views/widgets/indicators/horizontal_chart_indicator/horizontal_chart_indicator.h"
+#include "views/widgets/widget_base.h"
+#include "views/widgets/widget_factory.h"
 
 #include "views_test_support.h"
 
@@ -29,10 +29,10 @@ using namespace eerie_leap::domain::ui_domain::models;
 using namespace eerie_leap::domain::sensor_domain::event_bus;
 using namespace eerie_leap::views::widgets;
 using namespace eerie_leap::views::themes;
-using eerie_leap::views::utilitites::Frame;
 using eerie_leap::subsys::assets::AssetKind;
 using eerie_leap::subsys::event_bus::EventChannelId;
 using eerie_leap::subsys::event_bus::EventData;
+using eerie_leap::views::utilitites::Frame;
 
 namespace {
 
@@ -45,10 +45,18 @@ constexpr auto tertiary_inactive = WidgetPropertyType::COLOR_TERTIARY_INACTIVE;
 
 class TranslucentTheme : public DefaultTheme {
 public:
-    LvglColor GetPrimaryColor() const override { return LvglColor(0x123456, 128); }
-    LvglColor GetSecondaryColor() const override { return LvglColor(0x345678, 96); }
-    LvglColor GetSurfaceColor() const override { return LvglColor(0x56789A, 64); }
-    LvglColor GetAccentColor() const override { return LvglColor(0x789ABC, 32); }
+    LvglColor GetPrimaryColor() const override {
+        return LvglColor(0x123456, 128);
+    }
+    LvglColor GetSecondaryColor() const override {
+        return LvglColor(0x345678, 96);
+    }
+    LvglColor GetSurfaceColor() const override {
+        return LvglColor(0x56789A, 64);
+    }
+    LvglColor GetAccentColor() const override {
+        return LvglColor(0x789ABC, 32);
+    }
 };
 
 std::shared_ptr<WidgetConfiguration> Configuration(WidgetType type, IconType icon = IconType::Oval) {
@@ -58,18 +66,16 @@ std::shared_ptr<WidgetConfiguration> Configuration(WidgetType type, IconType ico
     if(type == WidgetType::BasicIcon || type == WidgetType::BasicArcIcon)
         configuration->properties[WidgetPropertyType::ICON_TYPE] = static_cast<int>(icon);
     for(auto target : { primary, primary_inactive, secondary, secondary_inactive, tertiary, tertiary_inactive,
-                       WidgetPropertyType::IS_VISIBLE, WidgetPropertyType::IS_ACTIVE, WidgetPropertyType::OPACITY,
-                       WidgetPropertyType::VALUE }) {
-        configuration->bindings.push_back(PropertyBinding {
-            .target = target,
-            .event = {
-                .channel = EventChannelId::Sensors,
-                .event_type = std::to_underlying(SensorEventType::DataUpdated),
-                .payload_key = std::to_underlying(SensorPayloadType::Value),
-                .selector_key = std::to_underlying(SensorPayloadType::SensorId),
-                .selector_value = static_cast<int>(target)
-            }
-        });
+            WidgetPropertyType::IS_VISIBLE, WidgetPropertyType::IS_ACTIVE, WidgetPropertyType::OPACITY,
+            WidgetPropertyType::VALUE }) {
+        configuration->bindings.push_back(
+            PropertyBinding{ .target = target,
+                .event = { .channel = EventChannelId::Sensors,
+                    .event_type = std::to_underlying(SensorEventType::DataUpdated),
+                    .payload_key = std::to_underlying(SensorPayloadType::Value),
+                    .selector_key = std::to_underlying(SensorPayloadType::SensorId),
+                    .selector_value = static_cast<int>(target) } }
+        );
     }
     return configuration;
 }
@@ -87,14 +93,12 @@ lv_obj_t* Inner(const IWidget& widget) {
 }
 
 void Publish(WidgetPropertyType type, const EventData& value) {
-    SensorEventsChannel::GetInstance().Publish({
-        .source_id = 0,
-        .type = SensorEventType::DataUpdated,
-        .payload = {
-            { SensorPayloadType::SensorId, static_cast<int>(type) },
-            { SensorPayloadType::Value, value }
-        }
-    });
+    SensorEventsChannel::GetInstance().Publish(
+        { .source_id = 0,
+            .type = SensorEventType::DataUpdated,
+            .payload = {
+                { SensorPayloadType::SensorId, static_cast<int>(type) }, { SensorPayloadType::Value, value } } }
+    );
 }
 
 void Color(WidgetPropertyType type, const char* value) {
@@ -128,7 +132,8 @@ void CheckArc(lv_obj_t* object, lv_part_t part, LvglColor expected) {
 void GallerySnapshot(lv_obj_t* root, const char* name, bool visible = true) {
     lv_obj_update_layout(root);
     std::unique_ptr<lv_draw_buf_t, decltype(&lv_draw_buf_destroy)> snapshot(
-        lv_snapshot_take(root, LV_COLOR_FORMAT_ARGB8888), lv_draw_buf_destroy);
+        lv_snapshot_take(root, LV_COLOR_FORMAT_ARGB8888), lv_draw_buf_destroy
+    );
     zassert_not_null(snapshot);
     zassert_equal(snapshot->header.w, 96);
     zassert_equal(snapshot->header.h, 72);
@@ -137,7 +142,8 @@ void GallerySnapshot(lv_obj_t* root, const char* name, bool visible = true) {
     for(uint32_t row = 0; row < snapshot->header.h; ++row) {
         auto* pixels = reinterpret_cast<const lv_color32_t*>(snapshot->data + row * snapshot->header.stride);
         for(uint32_t column = 0; column < snapshot->header.w; ++column) {
-            if(pixels[column].red != background->red || pixels[column].green != background->green
+            if(pixels[column].red != background->red
+                || pixels[column].green != background->green
                 || pixels[column].blue != background->blue)
                 ++changed;
         }
@@ -156,7 +162,7 @@ void GallerySnapshot(lv_obj_t* root, const char* name, bool visible = true) {
     for(uint32_t row = 0; row < snapshot->header.h; ++row) {
         auto* pixels = reinterpret_cast<const lv_color32_t*>(snapshot->data + row * snapshot->header.stride);
         for(uint32_t column = 0; column < snapshot->header.w; ++column) {
-            const uint8_t rgb[] { pixels[column].red, pixels[column].green, pixels[column].blue };
+            const uint8_t rgb[]{ pixels[column].red, pixels[column].green, pixels[column].blue };
             zassert_equal(std::fwrite(rgb, 1, sizeof(rgb), file), sizeof(rgb));
         }
     }
@@ -187,17 +193,14 @@ ZTEST(widget_colors, test_animation_simulator_gallery) {
     eerie_leap::domain::ui_domain::ScopedLvglLock lock;
     ThemeManager::GetInstance().SetTheme(std::make_shared<DefaultTheme>());
     const auto baseline = lv_anim_count_running();
-    const std::array types { WidgetType::BasicIcon, WidgetType::BasicIcon,
-        WidgetType::IndicatorDial, WidgetType::ControlButton };
-    const char* names[][3] {
-        { "animation_oval_full", "animation_oval_half", "animation_oval_zero" },
+    const std::array types{ WidgetType::BasicIcon, WidgetType::BasicIcon, WidgetType::IndicatorDial,
+        WidgetType::ControlButton };
+    const char* names[][3]{ { "animation_oval_full", "animation_oval_half", "animation_oval_zero" },
         { "animation_label_0", "animation_label_45", "animation_label_90" },
         { "animation_dial_0", "animation_dial_45", "animation_dial_90" },
-        { "animation_button_0", "animation_button_45", "animation_button_90" }
-    };
+        { "animation_button_0", "animation_button_45", "animation_button_90" } };
     for(size_t index = 0; index < types.size(); ++index) {
-        auto root = std::make_shared<Frame>(
-            Frame::CreateWrapped().SetWidth(96, true).SetHeight(72, true).Build());
+        auto root = std::make_shared<Frame>(Frame::CreateWrapped().SetWidth(96, true).SetHeight(72, true).Build());
         lv_obj_set_style_bg_color(root->GetObject(), lv_color_hex(0x202428), 0);
         lv_obj_set_style_bg_opa(root->GetObject(), LV_OPA_COVER, 0);
         auto configuration = Configuration(types[index], index == 0 ? IconType::Oval : IconType::Label);
@@ -209,7 +212,8 @@ ZTEST(widget_colors, test_animation_simulator_gallery) {
         configuration->properties[WidgetPropertyType::LABEL] = std::pmr::string(index == 3 ? "LOG" : "RPM");
         configuration->properties[WidgetPropertyType::IS_SMOOTHED] = false;
         configuration->properties[WidgetPropertyType::ANIMATION_TYPE] = static_cast<int>(
-            index == 0 ? Animation::Type::Blinking : Animation::Type::Rotation);
+            index == 0 ? Animation::Type::Blinking : Animation::Type::Rotation
+        );
         configuration->properties[WidgetPropertyType::IS_ANIMATION_ACTIVE] = true;
         configuration->properties[WidgetPropertyType::ANIMATION_DURATION_MS] = 1000;
         WidgetContext context;
@@ -248,8 +252,13 @@ ZTEST(widget_colors, test_animation_simulator_gallery) {
                 lv_anim_refr_now();
             }
             if(index == 0)
-                zassert_within(lv_obj_get_style_opa_layered(content, LV_PART_MAIN),
-                    phase == 0 ? 255 : phase == 1 ? 128 : 0, 2);
+                zassert_within(
+                    lv_obj_get_style_opa_layered(content, LV_PART_MAIN),
+                    phase == 0       ? 255
+                        : phase == 1 ? 128
+                                     : 0,
+                    2
+                );
             else
                 zassert_equal(lv_obj_get_style_transform_rotation(content, LV_PART_MAIN), phase * 450);
             GallerySnapshot(root->GetObject(), names[index][phase], index != 0 || phase != 2);
@@ -261,10 +270,10 @@ ZTEST(widget_colors, test_animation_simulator_gallery) {
 }
 
 ZTEST(widget_colors, test_simulator_gallery) {
-    auto root = std::make_shared<Frame>(
-        Frame::CreateWrapped().SetWidth(96, true).SetHeight(72, true).Build());
+    auto root = std::make_shared<Frame>(Frame::CreateWrapped().SetWidth(96, true).SetHeight(72, true).Build());
     auto parent = std::make_shared<Frame>(
-        Frame::CreateWrapped(root->GetObject()).SetWidth(72, true).SetHeight(32, true).Build());
+        Frame::CreateWrapped(root->GetObject()).SetWidth(72, true).SetHeight(32, true).Build()
+    );
     lv_obj_center(parent->GetObject());
     lv_obj_set_style_bg_color(root->GetObject(), lv_color_hex(0x202428), 0);
     lv_obj_set_style_bg_opa(root->GetObject(), LV_OPA_COVER, 0);
@@ -277,11 +286,9 @@ ZTEST(widget_colors, test_simulator_gallery) {
         return widget;
     };
 
-    const std::array<std::shared_ptr<ITheme>, 4> themes {
-        std::make_shared<DefaultTheme>(), std::make_shared<DarkTheme>(),
-        std::make_shared<DarkBWTheme>(), std::make_shared<TranslucentTheme>()
-    };
-    const char* theme_names[] { "01_default", "02_dark", "03_monochrome", "04_theme_alpha" };
+    const std::array<std::shared_ptr<ITheme>, 4> themes{ std::make_shared<DefaultTheme>(),
+        std::make_shared<DarkTheme>(), std::make_shared<DarkBWTheme>(), std::make_shared<TranslucentTheme>() };
+    const char* theme_names[]{ "01_default", "02_dark", "03_monochrome", "04_theme_alpha" };
     auto configuration = Configuration(WidgetType::IndicatorBar);
     configuration->bindings.clear();
     configuration->properties[WidgetPropertyType::VALUE] = 70;
@@ -342,13 +349,20 @@ ZTEST(widget_colors, test_simulator_gallery) {
         lv_anim_refr_now();
         if(type == WidgetType::ControlSlider)
             zassert_equal(lv_slider_get_value(object), 65);
-        GallerySnapshot(root->GetObject(), button ? "08_button_pressed" : toggle ? "12_toggle_on" : "10_slider_pressed");
+        GallerySnapshot(
+            root->GetObject(),
+            button       ? "08_button_pressed"
+                : toggle ? "12_toggle_on"
+                         : "10_slider_pressed"
+        );
     }
 
     configuration = Configuration(WidgetType::IndicatorBar);
     std::erase_if(configuration->bindings, [](const auto& binding) {
-        return binding.target != WidgetPropertyType::VALUE && binding.target != WidgetPropertyType::IS_VISIBLE
-            && binding.target != WidgetPropertyType::IS_ACTIVE && binding.target != WidgetPropertyType::OPACITY;
+        return binding.target != WidgetPropertyType::VALUE
+            && binding.target != WidgetPropertyType::IS_VISIBLE
+            && binding.target != WidgetPropertyType::IS_ACTIVE
+            && binding.target != WidgetPropertyType::OPACITY;
     });
     configuration->properties[primary] = std::pmr::string("#33CC99FF");
     configuration->properties[secondary] = std::pmr::string("#6688AA40");
@@ -381,9 +395,9 @@ ZTEST(widget_colors, test_simulator_gallery) {
 
 ZTEST(widget_colors, test_whole_widget_opacity_survives_render_theme_and_configuration_replay) {
     for(auto type : { WidgetType::BasicIcon, WidgetType::BasicArcIcon, WidgetType::IndicatorDigital,
-                     WidgetType::IndicatorSetting, WidgetType::IndicatorHorizontalChart, WidgetType::IndicatorArcFill,
-                     WidgetType::IndicatorBar, WidgetType::IndicatorSegmentArc, WidgetType::ControlButton,
-                     WidgetType::ControlSlider, WidgetType::ControlToggle }) {
+            WidgetType::IndicatorSetting, WidgetType::IndicatorHorizontalChart, WidgetType::IndicatorArcFill,
+            WidgetType::IndicatorBar, WidgetType::IndicatorSegmentArc, WidgetType::ControlButton,
+            WidgetType::ControlSlider, WidgetType::ControlToggle }) {
         auto configuration = Configuration(type);
         configuration->bindings.clear();
         configuration->properties[WidgetPropertyType::OPACITY] = 128;
@@ -391,8 +405,12 @@ ZTEST(widget_colors, test_whole_widget_opacity_survives_render_theme_and_configu
         auto* outer = widget->GetContainer()->GetObject();
         auto* inner = lv_obj_get_child(views_test::WidgetContent(*widget), 0);
         zassert_equal(lv_obj_get_style_opa_layered(outer, LV_PART_MAIN), 128);
-        zassert_equal(lv_obj_get_style_opa_layered(inner, LV_PART_MAIN), type == WidgetType::IndicatorHorizontalChart
-            ? ThemeManager::GetInstance().GetCurrentTheme().GetPrimaryColor().ToLvOpa() : LV_OPA_COVER);
+        zassert_equal(
+            lv_obj_get_style_opa_layered(inner, LV_PART_MAIN),
+            type == WidgetType::IndicatorHorizontalChart
+                ? ThemeManager::GetInstance().GetCurrentTheme().GetPrimaryColor().ToLvOpa()
+                : LV_OPA_COVER
+        );
         ThemeManager::GetInstance().SetTheme(std::make_shared<DefaultTheme>());
         widget->OnDeactivated();
         widget->OnActivated();
@@ -429,11 +447,11 @@ ZTEST(widget_colors, test_opacity_binding_restores_retained_colors_after_all_gat
     widget->OnActivated();
     CheckShape(inner, LvglColor(0xFEDCBA, 64));
     zassert_equal(lv_obj_get_style_opa_layered(outer, LV_PART_MAIN), 128);
-    for(const EventData& invalid : { EventData{-1}, EventData{256}, EventData{128.5F}, EventData{true} }) {
+    for(const EventData& invalid : { EventData{ -1 }, EventData{ 256 }, EventData{ 128.5F }, EventData{ true } }) {
         Publish(WidgetPropertyType::OPACITY, invalid);
         zassert_equal(lv_obj_get_style_opa_layered(outer, LV_PART_MAIN), 128);
     }
-    Publish(WidgetPropertyType::OPACITY, uint32_t{255});
+    Publish(WidgetPropertyType::OPACITY, uint32_t{ 255 });
     zassert_equal(lv_obj_get_style_opa_layered(outer, LV_PART_MAIN), LV_OPA_COVER);
 }
 
@@ -470,10 +488,8 @@ ZTEST(widget_colors, test_text_colors_follow_theme_only_when_unset) {
         auto configuration = Configuration(type);
         auto widget = Render(configuration);
         auto* label = Inner(*widget);
-        const std::array<std::shared_ptr<ITheme>, 4> themes {
-            std::make_shared<DefaultTheme>(), std::make_shared<DarkTheme>(),
-            std::make_shared<DarkBWTheme>(), std::make_shared<TranslucentTheme>()
-        };
+        const std::array<std::shared_ptr<ITheme>, 4> themes{ std::make_shared<DefaultTheme>(),
+            std::make_shared<DarkTheme>(), std::make_shared<DarkBWTheme>(), std::make_shared<TranslucentTheme>() };
         for(const auto& theme : themes) {
             ThemeManager::GetInstance().SetTheme(theme);
             CheckText(label, theme->GetPrimaryColor());
@@ -597,8 +613,8 @@ ZTEST(widget_colors, test_button_label_tracks_press_release_and_cancel) {
 }
 
 ZTEST(widget_colors, test_label_and_shapes_apply_colors_without_rebuilding) {
-    for(auto type : { IconType::Label, IconType::Rectangle, IconType::TriangleIsosceles,
-                     IconType::TriangleRight, IconType::Oval, IconType::Line }) {
+    for(auto type : { IconType::Label, IconType::Rectangle, IconType::TriangleIsosceles, IconType::TriangleRight,
+            IconType::Oval, IconType::Line }) {
         auto configuration = Configuration(WidgetType::BasicIcon, type);
         configuration->properties[WidgetPropertyType::LABEL] = std::pmr::string("Log");
         auto widget = Render(configuration);
@@ -640,8 +656,7 @@ ZTEST(widget_colors, test_direct_icon_configuration_applies_parsed_colors) {
     zassert_true(properties->Set(primary, std::pmr::string("")));
     icon->Configure(properties);
     icon->ApplyTheme(ThemeManager::GetInstance().GetCurrentTheme());
-    CheckShape(icon->GetContainer()->GetObject(),
-        ThemeManager::GetInstance().GetCurrentTheme().GetAccentColor());
+    CheckShape(icon->GetContainer()->GetObject(), ThemeManager::GetInstance().GetCurrentTheme().GetAccentColor());
 }
 
 ZTEST(widget_colors, test_chart_color_changes_preserve_series_and_samples) {
@@ -663,8 +678,10 @@ ZTEST(widget_colors, test_chart_color_changes_preserve_series_and_samples) {
         zassert_equal(lv_chart_get_series_next(chart, nullptr), series);
         zassert_true(std::equal(before.begin(), before.end(), samples));
         Color(primary, "");
-        zassert_equal(lv_obj_get_style_opa_layered(chart, LV_PART_MAIN),
-            ThemeManager::GetInstance().GetCurrentTheme().GetPrimaryColor().ToLvOpa());
+        zassert_equal(
+            lv_obj_get_style_opa_layered(chart, LV_PART_MAIN),
+            ThemeManager::GetInstance().GetCurrentTheme().GetPrimaryColor().ToLvOpa()
+        );
         zassert_true(std::equal(before.begin(), before.end(), samples));
     }
 }

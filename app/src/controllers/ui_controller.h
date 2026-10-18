@@ -16,11 +16,11 @@
 
 #include "domain/ui_domain/configuration/ui_configuration_manager.h"
 #include "domain/ui_domain/event_bus/navigation_event_channel.h"
-#include "domain/ui_domain/models/ui_configuration.h"
 #include "domain/ui_domain/models/screen_configuration.h"
-#include "domain/ui_domain/services/ui_renderer_service.h"
+#include "domain/ui_domain/models/ui_configuration.h"
 #include "domain/ui_domain/services/navigation_service.h"
 #include "domain/ui_domain/services/ui_input_service.h"
+#include "domain/ui_domain/services/ui_renderer_service.h"
 
 #include "views/main_view.h"
 #include "views/overlay_host.h"
@@ -37,14 +37,14 @@ using eerie_leap::subsys::threading::WorkQueueThread;
 
 using eerie_leap::domain::configuration_domain::services::ConfigurationService;
 
-using eerie_leap::domain::ui_domain::models::UiConfiguration;
-using eerie_leap::domain::ui_domain::models::ScreenConfiguration;
 using eerie_leap::domain::ui_domain::configuration::UiConfigurationManager;
 using eerie_leap::domain::ui_domain::event_bus::NavigationEventChannel;
-using eerie_leap::subsys::event_bus::AnySubscription;
-using eerie_leap::domain::ui_domain::services::UiRendererService;
+using eerie_leap::domain::ui_domain::models::ScreenConfiguration;
+using eerie_leap::domain::ui_domain::models::UiConfiguration;
 using eerie_leap::domain::ui_domain::services::NavigationService;
 using eerie_leap::domain::ui_domain::services::UiInputService;
+using eerie_leap::domain::ui_domain::services::UiRendererService;
+using eerie_leap::subsys::event_bus::AnySubscription;
 
 using eerie_leap::views::MainView;
 using eerie_leap::views::OverlayHost;
@@ -61,8 +61,8 @@ private:
     static constexpr const char* UI_ANIMATIONS_DIR = "ui_assets/animations";
 
     // What a client may upload as each kind. A provider keeps only a span of its extensions.
-    static constexpr std::array<std::string_view, 1> IMAGE_EXTENSIONS { ".bin" };
-    static constexpr std::array<std::string_view, 1> ANIMATION_EXTENSIONS { ".json" };
+    static constexpr std::array<std::string_view, 1> IMAGE_EXTENSIONS{ ".bin" };
+    static constexpr std::array<std::string_view, 1> ANIMATION_EXTENSIONS{ ".json" };
 
     // The first render of a screen group builds its whole LVGL tree, so it gets
     // a stack of its own instead of running on the event bus worker.
@@ -107,7 +107,8 @@ private:
     // Offers ui_assets/images and ui_assets/animations to clients as the image and animation kinds.
     void RegisterAssets();
 
-    std::shared_ptr<IScreen> CreateScreen(std::shared_ptr<ScreenConfiguration> configuration, std::shared_ptr<Frame> parent);
+    std::shared_ptr<IScreen>
+    CreateScreen(std::shared_ptr<ScreenConfiguration> configuration, std::shared_ptr<Frame> parent);
     std::shared_ptr<ScreenConfiguration> FindOverlayConfiguration(uint32_t screen_id) const;
 
     // Asks every settings owner to republish, so a binding resolved just now is not left showing
@@ -134,7 +135,8 @@ public:
         std::shared_ptr<IFsService> fs_service,
         std::shared_ptr<WorkQueueThread> config_work_queue_thread,
         std::shared_ptr<ConfigurationService> configuration_service,
-        std::shared_ptr<AssetsManager> assets_manager = nullptr);
+        std::shared_ptr<AssetsManager> assets_manager = nullptr
+    );
     ~UiController();
 
     int Initialize();

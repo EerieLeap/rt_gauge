@@ -13,8 +13,8 @@ using eerie_leap::views::utilities::LvglFont;
 ZTEST_SUITE(lvgl_types, NULL, NULL, NULL, NULL, NULL);
 
 ZTEST(lvgl_types, test_parsed_property_color_converts_to_lvgl_with_explicit_alpha) {
-    constexpr std::array values { "#12345600", "#12345680", "#123456FF" };
-    constexpr std::array<uint8_t, 3> alphas { 0, 128, 255 };
+    constexpr std::array values{ "#12345600", "#12345680", "#123456FF" };
+    constexpr std::array<uint8_t, 3> alphas{ 0, 128, 255 };
     for(size_t index = 0; index < values.size(); ++index) {
         const auto parsed = Color::TryParse(values[index]);
         zassert_true(parsed.has_value());

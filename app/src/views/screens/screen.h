@@ -6,10 +6,10 @@
 #include "domain/ui_domain/models/screen_configuration.h"
 
 #include "views/renderable_base.h"
-#include "views/widgets/i_widget.h"
-#include "views/widgets/widget_context.h"
 #include "views/screens/i_screen.h"
 #include "views/utilitites/frame.h"
+#include "views/widgets/i_widget.h"
+#include "views/widgets/widget_context.h"
 
 namespace eerie_leap::views::screens {
 

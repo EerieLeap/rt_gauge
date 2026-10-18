@@ -1,7 +1,7 @@
 #include <algorithm>
 
-#include <zephyr/logging/log.h>
 #include <lvgl.h>
+#include <zephyr/logging/log.h>
 
 #include "domain/ui_domain/lvgl_lock.h"
 
@@ -13,14 +13,14 @@ using eerie_leap::domain::ui_domain::ScopedLvglLock;
 
 LOG_MODULE_REGISTER(screen_group_logger);
 
-ScreenGroup::ScreenGroup(uint32_t screen_group_id, std::shared_ptr<Frame> parent)
-    : screen_group_id_(screen_group_id) {
+ScreenGroup::ScreenGroup(uint32_t screen_group_id, std::shared_ptr<Frame> parent) :
+    screen_group_id_(screen_group_id) {
 
     container_ = std::make_shared<Frame>(Frame::CreateWrapped(parent->GetObject())
-        .SetProcessingParent(parent)
-        .SetWidth(100, false)
-        .SetHeight(100, false)
-        .Build());
+            .SetProcessingParent(parent)
+            .SetWidth(100, false)
+            .SetHeight(100, false)
+            .Build());
 
     lv_obj_add_flag(container_->GetObject(), LV_OBJ_FLAG_HIDDEN);
 }
@@ -34,10 +34,11 @@ void ScreenGroup::AddScreen(std::shared_ptr<IScreen> screen) {
         return;
 
     auto insert_position = std::upper_bound(
-        screens_.begin(),
-        screens_.end(),
-        screen->GetZIndex(),
-        [](int32_t z_index, const std::shared_ptr<IScreen>& current) { return z_index < current->GetZIndex(); });
+        screens_.begin(), screens_.end(), screen->GetZIndex(),
+        [](int32_t z_index, const std::shared_ptr<IScreen>& current) {
+            return z_index < current->GetZIndex();
+        }
+    );
 
     screens_.insert(insert_position, std::move(screen));
 }

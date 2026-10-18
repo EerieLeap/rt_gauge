@@ -18,8 +18,8 @@ LOG_MODULE_REGISTER(button_control_logger);
 // A button carries no setting, so an unset target means "no navigation".
 static constexpr int32_t no_target = -1;
 
-ButtonControl::ButtonControl(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context)
-    : ControlBase(id, std::move(parent), std::move(context), false) {}
+ButtonControl::ButtonControl(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context) :
+    ControlBase(id, std::move(parent), std::move(context), false) {}
 
 void ButtonControl::RegisterProperties(WidgetPropertyStore& store) const {
     ControlBase::RegisterProperties(store);
@@ -29,12 +29,12 @@ void ButtonControl::RegisterProperties(WidgetPropertyStore& store) const {
     store.RegisterColor(WidgetPropertyType::COLOR_SECONDARY_ACTIVE);
     store.RegisterColor(WidgetPropertyType::COLOR_SECONDARY_INACTIVE);
 
-    store.Register(WidgetPropertyType::LABEL, ConfigValue { std::pmr::string { } }, PropertyChangeEffect::Repaint);
-    store.Register(WidgetPropertyType::TARGET_SCREEN_GROUP, ConfigValue { no_target }, PropertyChangeEffect::None);
+    store.Register(WidgetPropertyType::LABEL, ConfigValue{ std::pmr::string{} }, PropertyChangeEffect::Repaint);
+    store.Register(WidgetPropertyType::TARGET_SCREEN_GROUP, ConfigValue{ no_target }, PropertyChangeEffect::None);
     store.Register(
-        WidgetPropertyType::NAVIGATION_INTENT,
-        ConfigValue { static_cast<int>(NavigationIntent::None) },
-        PropertyChangeEffect::None);
+        WidgetPropertyType::NAVIGATION_INTENT, ConfigValue{ static_cast<int>(NavigationIntent::None) },
+        PropertyChangeEffect::None
+    );
 }
 
 int ButtonControl::ApplyTheme(const ITheme& theme) {
@@ -42,12 +42,16 @@ int ButtonControl::ApplyTheme(const ITheme& theme) {
 
     for(bool pressed : { false, true }) {
         const auto state = pressed ? LV_STATE_PRESSED : LV_STATE_DEFAULT;
-        const auto primary = properties_->ResolveColor(pressed ? WidgetPropertyType::COLOR_PRIMARY_ACTIVE
-            : WidgetPropertyType::COLOR_PRIMARY_INACTIVE, pressed ? theme.GetAccentColor() : theme.GetSurfaceColor());
-        const auto secondary = properties_->ResolveColor(pressed ? WidgetPropertyType::COLOR_SECONDARY_ACTIVE
-            : WidgetPropertyType::COLOR_SECONDARY_INACTIVE, theme.GetPrimaryColor());
+        const auto primary = properties_->ResolveColor(
+            pressed ? WidgetPropertyType::COLOR_PRIMARY_ACTIVE : WidgetPropertyType::COLOR_PRIMARY_INACTIVE,
+            pressed ? theme.GetAccentColor() : theme.GetSurfaceColor()
+        );
+        const auto secondary = properties_->ResolveColor(
+            pressed ? WidgetPropertyType::COLOR_SECONDARY_ACTIVE : WidgetPropertyType::COLOR_SECONDARY_INACTIVE,
+            theme.GetPrimaryColor()
+        );
 
-            lv_obj_set_style_bg_color(lv_button_, primary.ToLvColor(), LV_PART_MAIN | state);
+        lv_obj_set_style_bg_color(lv_button_, primary.ToLvColor(), LV_PART_MAIN | state);
         lv_obj_set_style_bg_opa(lv_button_, primary.ToLvOpa(), LV_PART_MAIN | state);
         lv_obj_set_style_text_color(lv_label_, secondary.ToLvColor(), LV_PART_MAIN | state);
         lv_obj_set_style_text_opa(lv_label_, secondary.ToLvOpa(), LV_PART_MAIN | state);
@@ -76,7 +80,8 @@ void ButtonControl::OnPropertyChanged(WidgetPropertyType type, const ConfigValue
 
         case WidgetPropertyType::NAVIGATION_INTENT:
             intent_ = static_cast<NavigationIntent>(
-                ConfigValueAs<int>(value, static_cast<int>(NavigationIntent::None)));
+                ConfigValueAs<int>(value, static_cast<int>(NavigationIntent::None))
+            );
             break;
 
         default:
@@ -126,15 +131,13 @@ void ButtonControl::OnControlEvent(lv_event_code_t code) {
 
 std::optional<std::pair<NavigationIntent, uint32_t>> ButtonControl::ResolveNavigation() const {
     // A button configured with only a target predates NAVIGATION_INTENT.
-    auto intent = intent_ == NavigationIntent::None && target_id_.has_value()
-        ? NavigationIntent::GoToGroup
-        : intent_;
+    auto intent = intent_ == NavigationIntent::None && target_id_.has_value() ? NavigationIntent::GoToGroup : intent_;
 
     switch(intent) {
         case NavigationIntent::GoToGroup:
         case NavigationIntent::ShowOverlay:
             if(target_id_.has_value())
-                return std::pair { intent, *target_id_ };
+                return std::pair{ intent, *target_id_ };
 
             return std::nullopt;
 
@@ -142,7 +145,7 @@ std::optional<std::pair<NavigationIntent, uint32_t>> ButtonControl::ResolveNavig
             return std::nullopt;
 
         default:
-            return std::pair { intent, uint32_t { 0 } };
+            return std::pair{ intent, uint32_t{ 0 } };
     }
 }
 

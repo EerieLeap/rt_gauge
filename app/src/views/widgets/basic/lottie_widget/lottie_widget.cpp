@@ -5,12 +5,12 @@
 
 #include <zephyr/logging/log.h>
 
-#include "utilities/memory/memory_resource_manager.h"
-#include "utilities/memory/scoped_new_resource.h"
+#include "domain/ui_domain/models/widget_property.h"
 #include "subsys/assets/asset_kind.h"
 #include "subsys/assets/asset_provider.h"
 #include "subsys/assets/asset_store.h"
-#include "domain/ui_domain/models/widget_property.h"
+#include "utilities/memory/memory_resource_manager.h"
+#include "utilities/memory/scoped_new_resource.h"
 
 #include "lottie_widget.h"
 
@@ -49,15 +49,14 @@ void LottieWidget::ValidateChildren(
     WidgetBase::ValidateChildren(configuration, children);
 
     const auto it = configuration.properties.find(WidgetPropertyType::FILE_PATH);
-    const auto* file_path = it != configuration.properties.end()
-        ? std::get_if<std::pmr::string>(&it->second)
-        : nullptr;
+    const auto* file_path = it != configuration.properties.end() ? std::get_if<std::pmr::string>(&it->second) : nullptr;
     if(file_path == nullptr || file_path->empty())
         throw std::invalid_argument("FILE_PATH must name a Lottie asset.");
 }
 
-LottieWidget::LottieWidget(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context)
-    : WidgetBase(id, std::move(parent), std::move(context)), buffer_(Mrm::GetExtPmr()) {}
+LottieWidget::LottieWidget(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context) :
+    WidgetBase(id, std::move(parent), std::move(context)),
+    buffer_(Mrm::GetExtPmr()) {}
 
 LottieWidget::~LottieWidget() {
     DetachDispatch();
@@ -170,9 +169,9 @@ void LottieWidget::OnProcessingUpdated(bool enabled) {
 void LottieWidget::RegisterProperties(WidgetPropertyStore& store) const {
     WidgetBase::RegisterProperties(store);
 
-    store.Register(WidgetPropertyType::FILE_PATH, ConfigValue { std::pmr::string { } }, PropertyChangeEffect::Rebuild);
-    store.Register(WidgetPropertyType::WIDTH_PX, ConfigValue { 0 }, PropertyChangeEffect::Rebuild);
-    store.Register(WidgetPropertyType::HEIGHT_PX, ConfigValue { 0 }, PropertyChangeEffect::Rebuild);
+    store.Register(WidgetPropertyType::FILE_PATH, ConfigValue{ std::pmr::string{} }, PropertyChangeEffect::Rebuild);
+    store.Register(WidgetPropertyType::WIDTH_PX, ConfigValue{ 0 }, PropertyChangeEffect::Rebuild);
+    store.Register(WidgetPropertyType::HEIGHT_PX, ConfigValue{ 0 }, PropertyChangeEffect::Rebuild);
 }
 
 void LottieWidget::OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) {

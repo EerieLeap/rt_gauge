@@ -9,8 +9,8 @@ namespace eerie_leap::views::widgets::controls {
 
 LOG_MODULE_REGISTER(control_base_logger);
 
-ControlBase::ControlBase(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context, bool consumes_gestures)
-    : SettingWidgetBase(id, std::move(parent), std::move(context)) {
+ControlBase::ControlBase(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context, bool consumes_gestures) :
+    SettingWidgetBase(id, std::move(parent), std::move(context)) {
 
     // Without this a drag over an interactive control would climb to the gesture
     // root and navigate away instead of moving the control.
@@ -39,7 +39,9 @@ void ControlBase::AttachEvents(lv_obj_t* object, std::initializer_list<lv_event_
     }
 
     if(event_object_ != object)
-        lv_obj_add_event_cb(object, InputGuardCb, static_cast<lv_event_code_t>(LV_EVENT_ALL | LV_EVENT_PREPROCESS), this);
+        lv_obj_add_event_cb(
+            object, InputGuardCb, static_cast<lv_event_code_t>(LV_EVENT_ALL | LV_EVENT_PREPROCESS), this
+        );
 
     event_object_ = object;
 
@@ -64,7 +66,7 @@ void ControlBase::EventCb(lv_event_t* e) {
     }
 }
 
-void ControlBase::OnControlEvent(lv_event_code_t) { }
+void ControlBase::OnControlEvent(lv_event_code_t) {}
 
 void ControlBase::InputGuardCb(lv_event_t* event) {
     const auto code = lv_event_get_code(event);
@@ -97,6 +99,6 @@ void ControlBase::OnProcessingSuspended() {
         OnPropertyChanged(WidgetPropertyType::VALUE, properties_->Get(WidgetPropertyType::VALUE));
 }
 
-void ControlBase::RestoreShownValue() { }
+void ControlBase::RestoreShownValue() {}
 
 } // namespace eerie_leap::views::widgets::controls

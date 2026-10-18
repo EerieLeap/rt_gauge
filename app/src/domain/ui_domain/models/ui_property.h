@@ -8,7 +8,7 @@ namespace eerie_leap::domain::ui_domain::models {
 // their persisted IDs must never be reordered or reused.
 enum class UiPropertyType : std::uint16_t {
     NONE = 0,
-    COUNT                  // Sentinel, not a property
+    COUNT // Sentinel, not a property
 };
 
 constexpr bool IsValidUiPropertyType(UiPropertyType type) {

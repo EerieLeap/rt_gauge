@@ -2,8 +2,8 @@
 
 #include <memory>
 #include <memory_resource>
-#include <vector>
 #include <unordered_map>
+#include <vector>
 
 #include "screen_configuration.h"
 #include "ui_property.h"
@@ -17,9 +17,9 @@ struct UiConfiguration {
     std::pmr::unordered_map<UiPropertyType, ConfigValue> properties;
     std::pmr::vector<std::shared_ptr<ScreenConfiguration>> screen_configurations;
 
-    UiConfiguration(std::allocator_arg_t, allocator_type alloc)
-        : properties(alloc),
-          screen_configurations(alloc) {}
+    UiConfiguration(std::allocator_arg_t, allocator_type alloc) :
+        properties(alloc),
+        screen_configurations(alloc) {}
 
     UiConfiguration(const UiConfiguration&) = delete;
     UiConfiguration& operator=(const UiConfiguration&) = delete;
@@ -27,10 +27,10 @@ struct UiConfiguration {
     UiConfiguration(UiConfiguration&&) noexcept = default;
     ~UiConfiguration() = default;
 
-    UiConfiguration(UiConfiguration&& other, allocator_type alloc)
-        : active_screen_group_id(other.active_screen_group_id),
-          properties(std::move(other.properties), alloc),
-          screen_configurations(std::move(other.screen_configurations), alloc) {}
+    UiConfiguration(UiConfiguration&& other, allocator_type alloc) :
+        active_screen_group_id(other.active_screen_group_id),
+        properties(std::move(other.properties), alloc),
+        screen_configurations(std::move(other.screen_configurations), alloc) {}
 };
 
 } // namespace eerie_leap::domain::ui_domain::models

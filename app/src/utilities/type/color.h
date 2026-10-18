@@ -35,7 +35,7 @@ struct Color {
                 return std::unexpected(std::errc::invalid_argument);
         }
 
-        return Color { channels[0], channels[1], channels[2], channels[3] };
+        return Color{ channels[0], channels[1], channels[2], channels[3] };
     }
 };
 

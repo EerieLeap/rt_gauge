@@ -4,8 +4,8 @@
 
 #include "domain/ui_domain/models/widget_property.h"
 
-#include "views/widgets/indicators/indicator_base.h"
 #include "views/themes/theme_manager.h"
+#include "views/widgets/indicators/indicator_base.h"
 
 #include "bar_indicator.h"
 
@@ -16,13 +16,14 @@ using namespace eerie_leap::domain::ui_domain::models;
 using namespace eerie_leap::views::utilitites;
 using eerie_leap::views::utilities::LvglColor;
 
-BarIndicator::BarIndicator(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context)
-    : IndicatorBase(id, std::move(parent), std::move(context)) {}
+BarIndicator::BarIndicator(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context) :
+    IndicatorBase(id, std::move(parent), std::move(context)) {}
 
 int BarIndicator::DoRender() {
-    auto lv_obj = Create(content_frame_->GetObject(), static_cast<int32_t>(range_start_), static_cast<int32_t>(range_end_));
-    auto child = std::make_shared<Frame>(
-        Frame::Create(lv_obj).Build());
+    auto lv_obj = Create(
+        content_frame_->GetObject(), static_cast<int32_t>(range_start_), static_cast<int32_t>(range_end_)
+    );
+    auto child = std::make_shared<Frame>(Frame::Create(lv_obj).Build());
     content_frame_->SetChild(child);
 
     return 0;
@@ -35,9 +36,9 @@ void BarIndicator::RegisterProperties(WidgetPropertyStore& store) const {
     store.RegisterColor(WidgetPropertyType::COLOR_SECONDARY_ACTIVE);
 
     store.Register(
-        WidgetPropertyType::DIRECTION,
-        ConfigValue { static_cast<int>(WidgetDirection::LeftToRight) },
-        PropertyChangeEffect::Repaint);
+        WidgetPropertyType::DIRECTION, ConfigValue{ static_cast<int>(WidgetDirection::LeftToRight) },
+        PropertyChangeEffect::Repaint
+    );
 }
 
 int BarIndicator::ApplyTheme(const ITheme& theme) {
@@ -71,7 +72,12 @@ lv_obj_t* BarIndicator::Create(lv_obj_t* parent, int32_t range_start, int32_t ra
     return lv_bar_;
 }
 
-void BarIndicator::UpdateDirection(lv_obj_t* lv_bar, WidgetDirection direction, int32_t range_start, int32_t range_end) {
+void BarIndicator::UpdateDirection(
+    lv_obj_t* lv_bar,
+    WidgetDirection direction,
+    int32_t range_start,
+    int32_t range_end
+) {
     if(direction == WidgetDirection::LeftToRight || direction == WidgetDirection::RightToLeft)
         lv_bar_set_orientation(lv_bar, LV_BAR_ORIENTATION_HORIZONTAL);
     else
@@ -92,7 +98,8 @@ void BarIndicator::UpdateIndicator(float value) {
 void BarIndicator::OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) {
     if(type == WidgetPropertyType::DIRECTION) {
         direction_ = static_cast<WidgetDirection>(
-            ConfigValueAs<int>(value, static_cast<int>(WidgetDirection::LeftToRight)));
+            ConfigValueAs<int>(value, static_cast<int>(WidgetDirection::LeftToRight))
+        );
 
         return;
     }

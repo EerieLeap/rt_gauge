@@ -111,8 +111,7 @@ static std::string GetWidgetPropertyValidationError(WidgetPropertyType type, con
         && !WidgetPropertyValidator::IsValidAnimationValue(type, value))
         return "Invalid value for property ID: " + std::to_string(static_cast<uint16_t>(type)) + ".";
 
-    if(WidgetPropertyValidator::IsAnchorProperty(type)
-        && !WidgetPropertyValidator::IsValidAnchorValue(type, value))
+    if(WidgetPropertyValidator::IsAnchorProperty(type) && !WidgetPropertyValidator::IsValidAnchorValue(type, value))
         return "Invalid anchor coordinate for property ID: " + std::to_string(static_cast<uint16_t>(type)) + ".";
 
     if(type == WidgetPropertyType::FILL_MODE && !IsValidFillMode(value))
@@ -137,27 +136,20 @@ static bool IsValidBindingDirection(PropertyBindingDirection direction) {
 }
 
 static void InvalidUiConfiguration(std::string_view message) {
-    throw std::invalid_argument(
-        "Invalid UI configuration. "
-        + std::string(message));
+    throw std::invalid_argument("Invalid UI configuration. " + std::string(message));
 }
 
 static void InvalidScreenConfiguration(uint32_t screen_id, std::string_view message) {
     throw std::invalid_argument(
-        "Invalid UI Screen configuration. Screen ID: "
-        + std::to_string(screen_id)
-        + ". "
-        + std::string(message));
+        "Invalid UI Screen configuration. Screen ID: " + std::to_string(screen_id) + ". " + std::string(message)
+    );
 }
 
 static void InvalidWidgetConfiguration(uint32_t screen_id, uint32_t widget_id, std::string_view message) {
     throw std::invalid_argument(
-        "Invalid UI Widget configuration. Screen ID: "
-        + std::to_string(screen_id)
-        + ", Widget ID: "
-        + std::to_string(widget_id)
-        + ". "
-        + std::string(message));
+        "Invalid UI Widget configuration. Screen ID: " + std::to_string(screen_id)
+        + ", Widget ID: " + std::to_string(widget_id) + ". " + std::string(message)
+    );
 }
 
 void UiConfigurationValidator::Validate(const UiConfiguration& configuration, const ChildValidator& validate_children) {
@@ -175,7 +167,10 @@ void UiConfigurationValidator::Validate(const UiConfiguration& configuration, co
     ValidateScreens(configuration, validate_children);
 }
 
-void UiConfigurationValidator::Validate(const ScreenConfiguration& configuration, const ChildValidator& validate_children) {
+void UiConfigurationValidator::Validate(
+    const ScreenConfiguration& configuration,
+    const ChildValidator& validate_children
+) {
     const auto& definitions = configuration.widget_configurations;
     if(definitions.size() > WidgetComposition::max_nodes)
         InvalidScreenConfiguration(configuration.id, "Composition exceeds the limit of 32 nodes.");
@@ -193,9 +188,11 @@ void UiConfigurationValidator::Validate(const ScreenConfiguration& configuration
             InvalidWidgetConfiguration(configuration.id, definition->id, "CHILD_WIDGET_IDS must be an integer list.");
         if(ids->size() > WidgetComposition::max_edges - edge_count) {
             const auto slot = WidgetComposition::max_edges - edge_count;
-            InvalidWidgetConfiguration(configuration.id, definition->id,
+            InvalidWidgetConfiguration(
+                configuration.id, definition->id,
                 "Child index " + std::to_string(slot) + ", ID " + std::to_string((*ids)[slot])
-                + ": composition exceeds the limit of 31 edges.");
+                    + ": composition exceeds the limit of 31 edges."
+            );
         }
         edge_count += ids->size();
     }
@@ -208,13 +205,15 @@ void UiConfigurationValidator::Validate(const ScreenConfiguration& configuration
 
     auto* resource = definitions.get_allocator().resource();
     // Validation uses temporary ownership/traversal state, not a reusable composition.
-    std::array<std::optional<size_t>, WidgetComposition::max_nodes> parents {};
-    std::array<std::span<const int>, WidgetComposition::max_nodes> child_ids {};
+    std::array<std::optional<size_t>, WidgetComposition::max_nodes> parents{};
+    std::array<std::span<const int>, WidgetComposition::max_nodes> child_ids{};
     std::pmr::unordered_map<uint32_t, size_t> indices(resource);
     indices.reserve(definitions.size());
     for(size_t i = 0; i < definitions.size(); ++i) {
         if(!indices.emplace(definitions[i]->id, i).second)
-            InvalidWidgetConfiguration(configuration.id, definitions[i]->id, "Screen cannot contain duplicate widget IDs.");
+            InvalidWidgetConfiguration(
+                configuration.id, definitions[i]->id, "Screen cannot contain duplicate widget IDs."
+            );
     }
 
     for(size_t i = 0; i < definitions.size(); ++i) {
@@ -238,8 +237,10 @@ void UiConfigurationValidator::Validate(const ScreenConfiguration& configuration
             if(parent.has_value()) {
                 if(*parent == i)
                     InvalidWidgetConfiguration(configuration.id, owner.id, edge + "duplicate reference in this owner.");
-                InvalidWidgetConfiguration(configuration.id, owner.id,
-                    edge + "already owned by widget " + std::to_string(definitions[*parent]->id) + ".");
+                InvalidWidgetConfiguration(
+                    configuration.id, owner.id,
+                    edge + "already owned by widget " + std::to_string(definitions[*parent]->id) + "."
+                );
             }
             parent = i;
         }
@@ -247,10 +248,13 @@ void UiConfigurationValidator::Validate(const ScreenConfiguration& configuration
 
     // Iterative DFS also visits components with no roots. A hostile cycle cannot
     // recurse through a Zephyr stack, and forward definition order does not affect depth.
-    struct Visit { size_t index; size_t next_child; };
+    struct Visit {
+        size_t index;
+        size_t next_child;
+    };
     std::array<Visit, WidgetComposition::max_nodes> stack;
-    std::array<uint8_t, WidgetComposition::max_nodes> state {};
-    std::array<size_t, WidgetComposition::max_nodes> height {};
+    std::array<uint8_t, WidgetComposition::max_nodes> state{};
+    std::array<size_t, WidgetComposition::max_nodes> height{};
     auto visit = [&](size_t start) {
         if(state[start] != 0)
             return;
@@ -272,9 +276,11 @@ void UiConfigurationValidator::Validate(const ScreenConfiguration& configuration
                             path += std::to_string(definitions[stack[j].index]->id) + " -> ";
                     }
                     path += std::to_string(definitions[child]->id);
-                    InvalidWidgetConfiguration(configuration.id, definitions[current.index]->id,
+                    InvalidWidgetConfiguration(
+                        configuration.id, definitions[current.index]->id,
                         "Child index " + std::to_string(slot) + ", ID " + std::to_string(definitions[child]->id)
-                        + ": cycle " + path + ".");
+                            + ": cycle " + path + "."
+                    );
                 }
                 if(state[child] == 0) {
                     state[child] = 1;
@@ -286,9 +292,11 @@ void UiConfigurationValidator::Validate(const ScreenConfiguration& configuration
                     const auto child = indices.at(static_cast<uint32_t>(children[slot]));
                     depth = std::max(depth, height[child] + 1);
                     if(depth > WidgetComposition::max_depth)
-                        InvalidWidgetConfiguration(configuration.id, definitions[current.index]->id,
+                        InvalidWidgetConfiguration(
+                            configuration.id, definitions[current.index]->id,
                             "Child index " + std::to_string(slot) + ", ID " + std::to_string(definitions[child]->id)
-                            + ": composition exceeds 8 levels of nesting (root is level 1).");
+                                + ": composition exceeds 8 levels of nesting (root is level 1)."
+                        );
                 }
                 height[current.index] = depth;
                 state[current.index] = 2;
@@ -320,7 +328,9 @@ void UiConfigurationValidator::Validate(const ScreenConfiguration& configuration
 
 void UiConfigurationValidator::ValidateScreenCount(const UiConfiguration& configuration) {
     if(configuration.screen_configurations.size() > max_screen_count)
-        InvalidUiConfiguration("Configuration cannot contain more than " + std::to_string(max_screen_count) + " screens.");
+        InvalidUiConfiguration(
+            "Configuration cannot contain more than " + std::to_string(max_screen_count) + " screens."
+        );
 }
 
 void UiConfigurationValidator::ValidateScreenId(const UiConfiguration& configuration) {
@@ -372,7 +382,10 @@ void UiConfigurationValidator::ValidateActiveScreenGroupId(const UiConfiguration
     InvalidUiConfiguration("Active screen group ID does not match any screen.");
 }
 
-void UiConfigurationValidator::ValidateScreens(const UiConfiguration& configuration, const ChildValidator& validate_children) {
+void UiConfigurationValidator::ValidateScreens(
+    const UiConfiguration& configuration,
+    const ChildValidator& validate_children
+) {
     for(const auto& screen_configuration : configuration.screen_configurations)
         Validate(*screen_configuration, validate_children);
 }
@@ -396,69 +409,57 @@ void UiConfigurationValidator::ValidateWidgetType(const ScreenConfiguration& scr
                 break;
 
             default:
-                InvalidWidgetConfiguration(
-                    screen_configuration.id,
-                    widget_configuration->id,
-                    "Invalid widget type."
-                );
+                InvalidWidgetConfiguration(screen_configuration.id, widget_configuration->id, "Invalid widget type.");
         }
     }
 }
 
-void UiConfigurationValidator::ValidateWidgetSize(const ScreenConfiguration& screen_configuration,
-    std::span<const std::optional<size_t>> parents) {
+void UiConfigurationValidator::ValidateWidgetSize(
+    const ScreenConfiguration& screen_configuration,
+    std::span<const std::optional<size_t>> parents
+) {
     for(size_t i = 0; i < screen_configuration.widget_configurations.size(); ++i) {
         if(parents[i].has_value())
             continue;
         const auto& widget_configuration = screen_configuration.widget_configurations[i];
         if(widget_configuration->size_grid.width == 0 || widget_configuration->size_grid.height == 0)
             InvalidWidgetConfiguration(
-                screen_configuration.id,
-                widget_configuration->id,
-                "Widget size must be greater than 0."
+                screen_configuration.id, widget_configuration->id, "Widget size must be greater than 0."
             );
 
         if(widget_configuration->size_grid.width > screen_configuration.grid.width)
             InvalidWidgetConfiguration(
-                screen_configuration.id,
-                widget_configuration->id,
-                "Widget width cannot exceed the screen grid width."
+                screen_configuration.id, widget_configuration->id, "Widget width cannot exceed the screen grid width."
             );
 
         if(widget_configuration->size_grid.height > screen_configuration.grid.height)
             InvalidWidgetConfiguration(
-                screen_configuration.id,
-                widget_configuration->id,
-                "Widget height cannot exceed the screen grid height."
+                screen_configuration.id, widget_configuration->id, "Widget height cannot exceed the screen grid height."
             );
     }
 }
 
-void UiConfigurationValidator::ValidateWidgetPosition(const ScreenConfiguration& screen_configuration,
-    std::span<const std::optional<size_t>> parents) {
+void UiConfigurationValidator::ValidateWidgetPosition(
+    const ScreenConfiguration& screen_configuration,
+    std::span<const std::optional<size_t>> parents
+) {
     for(size_t i = 0; i < screen_configuration.widget_configurations.size(); ++i) {
         if(parents[i].has_value())
             continue;
         const auto& widget_configuration = screen_configuration.widget_configurations[i];
         if(widget_configuration->position_grid.x < 0 || widget_configuration->position_grid.y < 0)
             InvalidWidgetConfiguration(
-                screen_configuration.id,
-                widget_configuration->id,
-                "Widget position cannot be negative."
+                screen_configuration.id, widget_configuration->id, "Widget position cannot be negative."
             );
 
         if(static_cast<uint32_t>(widget_configuration->position_grid.x) >= screen_configuration.grid.width)
             InvalidWidgetConfiguration(
-                screen_configuration.id,
-                widget_configuration->id,
-                "Widget position X must be within the screen grid."
+                screen_configuration.id, widget_configuration->id, "Widget position X must be within the screen grid."
             );
 
         if(static_cast<uint32_t>(widget_configuration->position_grid.y) >= screen_configuration.grid.height)
             InvalidWidgetConfiguration(
-                screen_configuration.id,
-                widget_configuration->id,
-                "Widget position Y must be within the screen grid."
+                screen_configuration.id, widget_configuration->id, "Widget position Y must be within the screen grid."
             );
     }
 }
@@ -467,11 +468,7 @@ void UiConfigurationValidator::ValidateWidgetProperties(const ScreenConfiguratio
     for(const auto& widget_configuration : screen_configuration.widget_configurations) {
         for(const auto& [property_type, value] : widget_configuration->properties) {
             if(auto error = GetWidgetPropertyValidationError(property_type, value); !error.empty())
-                InvalidWidgetConfiguration(
-                    screen_configuration.id,
-                    widget_configuration->id,
-                    error
-                );
+                InvalidWidgetConfiguration(screen_configuration.id, widget_configuration->id, error);
         }
     }
 }
@@ -483,43 +480,33 @@ void UiConfigurationValidator::ValidateWidgetBindings(const ScreenConfiguration&
         for(const auto& binding : widget_configuration->bindings) {
             if(!IsValidEventChannelId(binding.event.channel))
                 InvalidWidgetConfiguration(
-                    screen_configuration.id,
-                    widget_configuration->id,
-                    "Binding names an unknown event channel."
+                    screen_configuration.id, widget_configuration->id, "Binding names an unknown event channel."
                 );
 
             if(!IsValidBindingDirection(binding.direction))
                 InvalidWidgetConfiguration(
-                    screen_configuration.id,
-                    widget_configuration->id,
-                    "Binding has an invalid direction."
+                    screen_configuration.id, widget_configuration->id, "Binding has an invalid direction."
                 );
 
             if(binding.target == WidgetPropertyType::NONE)
                 InvalidWidgetConfiguration(
-                    screen_configuration.id,
-                    widget_configuration->id,
-                    "Binding must name a target property."
+                    screen_configuration.id, widget_configuration->id, "Binding must name a target property."
                 );
 
             if(!IsValidWidgetPropertyType(binding.target))
                 InvalidWidgetConfiguration(
-                    screen_configuration.id,
-                    widget_configuration->id,
-                    "Binding names an unknown target property."
+                    screen_configuration.id, widget_configuration->id, "Binding names an unknown target property."
                 );
 
             if(WidgetPropertyValidator::IsStructuralProperty(binding.target))
                 InvalidWidgetConfiguration(
-                    screen_configuration.id,
-                    widget_configuration->id,
+                    screen_configuration.id, widget_configuration->id,
                     "Binding cannot target a structural property; rebuild the screen to change child widgets."
                 );
 
             if(binding.event.HasSelector() && !IsSelectorValue(binding.event.selector_value))
                 InvalidWidgetConfiguration(
-                    screen_configuration.id,
-                    widget_configuration->id,
+                    screen_configuration.id, widget_configuration->id,
                     "Binding selector value must be text, an integer or a bool."
                 );
         }

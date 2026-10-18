@@ -9,8 +9,8 @@ namespace eerie_leap::views::widgets::indicators {
 using namespace eerie_leap::utilities::type;
 using namespace eerie_leap::domain::ui_domain::models;
 
-IndicatorBase::IndicatorBase(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context)
-    : WidgetBase(id, std::move(parent), std::move(context)) { // , value_filter_(0) {
+IndicatorBase::IndicatorBase(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context) :
+    WidgetBase(id, std::move(parent), std::move(context)) { // , value_filter_(0) {
 
     value_change_animation_ = CreateValueChangeAnimation();
 }
@@ -51,9 +51,10 @@ void IndicatorBase::ValueChangeAnimation(lv_anim_t& anim, float range, float sta
     uint32_t change_duration = unit_duration * abs(end_value - start_value);
 
     lv_anim_set_duration(&anim, change_duration);
-    lv_anim_set_values(&anim,
-        static_cast<int32_t>(start_value * 10 * CONFIG_EERIE_LEAP_FLOAT_SIGNIFICANT_DIGITS),
-        static_cast<int32_t>(end_value * 10 * CONFIG_EERIE_LEAP_FLOAT_SIGNIFICANT_DIGITS));
+    lv_anim_set_values(
+        &anim, static_cast<int32_t>(start_value * 10 * CONFIG_EERIE_LEAP_FLOAT_SIGNIFICANT_DIGITS),
+        static_cast<int32_t>(end_value * 10 * CONFIG_EERIE_LEAP_FLOAT_SIGNIFICANT_DIGITS)
+    );
     lv_anim_start(&anim);
 }
 
@@ -89,11 +90,7 @@ void IndicatorBase::Update(float value) {
         if(std::abs(value - value_) < min_animation_delta_ratio_ * (range_end_ - range_start_))
             return;
 
-        ValueChangeAnimation(
-            value_change_animation_,
-            range_end_ - range_start_,
-            value_,
-            value);
+        ValueChangeAnimation(value_change_animation_, range_end_ - range_start_, value_, value);
     } else {
         UpdateIndicatorCallback(this, static_cast<int32_t>(value * 10 * CONFIG_EERIE_LEAP_FLOAT_SIGNIFICANT_DIGITS));
     }
@@ -109,12 +106,12 @@ void IndicatorBase::OnProcessingSuspended() {
 void IndicatorBase::RegisterProperties(WidgetPropertyStore& store) const {
     WidgetBase::RegisterProperties(store);
 
-    store.Register(WidgetPropertyType::MIN_VALUE, ConfigValue { 0.0 }, PropertyChangeEffect::Repaint);
-    store.Register(WidgetPropertyType::MAX_VALUE, ConfigValue { 100.0 }, PropertyChangeEffect::Repaint);
+    store.Register(WidgetPropertyType::MIN_VALUE, ConfigValue{ 0.0 }, PropertyChangeEffect::Repaint);
+    store.Register(WidgetPropertyType::MAX_VALUE, ConfigValue{ 100.0 }, PropertyChangeEffect::Repaint);
 
     // No effect: Update() drives the animation, which invalidates just the area it moves. Adding
     // a container repaint here dirties the whole widget rect on every sample instead.
-    store.Register(WidgetPropertyType::VALUE, ConfigValue { 0.0 }, PropertyChangeEffect::None);
+    store.Register(WidgetPropertyType::VALUE, ConfigValue{ 0.0 }, PropertyChangeEffect::None);
 }
 
 void IndicatorBase::OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) {

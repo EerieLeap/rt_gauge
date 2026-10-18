@@ -40,7 +40,9 @@ protected:
     void OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) override;
 
 public:
-    WidgetType GetType() const override { return WidgetType::ControlSlider; }
+    WidgetType GetType() const override {
+        return WidgetType::ControlSlider;
+    }
 };
 
 } // namespace eerie_leap::views::widgets::controls

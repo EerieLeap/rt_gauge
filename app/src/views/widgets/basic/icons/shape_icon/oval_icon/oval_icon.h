@@ -10,7 +10,9 @@ private:
 
 public:
     using ClosedShapeIconBase::ClosedShapeIconBase;
-    [[nodiscard]] IconType GetIconType() const override { return IconType::Oval; }
+    [[nodiscard]] IconType GetIconType() const override {
+        return IconType::Oval;
+    }
 };
 
 } // namespace eerie_leap::views::widgets::basic::icons

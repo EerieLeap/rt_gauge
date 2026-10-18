@@ -2,8 +2,8 @@
 #include <string>
 #include <utility>
 
-#include "utilities/type/config_value.h"
 #include "domain/ui_domain/models/widget_property.h"
+#include "utilities/type/config_value.h"
 #include "views/themes/theme_manager.h"
 
 #include "horizontal_chart_indicator.h"
@@ -15,13 +15,15 @@ using namespace eerie_leap::domain::ui_domain::models;
 using namespace eerie_leap::views::utilitites;
 using namespace eerie_leap::views::themes;
 
-HorizontalChartIndicator::HorizontalChartIndicator(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context)
-    : IndicatorBase(id, std::move(parent), std::move(context)) { }
+HorizontalChartIndicator::HorizontalChartIndicator(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context) :
+    IndicatorBase(id, std::move(parent), std::move(context)) {}
 
 int HorizontalChartIndicator::DoRender() {
-    auto chart = Create(content_frame_->GetObject(), static_cast<int32_t>(range_start_), static_cast<int32_t>(range_end_), point_count_, chart_type_);
-    auto child = std::make_shared<Frame>(
-        Frame::Create(chart).Build());
+    auto chart = Create(
+        content_frame_->GetObject(), static_cast<int32_t>(range_start_), static_cast<int32_t>(range_end_), point_count_,
+        chart_type_
+    );
+    auto child = std::make_shared<Frame>(Frame::Create(chart).Build());
     content_frame_->SetChild(child);
 
     return 0;
@@ -32,11 +34,11 @@ void HorizontalChartIndicator::RegisterProperties(WidgetPropertyStore& store) co
 
     store.RegisterColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE);
 
-    store.Register(WidgetPropertyType::CHART_POINT_COUNT, ConfigValue { 30 }, PropertyChangeEffect::Rebuild);
+    store.Register(WidgetPropertyType::CHART_POINT_COUNT, ConfigValue{ 30 }, PropertyChangeEffect::Rebuild);
     store.Register(
-        WidgetPropertyType::CHART_TYPE,
-        ConfigValue { static_cast<int>(HorizontalChartIndicatorType::Bar) },
-        PropertyChangeEffect::Rebuild);
+        WidgetPropertyType::CHART_TYPE, ConfigValue{ static_cast<int>(HorizontalChartIndicatorType::Bar) },
+        PropertyChangeEffect::Rebuild
+    );
 }
 
 int HorizontalChartIndicator::ApplyTheme(const ITheme& theme) {
@@ -53,7 +55,13 @@ int HorizontalChartIndicator::ApplyTheme(const ITheme& theme) {
     return 0;
 }
 
-lv_obj_t* HorizontalChartIndicator::Create(lv_obj_t* parent, int32_t range_start, int32_t range_end, int32_t point_count, HorizontalChartIndicatorType type) {
+lv_obj_t* HorizontalChartIndicator::Create(
+    lv_obj_t* parent,
+    int32_t range_start,
+    int32_t range_end,
+    int32_t point_count,
+    HorizontalChartIndicatorType type
+) {
     lv_chart_ = lv_chart_create(parent);
     lv_obj_remove_style_all(lv_chart_);
 
@@ -116,7 +124,8 @@ void HorizontalChartIndicator::OnPropertyChanged(WidgetPropertyType type, const 
 
         case WidgetPropertyType::CHART_TYPE:
             chart_type_ = static_cast<HorizontalChartIndicatorType>(
-                ConfigValueAs<int>(value, static_cast<int>(HorizontalChartIndicatorType::Bar)));
+                ConfigValueAs<int>(value, static_cast<int>(HorizontalChartIndicatorType::Bar))
+            );
             break;
 
         default:

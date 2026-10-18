@@ -28,7 +28,9 @@ protected:
 public:
     explicit ToggleControl(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context);
 
-    WidgetType GetType() const override { return WidgetType::ControlToggle; }
+    WidgetType GetType() const override {
+        return WidgetType::ControlToggle;
+    }
 };
 
 } // namespace eerie_leap::views::widgets::controls

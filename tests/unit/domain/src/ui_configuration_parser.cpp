@@ -2,30 +2,30 @@
 #include <iterator>
 #include <memory>
 #include <memory_resource>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
-#include <stdexcept>
 
+#include <eerie_memory.hpp>
 #include <zephyr/kernel.h>
 #include <zephyr/ztest.h>
-#include <eerie_memory.hpp>
 
-#include "utilities/cbor/cbor_helpers.hpp"
-#include "configuration/services/cbor_configuration_service.h"
-#include "configuration/cbor/cbor_ui_config/cbor_ui_config_cbor_encode.h"
 #include "configuration/cbor/cbor_ui_config/cbor_ui_config_cbor_decode.h"
+#include "configuration/cbor/cbor_ui_config/cbor_ui_config_cbor_encode.h"
 #include "configuration/cbor/cbor_ui_config/cbor_ui_config_size.h"
+#include "configuration/services/cbor_configuration_service.h"
+#include "utilities/cbor/cbor_helpers.hpp"
 
-#include "domain/ui_domain/models/ui_configuration.h"
-#include "domain/ui_domain/models/widget_composition.h"
-#include "domain/ui_domain/models/widget_type.h"
-#include "domain/ui_domain/models/widget_property.h"
+#include "domain/ui_domain/configuration/parsers/ui_configuration_cbor_parser.h"
 #include "domain/ui_domain/models/animation.h"
 #include "domain/ui_domain/models/icon_type.h"
+#include "domain/ui_domain/models/ui_configuration.h"
+#include "domain/ui_domain/models/widget_composition.h"
 #include "domain/ui_domain/models/widget_direction.h"
 #include "domain/ui_domain/models/widget_fill_mode.h"
-#include "domain/ui_domain/configuration/parsers/ui_configuration_cbor_parser.h"
+#include "domain/ui_domain/models/widget_property.h"
+#include "domain/ui_domain/models/widget_type.h"
 
 #include "views/widgets/indicators/horizontal_chart_indicator/horizontal_chart_indicator.h"
 
@@ -127,7 +127,9 @@ pmr_unique_ptr<UiConfiguration> ui_configuration_parser_GetTestUiConfiguration()
     widget3->properties[WidgetPropertyType::MAX_VALUE] = 100;
     widget3->properties[WidgetPropertyType::LABEL] = "sensor_1";
     widget3->properties[WidgetPropertyType::CHART_POINT_COUNT] = 35;
-    widget3->properties[WidgetPropertyType::CHART_TYPE] = static_cast<std::uint16_t>(HorizontalChartIndicatorType::Line);
+    widget3->properties[WidgetPropertyType::CHART_TYPE] = static_cast<std::uint16_t>(
+        HorizontalChartIndicatorType::Line
+    );
     screen_configuration->AddWidget(std::move(widget3));
 
     ui_configuration->screen_configurations.push_back(std::move(screen_configuration));
@@ -135,36 +137,98 @@ pmr_unique_ptr<UiConfiguration> ui_configuration_parser_GetTestUiConfiguration()
     return ui_configuration;
 }
 
-void ui_configuration_parser_CompareUiConfigurations(UiConfiguration& ui_configuration, UiConfiguration& deserialized_ui_configuration) {
+void ui_configuration_parser_CompareUiConfigurations(
+    UiConfiguration& ui_configuration,
+    UiConfiguration& deserialized_ui_configuration
+) {
     zassert_equal(deserialized_ui_configuration.active_screen_group_id, ui_configuration.active_screen_group_id);
 
     for(std::size_t i = 0; i < ui_configuration.screen_configurations.size(); i++) {
-        zassert_equal(deserialized_ui_configuration.screen_configurations[i]->id, ui_configuration.screen_configurations[i]->id);
-        zassert_equal(deserialized_ui_configuration.screen_configurations[i]->screen_group_id, ui_configuration.screen_configurations[i]->screen_group_id);
-        zassert_equal(deserialized_ui_configuration.screen_configurations[i]->type, ui_configuration.screen_configurations[i]->type);
-        zassert_equal(deserialized_ui_configuration.screen_configurations[i]->z_index, ui_configuration.screen_configurations[i]->z_index);
-        zassert_equal(deserialized_ui_configuration.screen_configurations[i]->is_visible, ui_configuration.screen_configurations[i]->is_visible);
-        zassert_equal(deserialized_ui_configuration.screen_configurations[i]->is_overlay, ui_configuration.screen_configurations[i]->is_overlay);
-        zassert_equal(deserialized_ui_configuration.screen_configurations[i]->grid.snap_enabled, ui_configuration.screen_configurations[i]->grid.snap_enabled);
-        zassert_equal(deserialized_ui_configuration.screen_configurations[i]->grid.width, ui_configuration.screen_configurations[i]->grid.width);
-        zassert_equal(deserialized_ui_configuration.screen_configurations[i]->grid.height, ui_configuration.screen_configurations[i]->grid.height);
-        zassert_equal(deserialized_ui_configuration.screen_configurations[i]->grid.spacing_px, ui_configuration.screen_configurations[i]->grid.spacing_px);
+        zassert_equal(
+            deserialized_ui_configuration.screen_configurations[i]->id, ui_configuration.screen_configurations[i]->id
+        );
+        zassert_equal(
+            deserialized_ui_configuration.screen_configurations[i]->screen_group_id,
+            ui_configuration.screen_configurations[i]->screen_group_id
+        );
+        zassert_equal(
+            deserialized_ui_configuration.screen_configurations[i]->type,
+            ui_configuration.screen_configurations[i]->type
+        );
+        zassert_equal(
+            deserialized_ui_configuration.screen_configurations[i]->z_index,
+            ui_configuration.screen_configurations[i]->z_index
+        );
+        zassert_equal(
+            deserialized_ui_configuration.screen_configurations[i]->is_visible,
+            ui_configuration.screen_configurations[i]->is_visible
+        );
+        zassert_equal(
+            deserialized_ui_configuration.screen_configurations[i]->is_overlay,
+            ui_configuration.screen_configurations[i]->is_overlay
+        );
+        zassert_equal(
+            deserialized_ui_configuration.screen_configurations[i]->grid.snap_enabled,
+            ui_configuration.screen_configurations[i]->grid.snap_enabled
+        );
+        zassert_equal(
+            deserialized_ui_configuration.screen_configurations[i]->grid.width,
+            ui_configuration.screen_configurations[i]->grid.width
+        );
+        zassert_equal(
+            deserialized_ui_configuration.screen_configurations[i]->grid.height,
+            ui_configuration.screen_configurations[i]->grid.height
+        );
+        zassert_equal(
+            deserialized_ui_configuration.screen_configurations[i]->grid.spacing_px,
+            ui_configuration.screen_configurations[i]->grid.spacing_px
+        );
 
         for(std::size_t j = 0; j < ui_configuration.screen_configurations[i]->widget_configurations.size(); j++) {
-            zassert_equal(deserialized_ui_configuration.screen_configurations[i]->widget_configurations[j]->type, ui_configuration.screen_configurations[i]->widget_configurations[j]->type);
-            zassert_equal(deserialized_ui_configuration.screen_configurations[i]->widget_configurations[j]->id, ui_configuration.screen_configurations[i]->widget_configurations[j]->id);
-            zassert_equal(deserialized_ui_configuration.screen_configurations[i]->widget_configurations[j]->position_grid.x, ui_configuration.screen_configurations[i]->widget_configurations[j]->position_grid.x);
-            zassert_equal(deserialized_ui_configuration.screen_configurations[i]->widget_configurations[j]->position_grid.y, ui_configuration.screen_configurations[i]->widget_configurations[j]->position_grid.y);
-            zassert_equal(deserialized_ui_configuration.screen_configurations[i]->widget_configurations[j]->size_grid.width, ui_configuration.screen_configurations[i]->widget_configurations[j]->size_grid.width);
-            zassert_equal(deserialized_ui_configuration.screen_configurations[i]->widget_configurations[j]->size_grid.height, ui_configuration.screen_configurations[i]->widget_configurations[j]->size_grid.height);
-            zassert_equal(deserialized_ui_configuration.screen_configurations[i]->widget_configurations[j]->z_index, ui_configuration.screen_configurations[i]->widget_configurations[j]->z_index);
-            zassert_equal(deserialized_ui_configuration.screen_configurations[i]->widget_configurations[j]->properties.size(), ui_configuration.screen_configurations[i]->widget_configurations[j]->properties.size());
+            zassert_equal(
+                deserialized_ui_configuration.screen_configurations[i]->widget_configurations[j]->type,
+                ui_configuration.screen_configurations[i]->widget_configurations[j]->type
+            );
+            zassert_equal(
+                deserialized_ui_configuration.screen_configurations[i]->widget_configurations[j]->id,
+                ui_configuration.screen_configurations[i]->widget_configurations[j]->id
+            );
+            zassert_equal(
+                deserialized_ui_configuration.screen_configurations[i]->widget_configurations[j]->position_grid.x,
+                ui_configuration.screen_configurations[i]->widget_configurations[j]->position_grid.x
+            );
+            zassert_equal(
+                deserialized_ui_configuration.screen_configurations[i]->widget_configurations[j]->position_grid.y,
+                ui_configuration.screen_configurations[i]->widget_configurations[j]->position_grid.y
+            );
+            zassert_equal(
+                deserialized_ui_configuration.screen_configurations[i]->widget_configurations[j]->size_grid.width,
+                ui_configuration.screen_configurations[i]->widget_configurations[j]->size_grid.width
+            );
+            zassert_equal(
+                deserialized_ui_configuration.screen_configurations[i]->widget_configurations[j]->size_grid.height,
+                ui_configuration.screen_configurations[i]->widget_configurations[j]->size_grid.height
+            );
+            zassert_equal(
+                deserialized_ui_configuration.screen_configurations[i]->widget_configurations[j]->z_index,
+                ui_configuration.screen_configurations[i]->widget_configurations[j]->z_index
+            );
+            zassert_equal(
+                deserialized_ui_configuration.screen_configurations[i]->widget_configurations[j]->properties.size(),
+                ui_configuration.screen_configurations[i]->widget_configurations[j]->properties.size()
+            );
             for(auto& property : ui_configuration.screen_configurations[i]->widget_configurations[j]->properties) {
-                zassert_true(deserialized_ui_configuration.screen_configurations[i]->widget_configurations[j]->properties[property.first] == ui_configuration.screen_configurations[i]->widget_configurations[j]->properties[property.first]);
+                zassert_true(
+                    deserialized_ui_configuration.screen_configurations[i]
+                        ->widget_configurations[j]
+                        ->properties[property.first]
+                    == ui_configuration.screen_configurations[i]->widget_configurations[j]->properties[property.first]
+                );
             }
 
             const auto& bindings = ui_configuration.screen_configurations[i]->widget_configurations[j]->bindings;
-            const auto& deserialized_bindings = deserialized_ui_configuration.screen_configurations[i]->widget_configurations[j]->bindings;
+            const auto& deserialized_bindings =
+                deserialized_ui_configuration.screen_configurations[i]->widget_configurations[j]->bindings;
 
             zassert_equal(deserialized_bindings.size(), bindings.size());
 
@@ -191,10 +255,11 @@ ZTEST(ui_configuration_parser, test_CborSerializeDeserialize) {
 
     auto serialized_ui_configuration = ui_configuration_cbor_parser.Serialize(*ui_configuration);
     zassert_equal(serialized_ui_configuration->version, 1);
-    auto deserialized_ui_configuration = ui_configuration_cbor_parser.Deserialize(Mrm::GetDefaultPmr(), *serialized_ui_configuration.get());
+    auto deserialized_ui_configuration = ui_configuration_cbor_parser.Deserialize(
+        Mrm::GetDefaultPmr(), *serialized_ui_configuration.get()
+    );
 
-    ui_configuration_parser_CompareUiConfigurations(
-        *ui_configuration, *deserialized_ui_configuration);
+    ui_configuration_parser_CompareUiConfigurations(*ui_configuration, *deserialized_ui_configuration);
 }
 
 ZTEST(ui_configuration_parser, test_child_ids_and_anchor_keys_reuse_version_one_property_codec) {
@@ -270,8 +335,12 @@ ZTEST(ui_configuration_parser, test_widget_child_rules_guard_save_and_load) {
         }
         return false;
     };
-    zassert_true(rejected([&] { parser.Serialize(*configuration); }));
-    zassert_true(rejected([&] { parser.Deserialize(Mrm::GetDefaultPmr(), *serialized); }));
+    zassert_true(rejected([&] {
+        parser.Serialize(*configuration);
+    }));
+    zassert_true(rejected([&] {
+        parser.Deserialize(Mrm::GetDefaultPmr(), *serialized);
+    }));
 }
 
 ZTEST(ui_configuration_parser, test_shape_properties_and_bindings_round_trip) {
@@ -300,12 +369,9 @@ ZTEST(ui_configuration_parser, test_animation_properties_and_numeric_binding_tar
         Animation::Type type;
         bool active;
         int duration_ms;
-    } cases[] = {
-        { Animation::DEFAULT_TYPE, Animation::DEFAULT_ACTIVE, Animation::DEFAULT_DURATION_MS },
-        { Animation::Type::Blinking, true, 3 },
-        { Animation::Type::Rotation, false, INT32_MAX },
-        { Animation::Type::Rotation, true, 2 }
-    };
+    } cases[] = { { Animation::DEFAULT_TYPE, Animation::DEFAULT_ACTIVE, Animation::DEFAULT_DURATION_MS },
+        { Animation::Type::Blinking, true, 3 }, { Animation::Type::Rotation, false, INT32_MAX },
+        { Animation::Type::Rotation, true, 2 } };
     for(const auto& settings : cases) {
         auto configuration = ui_configuration_parser_GetTestUiConfiguration();
         auto& widget = *configuration->screen_configurations[0]->widget_configurations[0];
@@ -450,9 +516,12 @@ ZTEST(ui_configuration_parser, test_CborDeserializeOrdersWidgetsByZIndex) {
     widget_configurations[2]->z_index = 1;
 
     auto serialized_ui_configuration = ui_configuration_cbor_parser.Serialize(*ui_configuration);
-    auto deserialized_ui_configuration = ui_configuration_cbor_parser.Deserialize(Mrm::GetDefaultPmr(), *serialized_ui_configuration.get());
+    auto deserialized_ui_configuration = ui_configuration_cbor_parser.Deserialize(
+        Mrm::GetDefaultPmr(), *serialized_ui_configuration.get()
+    );
 
-    auto& deserialized_widget_configurations = deserialized_ui_configuration->screen_configurations[0]->widget_configurations;
+    auto& deserialized_widget_configurations =
+        deserialized_ui_configuration->screen_configurations[0]->widget_configurations;
     zassert_equal(deserialized_widget_configurations.size(), widget_configurations.size());
 
     // Equal z-index keeps configuration order.
@@ -477,12 +546,8 @@ bool Deserializes(const CborUiConfig& config) {
 // A version 1 config with one Gauge screen and one BasicIcon widget. Hand-encoded
 // to check the wire format independently of our encoder and parser.
 std::vector<uint8_t> WidgetPropertyPayload(std::initializer_list<uint8_t> properties) {
-    std::vector<uint8_t> payload = {
-        0x83, 0x01, 0x03, 0x81,
-        0x88, 0x08, 0x03, 0x02, 0x00, 0xf5, 0xf4, 0x84, 0xf5, 0x03, 0x03, 0x00, 0x81,
-        0x87, 0x1a, 0x00, 0x01, 0x00, 0x01, 0x00,
-        0x82, 0x00, 0x00, 0x82, 0x01, 0x01, 0x00
-    };
+    std::vector<uint8_t> payload = { 0x83, 0x01, 0x03, 0x81, 0x88, 0x08, 0x03, 0x02, 0x00, 0xf5, 0xf4, 0x84, 0xf5, 0x03,
+        0x03, 0x00, 0x81, 0x87, 0x1a, 0x00, 0x01, 0x00, 0x01, 0x00, 0x82, 0x00, 0x00, 0x82, 0x01, 0x01, 0x00 };
     payload.insert(payload.end(), properties.begin(), properties.end());
     payload.push_back(0x80); // No bindings.
     return payload;
@@ -498,14 +563,13 @@ ZTEST(ui_configuration_parser, test_widget_properties_round_trip_with_empty_ui_p
     properties[WidgetPropertyType::IS_SMOOTHED] = true;
     properties[WidgetPropertyType::WIDTH_PX] = 80;
     properties[WidgetPropertyType::FILL_MODE] = static_cast<int>(WidgetFillMode::Outline);
-    const std::pair<WidgetPropertyType, const char*> colors[] = {
-        { WidgetPropertyType::COLOR_PRIMARY_ACTIVE, "#3366fF80" },
+    const std::pair<WidgetPropertyType, const char*> colors[] = { { WidgetPropertyType::COLOR_PRIMARY_ACTIVE,
+                                                                      "#3366fF80" },
         { WidgetPropertyType::COLOR_PRIMARY_INACTIVE, "#00000000" },
         { WidgetPropertyType::COLOR_SECONDARY_ACTIVE, "#FFFFFFFF" },
         { WidgetPropertyType::COLOR_SECONDARY_INACTIVE, "" },
         { WidgetPropertyType::COLOR_TERTIARY_ACTIVE, "#12345678" },
-        { WidgetPropertyType::COLOR_TERTIARY_INACTIVE, "#abcdef01" }
-    };
+        { WidgetPropertyType::COLOR_TERTIARY_INACTIVE, "#abcdef01" } };
     for(const auto& [type, text] : colors) {
         properties[type] = std::pmr::string(text, Mrm::GetExtPmr());
         auto binding = widget.bindings.front();
@@ -533,7 +597,8 @@ ZTEST(ui_configuration_parser, test_widget_properties_round_trip_with_empty_ui_p
     zassert_equal(cbor_decode_CborUiConfig(payload.data(), encoded_size, decoded.get(), &decoded_size), 0);
     zassert_equal(decoded_size, encoded_size);
 
-    const auto& cbor_properties = decoded->CborScreenConfig_m[0].CborWidgetConfig_m[0].properties.CborPropertyValueType_m;
+    const auto& cbor_properties =
+        decoded->CborScreenConfig_m[0].CborWidgetConfig_m[0].properties.CborPropertyValueType_m;
     zassert_equal(cbor_properties.size(), properties.size());
     for(const auto& property : cbor_properties)
         zassert_true(properties.contains(static_cast<WidgetPropertyType>(property.CborPropertyValueType_m_key)));
@@ -555,9 +620,8 @@ ZTEST(ui_configuration_parser, test_deserialize_rejects_malformed_persisted_colo
     auto serialized = parser.Serialize(*configuration);
     auto& property = serialized->CborScreenConfig_m[0].CborWidgetConfig_m[0].properties.CborPropertyValueType_m[0];
     auto& value = property.CborPropertyValueType_m;
-    const std::pmr::string invalid_colors[] = {
-        "#3366FF", "3366FF80", "#3366FF8G", "#3366FF800", std::pmr::string("#3366FF80\0", 10)
-    };
+    const std::pmr::string invalid_colors[] = { "#3366FF", "3366FF80", "#3366FF8G", "#3366FF800",
+        std::pmr::string("#3366FF80\0", 10) };
     for(auto type : { WidgetPropertyType::COLOR_PRIMARY_ACTIVE, WidgetPropertyType::COLOR_PRIMARY_INACTIVE,
             WidgetPropertyType::COLOR_SECONDARY_ACTIVE, WidgetPropertyType::COLOR_SECONDARY_INACTIVE,
             WidgetPropertyType::COLOR_TERTIARY_ACTIVE, WidgetPropertyType::COLOR_TERTIARY_INACTIVE }) {
@@ -568,7 +632,7 @@ ZTEST(ui_configuration_parser, test_deserialize_rejects_malformed_persisted_colo
             zassert_false(Deserializes(*serialized));
         }
         value.CborPropertyValueType_choice = CborPropertyValueType_r::CborPropertyValueType_int_c;
-        value.value = int32_t{128};
+        value.value = int32_t{ 128 };
         zassert_false(Deserializes(*serialized));
         value.CborPropertyValueType_choice = CborPropertyValueType_r::CborPropertyValueType_float_c;
         value.value = 128.0;
@@ -586,8 +650,10 @@ ZTEST(ui_configuration_parser, test_deserialize_rejects_invalid_persisted_opacit
     properties[WidgetPropertyType::OPACITY] = 128;
     UiConfigurationCborParser parser;
     auto serialized = parser.Serialize(*configuration);
-    auto& value = serialized->CborScreenConfig_m[0].CborWidgetConfig_m[0]
-        .properties.CborPropertyValueType_m[0].CborPropertyValueType_m;
+    auto& value = serialized->CborScreenConfig_m[0]
+                      .CborWidgetConfig_m[0]
+                      .properties.CborPropertyValueType_m[0]
+                      .CborPropertyValueType_m;
     for(int32_t opacity : { 0, 128, 255 }) {
         value.value = opacity;
         zassert_true(Deserializes(*serialized));
@@ -643,10 +709,8 @@ ZTEST(ui_configuration_parser, test_rejects_legacy_text_widget_property_keys) {
 }
 
 ZTEST(ui_configuration_parser, test_rejects_unknown_widget_property_ids_before_narrowing) {
-    const std::array<uint32_t, 5> invalid_ids = {
-        0, static_cast<uint32_t>(WidgetPropertyType::COUNT), 9999,
-        0x10000U + static_cast<uint32_t>(WidgetPropertyType::MIN_VALUE), UINT32_MAX
-    };
+    const std::array<uint32_t, 5> invalid_ids = { 0, static_cast<uint32_t>(WidgetPropertyType::COUNT), 9999,
+        0x10000U + static_cast<uint32_t>(WidgetPropertyType::MIN_VALUE), UINT32_MAX };
     UiConfigurationCborParser parser;
     auto configuration = ui_configuration_parser_GetTestUiConfiguration();
     auto serialized = parser.Serialize(*configuration);
@@ -700,25 +764,23 @@ ZTEST(ui_configuration_parser, test_rejects_widget_property_ids_in_ui_properties
 }
 
 ZTEST(ui_configuration_parser, test_rejects_legacy_text_ui_property_keys) {
-    const uint8_t payload[] = {
-        0x84, 0x01, 0x00, 0xa1, 0x68, 'W', 'I', 'D', 'T', 'H', '_', 'P', 'X', 0x18, 0x50, 0x80
-    };
+    const uint8_t payload[] = { 0x84, 0x01, 0x00, 0xa1, 0x68, 'W', 'I', 'D', 'T', 'H', '_', 'P', 'X', 0x18, 0x50,
+        0x80 };
     auto decoded = make_unique_pmr<CborUiConfig>(Mrm::GetDefaultPmr());
     size_t decoded_size = 0;
     zassert_not_equal(cbor_decode_CborUiConfig(payload, sizeof(payload), decoded.get(), &decoded_size), 0);
 }
 
 ZTEST(ui_configuration_parser, test_rejects_undefined_ui_property_ids) {
-    const std::array<uint32_t, 5> invalid_ids = {
-        static_cast<uint32_t>(UiPropertyType::NONE), static_cast<uint32_t>(UiPropertyType::COUNT),
-        9999, 0x10000U, UINT32_MAX
-    };
+    const std::array<uint32_t, 5> invalid_ids = { static_cast<uint32_t>(UiPropertyType::NONE),
+        static_cast<uint32_t>(UiPropertyType::COUNT), 9999, 0x10000U, UINT32_MAX };
     UiConfigurationCborParser parser;
     auto configuration = ui_configuration_parser_GetTestUiConfiguration();
     auto serialized = parser.Serialize(*configuration);
     serialized->properties_present = true;
     auto& property = serialized->properties.CborPropertyValueType_m.emplace_back();
-    property.CborPropertyValueType_m.CborPropertyValueType_choice = CborPropertyValueType_r::CborPropertyValueType_int_c;
+    property.CborPropertyValueType_m.CborPropertyValueType_choice =
+        CborPropertyValueType_r::CborPropertyValueType_int_c;
     property.CborPropertyValueType_m.value = 0;
     for(auto id : invalid_ids) {
         property.CborPropertyValueType_m_key = id;
@@ -746,20 +808,13 @@ namespace {
 // A version 1 config with dial 9 and its BasicIcon needle 12 at the fill-slot placeholder.
 // Hand-encoded, like WidgetPropertyPayload, to pin the unchanged screen and widget records.
 std::vector<uint8_t> CompositionPayload(std::initializer_list<uint8_t> dial_properties) {
-    std::vector<uint8_t> payload = {
-        0x83, 0x01, 0x03, 0x81,
-        0x88, 0x08, 0x03, 0x02, 0x00, 0xf5, 0xf4, 0x84, 0xf5, 0x03, 0x03, 0x00, 0x82,
-        0x87, 0x1a, 0x00, 0x02, 0x00, 0x69, 0x09,
-        0x82, 0x00, 0x00, 0x82, 0x01, 0x01, 0x00
-    };
+    std::vector<uint8_t> payload = { 0x83, 0x01, 0x03, 0x81, 0x88, 0x08, 0x03, 0x02, 0x00, 0xf5, 0xf4, 0x84, 0xf5, 0x03,
+        0x03, 0x00, 0x82, 0x87, 0x1a, 0x00, 0x02, 0x00, 0x69, 0x09, 0x82, 0x00, 0x00, 0x82, 0x01, 0x01, 0x00 };
     payload.insert(payload.end(), dial_properties.begin(), dial_properties.end());
-    const uint8_t needle[] = {
-        0x80, // The dial has no bindings.
-        0x87, 0x1a, 0x00, 0x01, 0x00, 0x01, 0x0c,
-        0x82, 0x00, 0x00, 0x82, 0x01, 0x01, 0x00,
-        0xa2, 0x13, 0x07, 0x14, 0x07, // {ANCHOR_POINT_X: 7, ANCHOR_POINT_Y: 7}
-        0x80
-    };
+    const uint8_t needle[] = { 0x80, // The dial has no bindings.
+        0x87, 0x1a, 0x00, 0x01, 0x00, 0x01, 0x0c, 0x82, 0x00, 0x00, 0x82, 0x01, 0x01, 0x00, 0xa2, 0x13, 0x07, 0x14,
+        0x07, // {ANCHOR_POINT_X: 7, ANCHOR_POINT_Y: 7}
+        0x80 };
     payload.insert(payload.end(), std::begin(needle), std::end(needle));
     return payload;
 }
@@ -822,13 +877,15 @@ ZTEST(ui_configuration_parser, test_version_one_composition_payload_keeps_record
     const auto& dial = *screen.widget_configurations[0];
     const auto& needle = *screen.widget_configurations[1];
     zassert_equal(dial.type, WidgetType::IndicatorDial);
-    zassert_true(std::get<std::pmr::vector<int>>(dial.properties.at(WidgetPropertyType::CHILD_WIDGET_IDS))
-        == std::pmr::vector<int>({ 12 }));
+    zassert_true(
+        std::get<std::pmr::vector<int>>(dial.properties.at(WidgetPropertyType::CHILD_WIDGET_IDS))
+        == std::pmr::vector<int>({ 12 })
+    );
     zassert_equal(dial.properties.size(), 1, "Loading injects no anchors, defaults, or image properties");
     zassert_equal(needle.properties.size(), 2);
     zassert_equal(std::get<int>(needle.properties.at(WidgetPropertyType::ANCHOR_POINT_X)), 7);
     zassert_equal(std::get<int>(needle.properties.at(WidgetPropertyType::ANCHOR_POINT_Y)), 7);
-    const std::vector<std::pair<uint32_t, size_t>> expected_checks { { 9, 1 }, { 12, 0 } };
+    const std::vector<std::pair<uint32_t, size_t>> expected_checks{ { 9, 1 }, { 12, 0 } };
     zassert_true(checked == expected_checks);
     const auto composition = WidgetComposition::Build(screen);
     zassert_equal(composition.roots.size(), 1);
@@ -862,17 +919,22 @@ ZTEST(ui_configuration_parser, test_child_id_order_and_empty_lists_survive_z_ord
     std::vector<uint32_t> definition_ids;
     for(const auto& definition : definitions)
         definition_ids.push_back(definition->id);
-    zassert_true((definition_ids == std::vector<uint32_t> { 3, 1, 5, 7 }), "Definitions reload in z-order");
+    zassert_true((definition_ids == std::vector<uint32_t>{ 3, 1, 5, 7 }), "Definitions reload in z-order");
     const auto& restored_owner = *definitions[1];
-    zassert_true(std::get<std::pmr::vector<int>>(restored_owner.properties.at(WidgetPropertyType::CHILD_WIDGET_IDS))
-        == std::pmr::vector<int>({ 7, 3, 5 }), "Reference order is neither sorted nor deduplicated");
-    zassert_true(std::get<std::pmr::vector<int>>(definitions[2]->properties.at(WidgetPropertyType::CHILD_WIDGET_IDS))
-        .empty(), "An empty list stays present");
+    zassert_true(
+        std::get<std::pmr::vector<int>>(restored_owner.properties.at(WidgetPropertyType::CHILD_WIDGET_IDS))
+            == std::pmr::vector<int>({ 7, 3, 5 }),
+        "Reference order is neither sorted nor deduplicated"
+    );
+    zassert_true(
+        std::get<std::pmr::vector<int>>(definitions[2]->properties.at(WidgetPropertyType::CHILD_WIDGET_IDS)).empty(),
+        "An empty list stays present"
+    );
     const auto composition = WidgetComposition::Build(*restored->screen_configurations[0]);
     std::vector<uint32_t> child_ids;
     for(auto child : composition.GetChildren(1))
         child_ids.push_back(definitions[child]->id);
-    zassert_true((child_ids == std::vector<uint32_t> { 7, 3, 5 }));
+    zassert_true((child_ids == std::vector<uint32_t>{ 7, 3, 5 }));
 }
 
 ZTEST(ui_configuration_parser, test_decoded_child_ids_use_the_requested_memory_resource) {
@@ -902,14 +964,15 @@ ZTEST(ui_configuration_parser, test_child_ids_outside_the_signed_range_are_rejec
 
     auto largest = Decode(CompositionPayload({ 0xa1, 0x18, 0x2c, 0x81, 0x1a, 0x7f, 0xff, 0xff, 0xff }));
     zassert_not_null(largest.get());
-    zassert_true(DeserializeError(*largest).find("ID 2147483647: target does not exist") != std::string::npos,
-        "INT32_MAX decodes as a real reference, not a narrowed one");
+    zassert_true(
+        DeserializeError(*largest).find("ID 2147483647: target does not exist") != std::string::npos,
+        "INT32_MAX decodes as a real reference, not a narrowed one"
+    );
 }
 
 ZTEST(ui_configuration_parser, test_anchor_coordinates_persist_exactly_without_conversion) {
-    const std::array<std::pair<int, int>, 5> anchors { {
-        { -1, -1 }, { 0, 0 }, { 7, 7 }, { 7, 213 }, { -1, 536870911 }
-    } };
+    const std::array<std::pair<int, int>, 5> anchors{ { { -1, -1 }, { 0, 0 }, { 7, 7 }, { 7, 213 },
+        { -1, 536870911 } } };
     UiConfigurationCborParser parser;
     for(const auto& [x, y] : anchors) {
         auto configuration = ui_configuration_parser_GetTestUiConfiguration();

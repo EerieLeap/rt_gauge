@@ -28,7 +28,8 @@ public:
     static Roots Assemble(
         std::shared_ptr<ScreenConfiguration> configuration,
         std::shared_ptr<Frame> container,
-        const WidgetContext& context);
+        const WidgetContext& context
+    );
 };
 
 } // namespace eerie_leap::views::screens

@@ -6,13 +6,13 @@
 #include <utility>
 #include <variant>
 
+#include <eerie_memory.hpp>
 #include <zephyr/kernel.h>
 #include <zephyr/ztest.h>
-#include <eerie_memory.hpp>
 
-#include "utilities/memory/memory_resource_manager.h"
 #include "configuration/cbor/cbor_serializer.h"
 #include "configuration/cbor/cbor_ui_config/cbor_ui_config.h"
+#include "utilities/memory/memory_resource_manager.h"
 
 #include "domain/logging_domain/event_bus/logging_event_type.h"
 #include "domain/logging_domain/event_bus/logging_payload_type.h"
@@ -23,11 +23,11 @@
 #include "domain/ui_domain/event_bus/navigation_event_type.h"
 #include "domain/ui_domain/event_bus/navigation_payload_type.h"
 
+#include "domain/ui_domain/configuration/parsers/ui_configuration_cbor_parser.h"
 #include "domain/ui_domain/models/property_binding.h"
 #include "domain/ui_domain/models/ui_configuration.h"
 #include "domain/ui_domain/models/widget_property.h"
 #include "domain/ui_domain/models/widget_type.h"
-#include "domain/ui_domain/configuration/parsers/ui_configuration_cbor_parser.h"
 
 #include "subsys/event_bus/event_channel_id.h"
 
@@ -57,6 +57,7 @@ namespace {
 // 0xff. A binding record is [target, channel, event_type, payload_key, direction,
 // outbound_event_type, has_selector, selector_key, selector_value]; a target of 24 or more takes
 // two bytes (0x18 nn), and an absent selector still encodes the placeholder 0.
+// clang-format off: each row holds the bytes its comment describes, and the longer rows pass the column limit.
 const uint8_t k_stored_configuration[] = {
     0x9f, 0x01, 0x01, 0x9f,                                     // [version 1, active group 1, screens [
     0x9f, 0x01, 0x01, 0x02, 0x00, 0xf5, 0xf4,                   //   [id 1, group 1, Gauge, z 0, visible, not overlay,
@@ -78,8 +79,12 @@ const uint8_t k_stored_configuration[] = {
     0x21, 0xff,                                                 //   -2
     0xff, 0xff, 0xff, 0xff, 0xff, 0xff                          // bindings, widget, widgets, screen, screens, configuration
 };
+// clang-format on
 
-BUILD_ASSERT(!IS_ENABLED(CONFIG_ZCBOR_CANONICAL), "The stored bytes are those of non-canonical zcbor, as the app builds it.");
+BUILD_ASSERT(
+    !IS_ENABLED(CONFIG_ZCBOR_CANONICAL),
+    "The stored bytes are those of non-canonical zcbor, as the app builds it."
+);
 
 PropertyBinding MakeBinding(
     WidgetPropertyType target,
@@ -89,20 +94,17 @@ PropertyBinding MakeBinding(
     PropertyBindingDirection direction,
     uint32_t outbound_event_type,
     uint32_t selector_key,
-    ConfigValue selector_value) {
+    ConfigValue selector_value
+) {
 
-    return PropertyBinding {
-        .target = target,
-        .event = {
-            .channel = channel,
+    return PropertyBinding{ .target = target,
+        .event = { .channel = channel,
             .event_type = event_type,
             .payload_key = payload_key,
             .selector_key = selector_key,
-            .selector_value = std::move(selector_value)
-        },
+            .selector_value = std::move(selector_value) },
         .direction = direction,
-        .outbound_event_type = outbound_event_type
-    };
+        .outbound_event_type = outbound_event_type };
 }
 
 // No properties at any level, since property maps encode in unordered_map order, and one widget,
@@ -131,69 +133,46 @@ pmr_unique_ptr<UiConfiguration> MakeStoredConfiguration() {
 
     // A sensor selected by its text id.
     bindings.push_back(MakeBinding(
-        WidgetPropertyType::VALUE,
-        EventChannelId::Sensors,
-        std::to_underlying(SensorEventType::DataUpdated),
-        std::to_underlying(SensorPayloadType::Value),
-        PropertyBindingDirection::In,
-        0,
-        std::to_underlying(SensorPayloadType::SensorId),
-        std::pmr::string("sensor_1")));
+        WidgetPropertyType::VALUE, EventChannelId::Sensors, std::to_underlying(SensorEventType::DataUpdated),
+        std::to_underlying(SensorPayloadType::Value), PropertyBindingDirection::In, 0,
+        std::to_underlying(SensorPayloadType::SensorId), std::pmr::string("sensor_1")
+    ));
 
     // Unconditional.
     bindings.push_back(MakeBinding(
-        WidgetPropertyType::IS_VISIBLE,
-        EventChannelId::Logging,
-        std::to_underlying(LoggingEventType::StatusUpdated),
-        std::to_underlying(LoggingPayloadType::IsActive),
-        PropertyBindingDirection::In,
-        0,
-        0,
-        ConfigValue { }));
+        WidgetPropertyType::IS_VISIBLE, EventChannelId::Logging, std::to_underlying(LoggingEventType::StatusUpdated),
+        std::to_underlying(LoggingPayloadType::IsActive), PropertyBindingDirection::In, 0, 0, ConfigValue{}
+    ));
 
     // An integer selector.
     bindings.push_back(MakeBinding(
-        WidgetPropertyType::MIN_VALUE,
-        EventChannelId::Sensors,
-        std::to_underlying(SensorEventType::DataUpdated),
-        std::to_underlying(SensorPayloadType::Value),
-        PropertyBindingDirection::In,
-        0,
-        std::to_underlying(SensorPayloadType::SensorId),
-        7));
+        WidgetPropertyType::MIN_VALUE, EventChannelId::Sensors, std::to_underlying(SensorEventType::DataUpdated),
+        std::to_underlying(SensorPayloadType::Value), PropertyBindingDirection::In, 0,
+        std::to_underlying(SensorPayloadType::SensorId), 7
+    ));
 
     // A bool selector.
     bindings.push_back(MakeBinding(
-        WidgetPropertyType::OPACITY,
-        EventChannelId::Logging,
-        std::to_underlying(LoggingEventType::StatusUpdated),
-        std::to_underlying(LoggingPayloadType::Reason),
-        PropertyBindingDirection::In,
-        0,
-        std::to_underlying(LoggingPayloadType::IsActive),
-        true));
+        WidgetPropertyType::OPACITY, EventChannelId::Logging, std::to_underlying(LoggingEventType::StatusUpdated),
+        std::to_underlying(LoggingPayloadType::Reason), PropertyBindingDirection::In, 0,
+        std::to_underlying(LoggingPayloadType::IsActive), true
+    ));
 
     // Two-way, with the event the widget publishes when the user moves it.
     bindings.push_back(MakeBinding(
-        WidgetPropertyType::MAX_VALUE,
-        EventChannelId::Settings,
-        std::to_underlying(SettingsEventType::Changed),
-        std::to_underlying(SettingsPayloadType::Value),
-        PropertyBindingDirection::InOut,
-        std::to_underlying(SettingsEventType::ChangeRequested),
-        std::to_underlying(SettingsPayloadType::SettingId),
-        std::pmr::string("brightness")));
+        WidgetPropertyType::MAX_VALUE, EventChannelId::Settings, std::to_underlying(SettingsEventType::Changed),
+        std::to_underlying(SettingsPayloadType::Value), PropertyBindingDirection::InOut,
+        std::to_underlying(SettingsEventType::ChangeRequested), std::to_underlying(SettingsPayloadType::SettingId),
+        std::pmr::string("brightness")
+    ));
 
     // Outbound only, with a negative integer selector.
     bindings.push_back(MakeBinding(
-        WidgetPropertyType::TARGET_SCREEN_GROUP,
-        EventChannelId::Navigation,
-        std::to_underlying(NavigationEventType::Changed),
-        std::to_underlying(NavigationPayloadType::TargetGroupId),
-        PropertyBindingDirection::Out,
-        std::to_underlying(NavigationEventType::Changed),
-        std::to_underlying(NavigationPayloadType::Action),
-        -2));
+        WidgetPropertyType::TARGET_SCREEN_GROUP, EventChannelId::Navigation,
+        std::to_underlying(NavigationEventType::Changed), std::to_underlying(NavigationPayloadType::TargetGroupId),
+        PropertyBindingDirection::Out, std::to_underlying(NavigationEventType::Changed),
+        std::to_underlying(NavigationPayloadType::Action), -2
+    ));
 
     screen->AddWidget(std::move(widget));
     configuration->screen_configurations.push_back(std::move(screen));

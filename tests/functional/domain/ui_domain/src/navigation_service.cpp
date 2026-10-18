@@ -32,7 +32,8 @@ constexpr int BUS_STACK_SIZE = 4096;
 // NavigationEventChannel is inert until a bus drains it, so the suite owns one.
 class TestEventBus : public EventBus {
 public:
-    TestEventBus() : EventBus("nav_test_bus", BUS_STACK_SIZE) {
+    TestEventBus() :
+        EventBus("nav_test_bus", BUS_STACK_SIZE) {
         RegisterChannel(NavigationEventChannel::GetInstance());
     }
 };
@@ -58,21 +59,35 @@ public:
         k_sem_init(&delivered_, 0, K_SEM_MAX_LIMIT);
 
         subscription_ = CreateScopedSubscription(
-            NavigationEventChannel::GetInstance(),
-            NavigationEventType::Changed,
-            [this](const NavigationEventChannel::EventMessage& event) { Record(event); });
+            NavigationEventChannel::GetInstance(), NavigationEventType::Changed,
+            [this](const NavigationEventChannel::EventMessage& event) {
+                Record(event);
+            }
+        );
     }
 
     NavigationProbe(const NavigationProbe&) = delete;
     NavigationProbe& operator=(const NavigationProbe&) = delete;
 
-    [[nodiscard]] bool IsSubscribed() const { return subscription_ != nullptr; }
-    bool WaitForEvent() { return k_sem_take(&delivered_, K_MSEC(DISPATCH_TIMEOUT_MS)) == 0; }
+    [[nodiscard]] bool IsSubscribed() const {
+        return subscription_ != nullptr;
+    }
+    bool WaitForEvent() {
+        return k_sem_take(&delivered_, K_MSEC(DISPATCH_TIMEOUT_MS)) == 0;
+    }
 
-    [[nodiscard]] size_t Count() const { return actions_.size(); }
-    [[nodiscard]] const std::vector<NavigationAction>& Actions() const { return actions_; }
-    [[nodiscard]] const std::vector<uint32_t>& TargetGroupIds() const { return target_group_ids_; }
-    [[nodiscard]] const std::vector<uint32_t>& TargetScreenIds() const { return target_screen_ids_; }
+    [[nodiscard]] size_t Count() const {
+        return actions_.size();
+    }
+    [[nodiscard]] const std::vector<NavigationAction>& Actions() const {
+        return actions_;
+    }
+    [[nodiscard]] const std::vector<uint32_t>& TargetGroupIds() const {
+        return target_group_ids_;
+    }
+    [[nodiscard]] const std::vector<uint32_t>& TargetScreenIds() const {
+        return target_screen_ids_;
+    }
 
 private:
     k_sem delivered_{};
@@ -117,7 +132,7 @@ ZTEST_SUITE(navigation_service, NULL, StartEventBus, SettleEventBus, NULL, NULL)
 
 ZTEST(navigation_service, test_Next_advances_to_the_following_group) {
     NavigationService service;
-    Configure(service, {0, 1, 2}, 0);
+    Configure(service, { 0, 1, 2 }, 0);
 
     zassert_equal(service.Next(), 0);
     zassert_equal(ActiveGroupId(service), 1U);
@@ -125,7 +140,7 @@ ZTEST(navigation_service, test_Next_advances_to_the_following_group) {
 
 ZTEST(navigation_service, test_Next_wraps_around_to_the_first_group) {
     NavigationService service;
-    Configure(service, {0, 1, 2}, 2);
+    Configure(service, { 0, 1, 2 }, 2);
 
     zassert_equal(service.Next(), 0);
     zassert_equal(ActiveGroupId(service), 0U);
@@ -133,7 +148,7 @@ ZTEST(navigation_service, test_Next_wraps_around_to_the_first_group) {
 
 ZTEST(navigation_service, test_Previous_steps_back_to_the_preceding_group) {
     NavigationService service;
-    Configure(service, {0, 1, 2}, 2);
+    Configure(service, { 0, 1, 2 }, 2);
 
     zassert_equal(service.Previous(), 0);
     zassert_equal(ActiveGroupId(service), 1U);
@@ -141,7 +156,7 @@ ZTEST(navigation_service, test_Previous_steps_back_to_the_preceding_group) {
 
 ZTEST(navigation_service, test_Previous_wraps_around_to_the_last_group) {
     NavigationService service;
-    Configure(service, {0, 1, 2}, 0);
+    Configure(service, { 0, 1, 2 }, 0);
 
     zassert_equal(service.Previous(), 0);
     zassert_equal(ActiveGroupId(service), 2U);
@@ -149,7 +164,7 @@ ZTEST(navigation_service, test_Previous_wraps_around_to_the_last_group) {
 
 ZTEST(navigation_service, test_the_groups_are_ordered_by_id_not_by_insertion) {
     NavigationService service;
-    Configure(service, {7, 2, 5}, 2);
+    Configure(service, { 7, 2, 5 }, 2);
 
     zassert_equal(service.Next(), 0);
     zassert_equal(ActiveGroupId(service), 5U);
@@ -159,7 +174,7 @@ ZTEST(navigation_service, test_the_groups_are_ordered_by_id_not_by_insertion) {
 // the view reports back, or a burst of swipes all resolves against the same index.
 ZTEST(navigation_service, test_consecutive_requests_advance_past_the_pending_one) {
     NavigationService service;
-    Configure(service, {0, 1, 2}, 0);
+    Configure(service, { 0, 1, 2 }, 0);
 
     zassert_equal(service.Next(), 0);
     zassert_equal(service.Next(), 0);
@@ -169,7 +184,7 @@ ZTEST(navigation_service, test_consecutive_requests_advance_past_the_pending_one
 
 ZTEST(navigation_service, test_Next_without_an_active_group_reports_ENOENT) {
     NavigationService service;
-    service.SetGroupIds({0, 1, 2});
+    service.SetGroupIds({ 0, 1, 2 });
 
     zassert_equal(service.Next(), -ENOENT);
     zassert_false(service.GetActiveGroupId().has_value());
@@ -184,7 +199,7 @@ ZTEST(navigation_service, test_Next_without_any_configured_group_reports_ENOENT)
 
 ZTEST(navigation_service, test_Next_over_a_single_group_stays_put) {
     NavigationService service;
-    Configure(service, {4}, 4);
+    Configure(service, { 4 }, 4);
 
     zassert_equal(service.Next(), 0);
     zassert_equal(ActiveGroupId(service), 4U);
@@ -192,7 +207,7 @@ ZTEST(navigation_service, test_Next_over_a_single_group_stays_put) {
 
 ZTEST(navigation_service, test_GoToGroup_selects_the_requested_group) {
     NavigationService service;
-    Configure(service, {0, 1, 2}, 0);
+    Configure(service, { 0, 1, 2 }, 0);
 
     zassert_equal(service.GoToGroup(2), 0);
     zassert_equal(ActiveGroupId(service), 2U);
@@ -200,7 +215,7 @@ ZTEST(navigation_service, test_GoToGroup_selects_the_requested_group) {
 
 ZTEST(navigation_service, test_GoToGroup_reports_ENOENT_for_an_unknown_group) {
     NavigationService service;
-    Configure(service, {0, 1, 2}, 1);
+    Configure(service, { 0, 1, 2 }, 1);
 
     zassert_equal(service.GoToGroup(9), -ENOENT);
     zassert_equal(ActiveGroupId(service), 1U);
@@ -211,7 +226,7 @@ ZTEST(navigation_service, test_GoToGroup_of_the_active_group_is_a_no_op) {
     NavigationProbe probe;
     zassert_true(probe.IsSubscribed());
 
-    Configure(service, {0, 1, 2}, 1);
+    Configure(service, { 0, 1, 2 }, 1);
 
     zassert_equal(service.GoToGroup(1), 0);
     zassert_false(probe.WaitForEvent(), "No navigation event is expected.");
@@ -220,7 +235,7 @@ ZTEST(navigation_service, test_GoToGroup_of_the_active_group_is_a_no_op) {
 
 ZTEST(navigation_service, test_Back_returns_to_the_previous_group) {
     NavigationService service;
-    Configure(service, {0, 1, 2}, 0);
+    Configure(service, { 0, 1, 2 }, 0);
 
     zassert_equal(service.GoToGroup(2), 0);
     zassert_equal(service.Back(), 0);
@@ -229,7 +244,7 @@ ZTEST(navigation_service, test_Back_returns_to_the_previous_group) {
 
 ZTEST(navigation_service, test_Back_without_history_reports_ENOENT) {
     NavigationService service;
-    Configure(service, {0, 1, 2}, 0);
+    Configure(service, { 0, 1, 2 }, 0);
 
     zassert_equal(service.Back(), -ENOENT);
     zassert_equal(ActiveGroupId(service), 0U);
@@ -237,7 +252,7 @@ ZTEST(navigation_service, test_Back_without_history_reports_ENOENT) {
 
 ZTEST(navigation_service, test_Back_unwinds_the_history_in_reverse_order) {
     NavigationService service;
-    Configure(service, {0, 1, 2}, 0);
+    Configure(service, { 0, 1, 2 }, 0);
 
     zassert_equal(service.Next(), 0);
     zassert_equal(service.Next(), 0);
@@ -254,7 +269,7 @@ ZTEST(navigation_service, test_Back_unwinds_the_history_in_reverse_order) {
 
 ZTEST(navigation_service, test_Back_does_not_record_history_of_its_own) {
     NavigationService service;
-    Configure(service, {0, 1}, 0);
+    Configure(service, { 0, 1 }, 0);
 
     zassert_equal(service.GoToGroup(1), 0);
     zassert_equal(service.Back(), 0);
@@ -267,7 +282,7 @@ ZTEST(navigation_service, test_Back_does_not_record_history_of_its_own) {
 // Regression: the entry may only be consumed once the request has been accepted.
 ZTEST(navigation_service, test_Back_keeps_the_history_when_the_request_is_rejected) {
     NavigationService service;
-    Configure(service, {0, 1}, 0);
+    Configure(service, { 0, 1 }, 0);
 
     zassert_equal(service.GoToGroup(1), 0);
     zassert_equal(service.ShowOverlay(7), 0);
@@ -281,7 +296,7 @@ ZTEST(navigation_service, test_Back_keeps_the_history_when_the_request_is_reject
 
 ZTEST(navigation_service, test_the_history_drops_the_oldest_entry_when_it_is_full) {
     NavigationService service;
-    Configure(service, {0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, 0);
+    Configure(service, { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 }, 0);
 
     // Nine hops record nine entries into an eight deep history.
     for(uint32_t screen_group_id = 1; screen_group_id <= 9; ++screen_group_id)
@@ -298,7 +313,7 @@ ZTEST(navigation_service, test_the_history_drops_the_oldest_entry_when_it_is_ful
 
 ZTEST(navigation_service, test_group_navigation_is_rejected_while_an_overlay_is_active) {
     NavigationService service;
-    Configure(service, {0, 1, 2}, 0);
+    Configure(service, { 0, 1, 2 }, 0);
 
     zassert_equal(service.ShowOverlay(5), 0);
     zassert_true(service.IsOverlayActive());
@@ -311,7 +326,7 @@ ZTEST(navigation_service, test_group_navigation_is_rejected_while_an_overlay_is_
 
 ZTEST(navigation_service, test_CloseOverlay_releases_group_navigation) {
     NavigationService service;
-    Configure(service, {0, 1, 2}, 0);
+    Configure(service, { 0, 1, 2 }, 0);
 
     zassert_equal(service.ShowOverlay(5), 0);
     zassert_equal(service.CloseOverlay(), 0);
@@ -323,7 +338,7 @@ ZTEST(navigation_service, test_CloseOverlay_releases_group_navigation) {
 
 ZTEST(navigation_service, test_CloseOverlay_without_an_overlay_reports_ENOENT) {
     NavigationService service;
-    Configure(service, {0, 1}, 0);
+    Configure(service, { 0, 1 }, 0);
 
     zassert_equal(service.CloseOverlay(), -ENOENT);
     zassert_false(service.IsOverlayActive());
@@ -336,7 +351,7 @@ ZTEST(navigation_service, test_a_second_overlay_is_rejected) {
     NavigationProbe probe;
     zassert_true(probe.IsSubscribed());
 
-    Configure(service, {0, 1}, 0);
+    Configure(service, { 0, 1 }, 0);
 
     zassert_equal(service.ShowOverlay(5), 0);
     zassert_true(probe.WaitForEvent(), "ShowOverlay was not dispatched.");
@@ -357,7 +372,7 @@ ZTEST(navigation_service, test_a_second_overlay_is_rejected) {
 
 ZTEST(navigation_service, test_Handle_routes_every_intent) {
     NavigationService service;
-    Configure(service, {0, 1, 2}, 0);
+    Configure(service, { 0, 1, 2 }, 0);
 
     zassert_equal(service.Handle(NavigationIntent::NextGroup), 0);
     zassert_equal(ActiveGroupId(service), 1U);
@@ -380,7 +395,7 @@ ZTEST(navigation_service, test_Handle_routes_every_intent) {
 
 ZTEST(navigation_service, test_Handle_rejects_an_empty_intent) {
     NavigationService service;
-    Configure(service, {0, 1}, 0);
+    Configure(service, { 0, 1 }, 0);
 
     zassert_equal(service.Handle(NavigationIntent::None), -EINVAL);
     zassert_equal(ActiveGroupId(service), 0U);
@@ -388,7 +403,7 @@ ZTEST(navigation_service, test_Handle_rejects_an_empty_intent) {
 
 ZTEST(navigation_service, test_SetActiveGroupId_reconciles_the_service_with_the_view) {
     NavigationService service;
-    Configure(service, {0, 1, 2}, 0);
+    Configure(service, { 0, 1, 2 }, 0);
 
     zassert_equal(service.Next(), 0);
     zassert_equal(ActiveGroupId(service), 1U);
@@ -406,7 +421,7 @@ ZTEST(navigation_service, test_a_group_change_publishes_a_ShowGroup_event) {
     NavigationProbe probe;
     zassert_true(probe.IsSubscribed());
 
-    Configure(service, {0, 1, 2}, 0);
+    Configure(service, { 0, 1, 2 }, 0);
 
     zassert_equal(service.GoToGroup(2), 0);
 
@@ -421,7 +436,7 @@ ZTEST(navigation_service, test_a_rejected_request_publishes_nothing) {
     NavigationProbe probe;
     zassert_true(probe.IsSubscribed());
 
-    Configure(service, {0, 1, 2}, 0);
+    Configure(service, { 0, 1, 2 }, 0);
 
     zassert_equal(service.GoToGroup(9), -ENOENT);
 
@@ -434,7 +449,7 @@ ZTEST(navigation_service, test_the_overlay_transitions_publish_the_target_screen
     NavigationProbe probe;
     zassert_true(probe.IsSubscribed());
 
-    Configure(service, {0, 1}, 0);
+    Configure(service, { 0, 1 }, 0);
 
     zassert_equal(service.ShowOverlay(42), 0);
     zassert_true(probe.WaitForEvent(), "ShowOverlay was not dispatched.");
