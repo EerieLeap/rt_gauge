@@ -115,8 +115,8 @@ lv_obj_t* ImageIcon::Create(lv_obj_t* parent) {
             .magic = LV_IMAGE_HEADER_MAGIC,
             .cf = LV_COLOR_FORMAT_NATIVE_WITH_ALPHA,
             .flags = 0,
-            .w = image_width_,
-            .h = image_height_,
+            .w = static_cast<uint32_t>(image_width_),
+            .h = static_cast<uint32_t>(image_height_),
         },
         .data_size = image_data_.value().size(),
         .data = image_data_.value().data()

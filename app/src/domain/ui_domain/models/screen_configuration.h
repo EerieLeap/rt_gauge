@@ -45,7 +45,7 @@ struct ScreenConfiguration {
         widget_configurations(std::move(other.widget_configurations), alloc) {}
 
     void AddWidget(std::shared_ptr<WidgetConfiguration> widget_configuration) {
-        auto insert_position = std::upper_bound(
+        const auto insert_position = std::upper_bound(
             widget_configurations.begin(), widget_configurations.end(), widget_configuration->z_index,
             [](int32_t z_index, const std::shared_ptr<WidgetConfiguration>& current) {
                 return z_index < current->z_index;

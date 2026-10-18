@@ -77,8 +77,8 @@ int DialIndicator::ApplyTheme(const ITheme&) {
 }
 
 uint32_t DialIndicator::GetAngleForValue(float value) {
-    float resolution = (abs(end_angle_ - start_angle_) * 10) / abs(range_end_ - range_start_);
-    float angle_delta = resolution * value;
+    const float resolution = (abs(end_angle_ - start_angle_) * 10) / abs(range_end_ - range_start_);
+    const float angle_delta = resolution * value;
 
     return start_angle_ * 10 - 1800 + static_cast<uint32_t>(angle_delta);
 }

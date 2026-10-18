@@ -30,7 +30,7 @@ struct Color {
         for(std::size_t index = 0; index < channels.size(); ++index) {
             const char* begin = value.data() + 1 + index * 2;
             const char* end = begin + 2;
-            auto result = std::from_chars(begin, end, channels[index], 16);
+            const auto result = std::from_chars(begin, end, channels[index], 16);
             if(result.ec != std::errc{} || result.ptr != end)
                 return std::unexpected(std::errc::invalid_argument);
         }

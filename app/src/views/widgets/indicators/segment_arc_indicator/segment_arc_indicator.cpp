@@ -43,7 +43,7 @@ int SegmentArcIndicator::ApplyTheme(const ITheme& theme) {
     const auto active = properties_->ResolveColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE, theme.GetSecondaryColor());
     const auto inactive = properties_->ResolveColor(WidgetPropertyType::COLOR_PRIMARY_INACTIVE, LvglColor(0, 0));
 
-    for(auto& segment : segments_) {
+    for(const auto& segment : segments_) {
         const auto& color = segment.is_active ? active : inactive;
         lv_obj_set_style_arc_color(segment.lv_segment, color.ToLvColor(), LV_PART_INDICATOR | LV_STATE_DEFAULT);
         lv_obj_set_style_arc_opa(segment.lv_segment, color.ToLvOpa(), LV_PART_INDICATOR | LV_STATE_DEFAULT);
@@ -53,8 +53,8 @@ int SegmentArcIndicator::ApplyTheme(const ITheme& theme) {
 }
 
 lv_obj_t* SegmentArcIndicator::CreateSegment(lv_obj_t* parent, int start_angle, int end_angle, int i) {
-    int seg_start_angle = start_angle + 90 + i * step_deg_;
-    int seg_end_angle = start_angle + 90 + i * step_deg_ + 3;
+    const int seg_start_angle = start_angle + 90 + i * step_deg_;
+    const int seg_end_angle = start_angle + 90 + i * step_deg_ + 3;
 
     if(seg_end_angle > end_angle + 90)
         return nullptr;

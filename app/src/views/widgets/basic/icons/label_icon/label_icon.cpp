@@ -36,14 +36,14 @@ int LabelIcon::ApplyTheme(const ITheme& theme) {
 
     lv_obj_update_layout(lv_label_);
 
-    lv_coord_t label_width = lv_obj_get_width(lv_label_);
-    lv_coord_t label_height = lv_obj_get_height(lv_label_);
+    const lv_coord_t label_width = lv_obj_get_width(lv_label_);
+    const lv_coord_t label_height = lv_obj_get_height(lv_label_);
 
     if(label_width == 0 || label_height == 0)
         throw std::runtime_error("IconWidget: Label dimensions are invalid.");
 
-    int32_t icon_width = label_width + label_height * 0.75;
-    int32_t icon_height = label_height + label_height / 4;
+    const int32_t icon_width = label_width + label_height * 0.75;
+    const int32_t icon_height = label_height + label_height / 4;
 
     lv_obj_set_width(container_->GetObject(), icon_width);
     lv_obj_set_height(container_->GetObject(), icon_height);

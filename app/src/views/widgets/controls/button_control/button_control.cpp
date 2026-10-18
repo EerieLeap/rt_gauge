@@ -40,7 +40,7 @@ void ButtonControl::RegisterProperties(WidgetPropertyStore& store) const {
 int ButtonControl::ApplyTheme(const ITheme& theme) {
     lv_obj_set_style_recolor_opa(lv_button_, LV_OPA_TRANSP, LV_PART_MAIN | LV_STATE_PRESSED);
 
-    for(bool pressed : { false, true }) {
+    for(const bool pressed : { false, true }) {
         const auto state = pressed ? LV_STATE_PRESSED : LV_STATE_DEFAULT;
         const auto primary = properties_->ResolveColor(
             pressed ? WidgetPropertyType::COLOR_PRIMARY_ACTIVE : WidgetPropertyType::COLOR_PRIMARY_INACTIVE,
@@ -131,7 +131,8 @@ void ButtonControl::OnControlEvent(lv_event_code_t code) {
 
 std::optional<std::pair<NavigationIntent, uint32_t>> ButtonControl::ResolveNavigation() const {
     // A button configured with only a target predates NAVIGATION_INTENT.
-    auto intent = intent_ == NavigationIntent::None && target_id_.has_value() ? NavigationIntent::GoToGroup : intent_;
+    const auto intent = intent_ == NavigationIntent::None && target_id_.has_value() ? NavigationIntent::GoToGroup
+                                                                                    : intent_;
 
     switch(intent) {
         case NavigationIntent::GoToGroup:

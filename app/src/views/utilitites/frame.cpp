@@ -255,7 +255,7 @@ bool Frame::IsProcessingEnabled() const {
     if(!is_processing_enabled_)
         return false;
 
-    auto parent = processing_parent_.lock();
+    const auto parent = processing_parent_.lock();
     return parent == nullptr || parent->IsProcessingEnabled();
 }
 
@@ -269,7 +269,7 @@ bool Frame::IsTrackingEnabled() const {
     if(!is_tracking_enabled_)
         return false;
 
-    auto parent = processing_parent_.lock();
+    const auto parent = processing_parent_.lock();
     return parent == nullptr || parent->IsTrackingEnabled();
 }
 

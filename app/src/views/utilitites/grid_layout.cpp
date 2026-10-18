@@ -23,7 +23,7 @@ GridLayout::GridLayout(const GridSettings& grid, int32_t screen_width, int32_t s
 }
 
 GridLayout GridLayout::FromActiveScreen(const GridSettings& grid) {
-    lv_obj_t* active_screen = lv_screen_active();
+    const lv_obj_t* active_screen = lv_screen_active();
 
     return { grid, lv_obj_get_width(active_screen), lv_obj_get_height(active_screen) };
 }
@@ -54,11 +54,11 @@ WidgetPosition GridLayout::ToPx(const WidgetPosition& position_grid, const Widge
     if(size_px.width == 0 || size_px.height == 0)
         throw std::runtime_error("Widget size is not set.");
 
-    uint32_t cell_width = (screen_width_ / grid_.width) + (grid_.spacing_px * 2);
-    uint32_t cell_height = (screen_height_ / grid_.height) + (grid_.spacing_px * 2);
+    const uint32_t cell_width = (screen_width_ / grid_.width) + (grid_.spacing_px * 2);
+    const uint32_t cell_height = (screen_height_ / grid_.height) + (grid_.spacing_px * 2);
 
-    int x = cell_width * position_grid.x;
-    int y = screen_height_ - cell_height * position_grid.y - size_px.height;
+    const int x = cell_width * position_grid.x;
+    const int y = screen_height_ - cell_height * position_grid.y - size_px.height;
 
     return { .x = x, .y = std::abs(y) };
 }

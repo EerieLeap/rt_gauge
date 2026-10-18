@@ -32,7 +32,7 @@ WidgetComposition WidgetComposition::Build(const ScreenConfiguration& configurat
             continue;
         const auto& ids = std::get<std::pmr::vector<int>>(it->second);
         node.children_count = ids.size();
-        for(int id : ids) {
+        for(const int id : ids) {
             const auto child = indices.at(static_cast<uint32_t>(id));
             composition.nodes[child].parent = i;
             composition.children.push_back(child);
@@ -49,7 +49,7 @@ WidgetComposition WidgetComposition::Build(const ScreenConfiguration& configurat
     };
     std::pmr::vector<Visit> stack(resource);
     stack.reserve(max_depth);
-    for(auto root : composition.roots) {
+    for(const auto root : composition.roots) {
         stack.push_back({ root, 0 });
         while(!stack.empty()) {
             auto& current = stack.back();

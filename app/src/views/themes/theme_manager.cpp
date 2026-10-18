@@ -62,7 +62,7 @@ void ThemeManager::NotifyObservers() {
     // Snapshot: an observer may create or destroy renderables while handling the
     // change, and an erase would otherwise shift the vector and skip an observer.
     k_mutex_lock(&observers_lock_, K_FOREVER);
-    auto observers = observers_;
+    const auto observers = observers_;
     k_mutex_unlock(&observers_lock_);
 
     for(auto* observer : observers) {

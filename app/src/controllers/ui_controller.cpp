@@ -336,7 +336,7 @@ int UiController::Configure(std::shared_ptr<UiConfiguration> config) {
     // thread is already running.
     ScopedLvglLock lvgl_guard;
 
-    for(auto& screen_config : configuration_->screen_configurations) {
+    for(const auto& screen_config : configuration_->screen_configurations) {
         // An overlay is built on demand by OverlayHost; it belongs to no group.
         if(screen_config->is_overlay) {
             if(!default_overlay_screen_id_.has_value() || screen_config->id < *default_overlay_screen_id_)
@@ -555,7 +555,7 @@ void UiController::SetupTestConfiguration() {
     screen_configuration->AddWidget(std::move(widget0));
 
     // Widget 1: IndicatorDigital
-    auto widget1 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
+    const auto widget1 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
     widget1->type = WidgetType::IndicatorDigital;
     widget1->id = 1;
     widget1->position_grid.x = 0;
@@ -571,7 +571,7 @@ void UiController::SetupTestConfiguration() {
     // screen_configuration->AddWidget(std::move(widget1));
 
     // Widget 2: IndicatorHorizontalChart (Bar)
-    auto widget2 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
+    const auto widget2 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
     widget2->type = WidgetType::IndicatorHorizontalChart;
     widget2->id = 2;
     widget2->position_grid.x = 0;
@@ -590,7 +590,7 @@ void UiController::SetupTestConfiguration() {
     // screen_configuration->AddWidget(std::move(widget2));
 
     // Widget 3: IndicatorHorizontalChart (Line)
-    auto widget3 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
+    const auto widget3 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
     widget3->type = WidgetType::IndicatorHorizontalChart;
     widget3->id = 3;
     widget3->position_grid.x = 0;
@@ -605,7 +605,7 @@ void UiController::SetupTestConfiguration() {
     widget3->properties[WidgetPropertyType::CHART_TYPE] = static_cast<int>(HorizontalChartIndicatorType::Line);
     // screen_configuration->AddWidget(std::move(widget3));
 
-    auto widget4 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
+    const auto widget4 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
     widget4->type = WidgetType::IndicatorHorizontalChart;
     widget4->id = 4;
     widget4->position_grid.x = 0;
@@ -620,7 +620,7 @@ void UiController::SetupTestConfiguration() {
     // screen_configuration->AddWidget(std::move(widget4));
 
     // Widget: IndicatorArcFill
-    auto widget5 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
+    const auto widget5 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
     widget5->type = WidgetType::IndicatorArcFill;
     widget5->id = 5;
     widget5->position_grid.x = 0;
@@ -732,7 +732,7 @@ void UiController::SetupTestConfiguration() {
     screen_configuration->AddWidget(std::move(widget12));
 
     // Widget: IndicatorBar - Horizontal Left to right
-    auto widget10 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
+    const auto widget10 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
     widget10->type = WidgetType::IndicatorBar;
     widget10->id = 10;
     widget10->position_grid.x = 0;
@@ -747,7 +747,7 @@ void UiController::SetupTestConfiguration() {
     // screen_configuration->AddWidget(std::move(widget10));
 
     // Widget: IndicatorBar - Vertical Bottom to top
-    auto widget11 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
+    const auto widget11 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
     widget11->type = WidgetType::IndicatorBar;
     widget11->id = 11;
     widget11->position_grid.x = 200;

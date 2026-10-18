@@ -28,7 +28,7 @@ void SliderControl::RegisterProperties(WidgetPropertyStore& store) const {
 }
 
 int SliderControl::ApplyTheme(const ITheme& theme) {
-    for(bool pressed : { false, true }) {
+    for(const bool pressed : { false, true }) {
         const auto state = pressed ? LV_STATE_PRESSED : LV_STATE_DEFAULT;
         const auto primary = properties_->ResolveColor(
             pressed ? WidgetPropertyType::COLOR_PRIMARY_ACTIVE : WidgetPropertyType::COLOR_PRIMARY_INACTIVE,
@@ -78,9 +78,9 @@ void SliderControl::OnPropertyChanged(WidgetPropertyType type, const ConfigValue
 // Reads the store rather than caching each bound value: the three arrive as separate events and
 // only make sense together.
 void SliderControl::ApplyRange() {
-    double low = properties_->GetAs<double>(WidgetPropertyType::MIN_VALUE, 0);
-    double high = properties_->GetAs<double>(WidgetPropertyType::MAX_VALUE, 0);
-    double step = properties_->GetAs<double>(WidgetPropertyType::STEP, 0);
+    const double low = properties_->GetAs<double>(WidgetPropertyType::MIN_VALUE, 0);
+    const double high = properties_->GetAs<double>(WidgetPropertyType::MAX_VALUE, 0);
+    const double step = properties_->GetAs<double>(WidgetPropertyType::STEP, 0);
 
     // Ordered up front so an owner that declares its bounds the wrong way round cannot reach
     // std::clamp with lo > hi.
@@ -97,7 +97,7 @@ void SliderControl::ApplyRange() {
 }
 
 int32_t SliderControl::ToIndex(double value) const {
-    auto index = static_cast<int32_t>(std::lround((value - min_) / step_));
+    const auto index = static_cast<int32_t>(std::lround((value - min_) / step_));
 
     return std::clamp(index, 0, step_count_);
 }

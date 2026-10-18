@@ -400,7 +400,7 @@ void UiRendererService::ThreadEntry() {
 
 void UiRendererService::Render() {
     LvglLock::GetInstance().Lock();
-    uint32_t sleep_ms = lv_timer_handler();
+    const uint32_t sleep_ms = lv_timer_handler();
     LvglLock::GetInstance().Unlock();
 
     k_msleep(MIN(sleep_ms, INT32_MAX));

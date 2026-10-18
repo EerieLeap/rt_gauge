@@ -45,7 +45,7 @@ void ControlBase::AttachEvents(lv_obj_t* object, std::initializer_list<lv_event_
 
     event_object_ = object;
 
-    for(auto code : codes)
+    for(const auto code : codes)
         lv_obj_add_event_cb(object, EventCb, code, this);
 }
 

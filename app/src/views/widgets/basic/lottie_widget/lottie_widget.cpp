@@ -36,7 +36,7 @@ lv_anim_exec_xcb_t render_frame = nullptr;
 
 // ThorVG allocates its model and renderer state with plain `new`; keep that off the libc arena.
 void RenderFrameOnExtHeap(void* lottie, int32_t frame) {
-    ScopedNewResource ext_heap(Mrm::GetExtPmr());
+    const ScopedNewResource ext_heap(Mrm::GetExtPmr());
     render_frame(lottie, frame);
 }
 
@@ -115,7 +115,7 @@ lv_obj_t* LottieWidget::Create() {
     if(lv_draw_buf_init(&draw_buf_, width, height, LV_COLOR_FORMAT_ARGB8888, stride, data, size) != LV_RESULT_OK)
         return nullptr;
 
-    ScopedNewResource ext_heap(Mrm::GetExtPmr());
+    const ScopedNewResource ext_heap(Mrm::GetExtPmr());
     auto* lottie = lv_lottie_create(content);
     // Starting its animation fails on a full LVGL heap, and lv_lottie_set_src_data() does not check.
     auto* animation = lv_lottie_get_anim(lottie);

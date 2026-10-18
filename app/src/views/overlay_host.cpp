@@ -104,7 +104,7 @@ int OverlayHost::Mount(Entry& entry, const OverlayOptions& options) {
     if(options.is_modal)
         entry.scrim = CreateScrim(options.close_on_scrim_tap);
 
-    int res = entry.screen_group->EnsureRendered();
+    const int res = entry.screen_group->EnsureRendered();
     if(res != 0) {
         LOG_ERR("Failed to render overlay group %u. Error: %d.", entry.screen_group->GetGroupId(), res);
 
@@ -113,7 +113,7 @@ int OverlayHost::Mount(Entry& entry, const OverlayOptions& options) {
 
     // The scrim was created after the group's container, so it would otherwise
     // cover the overlay it is supposed to sit behind.
-    if(auto container = entry.screen_group->GetContainer())
+    if(const auto container = entry.screen_group->GetContainer())
         lv_obj_move_foreground(container->GetObject());
 
     entry.screen_group->Activate();

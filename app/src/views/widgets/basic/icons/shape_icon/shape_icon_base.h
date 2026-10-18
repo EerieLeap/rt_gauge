@@ -26,7 +26,7 @@ protected:
     static int ReadPixels(const WidgetPropertyStore& store, WidgetPropertyType type, int fallback, bool is_dimension);
     template<typename T>
     static bool UpdateValue(T& target, T value) {
-        bool changed = target != value;
+        const bool changed = target != value;
         target = value;
         return changed;
     }

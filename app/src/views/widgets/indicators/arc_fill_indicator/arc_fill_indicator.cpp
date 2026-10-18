@@ -21,7 +21,7 @@ int ArcFillIndicator::DoRender() {
     auto lv_obj = Create(
         content_frame_->GetObject(), static_cast<int32_t>(range_start_), static_cast<int32_t>(range_end_)
     );
-    auto child = std::make_shared<Frame>(Frame::Create(lv_obj).Build());
+    const auto child = std::make_shared<Frame>(Frame::Create(lv_obj).Build());
     content_frame_->SetChild(child);
 
     return 0;

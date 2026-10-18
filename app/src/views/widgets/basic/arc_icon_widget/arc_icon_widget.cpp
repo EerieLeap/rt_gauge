@@ -20,8 +20,8 @@ int ArcIconWidget::ApplyTheme(const ITheme& theme) {
 
     lv_obj_update_layout(container_->GetObject());
 
-    int radius = lv_obj_get_height(container_->GetObject()) / 2;
-    lv_coord_t icon_height = lv_obj_get_height(icon_->GetContainer()->GetObject());
+    const int radius = lv_obj_get_height(container_->GetObject()) / 2;
+    const lv_coord_t icon_height = lv_obj_get_height(icon_->GetContainer()->GetObject());
 
     PositioningHelpers::PlaceObjectOnCircle(
         icon_->GetContainer()->GetObject(), position_x_, position_y_, radius - icon_height / 2 - edge_offset_px_,

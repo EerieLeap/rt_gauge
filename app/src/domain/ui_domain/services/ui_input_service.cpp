@@ -86,7 +86,7 @@ void UiInputService::HandleGesture() {
     if(!index.has_value())
         return;
 
-    auto intent = gesture_map_[*index].load(std::memory_order_relaxed);
+    const auto intent = gesture_map_[*index].load(std::memory_order_relaxed);
     if(intent == NavigationIntent::None)
         return;
 

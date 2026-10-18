@@ -39,7 +39,7 @@ int ToggleControl::ApplyTheme(const ITheme& theme) {
     lv_obj_set_style_bg_color(lv_switch_, active.ToLvColor(), LV_PART_INDICATOR | LV_STATE_CHECKED);
     lv_obj_set_style_bg_opa(lv_switch_, active.ToLvOpa(), LV_PART_INDICATOR | LV_STATE_CHECKED);
 
-    for(bool checked : { false, true }) {
+    for(const bool checked : { false, true }) {
         const auto state = checked ? LV_STATE_CHECKED : LV_STATE_DEFAULT;
         const auto secondary = properties_->ResolveColor(
             checked ? WidgetPropertyType::COLOR_SECONDARY_ACTIVE : WidgetPropertyType::COLOR_SECONDARY_INACTIVE,

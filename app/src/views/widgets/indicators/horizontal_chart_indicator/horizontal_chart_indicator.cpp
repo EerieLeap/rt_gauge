@@ -23,7 +23,7 @@ int HorizontalChartIndicator::DoRender() {
         content_frame_->GetObject(), static_cast<int32_t>(range_start_), static_cast<int32_t>(range_end_), point_count_,
         chart_type_
     );
-    auto child = std::make_shared<Frame>(Frame::Create(chart).Build());
+    const auto child = std::make_shared<Frame>(Frame::Create(chart).Build());
     content_frame_->SetChild(child);
 
     return 0;

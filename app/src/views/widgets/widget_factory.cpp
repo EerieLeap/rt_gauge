@@ -54,7 +54,7 @@ std::unique_ptr<IWidget> WidgetFactory::CreateWidget(
     std::shared_ptr<Frame> parent,
     const WidgetContext& context
 ) {
-    auto it = registrations_.find(type);
+    const auto it = registrations_.find(type);
     if(it == registrations_.end())
         throw std::runtime_error("Unknown widget type");
 

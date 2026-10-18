@@ -80,7 +80,7 @@ std::optional<size_t> NavigationService::GetActiveIndex() const {
     if(!active_screen_group_id_.has_value())
         return std::nullopt;
 
-    auto it = std::find(screen_group_ids_.begin(), screen_group_ids_.end(), *active_screen_group_id_);
+    const auto it = std::find(screen_group_ids_.begin(), screen_group_ids_.end(), *active_screen_group_id_);
     if(it == screen_group_ids_.end())
         return std::nullopt;
 
@@ -123,7 +123,7 @@ int NavigationService::GoToGroup(uint32_t screen_group_id) {
     std::optional<uint32_t> screen_group_to_publish;
 
     k_mutex_lock(&lock_, K_FOREVER);
-    int res = RequestGroup(screen_group_id, true, screen_group_to_publish);
+    const int res = RequestGroup(screen_group_id, true, screen_group_to_publish);
     k_mutex_unlock(&lock_);
 
     PublishGroup(screen_group_to_publish);
@@ -193,7 +193,7 @@ int NavigationService::ShowOverlay(uint32_t screen_id) {
     // Only one overlay is tracked here, while OverlayHost can stack several. Letting
     // a second one through would make a single CloseOverlay unblock group navigation
     // with an overlay still on screen.
-    bool is_busy = active_overlay_screen_id_.has_value();
+    const bool is_busy = active_overlay_screen_id_.has_value();
     if(!is_busy)
         active_overlay_screen_id_ = screen_id;
 
@@ -251,7 +251,7 @@ std::optional<uint32_t> NavigationService::GetActiveGroupId() const {
 
 bool NavigationService::IsOverlayActive() const {
     k_mutex_lock(&lock_, K_FOREVER);
-    bool is_active = active_overlay_screen_id_.has_value();
+    const bool is_active = active_overlay_screen_id_.has_value();
     k_mutex_unlock(&lock_);
 
     return is_active;

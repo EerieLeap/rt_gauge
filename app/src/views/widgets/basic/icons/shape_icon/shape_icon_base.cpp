@@ -41,7 +41,7 @@ int ShapeIconBase::ReadPixels(
     int fallback,
     bool is_dimension
 ) {
-    double value = store.GetAs<double>(type, fallback);
+    const double value = store.GetAs<double>(type, fallback);
     if(!std::isfinite(value) || (is_dimension && (value < 0 || value > max_dimension)))
         return is_dimension ? -1 : 0;
 
@@ -91,7 +91,7 @@ lv_point_t ShapeIconBase::GetBounds() const {
 
 void ShapeIconBase::Configure(std::shared_ptr<WidgetPropertyStore> properties) {
     IconBase::Configure(std::move(properties));
-    bool changed = ReadGeometry();
+    const bool changed = ReadGeometry();
     if(is_ready_) {
         if(changed)
             UpdateImage();
@@ -119,9 +119,9 @@ void ShapeIconBase::UpdateImage() {
     image_ = {};
     mask_.clear();
 
-    auto bounds = GetBounds();
-    int width = bounds.x;
-    int height = bounds.y;
+    const auto bounds = GetBounds();
+    const int width = bounds.x;
+    const int height = bounds.y;
     lv_obj_set_size(image_object_, std::max(1, width), std::max(1, height));
     lv_obj_set_style_transform_pivot_x(image_object_, std::max(1, width) / 2, 0);
     lv_obj_set_style_transform_pivot_y(image_object_, std::max(1, height) / 2, 0);
@@ -133,10 +133,10 @@ void ShapeIconBase::UpdateImage() {
         return;
     }
 
-    Path path(lv_vector_path_create(LV_VECTOR_PATH_QUALITY_HIGH), lv_vector_path_delete);
+    const Path path(lv_vector_path_create(LV_VECTOR_PATH_QUALITY_HIGH), lv_vector_path_delete);
 
     try {
-        float stroke_width = BuildPath(path.get(), width, height);
+        const float stroke_width = BuildPath(path.get(), width, height);
         Rasterize(path.get(), width, height, stroke_width);
         lv_image_set_src(image_object_, &image_);
     } catch(const std::bad_alloc&) {
@@ -147,7 +147,7 @@ void ShapeIconBase::UpdateImage() {
 }
 
 void ShapeIconBase::Rasterize(lv_vector_path_t* path, int width_px, int height_px, float stroke_px) {
-    uint32_t stride = lv_draw_buf_width_to_stride(width_px, LV_COLOR_FORMAT_A8);
+    const uint32_t stride = lv_draw_buf_width_to_stride(width_px, LV_COLOR_FORMAT_A8);
     mask_.resize(static_cast<size_t>(stride) * height_px, 0);
 
     // Rasterize into a fixed ARGB tile: the RGB565 vector backend otherwise needs
@@ -169,7 +169,7 @@ void ShapeIconBase::Rasterize(lv_vector_path_t* path, int width_px, int height_p
             lv_draw_buf_clear(tile.get(), nullptr);
             lv_layer_t layer;
             lv_canvas_init_layer(canvas, &layer);
-            DrawDescriptor descriptor(lv_draw_vector_dsc_create(&layer), lv_draw_vector_dsc_delete);
+            const DrawDescriptor descriptor(lv_draw_vector_dsc_create(&layer), lv_draw_vector_dsc_delete);
             if(descriptor == nullptr) {
                 lv_canvas_finish_layer(canvas, &layer);
                 throw std::bad_alloc();

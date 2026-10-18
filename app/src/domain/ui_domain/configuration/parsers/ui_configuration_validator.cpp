@@ -85,14 +85,14 @@ static bool HoldsPropertyValueKind(const ConfigValue& value, PropertyValueKind k
 static bool IsValidFillMode(const ConfigValue& value) {
     if(!std::holds_alternative<int>(value) && !std::holds_alternative<double>(value))
         return false;
-    double val = std::holds_alternative<int>(value) ? std::get<int>(value) : std::get<double>(value);
+    const double val = std::holds_alternative<int>(value) ? std::get<int>(value) : std::get<double>(value);
     return val == static_cast<double>(WidgetFillMode::Filled) || val == static_cast<double>(WidgetFillMode::Outline);
 }
 
 static bool IsValidDirection(const ConfigValue& value) {
     if(!std::holds_alternative<int>(value) && !std::holds_alternative<double>(value))
         return false;
-    double val = std::holds_alternative<int>(value) ? std::get<int>(value) : std::get<double>(value);
+    const double val = std::holds_alternative<int>(value) ? std::get<int>(value) : std::get<double>(value);
     return val >= 1.0 && val <= 4.0 && val == std::floor(val);
 }
 
@@ -180,7 +180,7 @@ void UiConfigurationValidator::Validate(
     for(const auto& definition : definitions) {
         if(definition == nullptr)
             InvalidScreenConfiguration(configuration.id, "Composition contains a null widget definition.");
-        auto it = definition->properties.find(WidgetPropertyType::CHILD_WIDGET_IDS);
+        const auto it = definition->properties.find(WidgetPropertyType::CHILD_WIDGET_IDS);
         if(it == definition->properties.end())
             continue;
         const auto* ids = std::get_if<std::pmr::vector<int>>(&it->second);
@@ -218,7 +218,7 @@ void UiConfigurationValidator::Validate(
 
     for(size_t i = 0; i < definitions.size(); ++i) {
         const auto& owner = *definitions[i];
-        auto it = owner.properties.find(WidgetPropertyType::CHILD_WIDGET_IDS);
+        const auto it = owner.properties.find(WidgetPropertyType::CHILD_WIDGET_IDS);
         if(it == owner.properties.end())
             continue;
         const auto& ids = std::get<std::pmr::vector<int>>(it->second);
@@ -228,7 +228,7 @@ void UiConfigurationValidator::Validate(
             const auto edge = "Child index " + std::to_string(slot) + ", ID " + std::to_string(id) + ": ";
             if(id < 0 || static_cast<uint64_t>(id) > INT32_MAX)
                 InvalidWidgetConfiguration(configuration.id, owner.id, edge + "ID must be between 0 and INT32_MAX.");
-            auto child = indices.find(static_cast<uint32_t>(id));
+            const auto child = indices.find(static_cast<uint32_t>(id));
             if(child == indices.end())
                 InvalidWidgetConfiguration(configuration.id, owner.id, edge + "target does not exist in this screen.");
             if(child->second == i)
@@ -255,7 +255,7 @@ void UiConfigurationValidator::Validate(
     std::array<Visit, WidgetComposition::max_nodes> stack;
     std::array<uint8_t, WidgetComposition::max_nodes> state{};
     std::array<size_t, WidgetComposition::max_nodes> height{};
-    auto visit = [&](size_t start) {
+    const auto visit = [&](size_t start) {
         if(state[start] != 0)
             return;
         size_t stack_size = 1;
@@ -467,7 +467,7 @@ void UiConfigurationValidator::ValidateWidgetPosition(
 void UiConfigurationValidator::ValidateWidgetProperties(const ScreenConfiguration& screen_configuration) {
     for(const auto& widget_configuration : screen_configuration.widget_configurations) {
         for(const auto& [property_type, value] : widget_configuration->properties) {
-            if(auto error = GetWidgetPropertyValidationError(property_type, value); !error.empty())
+            if(const auto error = GetWidgetPropertyValidationError(property_type, value); !error.empty())
                 InvalidWidgetConfiguration(screen_configuration.id, widget_configuration->id, error);
         }
     }

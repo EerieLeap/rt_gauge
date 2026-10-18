@@ -33,7 +33,7 @@ void ScreenGroup::AddScreen(std::shared_ptr<IScreen> screen) {
     if(screen == nullptr)
         return;
 
-    auto insert_position = std::upper_bound(
+    const auto insert_position = std::upper_bound(
         screens_.begin(), screens_.end(), screen->GetZIndex(),
         [](int32_t z_index, const std::shared_ptr<IScreen>& current) {
             return z_index < current->GetZIndex();
@@ -59,7 +59,7 @@ int ScreenGroup::EnsureRendered() {
     if(is_rendered_)
         return 0;
 
-    int res = Render();
+    const int res = Render();
     if(res != 0) {
         LOG_ERR("Failed to render screen group %u.", screen_group_id_);
         return res;
@@ -91,7 +91,7 @@ void ScreenGroup::ApplyActivation() {
 
     lv_obj_remove_flag(container_->GetObject(), LV_OBJ_FLAG_HIDDEN);
 
-    for(auto& screen : screens_)
+    for(const auto& screen : screens_)
         screen->OnActivated();
 
     container_->Invalidate();
@@ -105,7 +105,7 @@ void ScreenGroup::Deactivate() {
     if(!is_activated_)
         return;
 
-    for(auto& screen : screens_)
+    for(const auto& screen : screens_)
         screen->OnDeactivated();
 
     lv_obj_add_flag(container_->GetObject(), LV_OBJ_FLAG_HIDDEN);
@@ -121,8 +121,8 @@ bool ScreenGroup::IsActivated() const {
 void ScreenGroup::ApplyScreenOrder() {
     int32_t index = 0;
 
-    for(auto& screen : screens_) {
-        auto screen_container = screen->GetContainer();
+    for(const auto& screen : screens_) {
+        const auto screen_container = screen->GetContainer();
         if(screen_container == nullptr || screen_container->GetObject() == nullptr)
             continue;
 
@@ -131,8 +131,8 @@ void ScreenGroup::ApplyScreenOrder() {
 }
 
 int ScreenGroup::DoRender() {
-    for(auto& screen : screens_) {
-        int res = screen->Render();
+    for(const auto& screen : screens_) {
+        const int res = screen->Render();
         if(res != 0) {
             LOG_ERR("Failed to render screen %u in group %u.", screen->GetId(), screen_group_id_);
             return res;

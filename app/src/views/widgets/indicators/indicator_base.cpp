@@ -30,7 +30,7 @@ void IndicatorBase::UpdateIndicatorCallback(void* obj, int32_t value) {
         return;
     }
 
-    float value_float = static_cast<float>(value) / (10 * CONFIG_EERIE_LEAP_FLOAT_SIGNIFICANT_DIGITS);
+    const float value_float = static_cast<float>(value) / (10 * CONFIG_EERIE_LEAP_FLOAT_SIGNIFICANT_DIGITS);
     indicator->UpdateIndicator(value_float);
     indicator->value_ = value_float;
 }
@@ -46,9 +46,9 @@ lv_anim_t IndicatorBase::CreateValueChangeAnimation() {
 }
 
 void IndicatorBase::ValueChangeAnimation(lv_anim_t& anim, float range, float start_value, float end_value) {
-    uint32_t duration = 4000;
-    uint32_t unit_duration = duration / range;
-    uint32_t change_duration = unit_duration * abs(end_value - start_value);
+    const uint32_t duration = 4000;
+    const uint32_t unit_duration = duration / range;
+    const uint32_t change_duration = unit_duration * abs(end_value - start_value);
 
     lv_anim_set_duration(&anim, change_duration);
     lv_anim_set_values(

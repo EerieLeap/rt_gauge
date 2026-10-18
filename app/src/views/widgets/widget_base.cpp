@@ -428,7 +428,7 @@ void WidgetBase::ResolveBindings() {
             throw std::invalid_argument("Bindings cannot target structural properties.");
     }
 
-    auto& registry = EventChannelRegistry::GetInstance();
+    const auto& registry = EventChannelRegistry::GetInstance();
 
     for(const auto& binding : configuration_->bindings) {
         if(!properties_->IsRegistered(binding.target)) {
@@ -495,7 +495,7 @@ void WidgetBase::ResolveBindings() {
 void WidgetBase::ReplayProperties() {
     PropertySet selected;
     const auto registered = properties_->GetRegisteredTypes();
-    for(auto type : registered)
+    for(const auto type : registered)
         selected.set(static_cast<size_t>(type));
 
     pending_properties_.reset();
@@ -504,7 +504,7 @@ void WidgetBase::ReplayProperties() {
     // Configuration seeds members before rendering. Those handlers cannot necessarily apply
     // their visual state yet, and activation may still be blocked by visibility or opacity.
     if(!IsReady() || !IsProcessingEligible()) {
-        for(auto type : registered) {
+        for(const auto type : registered) {
             if(!WidgetPropertyValidator::IsManagementProperty(type))
                 pending_properties_.set(static_cast<size_t>(type));
         }
@@ -513,7 +513,7 @@ void WidgetBase::ReplayProperties() {
 
 void WidgetBase::ApplyProperties(const PropertySet& selected) {
     auto strongest = PropertyChangeEffect::None;
-    auto apply = [&](WidgetPropertyType type) {
+    const auto apply = [&](WidgetPropertyType type) {
         if(!selected.test(static_cast<size_t>(type)))
             return;
 
@@ -524,7 +524,7 @@ void WidgetBase::ApplyProperties(const PropertySet& selected) {
     // VALUE consumes state declared by derived classes too (for example digital precision).
     // Registration order alone cannot express that dependency. Apply the value once, after
     // configuration, so charts still append at most one sample per replay.
-    for(auto type : properties_->GetRegisteredTypes()) {
+    for(const auto type : properties_->GetRegisteredTypes()) {
         if(type != WidgetPropertyType::VALUE)
             apply(type);
     }

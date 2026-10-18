@@ -83,7 +83,7 @@ int DisplayService::Initialize() {
     }
 
     DisplayConfiguration snapshot;
-    auto configuration = configuration_manager_->Get();
+    const auto configuration = configuration_manager_->Get();
     if(configuration != nullptr)
         snapshot = *configuration;
     else
@@ -153,7 +153,7 @@ void DisplayService::OnBrightnessChangeRequested(const SettingsEventsChannel::Ev
     else
         return;
 
-    auto clamped = static_cast<uint8_t>(std::lround(std::clamp(requested, brightness_min_, brightness_max_)));
+    const auto clamped = static_cast<uint8_t>(std::lround(std::clamp(requested, brightness_min_, brightness_max_)));
 
     // Only a value that actually moved is a fact worth waking every subscriber - and worth
     // re-arming the persistence debounce - for.
@@ -206,7 +206,7 @@ int DisplayService::ApplyBrightness(uint8_t value) {
     // lv_timer_handler() re-locks harmlessly.
     ScopedLvglLock lvgl_guard;
 
-    int res = display_set_brightness(DtDisplay::Get(), value);
+    const int res = display_set_brightness(DtDisplay::Get(), value);
 
     // A panel without brightness control must not make the setting fail, or the
     // control bound to it would be unusable on that board (native_sim included).
@@ -225,7 +225,7 @@ int DisplayService::ApplyBlanking(bool enabled) {
 
     ScopedLvglLock lvgl_guard;
 
-    int res = enabled ? display_blanking_on(DtDisplay::Get()) : display_blanking_off(DtDisplay::Get());
+    const int res = enabled ? display_blanking_on(DtDisplay::Get()) : display_blanking_off(DtDisplay::Get());
 
     if(res == -ENOTSUP || res == -ENOSYS)
         return 0;
@@ -234,7 +234,7 @@ int DisplayService::ApplyBlanking(bool enabled) {
 }
 
 int DisplayService::SetBrightness(uint8_t value) {
-    int res = ApplyBrightness(value);
+    const int res = ApplyBrightness(value);
     if(res != 0) {
         LOG_ERR("Failed to set display brightness to %u. Error: %d.", value, res);
         return res;
@@ -253,7 +253,7 @@ uint8_t DisplayService::GetBrightness() const {
 }
 
 int DisplayService::SetBlanking(bool enabled) {
-    int res = ApplyBlanking(enabled);
+    const int res = ApplyBlanking(enabled);
     if(res != 0) {
         LOG_ERR("Failed to set display blanking. Error: %d.", res);
         return res;
@@ -272,7 +272,7 @@ bool DisplayService::IsBlankingEnabled() const {
 }
 
 int DisplayService::Reload() {
-    auto configuration = configuration_manager_->Get();
+    const auto configuration = configuration_manager_->Get();
     if(configuration == nullptr)
         return -ENOENT;
 
