@@ -12,5 +12,16 @@
     "[c]": {
         "editor.defaultFormatter": "ms-vscode.cpptools",
         "editor.formatOnSave": true
+    },
+    "C_Cpp.codeAnalysis.clangTidy.enabled": true,
+    "C_Cpp.codeAnalysis.clangTidy.path": "/usr/bin/clang-tidy-23",
+    "C_Cpp.codeAnalysis.clangTidy.useBuildPath": true,
+    "C_Cpp.codeAnalysis.runAutomatically": true,
+    "C_Cpp.default.compileCommands": "${workspaceFolder}/build/tidy/compile_commands.json",
+    "C_Cpp.codeAnalysis.exclude": {
+        "**/configuration/cbor/cbor_*_config/**": true,
+        "**/views/assets/fonts/lv_font_*.c": true,
+        "**/views/assets/images/*.cpp": true,
+        "**/modules/**": true
     }
 }
