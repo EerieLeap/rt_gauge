@@ -11,8 +11,9 @@ using eerie_leap::domain::ui_domain::ScopedLvglLock;
 
 namespace {
 
-// Reserved by Frame for widget presentation nodes; do not reuse for application state.
-constexpr lv_obj_flag_t presentation_flag = LV_OBJ_FLAG_USER_1;
+// User flag bit 0 (LV_OBJ_FLAG_USER_1), reserved by Frame for widget presentation nodes; do not reuse
+// for application state.
+constexpr uint32_t PRESENTATION_USER_FLAG = 0;
 
 } // namespace
 
@@ -72,7 +73,7 @@ Frame Frame::CreateWrapped(lv_obj_t* object) {
     lv_obj_remove_style_all(frame);
 
     // A scrollable layout container makes LVGL treat drags as scrolling and never emits a gesture.
-    lv_obj_remove_flag(frame, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollable(frame, false);
 
     return Frame::Create(frame);
 }
@@ -85,13 +86,12 @@ Frame Frame::Build() {
 
 Frame Frame::CreatePresentation(lv_obj_t* parent) {
     auto frame = CreateWrapped(parent);
-    lv_obj_add_flag(frame.lv_object_, static_cast<lv_obj_flag_t>(presentation_flag | LV_OBJ_FLAG_GESTURE_BUBBLE));
-    lv_obj_remove_flag(
-        frame.lv_object_,
-        static_cast<lv_obj_flag_t>(
-            LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CLICK_FOCUSABLE | LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_ON_FOCUS
-        )
-    );
+    lv_obj_set_user_flag(frame.lv_object_, PRESENTATION_USER_FLAG, true);
+    lv_obj_set_gesture_bubble(frame.lv_object_, true);
+    lv_obj_set_clickable(frame.lv_object_, false);
+    lv_obj_set_click_focusable(frame.lv_object_, false);
+    lv_obj_set_scrollable(frame.lv_object_, false);
+    lv_obj_set_scroll_on_focus(frame.lv_object_, false);
     lv_obj_set_style_transform_pivot_x(frame.lv_object_, lv_pct(50), LV_PART_MAIN);
     lv_obj_set_style_transform_pivot_y(frame.lv_object_, lv_pct(50), LV_PART_MAIN);
     frame.SetWidth(100, false).SetHeight(100, false);
@@ -100,9 +100,10 @@ Frame Frame::CreatePresentation(lv_obj_t* parent) {
 
 bool Frame::IsVisibleInHierarchy(const lv_obj_t* object) {
     for(; object != nullptr; object = lv_obj_get_parent(object)) {
-        if(lv_obj_has_flag(object, LV_OBJ_FLAG_HIDDEN)
+        if(lv_obj_is_hidden(object)
             || lv_obj_get_style_opa(object, LV_PART_MAIN) == LV_OPA_TRANSP
-            || (!lv_obj_has_flag(object, presentation_flag)
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast): LVGL's getter only reads, but takes a non-const object.
+            || (!lv_obj_get_user_flag(const_cast<lv_obj_t*>(object), PRESENTATION_USER_FLAG)
                 && lv_obj_get_style_opa_layered(object, LV_PART_MAIN) == LV_OPA_TRANSP))
             return false;
     }
@@ -165,7 +166,7 @@ Frame& Frame::SetYOffset(int32_t offset, bool is_px) {
 Frame& Frame::SetPaddingLeft(int32_t padding) {
     ValidateFrame(lv_object_);
 
-    lv_obj_set_style_pad_left(lv_object_, padding, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_left(lv_object_, padding, LV_PART_MAIN);
 
     return *this;
 }
@@ -173,7 +174,7 @@ Frame& Frame::SetPaddingLeft(int32_t padding) {
 Frame& Frame::SetPaddingRight(int32_t padding) {
     ValidateFrame(lv_object_);
 
-    lv_obj_set_style_pad_right(lv_object_, padding, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_right(lv_object_, padding, LV_PART_MAIN);
 
     return *this;
 }
@@ -181,7 +182,7 @@ Frame& Frame::SetPaddingRight(int32_t padding) {
 Frame& Frame::SetPaddingTop(int32_t padding) {
     ValidateFrame(lv_object_);
 
-    lv_obj_set_style_pad_top(lv_object_, padding, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_top(lv_object_, padding, LV_PART_MAIN);
 
     return *this;
 }
@@ -189,7 +190,7 @@ Frame& Frame::SetPaddingTop(int32_t padding) {
 Frame& Frame::SetPaddingBottom(int32_t padding) {
     ValidateFrame(lv_object_);
 
-    lv_obj_set_style_pad_bottom(lv_object_, padding, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_pad_bottom(lv_object_, padding, LV_PART_MAIN);
 
     return *this;
 }

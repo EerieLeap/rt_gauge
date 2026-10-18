@@ -27,12 +27,12 @@ int LabelIcon::ApplyTheme(const ITheme& theme) {
         WidgetPropertyType::COLOR_SECONDARY_ACTIVE, theme.GetPrimaryColor()
     );
 
-    lv_obj_set_style_bg_color(container_->GetObject(), primary.ToLvColor(), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(container_->GetObject(), primary.ToLvOpa(), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(container_->GetObject(), primary.ToLvColor(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(container_->GetObject(), primary.ToLvOpa(), LV_PART_MAIN);
 
-    lv_obj_set_style_text_color(lv_label_, secondary.ToLvColor(), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_opa(lv_label_, secondary.ToLvOpa(), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_font(lv_label_, theme.GetPrimaryFont().ToLvFont(), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_color(lv_label_, secondary.ToLvColor(), LV_PART_MAIN);
+    lv_obj_set_style_text_opa(lv_label_, secondary.ToLvOpa(), LV_PART_MAIN);
+    lv_obj_set_style_text_font(lv_label_, theme.GetPrimaryFont().ToLvFont(), LV_PART_MAIN);
 
     lv_obj_update_layout(lv_label_);
 
@@ -47,10 +47,10 @@ int LabelIcon::ApplyTheme(const ITheme& theme) {
 
     lv_obj_set_width(container_->GetObject(), icon_width);
     lv_obj_set_height(container_->GetObject(), icon_height);
-    lv_obj_set_style_radius(container_->GetObject(), icon_height / 2, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_radius(container_->GetObject(), icon_height / 2, LV_PART_MAIN);
 
-    lv_obj_set_style_transform_pivot_x(container_->GetObject(), icon_width / 2, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_transform_pivot_y(container_->GetObject(), icon_height / 2, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_transform_pivot_x(container_->GetObject(), icon_width / 2, LV_PART_MAIN);
+    lv_obj_set_style_transform_pivot_y(container_->GetObject(), icon_height / 2, LV_PART_MAIN);
 
     return 0;
 }
@@ -65,9 +65,9 @@ int LabelIcon::DoRender() {
 lv_obj_t* LabelIcon::Create(lv_obj_t* parent) {
     auto* lv_icon = lv_obj_create(parent);
     lv_obj_set_align(lv_icon, LV_ALIGN_CENTER);
-    lv_obj_remove_flag(lv_icon, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_style_border_width(lv_icon, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_shadow_opa(lv_icon, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_scrollable(lv_icon, false);
+    lv_obj_set_style_border_width(lv_icon, 0, LV_PART_MAIN);
+    lv_obj_set_style_shadow_opa(lv_icon, 0, LV_PART_MAIN);
 
     lv_label_ = lv_label_create(lv_icon);
     lv_obj_set_width(lv_label_, LV_SIZE_CONTENT);

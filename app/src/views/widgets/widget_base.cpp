@@ -588,10 +588,7 @@ std::shared_ptr<WidgetConfiguration> WidgetBase::GetConfiguration() const {
 int WidgetBase::SetVisibility(bool is_visible) {
     ScopedLvglLock lvgl_guard;
 
-    if(is_visible)
-        lv_obj_clear_flag(container_->GetObject(), LV_OBJ_FLAG_HIDDEN);
-    else
-        lv_obj_add_flag(container_->GetObject(), LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(container_->GetObject(), !is_visible);
 
     return 0;
 }

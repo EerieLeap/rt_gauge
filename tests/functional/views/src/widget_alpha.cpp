@@ -313,7 +313,7 @@ ZTEST(widget_alpha, test_segment_pixels_use_resolved_alpha_for_both_displayed_st
     // Isolate one stroke: neighboring segments overlap near the center in this small fixture.
     const auto count = lv_obj_get_child_count(views_test::WidgetContent(*scene.widget));
     for(uint32_t i = 0; i + 1 < count; ++i)
-        lv_obj_add_flag(lv_obj_get_child(views_test::WidgetContent(*scene.widget), i), LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(lv_obj_get_child(views_test::WidgetContent(*scene.widget), i), true);
     Publish(WidgetPropertyType::VALUE, 100);
     CheckAlphaMatrix(scene);
     Publish(primary, White(0));

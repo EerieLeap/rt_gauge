@@ -577,10 +577,10 @@ ZTEST(shape_icons, test_theme_and_visibility_preserve_geometry_and_part_opacity)
         lv_color_to_u32(lv_color_hex(0x3366FF))
     );
     Publish(0);
-    zassert_true(lv_obj_has_flag(widget->GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN));
+    zassert_true(lv_obj_is_hidden(widget->GetContainer()->GetObject()));
     zassert_equal(lv_obj_get_style_opa(ImageObject(*widget), LV_PART_MAIN), 128);
     Publish(1);
-    zassert_false(lv_obj_has_flag(widget->GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN));
+    zassert_false(lv_obj_is_hidden(widget->GetContainer()->GetObject()));
     zassert_equal(Mask(*widget).data, data);
     zassert_equal(lv_obj_get_style_opa(ImageObject(*widget), LV_PART_MAIN), 128);
 }
@@ -594,7 +594,7 @@ ZTEST(shape_icons, test_inactive_shapes_keep_their_appearance_across_theme_chang
         const auto* data = Mask(*widget).data;
         const auto opacity = lv_obj_get_style_opa(ImageObject(*widget), LV_PART_MAIN);
         zassert_true(opacity > 0);
-        zassert_false(lv_obj_has_flag(widget->GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN));
+        zassert_false(lv_obj_is_hidden(widget->GetContainer()->GetObject()));
         Publish(1);
         zassert_equal(lv_obj_get_style_opa(ImageObject(*widget), LV_PART_MAIN), opacity);
         Publish(0);

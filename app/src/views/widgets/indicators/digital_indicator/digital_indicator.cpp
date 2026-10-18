@@ -33,9 +33,9 @@ void DigitalIndicator::RegisterProperties(WidgetPropertyStore& store) const {
 int DigitalIndicator::ApplyTheme(const ITheme& theme) {
     const auto primary = properties_->ResolveColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE, theme.GetPrimaryColor());
 
-    lv_obj_set_style_text_font(lv_label_, theme.GetPrimaryFontLarge().ToLvFont(), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_color(lv_label_, primary.ToLvColor(), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_text_opa(lv_label_, primary.ToLvOpa(), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(lv_label_, theme.GetPrimaryFontLarge().ToLvFont(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lv_label_, primary.ToLvColor(), LV_PART_MAIN);
+    lv_obj_set_style_text_opa(lv_label_, primary.ToLvOpa(), LV_PART_MAIN);
 
     return 0;
 }
@@ -50,7 +50,7 @@ lv_obj_t* DigitalIndicator::Create(std::shared_ptr<Frame> parent) {
     // Alignment
     lv_obj_center(lv_label_);
     lv_obj_set_align(lv_label_, LV_ALIGN_CENTER);
-    lv_obj_set_style_text_align(lv_label_, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_align(lv_label_, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
 
     return lv_label_;
 }

@@ -104,8 +104,8 @@ int ShapeIconBase::DoRender() {
         image_object_ = lv_image_create(parent_->GetObject());
         container_ = std::make_shared<Frame>(Frame::Create(image_object_).Build());
         lv_obj_remove_style_all(image_object_);
-        lv_obj_remove_flag(image_object_, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_remove_flag(image_object_, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_clickable(image_object_, false);
+        lv_obj_set_scrollable(image_object_, false);
         lv_obj_set_align(image_object_, LV_ALIGN_CENTER);
         lv_image_set_antialias(image_object_, true);
     }
@@ -161,7 +161,7 @@ void ShapeIconBase::Rasterize(lv_vector_path_t* path, int width_px, int height_p
         throw std::bad_alloc();
     auto canvas_frame = Frame::Create(lv_canvas_create(parent_->GetObject())).Build();
     auto* canvas = canvas_frame.GetObject();
-    lv_obj_add_flag(canvas, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(canvas, true);
     lv_canvas_set_draw_buf(canvas, tile.get());
 
     for(int y = 0; y < height_px; y += tile_size) {

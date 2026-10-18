@@ -51,8 +51,8 @@ OverlayHost::OverlayHost(std::shared_ptr<NavigationService> navigation_service) 
         Frame::CreateWrapped(top_layer).SetWidth(100, false).SetHeight(100, false).Build()
     );
 
-    lv_obj_remove_flag(container_->GetObject(), LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_flag(container_->GetObject(), LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_clickable(container_->GetObject(), false);
+    lv_obj_set_hidden(container_->GetObject(), true);
 }
 
 // Unlike the rest of the class this locks for itself: teardown does not come
@@ -160,7 +160,7 @@ std::shared_ptr<Frame> OverlayHost::CreateScrim(bool close_on_tap) {
     );
 
     // What makes the overlay modal, rather than a decoration the user can reach past.
-    lv_obj_add_flag(scrim->GetObject(), LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_clickable(scrim->GetObject(), true);
     StyleScrim(scrim->GetObject(), ThemeManager::GetInstance().GetCurrentTheme());
 
     if(close_on_tap)
@@ -170,8 +170,8 @@ std::shared_ptr<Frame> OverlayHost::CreateScrim(bool close_on_tap) {
 }
 
 void OverlayHost::StyleScrim(lv_obj_t* scrim, const ITheme& theme) {
-    lv_obj_set_style_bg_color(scrim, theme.GetBackgroundColor().ToLvColor(), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(scrim, scrim_opacity_, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(scrim, theme.GetBackgroundColor().ToLvColor(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(scrim, scrim_opacity_, LV_PART_MAIN);
 }
 
 void OverlayHost::UpdateVisibility() {
@@ -179,9 +179,9 @@ void OverlayHost::UpdateVisibility() {
         return;
 
     if(entries_.empty())
-        lv_obj_add_flag(container_->GetObject(), LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(container_->GetObject(), true);
     else
-        lv_obj_remove_flag(container_->GetObject(), LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(container_->GetObject(), false);
 }
 
 // Invoked by LVGL on the renderer thread, which already holds the LVGL lock.

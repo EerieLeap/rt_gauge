@@ -38,7 +38,9 @@ void ButtonControl::RegisterProperties(WidgetPropertyStore& store) const {
 }
 
 int ButtonControl::ApplyTheme(const ITheme& theme) {
-    lv_obj_set_style_recolor_opa(lv_button_, LV_OPA_TRANSP, LV_PART_MAIN | LV_STATE_PRESSED);
+    lv_obj_set_style_recolor_opa(
+        lv_button_, LV_OPA_TRANSP, static_cast<lv_style_selector_t>(LV_PART_MAIN) | LV_STATE_PRESSED
+    );
 
     for(const bool pressed : { false, true }) {
         const auto state = pressed ? LV_STATE_PRESSED : LV_STATE_DEFAULT;
@@ -51,13 +53,19 @@ int ButtonControl::ApplyTheme(const ITheme& theme) {
             theme.GetPrimaryColor()
         );
 
-        lv_obj_set_style_bg_color(lv_button_, primary.ToLvColor(), LV_PART_MAIN | state);
-        lv_obj_set_style_bg_opa(lv_button_, primary.ToLvOpa(), LV_PART_MAIN | state);
-        lv_obj_set_style_text_color(lv_label_, secondary.ToLvColor(), LV_PART_MAIN | state);
-        lv_obj_set_style_text_opa(lv_label_, secondary.ToLvOpa(), LV_PART_MAIN | state);
+        lv_obj_set_style_bg_color(
+            lv_button_, primary.ToLvColor(), static_cast<lv_style_selector_t>(LV_PART_MAIN) | state
+        );
+        lv_obj_set_style_bg_opa(lv_button_, primary.ToLvOpa(), static_cast<lv_style_selector_t>(LV_PART_MAIN) | state);
+        lv_obj_set_style_text_color(
+            lv_label_, secondary.ToLvColor(), static_cast<lv_style_selector_t>(LV_PART_MAIN) | state
+        );
+        lv_obj_set_style_text_opa(
+            lv_label_, secondary.ToLvOpa(), static_cast<lv_style_selector_t>(LV_PART_MAIN) | state
+        );
     }
 
-    lv_obj_set_style_text_font(lv_label_, theme.GetPrimaryFont().ToLvFont(), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(lv_label_, theme.GetPrimaryFont().ToLvFont(), LV_PART_MAIN);
     lv_obj_set_state(lv_label_, LV_STATE_PRESSED, lv_obj_has_state(lv_button_, LV_STATE_PRESSED));
 
     return 0;

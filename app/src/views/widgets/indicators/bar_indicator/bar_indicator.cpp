@@ -45,10 +45,10 @@ int BarIndicator::ApplyTheme(const ITheme& theme) {
     const auto primary = properties_->ResolveColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE, theme.GetSecondaryColor());
     const auto secondary = properties_->ResolveColor(WidgetPropertyType::COLOR_SECONDARY_ACTIVE, LvglColor(0, 0));
 
-    lv_obj_set_style_bg_color(lv_bar_, primary.ToLvColor(), LV_PART_INDICATOR | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(lv_bar_, primary.ToLvOpa(), LV_PART_INDICATOR | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_color(lv_bar_, secondary.ToLvColor(), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(lv_bar_, secondary.ToLvOpa(), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(lv_bar_, primary.ToLvColor(), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(lv_bar_, primary.ToLvOpa(), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(lv_bar_, secondary.ToLvColor(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(lv_bar_, secondary.ToLvOpa(), LV_PART_MAIN);
 
     return 0;
 }
@@ -62,12 +62,12 @@ lv_obj_t* BarIndicator::Create(lv_obj_t* parent, int32_t range_start, int32_t ra
     lv_obj_set_width(lv_bar_, lv_pct(100));
     lv_obj_set_height(lv_bar_, lv_pct(100));
     lv_obj_set_align(lv_bar_, LV_ALIGN_CENTER);
-    lv_obj_remove_flag(lv_bar_, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_clickable(lv_bar_, false);
     lv_bar_set_value(lv_bar_, range_start, LV_ANIM_OFF);
 
     // Background color - LV_PART_MAIN
     // Bar color - LV_PART_INDICATOR
-    lv_obj_set_style_bg_opa(lv_bar_, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(lv_bar_, 0, LV_PART_MAIN);
 
     return lv_bar_;
 }

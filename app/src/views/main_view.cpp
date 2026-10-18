@@ -176,23 +176,21 @@ static void RenderCenterCrossHelperGuides(lv_obj_t* screen) {
     lv_obj_set_width(panel1, 2);
     lv_obj_set_height(panel1, 466);
     lv_obj_set_align(panel1, LV_ALIGN_CENTER);
-    lv_obj_remove_flag(panel1, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollable(panel1, false);
     lv_obj_set_style_border_color(
-        panel1, ThemeManager::GetInstance().GetCurrentTheme().GetPrimaryColor().ToLvColor(),
-        LV_PART_MAIN | LV_STATE_DEFAULT
+        panel1, ThemeManager::GetInstance().GetCurrentTheme().GetPrimaryColor().ToLvColor(), LV_PART_MAIN
     );
-    lv_obj_set_style_border_opa(panel1, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_opa(panel1, 255, LV_PART_MAIN);
 
     lv_obj_t* panel2 = lv_obj_create(screen);
     lv_obj_set_width(panel2, 466);
     lv_obj_set_height(panel2, 2);
     lv_obj_set_align(panel2, LV_ALIGN_CENTER);
-    lv_obj_remove_flag(panel2, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollable(panel2, false);
     lv_obj_set_style_border_color(
-        panel2, ThemeManager::GetInstance().GetCurrentTheme().GetPrimaryColor().ToLvColor(),
-        LV_PART_MAIN | LV_STATE_DEFAULT
+        panel2, ThemeManager::GetInstance().GetCurrentTheme().GetPrimaryColor().ToLvColor(), LV_PART_MAIN
     );
-    lv_obj_set_style_border_opa(panel2, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_opa(panel2, 255, LV_PART_MAIN);
 }
 
 int MainView::DoRender() {
@@ -219,12 +217,8 @@ int MainView::DoRender() {
 }
 
 int MainView::ApplyTheme(const ITheme& theme) {
-    lv_obj_set_style_bg_color(
-        container_->GetObject(), theme.GetBackgroundColor().ToLvColor(), LV_PART_MAIN | LV_STATE_DEFAULT
-    );
-    lv_obj_set_style_bg_opa(
-        container_->GetObject(), theme.GetBackgroundColor().ToLvOpa(), LV_PART_MAIN | LV_STATE_DEFAULT
-    );
+    lv_obj_set_style_bg_color(container_->GetObject(), theme.GetBackgroundColor().ToLvColor(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(container_->GetObject(), theme.GetBackgroundColor().ToLvOpa(), LV_PART_MAIN);
 
     return 0;
 }

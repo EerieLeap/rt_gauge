@@ -48,9 +48,9 @@ int HorizontalChartIndicator::ApplyTheme(const ITheme& theme) {
     lv_chart_set_series_color(lv_chart_, ser, primary.ToLvColor());
     // LVGL's bar renderer forces its rectangles to full opacity. Composite this style-free,
     // single-series chart once for both chart types; the outer wrapper owns widget opacity.
-    lv_obj_set_style_line_opa(lv_chart_, LV_OPA_COVER, LV_PART_ITEMS | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(lv_chart_, LV_OPA_COVER, LV_PART_ITEMS | LV_STATE_DEFAULT);
-    lv_obj_set_style_opa_layered(lv_chart_, primary.ToLvOpa(), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_line_opa(lv_chart_, LV_OPA_COVER, LV_PART_ITEMS);
+    lv_obj_set_style_bg_opa(lv_chart_, LV_OPA_COVER, LV_PART_ITEMS);
+    lv_obj_set_style_opa_layered(lv_chart_, primary.ToLvOpa(), LV_PART_MAIN);
 
     return 0;
 }
@@ -93,7 +93,7 @@ lv_obj_t* HorizontalChartIndicator::Create(
     auto* ser = lv_chart_add_series(lv_chart_, lv_color_hex(0x000000), LV_CHART_AXIS_PRIMARY_Y);
     lv_chart_set_series_color(lv_chart_, ser, lv_color_hex(0x3D3D3D));
 
-    lv_obj_set_style_line_opa(lv_chart_, LV_OPA_COVER, LV_PART_ITEMS | LV_STATE_DEFAULT);
+    lv_obj_set_style_line_opa(lv_chart_, LV_OPA_COVER, LV_PART_ITEMS);
 
     return lv_chart_;
 }

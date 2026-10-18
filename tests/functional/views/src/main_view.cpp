@@ -51,7 +51,7 @@ std::shared_ptr<FakeScreen> AddScreen(MainView& view, uint32_t id, uint32_t scre
 }
 
 bool IsGroupHidden(MainView& view, uint32_t screen_group_id) {
-    return lv_obj_has_flag(view.GetGroupContainer(screen_group_id)->GetObject(), LV_OBJ_FLAG_HIDDEN);
+    return lv_obj_is_hidden(view.GetGroupContainer(screen_group_id)->GetObject());
 }
 
 void* SetUp() {

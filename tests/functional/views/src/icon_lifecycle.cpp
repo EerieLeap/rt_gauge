@@ -706,7 +706,7 @@ ZTEST(icon_lifecycle, test_anchor_binding_preserves_angles_and_replays_after_sus
         zassert_equal(std::get<int>(widget.Read(WidgetPropertyType::ANCHOR_POINT_X)), 25);
         zassert_equal(lv_image_get_rotation(image), 900);
     }
-    lv_obj_add_flag(root->GetObject(), LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(root->GetObject(), true);
     lv_display_send_event(lv_display_get_default(), LV_EVENT_REFR_START, nullptr);
     Publish(WidgetPropertyType::ANCHOR_POINT_X, 17);
     Publish(WidgetPropertyType::ANCHOR_POINT_Y, 191);
@@ -714,7 +714,7 @@ ZTEST(icon_lifecycle, test_anchor_binding_preserves_angles_and_replays_after_sus
     lv_image_get_pivot(image, &pivot);
     zassert_equal(pivot.x, 25);
     zassert_equal(pivot.y, -11);
-    lv_obj_remove_flag(root->GetObject(), LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(root->GetObject(), false);
     lv_display_send_event(lv_display_get_default(), LV_EVENT_REFR_START, nullptr);
     lv_image_get_pivot(image, &pivot);
     zassert_equal(pivot.x, 17);
@@ -1244,13 +1244,13 @@ ZTEST(icon_lifecycle, test_oval_management_restoration_does_not_start_animation)
     widget.OnActivated();
     zassert_is_null(Pulse(widget));
     zassert_false(widget.IsVisible());
-    zassert_true(lv_obj_has_flag(widget.GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN));
+    zassert_true(lv_obj_is_hidden(widget.GetContainer()->GetObject()));
     ThemeManager::GetInstance().SetTheme(std::make_shared<BlueTheme>());
     Publish(WidgetPropertyType::IS_ACTIVE, true);
     Publish(WidgetPropertyType::IS_VISIBLE, true);
     zassert_is_null(Pulse(widget));
     zassert_true(widget.IsVisible());
-    zassert_false(lv_obj_has_flag(widget.GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN));
+    zassert_false(lv_obj_is_hidden(widget.GetContainer()->GetObject()));
     zassert_false(widget.IsProcessingEligible());
     Publish(WidgetPropertyType::OPACITY, 128);
     zassert_is_null(Pulse(widget));
@@ -1275,10 +1275,7 @@ ZTEST(icon_lifecycle, test_oval_management_changes_keep_static_appearance) {
         Publish(target, 0);
         zassert_is_null(Pulse(widget));
         zassert_false(widget.IsProcessingEligible());
-        zassert_equal(
-            lv_obj_has_flag(widget.GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN),
-            target == WidgetPropertyType::IS_VISIBLE
-        );
+        zassert_equal(lv_obj_is_hidden(widget.GetContainer()->GetObject()), target == WidgetPropertyType::IS_VISIBLE);
         Tick(2000);
         zassert_equal(lv_obj_get_style_opa(Inner(widget), LV_PART_MAIN), opacity);
         ThemeManager::GetInstance().SetTheme(std::make_shared<BlueTheme>());
@@ -1287,7 +1284,7 @@ ZTEST(icon_lifecycle, test_oval_management_changes_keep_static_appearance) {
         Publish(target, 1);
         zassert_is_null(Pulse(widget));
         zassert_true(widget.IsProcessingEligible());
-        zassert_false(lv_obj_has_flag(widget.GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN));
+        zassert_false(lv_obj_is_hidden(widget.GetContainer()->GetObject()));
         zassert_equal(lv_obj_get_style_opa(Inner(widget), LV_PART_MAIN), 128);
         Tick(100);
         zassert_equal(lv_obj_get_style_opa(Inner(widget), LV_PART_MAIN), 128);
@@ -1305,7 +1302,7 @@ ZTEST(icon_lifecycle, test_oval_ancestor_suspension_keeps_static_appearance) {
         const auto opacity = lv_obj_get_style_opa(Inner(widget), LV_PART_MAIN);
         zassert_equal(opacity, LV_OPA_COVER);
         if(gate == 0)
-            lv_obj_add_flag(root->GetObject(), LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_hidden(root->GetObject(), true);
         else if(gate == 1)
             lv_obj_set_style_opa(root->GetObject(), 0, 0);
         else
@@ -1314,7 +1311,7 @@ ZTEST(icon_lifecycle, test_oval_ancestor_suspension_keeps_static_appearance) {
         zassert_false(widget.IsProcessingEligible());
         zassert_is_null(Pulse(widget));
         zassert_equal(lv_obj_get_style_opa(Inner(widget), LV_PART_MAIN), opacity);
-        lv_obj_remove_flag(root->GetObject(), LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(root->GetObject(), false);
         lv_obj_set_style_opa(root->GetObject(), 255, 0);
         lv_obj_set_style_opa_layered(root->GetObject(), 255, 0);
         lv_refr_now(nullptr);
@@ -1387,25 +1384,25 @@ ZTEST(icon_lifecycle, test_logging_visibility_keeps_tracking_and_does_not_overri
     zassert_equal(widget.Render(), 0);
     widget.OnActivated();
     zassert_true(widget.IsActive());
-    zassert_true(lv_obj_has_flag(widget.GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN));
+    zassert_true(lv_obj_is_hidden(widget.GetContainer()->GetObject()));
     zassert_is_null(Pulse(widget));
     Publish(WidgetPropertyType::POSITION_X, 12);
     zassert_equal(std::get<int>(widget.Read(WidgetPropertyType::POSITION_X)), 12);
     PublishLogging(true);
     zassert_true(widget.IsVisible());
-    zassert_false(lv_obj_has_flag(widget.GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN));
+    zassert_false(lv_obj_is_hidden(widget.GetContainer()->GetObject()));
     zassert_is_null(Pulse(widget));
     zassert_equal(lv_obj_get_style_opa(Inner(widget), LV_PART_MAIN), LV_OPA_COVER);
     zassert_equal(lv_obj_get_style_x(Inner(widget), LV_PART_MAIN), 12);
     PublishLogging(false);
     zassert_false(widget.IsVisible());
-    zassert_true(lv_obj_has_flag(widget.GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN));
+    zassert_true(lv_obj_is_hidden(widget.GetContainer()->GetObject()));
     zassert_is_null(Pulse(widget));
     Publish(WidgetPropertyType::IS_ACTIVE, false);
     PublishLogging(true);
     zassert_true(widget.IsVisible());
     zassert_false(widget.IsActive());
-    zassert_false(lv_obj_has_flag(widget.GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN));
+    zassert_false(lv_obj_is_hidden(widget.GetContainer()->GetObject()));
     zassert_is_null(Pulse(widget));
     Publish(WidgetPropertyType::IS_ACTIVE, true);
     zassert_is_null(Pulse(widget));
@@ -1438,7 +1435,7 @@ ZTEST(icon_lifecycle, test_logging_oval_on_arc_preserves_size_position_and_blink
     zassert_equal(widget->Render(), 0);
     widget->OnActivated();
     zassert_equal(lv_anim_count_running(), animations);
-    zassert_true(lv_obj_has_flag(widget->GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN));
+    zassert_true(lv_obj_is_hidden(widget->GetContainer()->GetObject()));
 
     PublishLogging(true);
     auto* icon = static_cast<IconWidget*>(widget.get())->GetIconContainer()->GetObject();
@@ -1452,14 +1449,14 @@ ZTEST(icon_lifecycle, test_logging_oval_on_arc_preserves_size_position_and_blink
     zassert_not_null(mask);
     zassert_within(mask->data[8 * mask->header.stride + 8], LV_OPA_COVER, 1);
     zassert_equal(mask->data[0], LV_OPA_TRANSP);
-    zassert_false(lv_obj_has_flag(widget->GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN));
+    zassert_false(lv_obj_is_hidden(widget->GetContainer()->GetObject()));
     zassert_equal(lv_anim_count_running(), animations + 1);
     Tick(500);
     zassert_equal(lv_obj_get_style_opa_layered(content, LV_PART_MAIN), LV_OPA_TRANSP);
     Tick(500);
     zassert_equal(lv_obj_get_style_opa_layered(content, LV_PART_MAIN), LV_OPA_COVER);
     PublishLogging(false);
-    zassert_true(lv_obj_has_flag(widget->GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN));
+    zassert_true(lv_obj_is_hidden(widget->GetContainer()->GetObject()));
     zassert_equal(lv_anim_count_running(), animations);
     PublishLogging(true);
     zassert_equal(lv_anim_count_running(), animations + 1);
@@ -1483,7 +1480,7 @@ ZTEST(icon_lifecycle, test_inactive_label_keeps_the_normal_palette) {
     zassert_equal(lv_obj_get_style_bg_opa(object, LV_PART_MAIN), 128);
     Publish(WidgetPropertyType::IS_ACTIVE, true);
     Publish(WidgetPropertyType::IS_ACTIVE, false);
-    zassert_false(lv_obj_has_flag(widget.GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN));
+    zassert_false(lv_obj_is_hidden(widget.GetContainer()->GetObject()));
     zassert_equal(lv_obj_get_style_bg_opa(object, LV_PART_MAIN), 128);
 }
 

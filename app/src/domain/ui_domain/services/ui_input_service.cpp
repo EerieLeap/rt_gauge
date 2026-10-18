@@ -46,7 +46,7 @@ int UiInputService::Initialize(lv_obj_t* root) {
 
     // lv_obj_create() sets GESTURE_BUBBLE on every child; LVGL walks up while that
     // flag is set, so the gesture target must be the first object without it.
-    lv_obj_remove_flag(root_, LV_OBJ_FLAG_GESTURE_BUBBLE);
+    lv_obj_set_gesture_bubble(root_, false);
     lv_obj_add_event_cb(root_, GestureCb, LV_EVENT_GESTURE, this);
 
     LOG_INF("UI input service initialized.");

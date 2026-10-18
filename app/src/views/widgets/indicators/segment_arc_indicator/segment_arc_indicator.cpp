@@ -46,8 +46,8 @@ int SegmentArcIndicator::ApplyTheme(const ITheme& theme) {
 
     for(const auto& segment : segments_) {
         const auto& color = segment.is_active ? active : inactive;
-        lv_obj_set_style_arc_color(segment.lv_segment, color.ToLvColor(), LV_PART_INDICATOR | LV_STATE_DEFAULT);
-        lv_obj_set_style_arc_opa(segment.lv_segment, color.ToLvOpa(), LV_PART_INDICATOR | LV_STATE_DEFAULT);
+        lv_obj_set_style_arc_color(segment.lv_segment, color.ToLvColor(), LV_PART_INDICATOR);
+        lv_obj_set_style_arc_opa(segment.lv_segment, color.ToLvOpa(), LV_PART_INDICATOR);
     }
 
     return 0;
@@ -66,16 +66,16 @@ lv_obj_t* SegmentArcIndicator::CreateSegment(lv_obj_t* parent, int start_angle, 
     lv_obj_set_width(lv_arc_segment, lv_pct(100));
     lv_obj_set_height(lv_arc_segment, lv_pct(100));
     lv_obj_set_align(lv_arc_segment, LV_ALIGN_CENTER);
-    lv_obj_remove_flag(lv_arc_segment, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_clickable(lv_arc_segment, false);
     lv_arc_set_value(lv_arc_segment, 1);
-    lv_obj_set_style_arc_width(lv_arc_segment, segment_length_, LV_PART_INDICATOR | LV_STATE_DEFAULT);
-    lv_obj_set_style_arc_rounded(lv_arc_segment, false, LV_PART_INDICATOR | LV_STATE_DEFAULT);
+    lv_obj_set_style_arc_width(lv_arc_segment, segment_length_, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_rounded(lv_arc_segment, false, LV_PART_INDICATOR);
 
     lv_arc_set_bg_angles(lv_arc_segment, seg_start_angle, seg_end_angle);
 
-    lv_obj_set_style_bg_opa(lv_arc_segment, 0, LV_PART_KNOB | LV_STATE_DEFAULT);
-    lv_obj_set_style_arc_opa(lv_arc_segment, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_arc_opa(lv_arc_segment, 0, LV_PART_INDICATOR | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(lv_arc_segment, 0, LV_PART_KNOB);
+    lv_obj_set_style_arc_opa(lv_arc_segment, 0, LV_PART_MAIN);
+    lv_obj_set_style_arc_opa(lv_arc_segment, 0, LV_PART_INDICATOR);
 
     return lv_arc_segment;
 }

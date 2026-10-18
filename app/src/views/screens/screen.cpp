@@ -79,9 +79,9 @@ bool Screen::IsVisible() const {
 void Screen::SetVisibility(bool is_visible) {
     ScopedLvglLock lvgl_guard;
     if(is_visible)
-        lv_obj_remove_flag(container_->GetObject(), LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(container_->GetObject(), false);
     else
-        lv_obj_add_flag(container_->GetObject(), LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(container_->GetObject(), true);
 }
 
 void Screen::OnActivated() {

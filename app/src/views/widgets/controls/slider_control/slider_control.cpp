@@ -43,13 +43,25 @@ int SliderControl::ApplyTheme(const ITheme& theme) {
             theme.GetAccentColor()
         );
 
-        lv_obj_set_style_recolor_opa(lv_slider_, LV_OPA_TRANSP, LV_PART_INDICATOR | state);
-        lv_obj_set_style_bg_color(lv_slider_, primary.ToLvColor(), LV_PART_INDICATOR | state);
-        lv_obj_set_style_bg_opa(lv_slider_, primary.ToLvOpa(), LV_PART_INDICATOR | state);
-        lv_obj_set_style_bg_color(lv_slider_, secondary.ToLvColor(), LV_PART_MAIN | state);
-        lv_obj_set_style_bg_opa(lv_slider_, secondary.ToLvOpa(), LV_PART_MAIN | state);
-        lv_obj_set_style_bg_color(lv_slider_, tertiary.ToLvColor(), LV_PART_KNOB | state);
-        lv_obj_set_style_bg_opa(lv_slider_, tertiary.ToLvOpa(), LV_PART_KNOB | state);
+        lv_obj_set_style_recolor_opa(
+            lv_slider_, LV_OPA_TRANSP, static_cast<lv_style_selector_t>(LV_PART_INDICATOR) | state
+        );
+        lv_obj_set_style_bg_color(
+            lv_slider_, primary.ToLvColor(), static_cast<lv_style_selector_t>(LV_PART_INDICATOR) | state
+        );
+        lv_obj_set_style_bg_opa(
+            lv_slider_, primary.ToLvOpa(), static_cast<lv_style_selector_t>(LV_PART_INDICATOR) | state
+        );
+        lv_obj_set_style_bg_color(
+            lv_slider_, secondary.ToLvColor(), static_cast<lv_style_selector_t>(LV_PART_MAIN) | state
+        );
+        lv_obj_set_style_bg_opa(
+            lv_slider_, secondary.ToLvOpa(), static_cast<lv_style_selector_t>(LV_PART_MAIN) | state
+        );
+        lv_obj_set_style_bg_color(
+            lv_slider_, tertiary.ToLvColor(), static_cast<lv_style_selector_t>(LV_PART_KNOB) | state
+        );
+        lv_obj_set_style_bg_opa(lv_slider_, tertiary.ToLvOpa(), static_cast<lv_style_selector_t>(LV_PART_KNOB) | state);
     }
 
     return 0;

@@ -22,7 +22,7 @@ ScreenGroup::ScreenGroup(uint32_t screen_group_id, std::shared_ptr<Frame> parent
             .SetHeight(100, false)
             .Build());
 
-    lv_obj_add_flag(container_->GetObject(), LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(container_->GetObject(), true);
 }
 
 uint32_t ScreenGroup::GetGroupId() const {
@@ -88,7 +88,7 @@ void ScreenGroup::ApplyActivation() {
     if(is_activated_ || !is_activation_requested_ || !is_rendered_)
         return;
 
-    lv_obj_remove_flag(container_->GetObject(), LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(container_->GetObject(), false);
 
     for(const auto& screen : screens_)
         screen->OnActivated();
@@ -107,7 +107,7 @@ void ScreenGroup::Deactivate() {
     for(const auto& screen : screens_)
         screen->OnDeactivated();
 
-    lv_obj_add_flag(container_->GetObject(), LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(container_->GetObject(), true);
     is_activated_ = false;
 }
 
