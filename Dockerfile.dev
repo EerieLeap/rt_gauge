@@ -132,6 +132,12 @@ RUN source /home/${USERNAME}/zephyr/.venv/bin/activate && \
 RUN source /home/${USERNAME}/zephyr/.venv/bin/activate && \
     pip install clang-format==23.1.1
 
+# clang-tidy 23 is on neither PyPI (22.1.8) nor Ubuntu 24.04 (18); take it from LLVM's apt repository.
+RUN sudo curl -fsSL -o /etc/apt/trusted.gpg.d/apt.llvm.org.asc https://apt.llvm.org/llvm-snapshot.gpg.key && \
+    echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-23 main" | sudo tee /etc/apt/sources.list.d/llvm-23.list && \
+    sudo apt-get update && \
+    sudo apt-get install -y --no-install-recommends clang-tidy-23 clang-tools-23
+
 RUN source /home/${USERNAME}/zephyr/.venv/bin/activate && \
     cd /home/${USERNAME}/zephyr/workspace/zephyr && \
     west sdk install
