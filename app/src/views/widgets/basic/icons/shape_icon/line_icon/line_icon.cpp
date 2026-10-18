@@ -50,7 +50,7 @@ float LineIcon::BuildPath(lv_vector_path_t* path, float width, float height) con
         std::swap(start, end);
     lv_vector_path_move_to(path, &start);
     lv_vector_path_line_to(path, &end);
-    return stroke_px_;
+    return static_cast<float>(stroke_px_);
 }
 
 } // namespace eerie_leap::views::widgets::basic::icons

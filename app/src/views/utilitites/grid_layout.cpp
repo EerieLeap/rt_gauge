@@ -58,8 +58,8 @@ WidgetPosition GridLayout::ToPx(const WidgetPosition& position_grid, const Widge
     const uint32_t cell_width = (screen_width_ / grid_.width) + (grid_.spacing_px * 2);
     const uint32_t cell_height = (screen_height_ / grid_.height) + (grid_.spacing_px * 2);
 
-    const int x = cell_width * position_grid.x;
-    const int y = screen_height_ - cell_height * position_grid.y - size_px.height;
+    const auto x = static_cast<int>(cell_width * position_grid.x);
+    const auto y = static_cast<int>(screen_height_ - cell_height * position_grid.y - size_px.height);
 
     return { .x = x, .y = std::abs(y) };
 }

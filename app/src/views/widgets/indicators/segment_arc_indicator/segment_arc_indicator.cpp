@@ -54,8 +54,8 @@ int SegmentArcIndicator::ApplyTheme(const ITheme& theme) {
 }
 
 lv_obj_t* SegmentArcIndicator::CreateSegment(lv_obj_t* parent, int start_angle, int end_angle, int i) {
-    const int seg_start_angle = start_angle + 90 + i * step_deg_;
-    const int seg_end_angle = start_angle + 90 + i * step_deg_ + 3;
+    const int seg_start_angle = start_angle + 90 + i * STEP_DEG;
+    const int seg_end_angle = start_angle + 90 + i * STEP_DEG + 3;
 
     if(seg_end_angle > end_angle + 90)
         return nullptr;
@@ -68,10 +68,12 @@ lv_obj_t* SegmentArcIndicator::CreateSegment(lv_obj_t* parent, int start_angle, 
     lv_obj_set_align(lv_arc_segment, LV_ALIGN_CENTER);
     lv_obj_set_clickable(lv_arc_segment, false);
     lv_arc_set_value(lv_arc_segment, 1);
-    lv_obj_set_style_arc_width(lv_arc_segment, segment_length_, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_width(lv_arc_segment, SEGMENT_LENGTH, LV_PART_INDICATOR);
     lv_obj_set_style_arc_rounded(lv_arc_segment, false, LV_PART_INDICATOR);
 
-    lv_arc_set_bg_angles(lv_arc_segment, seg_start_angle, seg_end_angle);
+    lv_arc_set_bg_angles(
+        lv_arc_segment, static_cast<lv_value_precise_t>(seg_start_angle), static_cast<lv_value_precise_t>(seg_end_angle)
+    );
 
     lv_obj_set_style_bg_opa(lv_arc_segment, 0, LV_PART_KNOB);
     lv_obj_set_style_arc_opa(lv_arc_segment, 0, LV_PART_MAIN);
@@ -91,13 +93,13 @@ void SegmentArcIndicator::Create(lv_obj_t* parent, int32_t range_start, int32_t 
         segments_.push_back({ .lv_segment = segment, .is_active = false });
     }
 
-    segments_per_value_ = (range_end - range_start) / static_cast<float>(segments_.size());
+    segments_per_value_ = static_cast<float>(range_end - range_start) / static_cast<float>(segments_.size());
 }
 
 void SegmentArcIndicator::UpdateIndicator(float value) {
-    int segment_index = value / segments_per_value_;
+    auto segment_index = static_cast<int>(value / segments_per_value_);
     if(segment_index >= segments_.size())
-        segment_index = segments_.size() - 1;
+        segment_index = static_cast<int>(segments_.size() - 1);
 
     for(size_t i = 0; i < segments_.size(); i++) {
         segments_[i].is_active = std::cmp_less_equal(i, segment_index);

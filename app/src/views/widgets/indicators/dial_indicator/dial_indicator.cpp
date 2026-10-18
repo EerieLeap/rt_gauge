@@ -25,7 +25,7 @@ std::string NeedleError(uint32_t id, const char* reason) {
     return "Child index 0, ID " + std::to_string(id) + " (needle): " + reason;
 }
 
-constexpr const char* rotation_conflict =
+constexpr const char* ROTATION_CONFLICT =
     "driven rotation conflicts with a rotation animation or inbound ANIMATION_TYPE binding.";
 
 } // namespace
@@ -41,7 +41,7 @@ void DialIndicator::ValidateChildren(const WidgetConfiguration&, std::span<const
         || needle.size_grid.height != 1)
         throw std::invalid_argument(NeedleError(needle.id, "fill slot requires position (0, 0) and size (1, 1)."));
     if(!WidgetTransform::CanSetRotation(needle))
-        throw std::invalid_argument(NeedleError(needle.id, rotation_conflict));
+        throw std::invalid_argument(NeedleError(needle.id, ROTATION_CONFLICT));
 }
 
 DialIndicator::DialIndicator(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context) :
@@ -77,7 +77,11 @@ int DialIndicator::ApplyTheme(const ITheme&) {
 }
 
 uint32_t DialIndicator::GetAngleForValue(float value) {
-    const float resolution = (abs(end_angle_ - start_angle_) * 10) / abs(range_end_ - range_start_);
+    // Both spans are whole numbers and so is their quotient: a fractional range or resolution is cut off.
+    const int angle_span = std::abs(end_angle_ - start_angle_) * 10;
+    const int range_span = std::abs(static_cast<int>(range_end_ - range_start_));
+    const int steps_per_unit = angle_span / range_span;
+    const auto resolution = static_cast<float>(steps_per_unit);
     const float angle_delta = resolution * value;
 
     return start_angle_ * 10 - 1800 + static_cast<uint32_t>(angle_delta);

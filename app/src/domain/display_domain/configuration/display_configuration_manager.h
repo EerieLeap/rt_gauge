@@ -24,8 +24,6 @@ class DisplayConfigurationManager :
     public CborConfigurationManagerBase<DisplayConfiguration, CborDisplayConfig>,
     public IConfigurationManager {
 private:
-    DisplayConfigurationCborParser cbor_parser_;
-
     ConfigurationUpdatedHandler configuration_updated_handler_;
 
     eerie_memory::PmrUniquePtr<CborDisplayConfig> Serialize(const DisplayConfiguration& configuration) override;

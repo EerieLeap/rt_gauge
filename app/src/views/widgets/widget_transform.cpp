@@ -1,3 +1,5 @@
+#include <algorithm>
+
 #include <zephyr/logging/log.h>
 
 #include "domain/ui_domain/lvgl_lock.h"
@@ -11,7 +13,7 @@ using eerie_leap::domain::ui_domain::utilities::WidgetPropertyValidator;
 
 LOG_MODULE_REGISTER(widget_transform_logger);
 
-static_assert(WidgetPropertyValidator::max_anchor_coordinate == LV_COORD_MAX);
+static_assert(WidgetPropertyValidator::MAX_ANCHOR_COORDINATE == LV_COORD_MAX);
 
 WidgetTransform::~WidgetTransform() {
     Detach();
@@ -120,12 +122,11 @@ void WidgetTransform::OnProcessingUpdated(bool enabled) {
 namespace {
 
 bool HasRotationBinding(const WidgetConfiguration& configuration) {
-    for(const auto& binding : configuration.bindings) {
-        // An inbound type binding could select a competing rotation later.
-        if(binding.target == WidgetPropertyType::ANIMATION_TYPE && binding.direction != PropertyBindingDirection::Out)
-            return true;
-    }
-    return false;
+    // An inbound type binding could select a competing rotation later.
+    return std::ranges::any_of(configuration.bindings, [](const auto& binding) {
+        return binding.target == WidgetPropertyType::ANIMATION_TYPE
+            && binding.direction != PropertyBindingDirection::Out;
+    });
 }
 
 } // namespace

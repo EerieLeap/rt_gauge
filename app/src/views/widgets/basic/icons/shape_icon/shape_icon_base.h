@@ -40,6 +40,10 @@ protected:
 public:
     explicit ShapeIconBase(std::shared_ptr<Frame> parent);
     ~ShapeIconBase() override;
+    ShapeIconBase(const ShapeIconBase&) = delete;
+    ShapeIconBase& operator=(const ShapeIconBase&) = delete;
+    ShapeIconBase(ShapeIconBase&&) = delete;
+    ShapeIconBase& operator=(ShapeIconBase&&) = delete;
 
     static void RegisterProperties(WidgetPropertyStore& store);
     void Configure(std::shared_ptr<WidgetPropertyStore> properties) override;

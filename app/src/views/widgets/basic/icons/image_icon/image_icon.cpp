@@ -123,7 +123,7 @@ lv_obj_t* ImageIcon::Create(lv_obj_t* parent) {
         .data = image_data_.value().data()
     };
 
-    auto* lv_image = lv_image_create(parent_->GetObject());
+    auto* lv_image = lv_image_create(parent);
     lv_image_set_src(lv_image, &lv_image_descriptor_);
     lv_image_set_antialias(lv_image, true);
 

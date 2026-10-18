@@ -42,7 +42,7 @@ private:
     std::vector<Entry> entries_;
     using ColorCache = std::array<
         std::optional<eerie_leap::utilities::type::Color>,
-        eerie_leap::domain::ui_domain::utilities::WidgetPropertyValidator::color_properties.size()>;
+        eerie_leap::domain::ui_domain::utilities::WidgetPropertyValidator::COLOR_PROPERTIES.size()>;
     ColorCache colors_;
     ColorCache applied_colors_;
     mutable k_mutex lock_{};
@@ -55,6 +55,9 @@ public:
 
     WidgetPropertyStore(const WidgetPropertyStore&) = delete;
     WidgetPropertyStore& operator=(const WidgetPropertyStore&) = delete;
+    WidgetPropertyStore(WidgetPropertyStore&&) = delete;
+    WidgetPropertyStore& operator=(WidgetPropertyStore&&) = delete;
+    ~WidgetPropertyStore() = default;
 
     // Re-registering replaces the default; structural properties throw std::invalid_argument.
     void Register(WidgetPropertyType type, ConfigValue default_value, PropertyChangeEffect effect);

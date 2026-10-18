@@ -39,7 +39,7 @@ using eerie_leap::views::widgets::indicators::BarIndicator;
 
 namespace {
 
-constexpr std::array shape_types{ IconType::Rectangle, IconType::TriangleIsosceles, IconType::TriangleRight,
+constexpr std::array SHAPE_TYPES{ IconType::Rectangle, IconType::TriangleIsosceles, IconType::TriangleRight,
     IconType::Oval, IconType::Line };
 
 std::shared_ptr<Frame> MakeRoot() {
@@ -143,6 +143,7 @@ std::vector<uint8_t> PolygonPixels(
 
 void SavePreview(const lv_draw_buf_t& snapshot, const char* name, int variant) {
 #ifdef CONFIG_ARCH_POSIX
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): the tests run on one thread and nothing sets the environment.
     const char* directory = std::getenv("SHAPE_ICON_PREVIEW_DIR");
     if(directory == nullptr)
         return;
@@ -150,9 +151,10 @@ void SavePreview(const lv_draw_buf_t& snapshot, const char* name, int variant) {
     std::snprintf(path, sizeof(path), "%s/%s_%d.ppm", directory, name, variant);
     auto* file = std::fopen(path, "wb");
     zassert_not_null(file);
+    // NOLINTNEXTLINE(modernize-use-std-print,clang-analyzer-core.NonNullParamChecker): no <print> on the host; zassert ends the test.
     std::fprintf(file, "P6\n%u %u\n255\n", snapshot.header.w, snapshot.header.h);
     for(uint32_t y = 0; y < snapshot.header.h; ++y) {
-        const auto* pixels = reinterpret_cast<const lv_color32_t*>(snapshot.data + y * snapshot.header.stride);
+        const auto* pixels = views_test::PixelRow(snapshot, y);
         for(uint32_t x = 0; x < snapshot.header.w; ++x) {
             uint8_t rgb[]{ pixels[x].red, pixels[x].green, pixels[x].blue };
             zassert_equal(std::fwrite(rgb, 1, sizeof(rgb), file), sizeof(rgb));
@@ -209,7 +211,7 @@ ZTEST(shape_icons, test_vector_backend_respects_disabled_document_loaders) {
 
 ZTEST(shape_icons, test_factory_registers_all_shapes_and_widgets_report_their_properties) {
     auto types = IconFactory::GetInstance().GetAvailableTypes();
-    for(auto type : shape_types) {
+    for(auto type : SHAPE_TYPES) {
         zassert_true(std::ranges::find(types, type) != types.end());
         auto widget = MakeWidget(Configuration(type));
         zassert_equal(Mask(*widget).header.w, 64);
@@ -240,7 +242,7 @@ ZTEST(shape_icons, test_icon_metadata_is_specific_before_rendering) {
         zassert_equal(store.IsRegistered(WidgetPropertyType::LABEL), type == IconType::Label);
         zassert_equal(store.IsRegistered(WidgetPropertyType::FILE_PATH), type == IconType::Image);
         zassert_equal(
-            store.IsRegistered(WidgetPropertyType::WIDTH_PX), std::ranges::find(shape_types, type) != shape_types.end()
+            store.IsRegistered(WidgetPropertyType::WIDTH_PX), std::ranges::find(SHAPE_TYPES, type) != SHAPE_TYPES.end()
         );
     }
     IconWidget line(1, root, WidgetContext{}, IconType::Line);
@@ -269,7 +271,7 @@ ZTEST(shape_icons, test_irrelevant_bindings_do_not_reconfigure_a_shape) {
 }
 
 ZTEST(shape_icons, test_default_shapes_have_visible_geometry) {
-    for(auto type : shape_types) {
+    for(auto type : SHAPE_TYPES) {
         auto configuration = Configuration(type);
         configuration->properties.clear();
         configuration->properties[WidgetPropertyType::ICON_TYPE] = static_cast<int>(type);
@@ -287,24 +289,26 @@ ZTEST(shape_icons, test_rectangle_fill_outline_and_rounding_cross_tile_boundarie
     auto filled = MakeWidget(Configuration(IconType::Rectangle, 97, 65));
     for(int y = 0; y < 65; ++y)
         for(int x = 0; x < 97; ++x)
-            zassert_within(Alpha(*filled, x, y), 255, 1, "A seam at %d,%d: alpha %u", x, y, Alpha(*filled, x, y));
+            zassert_between_inclusive(
+                Alpha(*filled, x, y), 254, 255, "A seam at %d,%d: alpha %u", x, y, Alpha(*filled, x, y)
+            );
 
     auto outline = MakeWidget(Configuration(IconType::Rectangle, 64, 48, WidgetFillMode::Outline, 12, 4));
     zassert_equal(Alpha(*outline, 0, 0), 0);
-    zassert_within(Alpha(*outline, 32, 1), 255, 1);
+    zassert_between_inclusive(Alpha(*outline, 32, 1), 254, 255);
     zassert_equal(Alpha(*outline, 32, 6), 0);
     zassert_equal(Alpha(*outline, 32, 24), 0);
 
     auto rounded = MakeWidget(Configuration(IconType::Rectangle, 64, 48, WidgetFillMode::Filled, 12));
     zassert_equal(Alpha(*rounded, 0, 0), 0);
-    zassert_within(Alpha(*rounded, 32, 24), 255, 1);
+    zassert_between_inclusive(Alpha(*rounded, 32, 24), 254, 255);
 }
 
 ZTEST(shape_icons, test_triangles_have_distinct_geometry_and_rounded_outline_corners) {
     auto isosceles = MakeWidget(Configuration(IconType::TriangleIsosceles));
     auto right = MakeWidget(Configuration(IconType::TriangleRight));
     zassert_equal(Alpha(*isosceles, 1, 8), 0);
-    zassert_within(Alpha(*right, 1, 8), 255, 1);
+    zassert_between_inclusive(Alpha(*right, 1, 8), 254, 255);
     for(int y = 0; y < 48; ++y)
         for(int x = 0; x < 64; ++x)
             if(static_cast<float>(y + 1) < static_cast<float>(x) * 0.75F)
@@ -314,9 +318,9 @@ ZTEST(shape_icons, test_triangles_have_distinct_geometry_and_rounded_outline_cor
         auto outline = MakeWidget(Configuration(type, 64, 48, WidgetFillMode::Outline, 10, 3));
         zassert_equal(Alpha(*filled, 1, 46), 0);
         zassert_equal(Alpha(*outline, 1, 46), 0);
-        zassert_within(Alpha(*filled, 24, 32), 255, 1);
+        zassert_between_inclusive(Alpha(*filled, 24, 32), 254, 255);
         zassert_equal(Alpha(*outline, 24, 32), 0);
-        zassert_within(Alpha(*outline, 32, 46), 255, 1);
+        zassert_between_inclusive(Alpha(*outline, 32, 46), 254, 255);
     }
 }
 
@@ -330,7 +334,7 @@ ZTEST(shape_icons, test_polygon_base_supports_rounded_pentagons_in_both_windings
             zassert_true(pixels == PolygonPixels(reversed, fill, radius));
             zassert_equal(pixels[0], 0);
             zassert_within(pixels[32 * 64 + 32], fill == WidgetFillMode::Filled ? 255 : 0, 1);
-            zassert_within(pixels[62 * 64 + 32], 255, 1);
+            zassert_between_inclusive(pixels[62 * 64 + 32], 254, 255);
         }
     }
     auto sharp = PolygonPixels(vertices);
@@ -369,10 +373,10 @@ ZTEST(shape_icons, test_polygon_base_rejects_degenerate_and_nonconvex_geometry) 
 ZTEST(shape_icons, test_oval_is_an_ellipse_with_a_transparent_outline_interior) {
     auto filled = MakeWidget(Configuration(IconType::Oval, 96, 48));
     zassert_equal(Alpha(*filled, 24, 1), 0); // A capsule would be filled here.
-    zassert_within(Alpha(*filled, 48, 1), 255, 1);
-    zassert_within(Alpha(*filled, 1, 24), 255, 1);
+    zassert_between_inclusive(Alpha(*filled, 48, 1), 254, 255);
+    zassert_between_inclusive(Alpha(*filled, 1, 24), 254, 255);
     auto outline = MakeWidget(Configuration(IconType::Oval, 96, 48, WidgetFillMode::Outline));
-    zassert_within(Alpha(*outline, 48, 1), 255, 1);
+    zassert_between_inclusive(Alpha(*outline, 48, 1), 254, 255);
     zassert_equal(Alpha(*outline, 48, 24), 0);
     auto radius_ignored = MakeWidget(Configuration(IconType::Oval, 96, 48, WidgetFillMode::Outline, 999));
     zassert_true(Pixels(*outline) == Pixels(*radius_ignored));
@@ -380,7 +384,7 @@ ZTEST(shape_icons, test_oval_is_an_ellipse_with_a_transparent_outline_interior) 
 
 ZTEST(shape_icons, test_line_direction_controls_orientation_and_reversal_preserves_appearance) {
     auto left = MakeWidget(Configuration(IconType::Line));
-    zassert_within(Alpha(*left, 1, 24), 255, 1);
+    zassert_between_inclusive(Alpha(*left, 1, 24), 254, 255);
     zassert_equal(Alpha(*left, 32, 1), 0);
     auto right = MakeWidget(
         Configuration(IconType::Line, 64, 48, WidgetFillMode::Outline, 20, 4, WidgetDirection::RightToLeft)
@@ -389,7 +393,7 @@ ZTEST(shape_icons, test_line_direction_controls_orientation_and_reversal_preserv
     auto down = MakeWidget(
         Configuration(IconType::Line, 64, 48, WidgetFillMode::Filled, 0, 4, WidgetDirection::TopToBottom)
     );
-    zassert_within(Alpha(*down, 32, 1), 255, 1);
+    zassert_between_inclusive(Alpha(*down, 32, 1), 254, 255);
     zassert_equal(Alpha(*down, 1, 24), 0);
     auto up = MakeWidget(
         Configuration(IconType::Line, 64, 48, WidgetFillMode::Filled, 0, 4, WidgetDirection::BottomToTop)
@@ -400,14 +404,14 @@ ZTEST(shape_icons, test_line_direction_controls_orientation_and_reversal_preserv
 ZTEST(shape_icons, test_lines_allow_zero_unused_dimension_and_keep_the_entire_stroke) {
     auto horizontal = MakeWidget(Configuration(IconType::Line, 64, 0, WidgetFillMode::Filled, 0, 7));
     zassert_equal(Mask(*horizontal).header.h, 7);
-    zassert_within(Alpha(*horizontal, 32, 0), 255, 1);
-    zassert_within(Alpha(*horizontal, 32, 6), 255, 1);
+    zassert_between_inclusive(Alpha(*horizontal, 32, 0), 254, 255);
+    zassert_between_inclusive(Alpha(*horizontal, 32, 6), 254, 255);
     auto vertical = MakeWidget(
         Configuration(IconType::Line, 0, 48, WidgetFillMode::Filled, 0, 7, WidgetDirection::TopToBottom)
     );
     zassert_equal(Mask(*vertical).header.w, 7);
-    zassert_within(Alpha(*vertical, 0, 24), 255, 1);
-    zassert_within(Alpha(*vertical, 6, 24), 255, 1);
+    zassert_between_inclusive(Alpha(*vertical, 0, 24), 254, 255);
+    zassert_between_inclusive(Alpha(*vertical, 6, 24), 254, 255);
 }
 
 ZTEST(shape_icons, test_invalid_sizes_and_zero_strokes_suppress_drawing_safely) {
@@ -420,7 +424,7 @@ ZTEST(shape_icons, test_invalid_sizes_and_zero_strokes_suppress_drawing_safely) 
     }
     auto too_large = MakeWidget(Configuration(IconType::Oval, 5000, 5000));
     zassert_is_null(lv_image_get_src(ImageObject(*too_large)));
-    for(auto type : shape_types) {
+    for(auto type : SHAPE_TYPES) {
         auto widget = MakeWidget(Configuration(type, 64, 48, WidgetFillMode::Outline, 0, 0));
         zassert_is_null(lv_image_get_src(ImageObject(*widget)));
     }
@@ -435,7 +439,7 @@ ZTEST(shape_icons, test_large_radii_and_thicknesses_fit_small_shapes) {
         }));
     }
     auto pixel = MakeWidget(Configuration(IconType::Rectangle, 1, 1));
-    zassert_within(Alpha(*pixel, 0, 0), 255, 1);
+    zassert_between_inclusive(Alpha(*pixel, 0, 0), 254, 255);
 }
 
 ZTEST(shape_icons, test_bound_size_tracks_hidden_updates_and_replays_visible_geometry) {
@@ -444,7 +448,7 @@ ZTEST(shape_icons, test_bound_size_tracks_hidden_updates_and_replays_visible_geo
     auto widget = MakeWidget(configuration);
     Publish(96);
     zassert_equal(Mask(*widget).header.w, 96);
-    zassert_within(Alpha(*widget, 95, 24), 255, 1);
+    zassert_between_inclusive(Alpha(*widget, 95, 24), 254, 255);
     widget->OnDeactivated();
     Publish(80);
     zassert_equal(Mask(*widget).header.w, 96);
@@ -473,7 +477,7 @@ ZTEST(shape_icons, test_async_binding_rasterizes_on_the_event_bus_worker) {
 }
 
 ZTEST(shape_icons, test_overlay_redraw_preserves_the_underlying_shape) {
-    for(auto type : shape_types) {
+    for(auto type : SHAPE_TYPES) {
         auto widget = MakeWidget(Configuration(type, 160, 96, WidgetFillMode::Outline, 10, 6));
         auto before = Pixels(*widget);
         eerie_leap::views::OverlayHost host(nullptr);
@@ -502,7 +506,12 @@ ZTEST(shape_icons, test_bound_fill_radius_thickness_and_direction_refresh_the_ma
         Bind(*configuration, property);
         auto widget = MakeWidget(configuration);
         auto before = Pixels(*widget);
-        Publish(property == WidgetPropertyType::FILL_MODE ? 1 : property == WidgetPropertyType::DIRECTION ? 3 : 12);
+        float value = 12.0F;
+        if(property == WidgetPropertyType::FILL_MODE)
+            value = 1.0F;
+        else if(property == WidgetPropertyType::DIRECTION)
+            value = 3.0F;
+        Publish(value);
         zassert_true(before != Pixels(*widget), "Property %d did not update drawing", static_cast<int>(property));
     }
 }
@@ -562,7 +571,7 @@ ZTEST(shape_icons, test_arc_position_angle_and_edge_offset_remain_leaf_owned) {
 ZTEST(shape_icons, test_theme_and_visibility_preserve_geometry_and_part_opacity) {
     class BlueTheme : public DefaultTheme {
         LvglColor GetAccentColor() const override {
-            return { 0x3366FF, 128 };
+            return LvglColor(0x3366FF, 128);
         }
     };
     auto configuration = Configuration(IconType::Rectangle, 32, 32);
@@ -586,7 +595,7 @@ ZTEST(shape_icons, test_theme_and_visibility_preserve_geometry_and_part_opacity)
 }
 
 ZTEST(shape_icons, test_inactive_shapes_keep_their_appearance_across_theme_changes) {
-    for(auto type : shape_types) {
+    for(auto type : SHAPE_TYPES) {
         auto configuration = Configuration(type);
         configuration->properties[WidgetPropertyType::IS_ACTIVE] = false;
         Bind(*configuration, WidgetPropertyType::IS_ACTIVE);
@@ -605,11 +614,11 @@ ZTEST(shape_icons, test_inactive_shapes_keep_their_appearance_across_theme_chang
 }
 
 ZTEST(shape_icons, test_rendered_gallery_preserves_background_and_recolors_masks) {
-    constexpr std::array names{ "rectangle", "triangle_isosceles", "triangle_right", "oval", "line" };
-    for(size_t i = 0; i < shape_types.size(); ++i) {
+    constexpr std::array NAMES{ "rectangle", "triangle_isosceles", "triangle_right", "oval", "line" };
+    for(size_t i = 0; i < SHAPE_TYPES.size(); ++i) {
         for(int variant = 0; variant < 4; ++variant) {
             auto widget = MakeWidget(Configuration(
-                shape_types[i], 64, 48, variant % 2 == 0 ? WidgetFillMode::Filled : WidgetFillMode::Outline,
+                SHAPE_TYPES[i], 64, 48, variant % 2 == 0 ? WidgetFillMode::Filled : WidgetFillMode::Outline,
                 variant >= 2 ? 12 : 0, 4, variant >= 2 ? WidgetDirection::TopToBottom : WidgetDirection::LeftToRight
             ));
             auto* root = lv_obj_get_parent(widget->GetContainer()->GetObject());
@@ -625,28 +634,26 @@ ZTEST(shape_icons, test_rendered_gallery_preserves_background_and_recolors_masks
             zassert_equal(snapshot->header.h, 72);
             size_t colored_pixels = 0;
             for(int y = 0; y < 72; ++y) {
-                const auto* pixels = reinterpret_cast<const lv_color32_t*>(
-                    snapshot->data + y * snapshot->header.stride
-                );
+                const auto* pixels = views_test::PixelRow(*snapshot, y);
                 for(int x = 0; x < 96; ++x) {
                     bool background = pixels[x].red == 0xF3 && pixels[x].green == 0xF4 && pixels[x].blue == 0xF6;
                     if(x < 16 || x >= 80 || y < 12 || y >= 60)
-                        zassert_true(background, "Shape %s escaped its bounds at %d,%d", names[i], x, y);
+                        zassert_true(background, "Shape %s escaped its bounds at %d,%d", NAMES[i], x, y);
                     if(pixels[x].red > 200 && pixels[x].green < 150 && pixels[x].blue < 150)
                         ++colored_pixels;
-                    if(variant % 2 == 1 && shape_types[i] != IconType::Line && x == 40 && y == 44)
+                    if(variant % 2 == 1 && SHAPE_TYPES[i] != IconType::Line && x == 40 && y == 44)
                         zassert_true(background, "Outline interior must preserve the background");
                 }
             }
-            zassert_true(colored_pixels > 20, "Shape %s did not render in the accent color", names[i]);
-            SavePreview(*snapshot, names[i], variant);
+            zassert_true(colored_pixels > 20, "Shape %s did not render in the accent color", NAMES[i]);
+            SavePreview(*snapshot, NAMES[i], variant);
         }
     }
 }
 
 ZTEST(shape_icons, test_repeated_render_and_destruction_leave_no_duplicate_owners) {
     auto root = MakeRoot();
-    for(auto type : shape_types) {
+    for(auto type : SHAPE_TYPES) {
         {
             IconWidget widget(1, root, WidgetContext{});
             widget.Configure(Configuration(type));

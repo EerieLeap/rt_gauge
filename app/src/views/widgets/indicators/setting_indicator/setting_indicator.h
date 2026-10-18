@@ -16,7 +16,7 @@ using eerie_leap::views::widgets::SettingWidgetBase;
 // sensor id, an EMA filter and a value-change animation, none of which a setting has.
 class SettingIndicator : public SettingWidgetBase {
 private:
-    static constexpr int max_value_precision_ = 9;
+    static constexpr int MAX_VALUE_PRECISION = 9;
 
     lv_obj_t* lv_label_ = nullptr;
 

@@ -30,7 +30,7 @@ using eerie_leap::views::utilitites::Frame;
 
 namespace {
 
-constexpr int extent = 96;
+constexpr int EXTENT = 96;
 
 static_assert(!std::is_copy_constructible_v<ViewAnimator>);
 static_assert(!std::is_move_constructible_v<ViewAnimator>);
@@ -89,6 +89,8 @@ public:
     ~PresentationProbe() override {
         DetachDispatch();
     }
+    PresentationProbe(const PresentationProbe&) = delete;
+    PresentationProbe& operator=(const PresentationProbe&) = delete;
     WidgetType GetType() const override {
         return WidgetType::BasicIcon;
     }
@@ -140,6 +142,8 @@ public:
     ~LifecycleProbe() override {
         DetachDispatch();
     }
+    LifecycleProbe(const LifecycleProbe&) = delete;
+    LifecycleProbe& operator=(const LifecycleProbe&) = delete;
     WidgetType GetType() const override {
         return WidgetType::BasicIcon;
     }
@@ -212,6 +216,8 @@ public:
     ~TestButton() override {
         DetachDispatch();
     }
+    TestButton(const TestButton&) = delete;
+    TestButton& operator=(const TestButton&) = delete;
     int clicks = 0;
 
 protected:
@@ -247,6 +253,8 @@ public:
     ~Pointer() {
         lv_indev_delete(device_);
     }
+    Pointer(const Pointer&) = delete;
+    Pointer& operator=(const Pointer&) = delete;
 
     void Send(int column, int row, lv_indev_state_t state) {
         point_ = { column, row };
@@ -294,6 +302,8 @@ public:
         Reset();
         lv_obj_remove_event_cb_with_user_data(layout_, DrawMargin, this);
     }
+    PresentationStyles(const PresentationStyles&) = delete;
+    PresentationStyles& operator=(const PresentationStyles&) = delete;
 
     void Rotate(int32_t angle) {
         lv_obj_set_overflow_visible(layout_, true);
@@ -319,10 +329,10 @@ public:
 
 struct Scene {
     std::shared_ptr<Frame> root = std::make_shared<Frame>(
-        Frame::CreateWrapped().SetWidth(extent, true).SetHeight(extent, true).Build()
+        Frame::CreateWrapped().SetWidth(EXTENT, true).SetHeight(EXTENT, true).Build()
     );
     std::shared_ptr<Frame> clip = std::make_shared<Frame>(
-        Frame::CreateWrapped(root->GetObject()).SetWidth(extent, true).SetHeight(extent, true).Build()
+        Frame::CreateWrapped(root->GetObject()).SetWidth(EXTENT, true).SetHeight(EXTENT, true).Build()
     );
     PresentationProbe widget{ 1, clip, WidgetContext{} };
 
@@ -343,20 +353,20 @@ struct Scene {
             lv_snapshot_take(root->GetObject(), LV_COLOR_FORMAT_ARGB8888), lv_draw_buf_destroy
         );
         zassert_not_null(snapshot);
-        zassert_equal(snapshot->header.w, extent);
-        zassert_equal(snapshot->header.h, extent);
+        zassert_equal(snapshot->header.w, EXTENT);
+        zassert_equal(snapshot->header.h, EXTENT);
         std::vector<lv_color32_t> pixels;
-        pixels.reserve(extent * extent);
-        for(int row = 0; row < extent; ++row) {
-            const auto* source = reinterpret_cast<const lv_color32_t*>(snapshot->data + row * snapshot->header.stride);
-            pixels.insert(pixels.end(), source, source + extent);
+        pixels.reserve(EXTENT * EXTENT);
+        for(int row = 0; row < EXTENT; ++row) {
+            const auto* source = views_test::PixelRow(*snapshot, static_cast<uint32_t>(row));
+            pixels.insert(pixels.end(), source, source + EXTENT);
         }
         return pixels;
     }
 };
 
 void CheckPixel(const std::vector<lv_color32_t>& pixels, int column, int row, int red, int green) {
-    const auto& pixel = pixels[row * extent + column];
+    const auto& pixel = pixels[row * EXTENT + column];
     zassert_within(pixel.red, red, 8, "red at %d,%d: %d != %d", column, row, pixel.red, red);
     zassert_within(pixel.green, green, 8, "green at %d,%d: %d != %d", column, row, pixel.green, green);
     zassert_equal(pixel.blue, 0);
@@ -574,6 +584,8 @@ ZTEST(widget_animations, test_widget_animation_restoration_batches_settings_and_
                 case 7:
                     Publish(WidgetPropertyType::IS_ACTIVE, enabled);
                     break;
+                default:
+                    break;
             }
         };
         Advance(250);
@@ -636,9 +648,9 @@ ZTEST(widget_animations, test_animator_start_failure_stays_neutral_and_retries_o
                 scene.animator.Synchronize(settings);
             }
             zassert_equal(animation_start_calls, attempts + 1);
-            if(transition == 0)
+            if(transition == 0) {
                 settings.duration_ms = 2000;
-            else if(transition == 1) {
+            } else if(transition == 1) {
                 scene.eligible = false;
                 scene.animator.Synchronize(settings);
                 scene.eligible = true;
@@ -1078,7 +1090,7 @@ ZTEST(widget_animations, test_animator_rotation_pixels_resize_and_external_clipp
     pixels = scene.Pixels();
     CheckPixel(pixels, 56, 20, 255, 0);
     CheckPixel(pixels, 42, 70, 0, 0);
-    scene.clip->SetHeight(extent, true);
+    scene.clip->SetHeight(EXTENT, true);
     scene.widget.SetPositionPx({ 12, 32 });
     scene.widget.SetSizePx({ 72, 32 });
     pixels = scene.Pixels();
@@ -1304,7 +1316,7 @@ ZTEST(widget_animations, test_direct_widget_rotation_preserves_pixels_clipping_a
     pixels = scene.Pixels();
     CheckPixel(pixels, 34, 23, 255, 0);
     CheckPixel(pixels, 59, 68, 0, 0);
-    scene.clip->SetHeight(extent, true);
+    scene.clip->SetHeight(EXTENT, true);
     zassert_true(widget.SetRotation(0));
     const auto restored = scene.Pixels();
     zassert_mem_equal(baseline.data(), restored.data(), baseline.size() * sizeof(lv_color32_t));
@@ -1341,7 +1353,7 @@ ZTEST(widget_animations, test_retained_rotation_is_not_rewritten_on_refresh) {
 
 ZTEST(widget_animations, test_anchor_resolves_only_once_the_widget_rotates) {
     ScopedLvglLock lock;
-    auto root = std::make_shared<Frame>(Frame::CreateWrapped().SetWidth(extent, true).SetHeight(extent, true).Build());
+    auto root = std::make_shared<Frame>(Frame::CreateWrapped().SetWidth(EXTENT, true).SetHeight(EXTENT, true).Build());
     auto configuration = Configuration();
     configuration->properties[WidgetPropertyType::ANCHOR_POINT_X] = 5;
     configuration->properties[WidgetPropertyType::ANCHOR_POINT_Y] = 4;
@@ -1491,7 +1503,7 @@ ZTEST(widget_animations, test_pointer_hits_rotated_button_even_at_zero_presentat
     lv_obj_update_layout(scene.root->GetObject());
     pointer.Click(48, 22);
     zassert_equal(button.clicks, 2);
-    scene.clip->SetHeight(extent, true);
+    scene.clip->SetHeight(EXTENT, true);
     styles.Reset();
     lv_obj_update_layout(scene.root->GetObject());
     pointer.Click(20, 40);

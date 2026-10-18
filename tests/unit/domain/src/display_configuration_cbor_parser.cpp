@@ -1,6 +1,7 @@
 #include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 #include <zephyr/ztest.h>
 
@@ -19,7 +20,7 @@ namespace {
 template<typename Fn>
 std::string ThrownMessage(Fn&& fn) {
     try {
-        fn();
+        std::forward<Fn>(fn)();
     } catch(const std::exception& e) {
         return e.what();
     } catch(...) {
@@ -30,7 +31,7 @@ std::string ThrownMessage(Fn&& fn) {
 }
 
 CborDisplayConfig MakeCborConfig() {
-    return CborDisplayConfig{ .version = DisplayConfigurationCborParser::configuration_version,
+    return CborDisplayConfig{ .version = DisplayConfigurationCborParser::CONFIGURATION_VERSION,
         .brightness = 200,
         .blanking_enabled = true,
         .screen_timeout_s = 45,
@@ -51,28 +52,24 @@ ZTEST(display_configuration_cbor_parser, test_defaults_leave_the_panel_lit) {
 }
 
 ZTEST(display_configuration_cbor_parser, test_serialize_stamps_the_current_version) {
-    DisplayConfigurationCborParser parser;
-
     DisplayConfiguration configuration;
     configuration.brightness = 12;
 
-    auto config = parser.Serialize(configuration);
+    auto config = DisplayConfigurationCborParser::Serialize(configuration);
 
-    zassert_equal(config->version, DisplayConfigurationCborParser::configuration_version);
+    zassert_equal(config->version, DisplayConfigurationCborParser::CONFIGURATION_VERSION);
     zassert_equal(config->brightness, 12);
 }
 
 ZTEST(display_configuration_cbor_parser, test_round_trip_preserves_every_field) {
-    DisplayConfigurationCborParser parser;
-
     DisplayConfiguration configuration;
     configuration.brightness = 77;
     configuration.blanking_enabled = true;
     configuration.screen_timeout_s = 30;
     configuration.theme_id = 2;
 
-    auto config = parser.Serialize(configuration);
-    auto restored = parser.Deserialize(Mrm::GetDefaultPmr(), *config);
+    auto config = DisplayConfigurationCborParser::Serialize(configuration);
+    auto restored = DisplayConfigurationCborParser::Deserialize(Mrm::GetDefaultPmr(), *config);
 
     zassert_equal(restored->brightness, 77);
     zassert_true(restored->blanking_enabled);
@@ -81,10 +78,8 @@ ZTEST(display_configuration_cbor_parser, test_round_trip_preserves_every_field) 
 }
 
 ZTEST(display_configuration_cbor_parser, test_deserialize_accepts_the_current_version) {
-    DisplayConfigurationCborParser parser;
-
     auto config = MakeCborConfig();
-    auto restored = parser.Deserialize(Mrm::GetDefaultPmr(), config);
+    auto restored = DisplayConfigurationCborParser::Deserialize(Mrm::GetDefaultPmr(), config);
 
     zassert_equal(restored->brightness, 200);
     zassert_true(restored->blanking_enabled);
@@ -95,33 +90,29 @@ ZTEST(display_configuration_cbor_parser, test_deserialize_accepts_the_current_ve
 // A stored config written by another layout must fail loudly so the manager
 // regenerates defaults instead of reading field-shifted values.
 ZTEST(display_configuration_cbor_parser, test_deserialize_rejects_another_version) {
-    DisplayConfigurationCborParser parser;
-
     auto config = MakeCborConfig();
-    config.version = DisplayConfigurationCborParser::configuration_version + 1;
+    config.version = DisplayConfigurationCborParser::CONFIGURATION_VERSION + 1;
 
     auto message = ThrownMessage([&] {
-        parser.Deserialize(Mrm::GetDefaultPmr(), config);
+        DisplayConfigurationCborParser::Deserialize(Mrm::GetDefaultPmr(), config);
     });
 
     zassert_equal(
         message,
         "Invalid Display configuration. Unsupported version: "
-            + std::to_string(DisplayConfigurationCborParser::configuration_version + 1)
-            + ". Expected: " + std::to_string(DisplayConfigurationCborParser::configuration_version) + ".",
+            + std::to_string(DisplayConfigurationCborParser::CONFIGURATION_VERSION + 1)
+            + ". Expected: " + std::to_string(DisplayConfigurationCborParser::CONFIGURATION_VERSION) + ".",
         "%s", message.c_str()
     );
 }
 
 // The schema stores brightness as a uint; the model is a uint8_t.
 ZTEST(display_configuration_cbor_parser, test_deserialize_rejects_out_of_range_brightness) {
-    DisplayConfigurationCborParser parser;
-
     auto config = MakeCborConfig();
     config.brightness = 256;
 
     auto message = ThrownMessage([&] {
-        parser.Deserialize(Mrm::GetDefaultPmr(), config);
+        DisplayConfigurationCborParser::Deserialize(Mrm::GetDefaultPmr(), config);
     });
 
     zassert_equal(
@@ -131,12 +122,10 @@ ZTEST(display_configuration_cbor_parser, test_deserialize_rejects_out_of_range_b
 }
 
 ZTEST(display_configuration_cbor_parser, test_deserialize_accepts_the_brightness_bounds) {
-    DisplayConfigurationCborParser parser;
-
     auto config = MakeCborConfig();
     config.brightness = 255;
-    zassert_equal(parser.Deserialize(Mrm::GetDefaultPmr(), config)->brightness, 255);
+    zassert_equal(DisplayConfigurationCborParser::Deserialize(Mrm::GetDefaultPmr(), config)->brightness, 255);
 
     config.brightness = 0;
-    zassert_equal(parser.Deserialize(Mrm::GetDefaultPmr(), config)->brightness, 0);
+    zassert_equal(DisplayConfigurationCborParser::Deserialize(Mrm::GetDefaultPmr(), config)->brightness, 0);
 }

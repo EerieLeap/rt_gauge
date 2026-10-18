@@ -82,7 +82,7 @@ constexpr int NO_DISPATCH_TIMEOUT_MS = 200;
 
 K_THREAD_STACK_DEFINE(publisher_stack, 4096);
 
-constexpr WidgetPropertyType color_properties[] = { WidgetPropertyType::COLOR_PRIMARY_ACTIVE,
+constexpr WidgetPropertyType COLOR_PROPERTIES[] = { WidgetPropertyType::COLOR_PRIMARY_ACTIVE,
     WidgetPropertyType::COLOR_PRIMARY_INACTIVE, WidgetPropertyType::COLOR_SECONDARY_ACTIVE,
     WidgetPropertyType::COLOR_SECONDARY_INACTIVE, WidgetPropertyType::COLOR_TERTIARY_ACTIVE,
     WidgetPropertyType::COLOR_TERTIARY_INACTIVE };
@@ -101,6 +101,8 @@ public:
     ~ProbeWidget() override {
         DetachDispatch();
     }
+    ProbeWidget(const ProbeWidget&) = delete;
+    ProbeWidget& operator=(const ProbeWidget&) = delete;
 
     WidgetType GetType() const override {
         return WidgetType::BasicIcon;
@@ -141,7 +143,7 @@ private:
         store.Register(WidgetPropertyType::VALUE, ConfigValue{ 0.0 }, PropertyChangeEffect::None);
         store.Register(WidgetPropertyType::LABEL, ConfigValue{ std::pmr::string{} }, PropertyChangeEffect::None);
 
-        for(auto type : color_properties)
+        for(auto type : COLOR_PROPERTIES)
             store.Register(type, ConfigValue{ std::pmr::string{} }, PropertyChangeEffect::None);
     }
 
@@ -432,7 +434,7 @@ ZTEST(widget_bindings, test_color_store_rejects_invalid_updates_and_accepts_rese
     WidgetPropertyStore store;
     const ConfigValue invalid_values[] = { {}, 0, 255, 128.0, true, false, std::pmr::string("#3366FF"),
         std::pmr::string("#3366FF8G"), std::pmr::string("#3366FF80\0", 10) };
-    for(auto type : color_properties) {
+    for(auto type : COLOR_PROPERTIES) {
         store.Register(type, std::pmr::string{}, PropertyChangeEffect::None);
         zassert_true(std::get<std::pmr::string>(store.Get(type)).empty());
         for(const auto* text : { "#3366fF80", "#00000000", "#FFFFFFFF" }) {
@@ -519,7 +521,7 @@ ZTEST(widget_bindings, test_color_bindings_preserve_exact_rgba_and_reject_invali
     // Numbers are 0xRRGGBB values and bind as opaque colors.
     const std::pair<EventData, const char*> numbers[] = { { 0x3366FF, "#3366FFFF" }, { uint32_t{ 255 }, "#0000FFFF" },
         { 128.0F, "#000080FF" } };
-    for(auto type : color_properties) {
+    for(auto type : COLOR_PROPERTIES) {
         auto configuration = MakeConfiguration();
         configuration->bindings.push_back(SensorBinding(type, SENSOR_ID));
         auto widget = MakeActiveWidget(std::move(configuration));

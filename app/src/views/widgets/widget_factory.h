@@ -67,11 +67,8 @@ public:
 
     // Injects children, already configured under the widget's child mount in
     // CHILD_WIDGET_IDS order, then configures the receiving widget once.
-    void ConfigureWidget(
-        IWidget& widget,
-        std::shared_ptr<WidgetConfiguration> configuration,
-        IWidget::Children children
-    ) const;
+    static void
+    ConfigureWidget(IWidget& widget, std::shared_ptr<WidgetConfiguration> configuration, IWidget::Children children);
 
     std::vector<WidgetType> GetAvailableTypes() const;
 };

@@ -3,6 +3,7 @@
 #include <memory>
 #include <memory_resource>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 #include <zephyr/kernel.h>
 #include <zephyr/ztest.h>
@@ -30,7 +31,7 @@ using namespace eerie_leap::views::widgets::indicators;
 
 ZTEST_SUITE(ui_configuration_manager, NULL, NULL, NULL, NULL, NULL);
 
-std::shared_ptr<UiConfiguration> ui_configuration_manager_test_SetupTestUiConfiguration() {
+std::shared_ptr<UiConfiguration> CreateManagerTestUiConfiguration() {
     auto ui_configuration = make_shared_pmr<UiConfiguration>(Mrm::GetDefaultPmr());
     ui_configuration->active_screen_group_id = 3;
 
@@ -137,7 +138,7 @@ ZTEST(ui_configuration_manager, test_UiConfigurationManager_Save_config_successf
     );
     auto ui_configuration_manager = std::make_shared<UiConfigurationManager>(std::move(cbor_ui_configuration_service));
 
-    auto ui_configuration = ui_configuration_manager_test_SetupTestUiConfiguration();
+    auto ui_configuration = CreateManagerTestUiConfiguration();
     bool result = ui_configuration_manager->Update(ui_configuration);
     zassert_true(result);
 }
@@ -153,7 +154,7 @@ ZTEST(ui_configuration_manager, test_UiConfigurationManager_Save_config_and_Load
     );
     auto ui_configuration_manager = std::make_shared<UiConfigurationManager>(std::move(cbor_ui_configuration_service));
 
-    auto ui_configuration = ui_configuration_manager_test_SetupTestUiConfiguration();
+    auto ui_configuration = CreateManagerTestUiConfiguration();
     bool result = ui_configuration_manager->Update(ui_configuration);
     zassert_true(result);
 
@@ -272,7 +273,7 @@ ZTEST(ui_configuration_manager, test_UiConfigurationManager_validates_once_per_b
             ++checks;
         }
     );
-    auto ui_configuration = ui_configuration_manager_test_SetupTestUiConfiguration();
+    auto ui_configuration = CreateManagerTestUiConfiguration();
     const auto widget_count = ui_configuration->screen_configurations[0]->widget_configurations.size();
 
     checks = 0;
@@ -312,7 +313,7 @@ ZTEST(ui_configuration_manager, test_UiConfigurationManager_persists_ordered_chi
     auto ui_configuration_manager = std::make_shared<UiConfigurationManager>(
         std::make_unique<CborConfigurationService<CborUiConfig>>("ui_config", fs_service)
     );
-    auto ui_configuration = ui_configuration_manager_test_SetupTestUiConfiguration();
+    auto ui_configuration = CreateManagerTestUiConfiguration();
     auto& widgets = ui_configuration->screen_configurations[0]->widget_configurations;
     // Widget 2 (z 2) comes before widget 1 (z 0), and ID order, in the owner's list.
     widgets[0]->properties[WidgetPropertyType::CHILD_WIDGET_IDS] = std::pmr::vector<int>(
@@ -348,19 +349,19 @@ ZTEST(ui_configuration_manager, test_UiConfigurationManager_rejects_invalid_comp
         }
     );
 
-    auto composed = ui_configuration_manager_test_SetupTestUiConfiguration();
+    auto composed = CreateManagerTestUiConfiguration();
     composed->screen_configurations[0]->widget_configurations[0]->properties[WidgetPropertyType::CHILD_WIDGET_IDS] =
         std::pmr::vector<int>({ 1 }, Mrm::GetDefaultPmr());
     zassert_true(ui_configuration_manager->Update(composed));
     const auto exported = ui_configuration_manager->GetCborConfiguration();
-    auto plain = ui_configuration_manager_test_SetupTestUiConfiguration();
+    auto plain = CreateManagerTestUiConfiguration();
     zassert_true(ui_configuration_manager->Update(plain));
 
     auto expect_plain_stored = [&](const char* mode) {
         zassert_equal(ui_configuration_manager->Get().get(), plain.get(), "%s", mode);
         auto stored = ui_configuration_manager->Get(true);
         zassert_is_null(ChildIds(*stored->screen_configurations[0]->widget_configurations[0]), "%s", mode);
-        plain = stored;
+        plain = std::move(stored);
     };
 
     reject_children = true;
@@ -374,7 +375,7 @@ ZTEST(ui_configuration_manager, test_UiConfigurationManager_rejects_invalid_comp
     expect_plain_stored("Rejected import");
 
     reject_children = false;
-    auto missing = ui_configuration_manager_test_SetupTestUiConfiguration();
+    auto missing = CreateManagerTestUiConfiguration();
     missing->screen_configurations[0]->widget_configurations[0]->properties[WidgetPropertyType::CHILD_WIDGET_IDS] =
         std::pmr::vector<int>({ 99 }, Mrm::GetDefaultPmr());
     zassert_false(ui_configuration_manager->Update(missing), "Graph checks run without widget rules too");
@@ -389,7 +390,7 @@ ZTEST(ui_configuration_manager, test_UiConfigurationManager_falls_back_when_the_
 
     // A payload from before the schema bump: structurally valid, but unreadable now.
     auto stale_config = make_unique_pmr<CborUiConfig>(Mrm::GetDefaultPmr());
-    stale_config->version = UiConfigurationCborParser::configuration_version - 1;
+    stale_config->version = UiConfigurationCborParser::CONFIGURATION_VERSION - 1;
     stale_config->active_screen_group_id = 3;
 
     auto writer_service = std::make_unique<CborConfigurationService<CborUiConfig>>("ui_config", fs_service);
@@ -428,7 +429,7 @@ ZTEST(ui_configuration_manager, test_an_update_is_reported_to_the_configuration_
         reports.push_back(type);
     });
 
-    zassert_true(ui_configuration_manager->Update(ui_configuration_manager_test_SetupTestUiConfiguration()));
+    zassert_true(ui_configuration_manager->Update(CreateManagerTestUiConfiguration()));
 
     zassert_equal(reports.size(), 1U, "A UI configuration stored after the unit started is an update");
     zassert_equal(reports[0], Type::Ui);

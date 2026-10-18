@@ -12,7 +12,7 @@ private:
     int value_precision_{};
 
     void UpdateIndicator(float value) override;
-    lv_obj_t* Create(std::shared_ptr<Frame> parent);
+    lv_obj_t* Create(const std::shared_ptr<Frame>& parent);
 
     int DoRender() override;
     int ApplyTheme(const ITheme& theme) override;

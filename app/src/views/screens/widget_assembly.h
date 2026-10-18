@@ -26,8 +26,8 @@ public:
     // destroying every widget, subscription, and LVGL object it created.
     // Roots keep definition order; descendants belong to their owners.
     static Roots Assemble(
-        std::shared_ptr<ScreenConfiguration> configuration,
-        std::shared_ptr<Frame> container,
+        const std::shared_ptr<ScreenConfiguration>& configuration,
+        const std::shared_ptr<Frame>& container,
         const WidgetContext& context
     );
 };

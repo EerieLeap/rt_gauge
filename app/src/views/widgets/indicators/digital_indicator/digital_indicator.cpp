@@ -40,7 +40,7 @@ int DigitalIndicator::ApplyTheme(const ITheme& theme) {
     return 0;
 }
 
-lv_obj_t* DigitalIndicator::Create(std::shared_ptr<Frame> parent) {
+lv_obj_t* DigitalIndicator::Create(const std::shared_ptr<Frame>& parent) {
     lv_label_ = lv_label_create(parent->GetObject());
 
     lv_obj_set_width(lv_label_, LV_SIZE_CONTENT);
@@ -57,7 +57,7 @@ lv_obj_t* DigitalIndicator::Create(std::shared_ptr<Frame> parent) {
 
 void DigitalIndicator::UpdateIndicator(float value) {
     char value_str[8];
-    snprintf(value_str, sizeof(value_str), "%.*f", value_precision_, value);
+    snprintf(value_str, sizeof(value_str), "%.*f", value_precision_, static_cast<double>(value));
 
     lv_label_set_text(lv_label_, value_str);
 }

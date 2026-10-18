@@ -15,10 +15,10 @@ using eerie_leap::subsys::event_bus::EventBus;
 
 class AppEventBus : public EventBus {
 private:
-    static constexpr int k_stack_size = 4096;
+    static constexpr int STACK_SIZE = 4096;
 
     AppEventBus() :
-        EventBus("app_event_bus", k_stack_size) {
+        EventBus("app_event_bus", STACK_SIZE) {
         RegisterChannel(NavigationEventChannel::GetInstance());
         // rt_core creates no bus for logging_events: the composition root picks one, and on the gauge it
         // is this one. A channel stays with the first bus that registers it; another bus's registration

@@ -27,7 +27,11 @@ const WidgetPropertyStore::Entry* WidgetPropertyStore::Find(WidgetPropertyType t
 }
 
 WidgetPropertyStore::Entry* WidgetPropertyStore::Find(WidgetPropertyType type) {
-    return const_cast<Entry*>(std::as_const(*this).Find(type));
+    const auto it = std::ranges::find_if(entries_, [type](const Entry& entry) {
+        return entry.type == type;
+    });
+
+    return it == entries_.end() ? nullptr : &(*it);
 }
 
 void WidgetPropertyStore::Register(WidgetPropertyType type, ConfigValue default_value, PropertyChangeEffect effect) {

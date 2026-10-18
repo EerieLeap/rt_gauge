@@ -48,7 +48,7 @@ WidgetComposition WidgetComposition::Build(const ScreenConfiguration& configurat
         size_t next_child;
     };
     std::pmr::vector<Visit> stack(resource);
-    stack.reserve(max_depth);
+    stack.reserve(MAX_DEPTH);
     for(const auto root : composition.roots) {
         stack.push_back({ root, 0 });
         while(!stack.empty()) {

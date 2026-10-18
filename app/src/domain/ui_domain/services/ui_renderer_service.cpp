@@ -344,7 +344,7 @@ int InitializeRotation(lv_display_t* display) {
 UiRendererService::UiRendererService() {
     // NOTE: Stack should be allocated on internal RAM to take an advantage of DMA for rendering
     thread_ = std::make_unique<Thread>(
-        "ui_renderer_service", this, UiRendererService::k_stack_size_, UiRendererService::k_priority_, false
+        "ui_renderer_service", this, UiRendererService::STACK_SIZE, UiRendererService::PRIORITY, false
     );
 }
 

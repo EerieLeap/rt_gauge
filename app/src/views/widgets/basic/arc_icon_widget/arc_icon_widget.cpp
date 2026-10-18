@@ -41,7 +41,7 @@ void ArcIconWidget::RegisterProperties(WidgetPropertyStore& store) const {
 void ArcIconWidget::OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) {
     switch(type) {
         case WidgetPropertyType::POSITION_ANGLE:
-            position_angle_ = ConfigValueAs<double>(value, -90.0);
+            position_angle_ = static_cast<float>(ConfigValueAs<double>(value, -90.0));
             break;
 
         case WidgetPropertyType::EDGE_OFFSET:

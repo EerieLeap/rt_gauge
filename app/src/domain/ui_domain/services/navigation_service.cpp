@@ -22,10 +22,10 @@ LOG_MODULE_REGISTER(navigation_service_logger);
 namespace {
 
 void PublishNavigation(NavigationAction action, NavigationPayloadType target_type, uint32_t target_id) {
-    static constexpr auto caller = GetCallerName();
+    static constexpr auto CALLER = GetCallerName();
 
     NavigationEventChannel::GetInstance().PublishAsync(
-        { .source_id = caller.hash,
+        { .source_id = CALLER.hash,
             .type = NavigationEventType::Changed,
             .payload = {
                 { NavigationPayloadType::Action, static_cast<uint32_t>(action) }, { target_type, target_id } } }
@@ -56,7 +56,7 @@ void NavigationService::SetActiveGroupId(uint32_t screen_group_id) {
 }
 
 void NavigationService::PushHistory(uint32_t screen_group_id) {
-    if(history_count_ == k_history_depth) {
+    if(history_count_ == HISTORY_DEPTH) {
         std::ranges::rotate(history_, history_.begin() + 1);
         --history_count_;
     }

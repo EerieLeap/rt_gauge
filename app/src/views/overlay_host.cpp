@@ -71,8 +71,8 @@ int OverlayHost::Push(std::unique_ptr<ScreenGroup> screen_group, const OverlayOp
     if(screen_group == nullptr || screen_group->IsEmpty())
         return -EINVAL;
 
-    if(entries_.size() >= k_max_depth) {
-        LOG_WRN("Refusing to stack more than %zu overlays.", k_max_depth);
+    if(entries_.size() >= MAX_DEPTH) {
+        LOG_WRN("Refusing to stack more than %zu overlays.", MAX_DEPTH);
         return -ENOSPC;
     }
 
@@ -171,7 +171,7 @@ std::shared_ptr<Frame> OverlayHost::CreateScrim(bool close_on_tap) {
 
 void OverlayHost::StyleScrim(lv_obj_t* scrim, const ITheme& theme) {
     lv_obj_set_style_bg_color(scrim, theme.GetBackgroundColor().ToLvColor(), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(scrim, scrim_opacity_, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(scrim, SCRIM_OPACITY, LV_PART_MAIN);
 }
 
 void OverlayHost::UpdateVisibility() {

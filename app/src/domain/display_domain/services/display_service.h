@@ -36,9 +36,9 @@ private:
 
     // The floor is deliberately above 0: a slider that can black the panel out leaves no way
     // to find the slider again.
-    static constexpr double brightness_min_ = 10;
-    static constexpr double brightness_max_ = 255;
-    static constexpr double brightness_step_ = 5;
+    static constexpr double BRIGHTNESS_MIN = 10;
+    static constexpr double BRIGHTNESS_MAX = 255;
+    static constexpr double BRIGHTNESS_STEP = 5;
 
     std::shared_ptr<DisplayConfigurationManager> configuration_manager_;
     std::shared_ptr<WorkQueueThread> config_work_queue_thread_;
@@ -54,13 +54,13 @@ private:
 
     bool is_initialized_ = false;
 
-    int ApplyBrightness(uint8_t value);
-    int ApplyBlanking(bool enabled);
+    int ApplyBrightness(uint8_t value) const;
+    int ApplyBlanking(bool enabled) const;
 
     void SubscribeSettings();
     void OnBrightnessChangeRequested(const SettingsEventsChannel::EventMessage& event);
     void PublishBrightnessValue() const;
-    void PublishBrightnessRange() const;
+    static void PublishBrightnessRange();
 
     static WorkQueueTaskResult PersistWork(PersistTask* task);
     void WriteConfiguration();

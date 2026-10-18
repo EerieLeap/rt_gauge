@@ -12,7 +12,7 @@ using eerie_leap::domain::ui_domain::models::WidgetDirection;
 class BarIndicator : public IndicatorBase {
 protected:
     lv_obj_t* lv_bar_{};
-    WidgetDirection direction_;
+    WidgetDirection direction_{};
 
     void UpdateIndicator(float value) override;
 

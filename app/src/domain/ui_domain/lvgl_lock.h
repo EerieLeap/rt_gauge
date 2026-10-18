@@ -19,10 +19,10 @@ private:
     LvglLock();
     ~LvglLock() = default;
 
+public:
     LvglLock(const LvglLock&) = delete;
     LvglLock& operator=(const LvglLock&) = delete;
 
-public:
     static LvglLock& GetInstance();
 
     void Lock();

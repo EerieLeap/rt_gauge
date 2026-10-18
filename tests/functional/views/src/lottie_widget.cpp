@@ -23,14 +23,14 @@ using namespace eerie_leap::views::widgets::basic;
 using eerie_leap::domain::ui_domain::ScopedLvglLock;
 using eerie_leap::subsys::assets::AssetKind;
 using eerie_leap::subsys::assets::AssetsManager;
-using eerie_leap::views::assets::animations::ui_lottie_spinner_json;
+using eerie_leap::views::assets::animations::UI_LOTTIE_SPINNER_JSON;
 using eerie_leap::views::utilitites::Frame;
 
 namespace {
 
 // A 32x32 white square whose layer opacity rises linearly from 0 to 100 over one second,
 // authored at 30 fps so that playing it at LVGL's assumed 60 fps would show.
-constexpr std::string_view fade_json = R"json({
+constexpr std::string_view FADE_JSON = R"json({
   "v": "5.7.4", "fr": 30, "ip": 0, "op": 30, "w": 32, "h": 32, "nm": "fade", "ddd": 0, "assets": [],
   "layers": [{
     "ddd": 0, "ind": 1, "ty": 4, "nm": "square", "sr": 1, "ao": 0, "ip": 0, "op": 30, "st": 0, "bm": 0,
@@ -61,15 +61,11 @@ std::shared_ptr<Frame> MakeRoot() {
     return std::make_shared<Frame>(Frame::CreateWrapped().SetWidth(100, true).SetHeight(100, true).Build());
 }
 
-std::span<const uint8_t> Bytes(std::string_view text) {
-    return { reinterpret_cast<const uint8_t*>(text.data()), text.size() };
-}
-
 WidgetContext Context() {
     auto store = views_test::MakeAssetStore("lottie-widget");
-    zassert_true(store->Save("spinner.json", Bytes(ui_lottie_spinner_json)));
-    zassert_true(store->Save("fade.json", Bytes(fade_json)));
-    zassert_true(store->Save("broken.json", Bytes("{\"v\":\"5.7.4\"")));
+    zassert_true(store->Save("spinner.json", views_test::TextBytes(UI_LOTTIE_SPINNER_JSON)));
+    zassert_true(store->Save("fade.json", views_test::TextBytes(FADE_JSON)));
+    zassert_true(store->Save("broken.json", views_test::TextBytes("{\"v\":\"5.7.4\"")));
     return WidgetContext{ .assets_manager = views_test::MakeAssetsManager(AssetKind::ANIMATIONS, std::move(store)) };
 }
 
@@ -92,7 +88,7 @@ lv_obj_t* LottieObject(const LottieWidget& widget) {
 
 lv_color32_t Pixel(lv_obj_t* animation, int x, int y) {
     auto* buffer = lv_canvas_get_draw_buf(animation);
-    return reinterpret_cast<const lv_color32_t*>(buffer->data + y * buffer->header.stride)[x];
+    return views_test::PixelRow(*buffer, static_cast<uint32_t>(y))[x];
 }
 
 std::vector<uint8_t> Pixels(lv_obj_t* animation) {

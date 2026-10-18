@@ -26,6 +26,10 @@ private:
 public:
     explicit ImageIcon(std::shared_ptr<Frame> parent);
     ~ImageIcon() override;
+    ImageIcon(const ImageIcon&) = delete;
+    ImageIcon& operator=(const ImageIcon&) = delete;
+    ImageIcon(ImageIcon&&) = delete;
+    ImageIcon& operator=(ImageIcon&&) = delete;
 
     static void RegisterProperties(WidgetPropertyStore& store);
 

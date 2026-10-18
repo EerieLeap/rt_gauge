@@ -6,12 +6,19 @@
 
 namespace eerie_leap::configuration::cbor::traits {
 
-static struct CborDisplayConfigTraitRegistrar {
+namespace {
+
+struct CborDisplayConfigTraitRegistrar {
     CborDisplayConfigTraitRegistrar() {
         CborTraitRegistry::Register<CborDisplayConfig>(
             cbor_encode_CborDisplayConfig, cbor_decode_CborDisplayConfig, cbor_get_size_CborDisplayConfig
         );
     }
-} CborDisplayConfigTraitRegistrar;
+};
+
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization): the registry insert can only throw std::bad_alloc, fatal before main
+const CborDisplayConfigTraitRegistrar CBOR_DISPLAY_CONFIG_TRAIT_REGISTRAR;
+
+} // namespace
 
 } // namespace eerie_leap::configuration::cbor::traits

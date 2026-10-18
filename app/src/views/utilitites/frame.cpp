@@ -252,11 +252,20 @@ void Frame::SetProcessingEnabled(bool enabled) {
 
 bool Frame::IsProcessingEnabled() const {
     ScopedLvglLock lvgl_guard;
-    if(!is_processing_enabled_)
-        return false;
 
-    const auto parent = processing_parent_.lock();
-    return parent == nullptr || parent->IsProcessingEnabled();
+    // Walks up the processing parents; `owner` keeps the frame being inspected alive.
+    const Frame* frame = this;
+    std::shared_ptr<Frame> owner;
+    while(frame != nullptr) {
+        if(!frame->is_processing_enabled_)
+            return false;
+
+        auto parent = frame->processing_parent_.lock();
+        frame = parent.get();
+        owner = std::move(parent);
+    }
+
+    return true;
 }
 
 void Frame::SetTrackingEnabled(bool enabled) {
@@ -266,11 +275,20 @@ void Frame::SetTrackingEnabled(bool enabled) {
 
 bool Frame::IsTrackingEnabled() const {
     ScopedLvglLock lvgl_guard;
-    if(!is_tracking_enabled_)
-        return false;
 
-    const auto parent = processing_parent_.lock();
-    return parent == nullptr || parent->IsTrackingEnabled();
+    // Walks up the processing parents; `owner` keeps the frame being inspected alive.
+    const Frame* frame = this;
+    std::shared_ptr<Frame> owner;
+    while(frame != nullptr) {
+        if(!frame->is_tracking_enabled_)
+            return false;
+
+        auto parent = frame->processing_parent_.lock();
+        frame = parent.get();
+        owner = std::move(parent);
+    }
+
+    return true;
 }
 
 void Frame::SetChild(std::shared_ptr<Frame> child) {

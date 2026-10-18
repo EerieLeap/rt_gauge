@@ -13,10 +13,10 @@ using eerie_leap::subsys::event_bus::EventChannel;
 
 class SettingsEventsChannel : public EventChannel<SettingsEventType, SettingsPayloadType> {
 private:
-    static constexpr size_t k_max_queued_events = 16;
+    static constexpr size_t MAX_QUEUED_EVENTS = 16;
 
     SettingsEventsChannel() :
-        EventChannel("settings_events", k_max_queued_events) {}
+        EventChannel("settings_events", MAX_QUEUED_EVENTS) {}
 
 public:
     static SettingsEventsChannel& GetInstance() {

@@ -18,8 +18,8 @@ using eerie_leap::views::utilitites::GridLayout;
 using eerie_leap::views::widgets::WidgetFactory;
 
 WidgetAssembly::Roots WidgetAssembly::Assemble(
-    std::shared_ptr<ScreenConfiguration> configuration,
-    std::shared_ptr<Frame> container,
+    const std::shared_ptr<ScreenConfiguration>& configuration,
+    const std::shared_ptr<Frame>& container,
     const WidgetContext& context
 ) {
     ScopedLvglLock lvgl_guard;
@@ -60,7 +60,7 @@ WidgetAssembly::Roots WidgetAssembly::Assemble(
             for(const auto child : indices)
                 children.push_back(std::move(instances[child]));
 
-            factory.ConfigureWidget(*instances[i], definitions[i], std::move(children));
+            WidgetFactory::ConfigureWidget(*instances[i], definitions[i], std::move(children));
         }
 
         for(const auto i : composition.roots) {

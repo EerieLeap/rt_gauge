@@ -16,12 +16,12 @@ using eerie_leap::domain::ui_domain::models::NavigationIntent;
 
 class NavigationService {
 private:
-    static constexpr size_t k_history_depth = 8;
+    static constexpr size_t HISTORY_DEPTH = 8;
 
     std::vector<uint32_t> screen_group_ids_;
     std::optional<uint32_t> active_screen_group_id_;
 
-    std::array<uint32_t, k_history_depth> history_{};
+    std::array<uint32_t, HISTORY_DEPTH> history_{};
     size_t history_count_ = 0;
 
     std::optional<uint32_t> active_overlay_screen_id_;
@@ -37,6 +37,7 @@ private:
 
 public:
     NavigationService();
+    ~NavigationService() = default;
 
     // Copying would duplicate lock_, whose wait queue is tied to its address.
     NavigationService(const NavigationService&) = delete;

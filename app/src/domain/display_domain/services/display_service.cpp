@@ -34,9 +34,9 @@ LOG_MODULE_REGISTER(display_service_logger);
 namespace {
 
 uint32_t BrightnessSettingId() {
-    static const uint32_t id = StringHelpers::GetHash(SettingId::DISPLAY_BRIGHTNESS);
+    static const uint32_t ID = StringHelpers::GetHash(SettingId::DISPLAY_BRIGHTNESS);
 
-    return id;
+    return ID;
 }
 
 bool IsBrightnessSetting(const SettingsEventsChannel::EventMessage& event) {
@@ -149,11 +149,11 @@ void DisplayService::OnBrightnessChangeRequested(const SettingsEventsChannel::Ev
     if(const auto* int_value = std::get_if<int>(&it->second))
         requested = *int_value;
     else if(const auto* float_value = std::get_if<float>(&it->second))
-        requested = *float_value;
+        requested = static_cast<double>(*float_value);
     else
         return;
 
-    const auto clamped = static_cast<uint8_t>(std::lround(std::clamp(requested, brightness_min_, brightness_max_)));
+    const auto clamped = static_cast<uint8_t>(std::lround(std::clamp(requested, BRIGHTNESS_MIN, BRIGHTNESS_MAX)));
 
     // Only a value that actually moved is a fact worth waking every subscriber - and worth
     // re-arming the persistence debounce - for.
@@ -167,26 +167,26 @@ void DisplayService::OnBrightnessChangeRequested(const SettingsEventsChannel::Ev
 }
 
 void DisplayService::PublishBrightnessValue() const {
-    static constexpr auto caller = GetCallerName();
+    static constexpr auto CALLER = GetCallerName();
 
     SettingsEventsChannel::GetInstance().PublishAsync(
-        { .source_id = caller.hash,
+        { .source_id = CALLER.hash,
             .type = SettingsEventType::Changed,
             .payload = { { SettingsPayloadType::SettingId, BrightnessSettingId() },
                 { SettingsPayloadType::Value, static_cast<int>(GetBrightness()) } } }
     );
 }
 
-void DisplayService::PublishBrightnessRange() const {
-    static constexpr auto caller = GetCallerName();
+void DisplayService::PublishBrightnessRange() {
+    static constexpr auto CALLER = GetCallerName();
 
     SettingsEventsChannel::GetInstance().PublishAsync(
-        { .source_id = caller.hash,
+        { .source_id = CALLER.hash,
             .type = SettingsEventType::RangeChanged,
             .payload = { { SettingsPayloadType::SettingId, BrightnessSettingId() },
-                { SettingsPayloadType::MinValue, static_cast<float>(brightness_min_) },
-                { SettingsPayloadType::MaxValue, static_cast<float>(brightness_max_) },
-                { SettingsPayloadType::Step, static_cast<float>(brightness_step_) } } }
+                { SettingsPayloadType::MinValue, static_cast<float>(BRIGHTNESS_MIN) },
+                { SettingsPayloadType::MaxValue, static_cast<float>(BRIGHTNESS_MAX) },
+                { SettingsPayloadType::Step, static_cast<float>(BRIGHTNESS_STEP) } } }
     );
 }
 
@@ -194,7 +194,7 @@ bool DisplayService::IsInitialized() const {
     return is_initialized_;
 }
 
-int DisplayService::ApplyBrightness(uint8_t value) {
+int DisplayService::ApplyBrightness(uint8_t value) const {
     // Initialize() is what proves the device exists; without it the driver call
     // below would dereference a null device.
     if(!is_initialized_)
@@ -219,7 +219,7 @@ int DisplayService::ApplyBrightness(uint8_t value) {
     return res;
 }
 
-int DisplayService::ApplyBlanking(bool enabled) {
+int DisplayService::ApplyBlanking(bool enabled) const {
     if(!is_initialized_)
         return -ENODEV;
 

@@ -68,6 +68,7 @@ public:
 
     NavigationProbe(const NavigationProbe&) = delete;
     NavigationProbe& operator=(const NavigationProbe&) = delete;
+    ~NavigationProbe() = default;
 
     [[nodiscard]] bool IsSubscribed() const {
         return subscription_ != nullptr;

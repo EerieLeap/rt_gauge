@@ -58,7 +58,7 @@ namespace {
 // outbound_event_type, has_selector, selector_key, selector_value]; a target of 24 or more takes
 // two bytes (0x18 nn), and an absent selector still encodes the placeholder 0.
 // clang-format off: each row holds the bytes its comment describes, and the longer rows pass the column limit.
-const uint8_t k_stored_configuration[] = {
+const uint8_t STORED_CONFIGURATION[] = {
     0x9f, 0x01, 0x01, 0x9f,                                     // [version 1, active group 1, screens [
     0x9f, 0x01, 0x01, 0x02, 0x00, 0xf5, 0xf4,                   //   [id 1, group 1, Gauge, z 0, visible, not overlay,
     0x9f, 0xf4, 0x01, 0x01, 0x00, 0xff, 0x9f,                   //    grid [no snap, 1, 1, 0], widgets [
@@ -197,8 +197,8 @@ ZTEST(ui_configuration_binding_bytes, test_bindings_encode_to_the_stored_bytes) 
     auto cbor_configuration = UiConfigurationCborParser().Serialize(*configuration);
     auto bytes = CborSerializer<CborUiConfig>().Serialize(*cbor_configuration);
 
-    const bool matches = bytes.size() == sizeof(k_stored_configuration)
-        && std::memcmp(bytes.data(), k_stored_configuration, bytes.size()) == 0;
+    const bool matches = bytes.size() == sizeof(STORED_CONFIGURATION)
+        && std::memcmp(bytes.data(), STORED_CONFIGURATION, bytes.size()) == 0;
 
     if(!matches)
         PrintBytes(bytes);
@@ -207,7 +207,7 @@ ZTEST(ui_configuration_binding_bytes, test_bindings_encode_to_the_stored_bytes) 
 }
 
 ZTEST(ui_configuration_binding_bytes, test_stored_bytes_decode_to_the_same_bindings) {
-    auto cbor_configuration = CborSerializer<CborUiConfig>().Deserialize(k_stored_configuration);
+    auto cbor_configuration = CborSerializer<CborUiConfig>().Deserialize(STORED_CONFIGURATION);
     zassert_not_null(cbor_configuration.get());
 
     auto configuration = UiConfigurationCborParser().Deserialize(Mrm::GetDefaultPmr(), *cbor_configuration);

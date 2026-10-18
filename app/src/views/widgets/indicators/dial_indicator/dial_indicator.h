@@ -38,6 +38,10 @@ public:
 
     explicit DialIndicator(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context);
     ~DialIndicator() override;
+    DialIndicator(const DialIndicator&) = delete;
+    DialIndicator& operator=(const DialIndicator&) = delete;
+    DialIndicator(DialIndicator&&) = delete;
+    DialIndicator& operator=(DialIndicator&&) = delete;
 
     std::vector<WidgetPropertyType> GetSupportedProperties() const override;
 

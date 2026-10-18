@@ -28,8 +28,8 @@ LOG_MODULE_REGISTER(lottie_widget_logger);
 namespace {
 
 // Matches the shape icon mask limit; larger frames would not fit the smaller boards anyway.
-constexpr size_t max_buffer_bytes = 4 * 1024 * 1024;
-constexpr int32_t max_extent = INT16_MAX;
+constexpr size_t MAX_BUFFER_BYTES = 4 * 1024 * 1024;
+constexpr int32_t MAX_EXTENT = INT16_MAX;
 
 // lv_lottie's own frame callback, shared by every instance.
 lv_anim_exec_xcb_t render_frame = nullptr;
@@ -90,12 +90,12 @@ lv_obj_t* LottieWidget::Create() {
     lv_obj_update_layout(content);
     const int32_t width = width_px_ > 0 ? width_px_ : lv_obj_get_content_width(content);
     const int32_t height = height_px_ > 0 ? height_px_ : lv_obj_get_content_height(content);
-    if(width <= 0 || height <= 0 || width > max_extent || height > max_extent)
+    if(width <= 0 || height <= 0 || width > MAX_EXTENT || height > MAX_EXTENT)
         return nullptr;
 
     const uint32_t stride = lv_draw_buf_width_to_stride(width, LV_COLOR_FORMAT_ARGB8888);
     const size_t size = static_cast<size_t>(stride) * height;
-    if(size > max_buffer_bytes)
+    if(size > MAX_BUFFER_BYTES)
         return nullptr;
 
     const auto provider = context_.assets_manager->Find(AssetKind::ANIMATIONS);

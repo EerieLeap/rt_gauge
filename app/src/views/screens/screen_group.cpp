@@ -13,7 +13,7 @@ using eerie_leap::domain::ui_domain::ScopedLvglLock;
 
 LOG_MODULE_REGISTER(screen_group_logger);
 
-ScreenGroup::ScreenGroup(uint32_t screen_group_id, std::shared_ptr<Frame> parent) :
+ScreenGroup::ScreenGroup(uint32_t screen_group_id, const std::shared_ptr<Frame>& parent) :
     screen_group_id_(screen_group_id) {
 
     container_ = std::make_shared<Frame>(Frame::CreateWrapped(parent->GetObject())
@@ -143,7 +143,7 @@ int ScreenGroup::DoRender() {
     return 0;
 }
 
-int ScreenGroup::ApplyTheme(const ITheme& theme) {
+int ScreenGroup::ApplyTheme(const ITheme& /*theme*/) {
     return 0;
 }
 

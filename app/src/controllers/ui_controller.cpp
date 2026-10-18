@@ -237,19 +237,21 @@ int UiController::Initialize() {
     }
 
     ui_render_work_queue_thread_ = std::make_unique<WorkQueueThread>(
-        "ui_render_work_q", ui_render_work_queue_stack_size_, ui_render_work_queue_priority_
+        "ui_render_work_q", UI_RENDER_WORK_QUEUE_STACK_SIZE, UI_RENDER_WORK_QUEUE_PRIORITY
     );
 
     if(ui_render_work_queue_thread_->Initialize()) {
         // Keeps the event bus worker - and the LVGL lock it holds while
         // dispatching - out of the multi-frame first render of a screen group.
-        main_view_->SetRenderDispatcher([work_queue = ui_render_work_queue_thread_.get()](std::function<void()> work) {
-            try {
-                work_queue->Run(work);
-            } catch(const std::exception& e) {
-                LOG_ERR("Failed to queue a screen group render. %s", e.what());
+        main_view_->SetRenderDispatcher(
+            [work_queue = ui_render_work_queue_thread_.get()](const std::function<void()>& work) {
+                try {
+                    work_queue->Run(work);
+                } catch(const std::exception& e) {
+                    LOG_ERR("Failed to queue a screen group render. %s", e.what());
+                }
             }
-        });
+        );
     } else {
         LOG_ERR("Failed to start the UI render work queue, rendering inline.");
         ui_render_work_queue_thread_.reset();
@@ -277,7 +279,7 @@ void UiController::RegisterAssets() {
 
     // Widgets keep RAM copies of what they load, so a client may overwrite or delete a file a widget
     // shows: nothing is ever in use, and the change appears at the widget's next render.
-    constexpr auto access = static_cast<uint8_t>(
+    constexpr auto ACCESS = static_cast<uint8_t>(
         ToMask(AssetAccess::READ) | ToMask(AssetAccess::WRITE) | ToMask(AssetAccess::DELETE)
     );
 
@@ -286,7 +288,7 @@ void UiController::RegisterAssets() {
             .name = "images",
             .store = images_store_,
             .extensions = IMAGE_EXTENSIONS,
-            .access = access,
+            .access = ACCESS,
             .max_size = CONFIG_EERIE_LEAP_UI_IMAGE_MAX_SIZE }
     );
     if(!images_registered_)
@@ -297,7 +299,7 @@ void UiController::RegisterAssets() {
             .name = "animations",
             .store = animations_store_,
             .extensions = ANIMATION_EXTENSIONS,
-            .access = access,
+            .access = ACCESS,
             .max_size = CONFIG_EERIE_LEAP_UI_ANIMATION_MAX_SIZE }
     );
     if(!animations_registered_)
@@ -376,11 +378,11 @@ int UiController::Configure(std::shared_ptr<UiConfiguration> config) {
 
 // Every screen group is built here, not on first render, so one broadcast reaches every binding
 // that was just resolved. Settings owners only publish on change, and none of them has yet.
-void UiController::RequestSettingsState() const {
-    static constexpr auto caller = GetCallerName();
+void UiController::RequestSettingsState() {
+    static constexpr auto CALLER = GetCallerName();
 
     SettingsEventsChannel::GetInstance().PublishAsync(
-        { .source_id = caller.hash, .type = SettingsEventType::StateRequested }
+        { .source_id = CALLER.hash, .type = SettingsEventType::StateRequested }
     );
 }
 
@@ -452,7 +454,7 @@ void UiController::ShowOverlay(uint32_t screen_id) {
         return;
     }
 
-    auto configuration = FindOverlayConfiguration(screen_id);
+    const auto configuration = FindOverlayConfiguration(screen_id);
     if(configuration == nullptr) {
         LOG_ERR("Screen %u is not a configured overlay.", screen_id);
         navigation_service_->CloseOverlay();
@@ -462,7 +464,7 @@ void UiController::ShowOverlay(uint32_t screen_id) {
 
     // Built fresh on every show: Pop() destroys the group and everything under it.
     auto screen_group = overlay_host_->CreateGroup(configuration->screen_group_id);
-    auto screen = CreateScreen(std::move(configuration), screen_group->GetContainer());
+    auto screen = CreateScreen(configuration, screen_group->GetContainer());
     if(screen == nullptr) {
         LOG_ERR("Failed to build overlay screen %u.", screen_id);
         navigation_service_->CloseOverlay();
@@ -495,7 +497,7 @@ std::shared_ptr<NavigationService> UiController::GetNavigationService() const {
 }
 
 std::shared_ptr<IScreen>
-UiController::CreateScreen(std::shared_ptr<ScreenConfiguration> configuration, std::shared_ptr<Frame> parent) {
+UiController::CreateScreen(const std::shared_ptr<ScreenConfiguration>& configuration, std::shared_ptr<Frame> parent) {
 
     try {
         return ScreenFactory::GetInstance().CreateScreen(configuration, std::move(parent), widget_context_);
@@ -939,17 +941,18 @@ void UiController::SetupTestAssets() {
         if(const auto size = animations_store_->GetSize(name); size.has_value() && *size == json.size())
             return;
 
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): the embedded JSON text is stored as raw bytes
         animations_store_->Save(name, std::span(reinterpret_cast<const uint8_t*>(json.data()), json.size()));
     };
 
-    save_if_stale("ui_lottie_spinner.json", ui_lottie_spinner_json);
+    save_if_stale("ui_lottie_spinner.json", UI_LOTTIE_SPINNER_JSON);
 
     if(images_store_->Exists("ui_img_norma_al88.bin"))
         return;
 
-    images_store_->Save("ui_img_norma_al88.bin", ui_img_norma_al88_data);
+    images_store_->Save("ui_img_norma_al88.bin", UI_IMG_NORMA_AL88_DATA);
 
-    images_store_->Save("ui_img_arrow_al88.bin", ui_img_arrow_al88_data);
+    images_store_->Save("ui_img_arrow_al88.bin", UI_IMG_ARROW_AL88_DATA);
 }
 
 } // namespace eerie_leap::controllers

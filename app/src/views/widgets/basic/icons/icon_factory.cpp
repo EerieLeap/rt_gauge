@@ -51,7 +51,7 @@ std::unique_ptr<IIcon> IconFactory::Create(
     if(it == registrations_.end())
         throw std::runtime_error("Unknown widget type");
 
-    auto icon = it->second.create(parent);
+    auto icon = it->second.create(std::move(parent));
     icon->Configure(std::move(properties));
 
     return icon;

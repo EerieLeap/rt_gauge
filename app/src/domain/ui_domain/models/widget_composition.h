@@ -13,9 +13,9 @@ struct ScreenConfiguration;
 // Indices refer to ScreenConfiguration::widget_configurations, which must remain
 // unchanged while consuming this plan. Child order is semantic, not drawing order.
 struct WidgetComposition {
-    static constexpr size_t max_nodes = 32;
-    static constexpr size_t max_edges = 31;
-    static constexpr size_t max_depth = 8;
+    static constexpr size_t MAX_NODES = 32;
+    static constexpr size_t MAX_EDGES = 31;
+    static constexpr size_t MAX_DEPTH = 8;
 
     struct Node {
         std::optional<size_t> parent;
@@ -43,6 +43,7 @@ struct WidgetComposition {
     WidgetComposition& operator=(const WidgetComposition&) = delete;
     WidgetComposition(WidgetComposition&&) noexcept = default;
     WidgetComposition& operator=(WidgetComposition&&) = default;
+    ~WidgetComposition() = default;
 
     std::span<const size_t> GetChildren(size_t index) const {
         const auto& node = nodes.at(index);

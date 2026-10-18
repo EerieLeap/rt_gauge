@@ -1,6 +1,7 @@
 #include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 #include <zephyr/ztest.h>
 
@@ -43,7 +44,7 @@ std::string InvalidArgumentMessage(const GridSettings& grid, int32_t screen_widt
 template<typename Fn>
 std::string ThrownMessage(Fn&& fn) {
     try {
-        fn();
+        std::forward<Fn>(fn)();
     } catch(const std::exception& e) {
         return e.what();
     } catch(...) {

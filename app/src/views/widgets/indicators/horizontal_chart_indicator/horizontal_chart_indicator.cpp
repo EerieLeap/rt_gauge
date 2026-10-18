@@ -75,6 +75,8 @@ lv_obj_t* HorizontalChartIndicator::Create(
             chart_type = LV_CHART_TYPE_LINE;
             lv_obj_set_style_line_width(lv_chart_, 6, LV_PART_ITEMS);
             break;
+        case HorizontalChartIndicatorType::None:
+            break;
     }
 
     if(chart_type == LV_CHART_TYPE_NONE)

@@ -14,8 +14,8 @@ private:
         bool is_active;
     };
 
-    static const int segment_length_ = 46;
-    static const int step_deg_ = 4;
+    static constexpr int SEGMENT_LENGTH = 46;
+    static constexpr int STEP_DEG = 4;
 
     int start_angle_{};
     int end_angle_{};
@@ -37,6 +37,10 @@ protected:
 
 public:
     ~SegmentArcIndicator() override;
+    SegmentArcIndicator(const SegmentArcIndicator&) = delete;
+    SegmentArcIndicator& operator=(const SegmentArcIndicator&) = delete;
+    SegmentArcIndicator(SegmentArcIndicator&&) = delete;
+    SegmentArcIndicator& operator=(SegmentArcIndicator&&) = delete;
 
     explicit SegmentArcIndicator(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context);
     WidgetType GetType() const override {

@@ -31,6 +31,10 @@ public:
 
     IconWidget(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context, IconType icon_type = IconType::None);
     ~IconWidget() override;
+    IconWidget(const IconWidget&) = delete;
+    IconWidget& operator=(const IconWidget&) = delete;
+    IconWidget(IconWidget&&) = delete;
+    IconWidget& operator=(IconWidget&&) = delete;
     std::shared_ptr<Frame> GetIconContainer() const;
 
 protected:

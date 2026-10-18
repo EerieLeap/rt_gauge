@@ -16,7 +16,7 @@ using namespace eerie_leap::views::themes;
 LOG_MODULE_REGISTER(button_control_logger);
 
 // A button carries no setting, so an unset target means "no navigation".
-static constexpr int32_t no_target = -1;
+static constexpr int32_t NO_TARGET = -1;
 
 ButtonControl::ButtonControl(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context) :
     ControlBase(id, std::move(parent), std::move(context), false) {}
@@ -30,7 +30,7 @@ void ButtonControl::RegisterProperties(WidgetPropertyStore& store) const {
     store.RegisterColor(WidgetPropertyType::COLOR_SECONDARY_INACTIVE);
 
     store.Register(WidgetPropertyType::LABEL, ConfigValue{ std::pmr::string{} }, PropertyChangeEffect::Repaint);
-    store.Register(WidgetPropertyType::TARGET_SCREEN_GROUP, ConfigValue{ no_target }, PropertyChangeEffect::None);
+    store.Register(WidgetPropertyType::TARGET_SCREEN_GROUP, ConfigValue{ NO_TARGET }, PropertyChangeEffect::None);
     store.Register(
         WidgetPropertyType::NAVIGATION_INTENT, ConfigValue{ static_cast<int>(NavigationIntent::None) },
         PropertyChangeEffect::None
@@ -78,7 +78,7 @@ void ButtonControl::OnPropertyChanged(WidgetPropertyType type, const ConfigValue
             break;
 
         case WidgetPropertyType::TARGET_SCREEN_GROUP: {
-            auto target = ConfigValueAs<int>(value, no_target);
+            auto target = ConfigValueAs<int>(value, NO_TARGET);
 
             if(target >= 0)
                 target_id_ = static_cast<uint32_t>(target);

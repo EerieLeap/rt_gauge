@@ -16,7 +16,7 @@ struct ScreenConfiguration {
 
     uint32_t id{};
     uint32_t screen_group_id{};
-    ScreenType type;
+    ScreenType type{};
     int32_t z_index = 0;
     bool is_visible = true;
 

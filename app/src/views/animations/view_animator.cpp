@@ -186,9 +186,9 @@ void ViewAnimator::Execute(void* context, int32_t value) {
         self->ResetPresentation();
         return;
     }
-    if(self->settings_.type == Animation::Type::Blinking)
+    if(self->settings_.type == Animation::Type::Blinking) {
         lv_obj_set_style_opa_layered(self->presentation_, value, LV_PART_MAIN);
-    else {
+    } else {
         lv_obj_set_style_transform_rotation(self->presentation_, value, LV_PART_MAIN);
         self->RefreshDrawMargin();
     }

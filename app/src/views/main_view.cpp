@@ -171,7 +171,7 @@ std::shared_ptr<IScreen> MainView::GetScreen(uint32_t screen_id) const {
     return nullptr;
 }
 
-static void RenderCenterCrossHelperGuides(lv_obj_t* screen) {
+[[maybe_unused]] static void RenderCenterCrossHelperGuides(lv_obj_t* screen) {
     lv_obj_t* panel1 = lv_obj_create(screen);
     lv_obj_set_width(panel1, 2);
     lv_obj_set_height(panel1, 466);

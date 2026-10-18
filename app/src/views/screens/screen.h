@@ -30,7 +30,7 @@ protected:
     int ApplyTheme(const ITheme& theme) override;
 
 public:
-    Screen(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context);
+    Screen(uint32_t id, const std::shared_ptr<Frame>& parent, WidgetContext context);
 
     void Configure(std::shared_ptr<ScreenConfiguration> configuration) override;
     std::shared_ptr<ScreenConfiguration> GetConfiguration() const override;

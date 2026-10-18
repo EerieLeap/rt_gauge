@@ -50,8 +50,8 @@ struct OverlayOptions {
 class OverlayHost : public RenderableBase {
 private:
     // Deep enough for a dialog raised from a popup; anything more is a runaway publisher.
-    static constexpr size_t k_max_depth = 4;
-    static constexpr lv_opa_t scrim_opacity_ = 240;
+    static constexpr size_t MAX_DEPTH = 4;
+    static constexpr lv_opa_t SCRIM_OPACITY = 240;
 
     // One pushed overlay. Everything it owns goes away together when it does.
     struct Entry {

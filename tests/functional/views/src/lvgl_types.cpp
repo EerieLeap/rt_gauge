@@ -13,10 +13,10 @@ using eerie_leap::views::utilities::LvglFont;
 ZTEST_SUITE(lvgl_types, NULL, NULL, NULL, NULL, NULL);
 
 ZTEST(lvgl_types, test_parsed_property_color_converts_to_lvgl_with_explicit_alpha) {
-    constexpr std::array values{ "#12345600", "#12345680", "#123456FF" };
-    constexpr std::array<uint8_t, 3> alphas{ 0, 128, 255 };
-    for(size_t index = 0; index < values.size(); ++index) {
-        const auto parsed = Color::TryParse(values[index]);
+    constexpr std::array VALUES{ "#12345600", "#12345680", "#123456FF" };
+    constexpr std::array<uint8_t, 3> ALPHAS{ 0, 128, 255 };
+    for(size_t index = 0; index < VALUES.size(); ++index) {
+        const auto parsed = Color::TryParse(VALUES[index]);
         zassert_true(parsed.has_value());
         zassert_true(parsed->has_value());
         const auto& color = **parsed;
@@ -24,8 +24,8 @@ ZTEST(lvgl_types, test_parsed_property_color_converts_to_lvgl_with_explicit_alph
         zassert_equal(lvgl_color.r, color.red);
         zassert_equal(lvgl_color.g, color.green);
         zassert_equal(lvgl_color.b, color.blue);
-        zassert_equal(lvgl_color.a, alphas[index]);
-        zassert_equal(lvgl_color.ToLvOpa(), alphas[index]);
+        zassert_equal(lvgl_color.a, ALPHAS[index]);
+        zassert_equal(lvgl_color.ToLvOpa(), ALPHAS[index]);
         zassert_equal(lv_color_to_u32(lvgl_color.ToLvColor()), lv_color_to_u32(lv_color_hex(0x123456)));
     }
 }

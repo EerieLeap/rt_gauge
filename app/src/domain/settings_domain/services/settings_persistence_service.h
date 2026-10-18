@@ -28,7 +28,7 @@ private:
         SettingsPersistenceService* service = nullptr;
     };
 
-    static constexpr k_timeout_t persist_debounce_ = K_MSEC(1000);
+    static constexpr k_timeout_t PERSIST_DEBOUNCE = K_MSEC(1000);
 
     std::shared_ptr<WorkQueueThread> work_queue_thread_;
 

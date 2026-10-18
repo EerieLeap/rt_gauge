@@ -64,7 +64,7 @@ public:
             return;
 
         subscription_ = channel->SubscribeErased(
-            event_type, selector, [this, payload_key](const ErasedPayloadView& view) {
+            event_type, std::move(selector), [this, payload_key](const ErasedPayloadView& view) {
                 ++calls_;
 
                 if(const auto* value = view.Find(payload_key))

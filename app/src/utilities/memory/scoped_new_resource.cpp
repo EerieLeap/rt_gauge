@@ -21,7 +21,7 @@ std::pmr::memory_resource* scope_resource = nullptr;
 } // namespace
 
 ScopedNewResource::ScopedNewResource(std::pmr::memory_resource* resource) noexcept {
-    const k_tid_t self = k_current_get();
+    k_thread* const self = k_current_get();
     k_tid_t owner = nullptr;
     is_outermost_ = scope_owner.compare_exchange_strong(owner, self);
     is_owner_ = is_outermost_ || owner == self;

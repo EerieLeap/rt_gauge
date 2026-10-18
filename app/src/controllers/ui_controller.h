@@ -66,8 +66,8 @@ private:
 
     // The first render of a screen group builds its whole LVGL tree, so it gets
     // a stack of its own instead of running on the event bus worker.
-    static constexpr int ui_render_work_queue_stack_size_ = CONFIG_EERIE_LEAP_UI_RENDER_WORK_QUEUE_STACK_SIZE;
-    static constexpr int ui_render_work_queue_priority_ = 9;
+    static constexpr int UI_RENDER_WORK_QUEUE_STACK_SIZE = CONFIG_EERIE_LEAP_UI_RENDER_WORK_QUEUE_STACK_SIZE;
+    static constexpr int UI_RENDER_WORK_QUEUE_PRIORITY = 9;
 
     std::shared_ptr<IFsService> fs_service_;
     std::shared_ptr<WorkQueueThread> config_work_queue_thread_;
@@ -108,12 +108,12 @@ private:
     void RegisterAssets();
 
     std::shared_ptr<IScreen>
-    CreateScreen(std::shared_ptr<ScreenConfiguration> configuration, std::shared_ptr<Frame> parent);
+    CreateScreen(const std::shared_ptr<ScreenConfiguration>& configuration, std::shared_ptr<Frame> parent);
     std::shared_ptr<ScreenConfiguration> FindOverlayConfiguration(uint32_t screen_id) const;
 
     // Asks every settings owner to republish, so a binding resolved just now is not left showing
     // its default until the value happens to change.
-    void RequestSettingsState() const;
+    static void RequestSettingsState();
 
     void SubscribeToNavigation();
     void OnNavigationChanged(const NavigationEventChannel::EventMessage& event);
@@ -138,6 +138,11 @@ public:
         std::shared_ptr<AssetsManager> assets_manager = nullptr
     );
     ~UiController();
+    // The subscriptions, the render dispatcher and the registered asset kinds refer to it.
+    UiController(const UiController&) = delete;
+    UiController& operator=(const UiController&) = delete;
+    UiController(UiController&&) = delete;
+    UiController& operator=(UiController&&) = delete;
 
     int Initialize();
     int Start();

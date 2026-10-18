@@ -98,11 +98,13 @@ LOG_MODULE_REGISTER(main_logger);
 
 constexpr uint32_t SLEEP_TIME_MS = 10000;
 
-static void SetupCanbusConfiguration(std::shared_ptr<CanbusConfigurationManager> canbus_configuration_manager);
-static void SetupTestSensors(std::shared_ptr<SensorsConfigurationManager> sensors_configuration_manager);
-static void SetupTestLoggingButton(std::shared_ptr<SensorsConfigurationManager> sensors_configuration_manager);
+[[maybe_unused]] static void
+SetupCanbusConfiguration(const std::shared_ptr<CanbusConfigurationManager>& canbus_configuration_manager);
+[[maybe_unused]] static void
+SetupTestSensors(const std::shared_ptr<SensorsConfigurationManager>& sensors_configuration_manager);
+static void SetupTestLoggingButton(const std::shared_ptr<SensorsConfigurationManager>& sensors_configuration_manager);
 static void SetupTestLoggingTrigger(
-    std::shared_ptr<LoggingControlConfigurationManager> logging_control_configuration_manager,
+    const std::shared_ptr<LoggingControlConfigurationManager>& logging_control_configuration_manager,
     int gpio_channel_count
 );
 
@@ -154,6 +156,7 @@ LoggingTrigger MakeLoggingButtonTrigger() {
 
 } // namespace
 
+// NOLINTNEXTLINE(bugprone-exception-escape): the composition root; an exception during boot is fatal and ends in std::terminate
 int main() {
     // CoredumpReporter::PrintStoredDump();
 
@@ -274,7 +277,7 @@ int main() {
     // The count the sensors manager was built with, which the button's sensor and trigger agree on.
     const int gpio_channel_count = gpio != nullptr ? gpio->GetChannelCount() : 0;
     // TODO: For test purposes only
-    if(logging_controller->Initialize([gpio_channel_count](auto logging_control_configuration_manager) {
+    if(logging_controller->Initialize([gpio_channel_count](const auto& logging_control_configuration_manager) {
            SetupTestLoggingTrigger(logging_control_configuration_manager, gpio_channel_count);
        })
         != 0) {
@@ -351,7 +354,7 @@ int main() {
     return 0;
 }
 
-void SetupCanbusConfiguration(std::shared_ptr<CanbusConfigurationManager> canbus_configuration_manager) {
+void SetupCanbusConfiguration(const std::shared_ptr<CanbusConfigurationManager>& canbus_configuration_manager) {
     const auto canbus_configuration = make_shared_pmr<CanbusConfiguration>(Mrm::GetExtPmr());
     canbus_configuration->com_configuration.bus_channel = 0;
 
@@ -399,7 +402,7 @@ void SetupCanbusConfiguration(std::shared_ptr<CanbusConfigurationManager> canbus
     canbus_configuration_manager->Update(*canbus_configuration);
 }
 
-void SetupTestSensors(std::shared_ptr<SensorsConfigurationManager> sensors_configuration_manager) {
+void SetupTestSensors(const std::shared_ptr<SensorsConfigurationManager>& sensors_configuration_manager) {
     // Test Sensors
 
     // auto sensor_1 = make_shared_pmr<Sensor>(Mrm::GetExtPmr(), "sensor_1");
@@ -438,7 +441,7 @@ void SetupTestSensors(std::shared_ptr<SensorsConfigurationManager> sensors_confi
 // TODO: For test purposes only
 // Adds the logging button to the stored sensors, when it is missing and the unit has its GPIO channel.
 // The rest of the stored configuration stays as it is.
-void SetupTestLoggingButton(std::shared_ptr<SensorsConfigurationManager> sensors_configuration_manager) {
+void SetupTestLoggingButton(const std::shared_ptr<SensorsConfigurationManager>& sensors_configuration_manager) {
     if(!HasLoggingButton(sensors_configuration_manager->GetGpioChannelCount()))
         return;
 
@@ -481,7 +484,7 @@ void SetupTestLoggingButton(std::shared_ptr<SensorsConfigurationManager> sensors
 // Adds the trigger that follows the logging button, when it is missing and the unit has the button's
 // GPIO channel. The rest of the stored configuration stays as it is.
 void SetupTestLoggingTrigger(
-    std::shared_ptr<LoggingControlConfigurationManager> logging_control_configuration_manager,
+    const std::shared_ptr<LoggingControlConfigurationManager>& logging_control_configuration_manager,
     int gpio_channel_count
 ) {
 

@@ -384,8 +384,9 @@ void WidgetBase::NotifyPropertyChanged(WidgetPropertyType type, const ConfigValu
         RunEffect(effect);
         transform_.Synchronize();
         return;
-    } else
+    } else {
         pending_properties_.set(static_cast<size_t>(type));
+    }
 
     ReplayPendingProperties();
 
@@ -396,7 +397,7 @@ void WidgetBase::NotifyPropertyChanged(WidgetPropertyType type, const ConfigValu
 }
 
 void WidgetBase::SetPropertyLocal(WidgetPropertyType type, const ConfigValue& value) {
-    static constexpr auto caller = GetCallerName();
+    static constexpr auto CALLER = GetCallerName();
     ScopedLvglLock lvgl_guard;
 
     if(WidgetPropertyValidator::IsStructuralProperty(type))
@@ -416,7 +417,7 @@ void WidgetBase::SetPropertyLocal(WidgetPropertyType type, const ConfigValue& va
             std::pair{ binding.selector_key, binding.selector_value.value_or(EventData{}) } };
 
         binding.channel->PublishErasedAsync(
-            binding.event_type, caller.hash,
+            binding.event_type, CALLER.hash,
             ErasedPayload{ payload.data(), binding.selector_value.has_value() ? 2U : 1U }
         );
     }
@@ -620,7 +621,8 @@ void WidgetBase::SetSizePx(const WidgetSize& size_px) {
 
     size_px_ = size_px;
 
-    container_->SetHeight(size_px.height, true).SetWidth(size_px.width, true);
+    container_->SetHeight(static_cast<int32_t>(size_px.height), true)
+        .SetWidth(static_cast<int32_t>(size_px.width), true);
 
     UpdateChildrenLayout();
     transform_.UpdateAnchor();

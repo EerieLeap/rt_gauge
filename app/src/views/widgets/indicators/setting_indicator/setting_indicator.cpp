@@ -49,7 +49,7 @@ void SettingIndicator::OnPropertyChanged(WidgetPropertyType type, const ConfigVa
 
         // Bounded because it reaches snprintf's "%.*f" precision.
         case WidgetPropertyType::VALUE_PRECISION:
-            value_precision_ = std::clamp(ConfigValueAs<int>(value, 0), 0, max_value_precision_);
+            value_precision_ = std::clamp(ConfigValueAs<int>(value, 0), 0, MAX_VALUE_PRECISION);
             break;
 
         case WidgetPropertyType::VALUE:

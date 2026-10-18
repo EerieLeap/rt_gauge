@@ -15,7 +15,7 @@ using eerie_leap::domain::ui_domain::ScopedLvglLock;
 
 LOG_MODULE_REGISTER(screen_logger);
 
-Screen::Screen(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context) :
+Screen::Screen(uint32_t id, const std::shared_ptr<Frame>& parent, WidgetContext context) :
     id_(id),
     parent_(parent),
     context_(std::move(context)) {
@@ -43,7 +43,7 @@ int Screen::DoRender() {
     return 0;
 }
 
-int Screen::ApplyTheme(const ITheme& theme) {
+int Screen::ApplyTheme(const ITheme& /*theme*/) {
     return 0;
 }
 

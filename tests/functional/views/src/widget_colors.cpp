@@ -36,26 +36,26 @@ using eerie_leap::views::utilitites::Frame;
 
 namespace {
 
-constexpr auto primary = WidgetPropertyType::COLOR_PRIMARY_ACTIVE;
-constexpr auto primary_inactive = WidgetPropertyType::COLOR_PRIMARY_INACTIVE;
-constexpr auto secondary = WidgetPropertyType::COLOR_SECONDARY_ACTIVE;
-constexpr auto secondary_inactive = WidgetPropertyType::COLOR_SECONDARY_INACTIVE;
-constexpr auto tertiary = WidgetPropertyType::COLOR_TERTIARY_ACTIVE;
-constexpr auto tertiary_inactive = WidgetPropertyType::COLOR_TERTIARY_INACTIVE;
+constexpr auto PRIMARY = WidgetPropertyType::COLOR_PRIMARY_ACTIVE;
+constexpr auto PRIMARY_INACTIVE = WidgetPropertyType::COLOR_PRIMARY_INACTIVE;
+constexpr auto SECONDARY = WidgetPropertyType::COLOR_SECONDARY_ACTIVE;
+constexpr auto SECONDARY_INACTIVE = WidgetPropertyType::COLOR_SECONDARY_INACTIVE;
+constexpr auto TERTIARY = WidgetPropertyType::COLOR_TERTIARY_ACTIVE;
+constexpr auto TERTIARY_INACTIVE = WidgetPropertyType::COLOR_TERTIARY_INACTIVE;
 
 class TranslucentTheme : public DefaultTheme {
 public:
     LvglColor GetPrimaryColor() const override {
-        return { 0x123456, 128 };
+        return LvglColor(0x123456, 128);
     }
     LvglColor GetSecondaryColor() const override {
-        return { 0x345678, 96 };
+        return LvglColor(0x345678, 96);
     }
     LvglColor GetSurfaceColor() const override {
-        return { 0x56789A, 64 };
+        return LvglColor(0x56789A, 64);
     }
     LvglColor GetAccentColor() const override {
-        return { 0x789ABC, 32 };
+        return LvglColor(0x789ABC, 32);
     }
 };
 
@@ -65,7 +65,7 @@ std::shared_ptr<WidgetConfiguration> Configuration(WidgetType type, IconType ico
     configuration->type = type;
     if(type == WidgetType::BasicIcon || type == WidgetType::BasicArcIcon)
         configuration->properties[WidgetPropertyType::ICON_TYPE] = static_cast<int>(icon);
-    for(auto target : { primary, primary_inactive, secondary, secondary_inactive, tertiary, tertiary_inactive,
+    for(auto target : { PRIMARY, PRIMARY_INACTIVE, SECONDARY, SECONDARY_INACTIVE, TERTIARY, TERTIARY_INACTIVE,
             WidgetPropertyType::IS_VISIBLE, WidgetPropertyType::IS_ACTIVE, WidgetPropertyType::OPACITY,
             WidgetPropertyType::VALUE }) {
         configuration->bindings.push_back(
@@ -82,7 +82,7 @@ std::shared_ptr<WidgetConfiguration> Configuration(WidgetType type, IconType ico
 
 std::unique_ptr<IWidget> Render(std::shared_ptr<WidgetConfiguration> configuration) {
     auto root = std::make_shared<Frame>(Frame::CreateWrapped().SetWidth(100, false).SetHeight(100, false).Build());
-    auto widget = WidgetFactory::GetInstance().CreateWidget(configuration, root, WidgetContext{});
+    auto widget = WidgetFactory::GetInstance().CreateWidget(std::move(configuration), root, WidgetContext{});
     zassert_equal(widget->Render(), 0);
     widget->OnActivated();
     return widget;
@@ -137,10 +137,10 @@ void GallerySnapshot(lv_obj_t* root, const char* name, bool visible = true) {
     zassert_not_null(snapshot);
     zassert_equal(snapshot->header.w, 96);
     zassert_equal(snapshot->header.h, 72);
-    const auto* background = reinterpret_cast<const lv_color32_t*>(snapshot->data);
+    const auto* background = views_test::PixelRow(*snapshot, 0);
     size_t changed = 0;
     for(uint32_t row = 0; row < snapshot->header.h; ++row) {
-        const auto* pixels = reinterpret_cast<const lv_color32_t*>(snapshot->data + row * snapshot->header.stride);
+        const auto* pixels = views_test::PixelRow(*snapshot, row);
         for(uint32_t column = 0; column < snapshot->header.w; ++column) {
             if(pixels[column].red != background->red
                 || pixels[column].green != background->green
@@ -150,6 +150,7 @@ void GallerySnapshot(lv_obj_t* root, const char* name, bool visible = true) {
     }
     zassert_equal(changed > 0, visible, "%s visibility", name);
 #ifdef CONFIG_ARCH_POSIX
+    // NOLINTNEXTLINE(concurrency-mt-unsafe): the tests run on one thread and nothing sets the environment.
     const char* directory = std::getenv("WIDGET_COLOR_PREVIEW_DIR");
     if(directory == nullptr)
         return;
@@ -158,9 +159,10 @@ void GallerySnapshot(lv_obj_t* root, const char* name, bool visible = true) {
     zassert_true(length > 0 && static_cast<size_t>(length) < sizeof(path));
     auto* file = std::fopen(path, "wb");
     zassert_not_null(file, "%s", path);
+    // NOLINTNEXTLINE(modernize-use-std-print): the host toolchain's libstdc++ has no <print>.
     std::fprintf(file, "P6\n%u %u\n255\n", snapshot->header.w, snapshot->header.h);
     for(uint32_t row = 0; row < snapshot->header.h; ++row) {
-        const auto* pixels = reinterpret_cast<const lv_color32_t*>(snapshot->data + row * snapshot->header.stride);
+        const auto* pixels = views_test::PixelRow(*snapshot, row);
         for(uint32_t column = 0; column < snapshot->header.w; ++column) {
             const uint8_t rgb[]{ pixels[column].red, pixels[column].green, pixels[column].blue };
             zassert_equal(std::fwrite(rgb, 1, sizeof(rgb), file), sizeof(rgb));
@@ -262,7 +264,7 @@ ZTEST(widget_colors, test_animation_simulator_gallery) {
             else
                 zassert_equal(lv_obj_get_style_transform_rotation(content, LV_PART_MAIN), phase * 450);
             GallerySnapshot(root->GetObject(), names[index][phase], index != 0 || phase != 2);
-            zassert_true(static_cast<WidgetBase*>(widget.get())->IsProcessingEligible());
+            zassert_true(dynamic_cast<WidgetBase*>(widget.get())->IsProcessingEligible());
         }
         widget.reset();
         zassert_equal(lv_anim_count_running(), baseline);
@@ -277,7 +279,7 @@ ZTEST(widget_colors, test_simulator_gallery) {
     lv_obj_center(parent->GetObject());
     lv_obj_set_style_bg_color(root->GetObject(), lv_color_hex(0x202428), 0);
     lv_obj_set_style_bg_opa(root->GetObject(), LV_OPA_COVER, 0);
-    auto render = [&](std::shared_ptr<WidgetConfiguration> configuration) {
+    auto render = [&](const std::shared_ptr<WidgetConfiguration>& configuration) {
         configuration->properties[WidgetPropertyType::IS_SMOOTHED] = false;
         auto widget = WidgetFactory::GetInstance().CreateWidget(configuration, parent, WidgetContext{});
         zassert_equal(widget->Render(), 0);
@@ -299,8 +301,8 @@ ZTEST(widget_colors, test_simulator_gallery) {
             CheckBackground(Inner(*widget), LV_PART_INDICATOR, themes[index]->GetSecondaryColor());
             GallerySnapshot(root->GetObject(), theme_names[index]);
         }
-        configuration->properties[primary] = std::pmr::string("#33CC9980");
-        configuration->properties[secondary] = std::pmr::string("#6688AA40");
+        configuration->properties[PRIMARY] = std::pmr::string("#33CC9980");
+        configuration->properties[SECONDARY] = std::pmr::string("#6688AA40");
         widget->Configure(configuration);
         CheckBackground(Inner(*widget), LV_PART_INDICATOR, LvglColor(0x33CC99, 128));
         GallerySnapshot(root->GetObject(), "05_explicit_rgba");
@@ -315,15 +317,15 @@ ZTEST(widget_colors, test_simulator_gallery) {
         configuration = Configuration(type);
         configuration->bindings.clear();
         configuration->properties[WidgetPropertyType::LABEL] = std::pmr::string("LOG");
-        configuration->properties[primary] = std::pmr::string("#33CC99FF");
-        configuration->properties[primary_inactive] = std::pmr::string("#6688AA80");
-        configuration->properties[secondary] = std::pmr::string("#FFFFFFFF");
-        configuration->properties[secondary_inactive] = std::pmr::string("#DDEEFFC0");
+        configuration->properties[PRIMARY] = std::pmr::string("#33CC99FF");
+        configuration->properties[PRIMARY_INACTIVE] = std::pmr::string("#6688AA80");
+        configuration->properties[SECONDARY] = std::pmr::string("#FFFFFFFF");
+        configuration->properties[SECONDARY_INACTIVE] = std::pmr::string("#DDEEFFC0");
         if(type == WidgetType::ControlSlider) {
-            configuration->properties[secondary] = std::pmr::string("#6688AA80");
-            configuration->properties[secondary_inactive] = std::pmr::string("#6688AA40");
-            configuration->properties[tertiary] = std::pmr::string("#FFFFFFFF");
-            configuration->properties[tertiary_inactive] = std::pmr::string("#DDEEFFC0");
+            configuration->properties[SECONDARY] = std::pmr::string("#6688AA80");
+            configuration->properties[SECONDARY_INACTIVE] = std::pmr::string("#6688AA40");
+            configuration->properties[TERTIARY] = std::pmr::string("#FFFFFFFF");
+            configuration->properties[TERTIARY_INACTIVE] = std::pmr::string("#DDEEFFC0");
             configuration->properties[WidgetPropertyType::MIN_VALUE] = 0;
             configuration->properties[WidgetPropertyType::MAX_VALUE] = 100;
             configuration->properties[WidgetPropertyType::STEP] = 1;
@@ -335,7 +337,12 @@ ZTEST(widget_colors, test_simulator_gallery) {
         const bool button = type == WidgetType::ControlButton;
         if(type == WidgetType::ControlSlider)
             zassert_equal(lv_slider_get_value(object), 65);
-        GallerySnapshot(root->GetObject(), button ? "07_button_idle" : toggle ? "11_toggle_off" : "09_slider_idle");
+        const char* idle_name = "09_slider_idle";
+        if(button)
+            idle_name = "07_button_idle";
+        else if(toggle)
+            idle_name = "11_toggle_off";
+        GallerySnapshot(root->GetObject(), idle_name);
         if(toggle) {
             configuration->properties[WidgetPropertyType::VALUE] = true;
             widget->Configure(configuration);
@@ -349,12 +356,12 @@ ZTEST(widget_colors, test_simulator_gallery) {
         lv_anim_refr_now();
         if(type == WidgetType::ControlSlider)
             zassert_equal(lv_slider_get_value(object), 65);
-        GallerySnapshot(
-            root->GetObject(),
-            button       ? "08_button_pressed"
-                : toggle ? "12_toggle_on"
-                         : "10_slider_pressed"
-        );
+        const char* pressed_name = "10_slider_pressed";
+        if(button)
+            pressed_name = "08_button_pressed";
+        else if(toggle)
+            pressed_name = "12_toggle_on";
+        GallerySnapshot(root->GetObject(), pressed_name);
     }
 
     configuration = Configuration(WidgetType::IndicatorBar);
@@ -364,8 +371,8 @@ ZTEST(widget_colors, test_simulator_gallery) {
             && binding.target != WidgetPropertyType::IS_ACTIVE
             && binding.target != WidgetPropertyType::OPACITY;
     });
-    configuration->properties[primary] = std::pmr::string("#33CC99FF");
-    configuration->properties[secondary] = std::pmr::string("#6688AA40");
+    configuration->properties[PRIMARY] = std::pmr::string("#33CC99FF");
+    configuration->properties[SECONDARY] = std::pmr::string("#6688AA40");
     auto widget = render(configuration);
     auto* bar = Inner(*widget);
     Publish(WidgetPropertyType::VALUE, 25);
@@ -427,13 +434,13 @@ ZTEST(widget_colors, test_whole_widget_opacity_survives_render_theme_and_configu
 
 ZTEST(widget_colors, test_opacity_binding_restores_retained_colors_after_all_gates_open) {
     auto configuration = Configuration(WidgetType::BasicIcon);
-    configuration->properties[primary] = std::pmr::string("#12345660");
+    configuration->properties[PRIMARY] = std::pmr::string("#12345660");
     auto widget = Render(configuration);
     auto* outer = widget->GetContainer()->GetObject();
     auto* inner = Inner(*widget);
     Publish(WidgetPropertyType::OPACITY, 0);
-    Color(primary, "#ABCDEF80");
-    Color(primary, "#FEDCBA40");
+    Color(PRIMARY, "#ABCDEF80");
+    Color(PRIMARY, "#FEDCBA40");
     CheckShape(inner, LvglColor(0x123456, 96));
     zassert_equal(lv_obj_get_style_opa_layered(outer, LV_PART_MAIN), 0);
     Publish(WidgetPropertyType::IS_VISIBLE, false);
@@ -493,16 +500,16 @@ ZTEST(widget_colors, test_text_colors_follow_theme_only_when_unset) {
         for(const auto& theme : themes) {
             ThemeManager::GetInstance().SetTheme(theme);
             CheckText(label, theme->GetPrimaryColor());
-            Color(primary, "#fedcba80");
+            Color(PRIMARY, "#fedcba80");
             CheckText(label, LvglColor(0xFEDCBA, 128));
             ThemeManager::GetInstance().SetTheme(std::make_shared<DefaultTheme>());
             CheckText(label, LvglColor(0xFEDCBA, 128));
-            Color(primary, "");
+            Color(PRIMARY, "");
             ThemeManager::GetInstance().SetTheme(theme);
             CheckText(label, theme->GetPrimaryColor());
         }
         zassert_equal(Inner(*widget), label);
-        zassert_equal(configuration->properties.count(primary), 0);
+        zassert_false(configuration->properties.contains(PRIMARY));
     }
 }
 
@@ -514,14 +521,14 @@ ZTEST(widget_colors, test_fill_and_track_resolve_independently_and_reset) {
         const auto& theme = ThemeManager::GetInstance().GetCurrentTheme();
         check(object, LV_PART_INDICATOR, theme.GetSecondaryColor());
         check(object, LV_PART_MAIN, LvglColor(0, 0));
-        Color(primary, "#ff220080");
-        Color(secondary, "#0033ff40");
+        Color(PRIMARY, "#ff220080");
+        Color(SECONDARY, "#0033ff40");
         check(object, LV_PART_INDICATOR, LvglColor(0xFF2200, 128));
         check(object, LV_PART_MAIN, LvglColor(0x0033FF, 64));
-        Color(secondary, "");
+        Color(SECONDARY, "");
         check(object, LV_PART_MAIN, LvglColor(0, 0));
         check(object, LV_PART_INDICATOR, LvglColor(0xFF2200, 128));
-        Color(primary, "");
+        Color(PRIMARY, "");
         check(object, LV_PART_INDICATOR, theme.GetSecondaryColor());
         zassert_equal(Inner(*widget), object);
     }
@@ -531,9 +538,9 @@ ZTEST(widget_colors, test_slider_palettes_do_not_inherit_other_states_or_roles) 
     auto widget = Render(Configuration(WidgetType::ControlSlider));
     auto* slider = Inner(*widget);
     const auto& theme = ThemeManager::GetInstance().GetCurrentTheme();
-    Color(primary_inactive, "#ff000080");
-    Color(secondary, "#00ff0040");
-    Color(tertiary_inactive, "#0000ff20");
+    Color(PRIMARY_INACTIVE, "#ff000080");
+    Color(SECONDARY, "#00ff0040");
+    Color(TERTIARY_INACTIVE, "#0000ff20");
     CheckBackground(slider, LV_PART_INDICATOR, LvglColor(0xFF0000, 128));
     CheckBackground(slider, LV_PART_MAIN, theme.GetSurfaceColor());
     CheckBackground(slider, LV_PART_KNOB, LvglColor(0x0000FF, 32));
@@ -542,11 +549,11 @@ ZTEST(widget_colors, test_slider_palettes_do_not_inherit_other_states_or_roles) 
     CheckBackground(slider, LV_PART_INDICATOR, theme.GetPrimaryColor());
     CheckBackground(slider, LV_PART_MAIN, LvglColor(0x00FF00, 64));
     CheckBackground(slider, LV_PART_KNOB, theme.GetAccentColor());
-    Color(primary, "#11223300");
-    Color(tertiary, "#aabbccff");
+    Color(PRIMARY, "#11223300");
+    Color(TERTIARY, "#aabbccff");
     CheckBackground(slider, LV_PART_INDICATOR, LvglColor(0x112233, 0));
     CheckBackground(slider, LV_PART_KNOB, LvglColor(0xAABBCC, 255));
-    Color(secondary, "");
+    Color(SECONDARY, "");
     CheckBackground(slider, LV_PART_MAIN, theme.GetSurfaceColor());
     lv_obj_remove_state(slider, LV_STATE_PRESSED);
     CheckBackground(slider, LV_PART_INDICATOR, LvglColor(0xFF0000, 128));
@@ -557,9 +564,9 @@ ZTEST(widget_colors, test_toggle_track_and_knob_select_checked_colors) {
     auto widget = Render(Configuration(WidgetType::ControlToggle));
     auto* toggle = Inner(*widget);
     const auto& theme = ThemeManager::GetInstance().GetCurrentTheme();
-    Color(primary_inactive, "#ff000040");
-    Color(primary, "#00ff0080");
-    Color(secondary_inactive, "#0000ff20");
+    Color(PRIMARY_INACTIVE, "#ff000040");
+    Color(PRIMARY, "#00ff0080");
+    Color(SECONDARY_INACTIVE, "#0000ff20");
     CheckBackground(toggle, LV_PART_MAIN, LvglColor(0xFF0000, 64));
     CheckBackground(toggle, LV_PART_KNOB, LvglColor(0x0000FF, 32));
     Publish(WidgetPropertyType::VALUE, true);
@@ -567,9 +574,9 @@ ZTEST(widget_colors, test_toggle_track_and_knob_select_checked_colors) {
     CheckBackground(toggle, LV_PART_MAIN, LvglColor(0xFF0000, 64));
     CheckBackground(toggle, LV_PART_INDICATOR, LvglColor(0x00FF00, 128));
     CheckBackground(toggle, LV_PART_KNOB, theme.GetAccentColor());
-    Color(secondary, "#112233ff");
+    Color(SECONDARY, "#112233ff");
     CheckBackground(toggle, LV_PART_KNOB, LvglColor(0x112233, 255));
-    Color(primary, "");
+    Color(PRIMARY, "");
     CheckBackground(toggle, LV_PART_INDICATOR, theme.GetPrimaryColor());
     Publish(WidgetPropertyType::VALUE, false);
     CheckBackground(toggle, LV_PART_KNOB, LvglColor(0x0000FF, 32));
@@ -583,8 +590,8 @@ ZTEST(widget_colors, test_button_label_tracks_press_release_and_cancel) {
     auto* button = Inner(*widget);
     auto* label = lv_obj_get_child(button, 0);
     const auto& theme = ThemeManager::GetInstance().GetCurrentTheme();
-    Color(primary_inactive, "#ff000040");
-    Color(secondary_inactive, "#00ff0080");
+    Color(PRIMARY_INACTIVE, "#ff000040");
+    Color(SECONDARY_INACTIVE, "#00ff0080");
     CheckBackground(button, LV_PART_MAIN, LvglColor(0xFF0000, 64));
     CheckText(label, LvglColor(0x00FF00, 128));
     for(auto release : { LV_EVENT_RELEASED, LV_EVENT_PRESS_LOST }) {
@@ -594,12 +601,12 @@ ZTEST(widget_colors, test_button_label_tracks_press_release_and_cancel) {
         zassert_equal(lv_obj_get_style_recolor_opa(button, LV_PART_MAIN), LV_OPA_TRANSP);
         CheckBackground(button, LV_PART_MAIN, theme.GetAccentColor());
         CheckText(label, theme.GetPrimaryColor());
-        Color(primary, "#aabbccff");
-        Color(secondary, "#11223300");
+        Color(PRIMARY, "#aabbccff");
+        Color(SECONDARY, "#11223300");
         CheckBackground(button, LV_PART_MAIN, LvglColor(0xAABBCC, 255));
         CheckText(label, LvglColor(0x112233, 0));
-        Color(primary, "");
-        Color(secondary, "");
+        Color(PRIMARY, "");
+        Color(SECONDARY, "");
         CheckText(label, theme.GetPrimaryColor());
         lv_obj_remove_state(button, LV_STATE_PRESSED);
         lv_obj_send_event(button, release, nullptr);
@@ -621,7 +628,7 @@ ZTEST(widget_colors, test_label_and_shapes_apply_colors_without_rebuilding) {
         auto* object = Inner(*widget);
         const bool shape = type != IconType::Label;
         const auto* source = shape ? lv_image_get_src(object) : nullptr;
-        Color(primary, "#11223380");
+        Color(PRIMARY, "#11223380");
         if(shape) {
             CheckColor(lv_obj_get_style_image_recolor(object, LV_PART_MAIN), LvglColor(0x112233));
             zassert_equal(lv_obj_get_style_opa(object, LV_PART_MAIN), 128);
@@ -633,11 +640,11 @@ ZTEST(widget_colors, test_label_and_shapes_apply_colors_without_rebuilding) {
         if(type == IconType::Label) {
             auto* label = lv_obj_get_child(object, 0);
             CheckText(label, ThemeManager::GetInstance().GetCurrentTheme().GetPrimaryColor());
-            Color(secondary, "#aabbcc40");
+            Color(SECONDARY, "#aabbcc40");
             CheckText(label, LvglColor(0xAABBCC, 64));
         }
         Publish(WidgetPropertyType::IS_ACTIVE, false);
-        Color(primary, "#ffffffff");
+        Color(PRIMARY, "#ffffffff");
         if(!shape)
             CheckBackground(object, LV_PART_MAIN, LvglColor(0x112233, 128));
         zassert_equal(Inner(*widget), object);
@@ -649,11 +656,11 @@ ZTEST(widget_colors, test_direct_icon_configuration_applies_parsed_colors) {
     auto properties = std::make_shared<WidgetPropertyStore>();
     auto& factory = eerie_leap::views::widgets::basic::icons::IconFactory::GetInstance();
     factory.RegisterProperties(IconType::Oval, *properties);
-    zassert_true(properties->Set(primary, std::pmr::string("#11223380")));
+    zassert_true(properties->Set(PRIMARY, std::pmr::string("#11223380")));
     auto icon = factory.Create(IconType::Oval, properties, root);
     zassert_equal(icon->Render(), 0);
     CheckShape(icon->GetContainer()->GetObject(), LvglColor(0x112233, 128));
-    zassert_true(properties->Set(primary, std::pmr::string("")));
+    zassert_true(properties->Set(PRIMARY, std::pmr::string("")));
     icon->Configure(properties);
     icon->ApplyTheme(ThemeManager::GetInstance().GetCurrentTheme());
     CheckShape(icon->GetContainer()->GetObject(), ThemeManager::GetInstance().GetCurrentTheme().GetAccentColor());
@@ -671,13 +678,13 @@ ZTEST(widget_colors, test_chart_color_changes_preserve_series_and_samples) {
         auto* samples = lv_chart_get_y_array(chart, series);
         const auto count = lv_chart_get_point_count(chart);
         const std::vector<int32_t> before(samples, samples + count);
-        Color(primary, "#11223380");
+        Color(PRIMARY, "#11223380");
         zassert_equal(lv_obj_get_style_opa_layered(chart, LV_PART_MAIN), 128);
         zassert_equal(lv_obj_get_style_line_opa(chart, LV_PART_ITEMS), LV_OPA_COVER);
         zassert_equal(lv_obj_get_style_bg_opa(chart, LV_PART_ITEMS), LV_OPA_COVER);
         zassert_equal(lv_chart_get_series_next(chart, nullptr), series);
         zassert_true(std::equal(before.begin(), before.end(), samples));
-        Color(primary, "");
+        Color(PRIMARY, "");
         zassert_equal(
             lv_obj_get_style_opa_layered(chart, LV_PART_MAIN),
             ThemeManager::GetInstance().GetCurrentTheme().GetPrimaryColor().ToLvOpa()
@@ -692,8 +699,8 @@ ZTEST(widget_colors, test_segment_palettes_preserve_displayed_states) {
     auto* first = lv_obj_get_child(container, 0);
     auto* last = lv_obj_get_child(container, -1);
     Publish(WidgetPropertyType::VALUE, 20);
-    Color(primary, "#11223380");
-    Color(primary_inactive, "#aabbcc40");
+    Color(PRIMARY, "#11223380");
+    Color(PRIMARY_INACTIVE, "#aabbcc40");
     CheckArc(first, LV_PART_INDICATOR, LvglColor(0x112233, 128));
     CheckArc(last, LV_PART_INDICATOR, LvglColor(0xAABBCC, 64));
     ThemeManager::GetInstance().SetTheme(std::make_shared<DarkTheme>());
@@ -702,31 +709,31 @@ ZTEST(widget_colors, test_segment_palettes_preserve_displayed_states) {
     Publish(WidgetPropertyType::VALUE, 100);
     CheckArc(last, LV_PART_INDICATOR, LvglColor(0x112233, 128));
     Publish(WidgetPropertyType::VALUE, 20);
-    Color(primary_inactive, "");
+    Color(PRIMARY_INACTIVE, "");
     CheckArc(last, LV_PART_INDICATOR, LvglColor(0, 0));
-    Color(primary, "");
+    Color(PRIMARY, "");
     CheckArc(first, LV_PART_INDICATOR, ThemeManager::GetInstance().GetCurrentTheme().GetSecondaryColor());
     CheckArc(last, LV_PART_INDICATOR, LvglColor(0, 0));
 }
 
 ZTEST(widget_colors, test_hidden_colors_replay_latest_and_inactive_colors_are_rejected) {
     auto configuration = Configuration(WidgetType::BasicIcon);
-    configuration->properties[primary] = std::pmr::string("#112233ff");
+    configuration->properties[PRIMARY] = std::pmr::string("#112233ff");
     auto widget = Render(configuration);
     auto* oval = Inner(*widget);
     for(auto gate : { WidgetPropertyType::IS_VISIBLE, WidgetPropertyType::OPACITY }) {
         Publish(gate, 0);
-        Color(primary, "#ff000080");
-        Color(primary, "#00ff0040");
+        Color(PRIMARY, "#ff000080");
+        Color(PRIMARY, "#00ff0040");
         CheckShape(oval, LvglColor(0x112233, 255));
         ThemeManager::GetInstance().SetTheme(std::make_shared<DarkTheme>());
         CheckShape(oval, LvglColor(0x112233, 255));
         Publish(gate, 1);
         CheckShape(oval, LvglColor(0x00FF00, 64));
-        Color(primary, "#112233ff");
+        Color(PRIMARY, "#112233ff");
     }
     Publish(WidgetPropertyType::IS_ACTIVE, false);
-    Color(primary, "#ffffffff");
+    Color(PRIMARY, "#ffffffff");
     Publish(WidgetPropertyType::IS_ACTIVE, true);
     CheckShape(oval, LvglColor(0x112233, 255));
     widget->Configure(Configuration(WidgetType::BasicIcon));

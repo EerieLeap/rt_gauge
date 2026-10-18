@@ -25,7 +25,7 @@ using views_test::FakeScreen;
 
 namespace {
 
-constexpr uint32_t overlay_screen_id = 7;
+constexpr uint32_t OVERLAY_SCREEN_ID = 7;
 
 // Pop() destroys the group and every screen in it, so a test that asserts on a
 // dismissed overlay has to outlive the screen with its own counter.
@@ -62,7 +62,7 @@ public:
 // overlay state is what a test can observe without a running event bus.
 std::shared_ptr<NavigationService> MakeNavigationWithOverlay() {
     auto navigation_service = std::make_shared<NavigationService>();
-    navigation_service->ShowOverlay(overlay_screen_id);
+    navigation_service->ShowOverlay(OVERLAY_SCREEN_ID);
 
     return navigation_service;
 }
@@ -107,7 +107,7 @@ uint32_t ChildCount(const std::shared_ptr<OverlayHost>& host) {
 // elapsed. The suites do not run Zephyr's LVGL init, so the tick may still be
 // LVGL's own counter rather than k_uptime_get_32(); advance both.
 void RunTimersFor(uint32_t duration_ms) {
-    k_msleep(duration_ms);
+    k_msleep(static_cast<int32_t>(duration_ms));
     lv_tick_inc(duration_ms);
     lv_timer_handler();
 }

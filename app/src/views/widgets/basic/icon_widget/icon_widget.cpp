@@ -61,8 +61,7 @@ int IconWidget::DoRender() {
     icon_.reset();
     content_frame_->SetChild(nullptr);
 
-    auto* lv_obj = Create();
-    if(lv_obj == nullptr)
+    if(Create() == nullptr)
         return -1;
 
     content_frame_->SetChild(icon_->GetContainer());

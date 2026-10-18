@@ -64,9 +64,9 @@ std::string CompositionError(const ScreenConfiguration& screen) {
 void ExpectError(const ScreenConfiguration& screen, std::initializer_list<const char*> fragments) {
     const auto error = CompositionError(screen);
     zassert_false(error.empty(), "Expected a widget-owned contract rejection");
-    zassert_true(error.find("Screen ID: 42") != std::string::npos, "%s", error.c_str());
+    zassert_true(error.contains("Screen ID: 42"), "%s", error.c_str());
     for(const auto* fragment : fragments)
-        zassert_true(error.find(fragment) != std::string::npos, "Missing '%s' in '%s'", fragment, error.c_str());
+        zassert_true(error.contains(fragment), "Missing '%s' in '%s'", fragment, error.c_str());
 }
 
 // Test-only composite with two ordered roles and its own parent-local layout.
@@ -78,12 +78,12 @@ public:
     static void ValidateChildren(const WidgetConfiguration&, std::span<const WidgetConfiguration* const> children) {
         if(children.size() != 2)
             throw std::invalid_argument("Expected 2 children in order: readout, button.");
-        constexpr WidgetType types[] = { WidgetType::IndicatorDigital, WidgetType::ControlButton };
-        constexpr const char* roles[] = { "readout", "button" };
+        constexpr WidgetType TYPES[] = { WidgetType::IndicatorDigital, WidgetType::ControlButton };
+        constexpr const char* ROLES[] = { "readout", "button" };
         for(size_t i = 0; i < children.size(); ++i) {
             const auto prefix = "Child index " + std::to_string(i) + ", ID " + std::to_string(children[i]->id) + " ("
-                + roles[i] + "): ";
-            if(children[i]->type != types[i])
+                + ROLES[i] + "): ";
+            if(children[i]->type != TYPES[i])
                 throw std::invalid_argument(prefix + "unsupported configuration for this role.");
             if(std::cmp_not_equal(children[i]->position_grid.x, i)
                 || children[i]->position_grid.y != 0
@@ -101,7 +101,7 @@ public:
     TestRegistration() {
         WidgetFactory::GetInstance().RegisterWidget(
             WidgetType::BasicArcIcon,
-            [this](uint32_t, std::shared_ptr<Frame>, const WidgetContext&) -> std::unique_ptr<IWidget> {
+            [this](uint32_t, const std::shared_ptr<Frame>&, const WidgetContext&) -> std::unique_ptr<IWidget> {
                 ++creation_count;
                 throw std::runtime_error("Preflight must not construct widgets");
             },
@@ -112,6 +112,8 @@ public:
     ~TestRegistration() {
         WidgetFactory::GetInstance().RegisterWidget<basic::ArcIconWidget>(WidgetType::BasicArcIcon);
     }
+    TestRegistration(const TestRegistration&) = delete;
+    TestRegistration& operator=(const TestRegistration&) = delete;
 };
 
 } // namespace
@@ -316,8 +318,8 @@ ZTEST(widget_composition, test_central_validator_rejects_invalid_structure_befor
         } catch(const std::invalid_argument& error) {
             message = error.what();
         }
-        zassert_true(message.find("Screen ID: 42") != std::string::npos, "%s", message.c_str());
-        zassert_true(message.find(reason) != std::string::npos, "%s", message.c_str());
+        zassert_true(message.contains("Screen ID: 42"), "%s", message.c_str());
+        zassert_true(message.contains(reason), "%s", message.c_str());
         zassert_equal(validation_count, 0);
     };
     check("Invalid widget type");
@@ -401,6 +403,6 @@ ZTEST(widget_composition, test_a_legacy_dial_is_neither_saved_nor_loaded_under_w
                 with_widget_rules.Deserialize(std::pmr::get_default_resource(), *encoded);
             }) }) {
         for(const auto* fragment : { "Screen ID: 42, Widget ID: 9", "exactly 1 child", "received 0" })
-            zassert_true(error.find(fragment) != std::string::npos, "Missing '%s' in '%s'", fragment, error.c_str());
+            zassert_true(error.contains(fragment), "Missing '%s' in '%s'", fragment, error.c_str());
     }
 }

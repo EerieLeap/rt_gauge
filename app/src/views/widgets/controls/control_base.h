@@ -36,6 +36,10 @@ protected:
 
 public:
     ~ControlBase() override;
+    ControlBase(const ControlBase&) = delete;
+    ControlBase& operator=(const ControlBase&) = delete;
+    ControlBase(ControlBase&&) = delete;
+    ControlBase& operator=(ControlBase&&) = delete;
 };
 
 } // namespace eerie_leap::views::widgets::controls

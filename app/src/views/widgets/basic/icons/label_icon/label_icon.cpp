@@ -42,7 +42,7 @@ int LabelIcon::ApplyTheme(const ITheme& theme) {
     if(label_width == 0 || label_height == 0)
         throw std::runtime_error("IconWidget: Label dimensions are invalid.");
 
-    const int32_t icon_width = label_width + label_height * 0.75;
+    const auto icon_width = static_cast<int32_t>(label_width + label_height * 0.75);
     const int32_t icon_height = label_height + label_height / 4;
 
     lv_obj_set_width(container_->GetObject(), icon_width);

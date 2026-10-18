@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <initializer_list>
 #include <memory>
+#include <span>
 #include <string_view>
 #include <vector>
 
@@ -32,6 +33,12 @@ void CleanTestDisplay(void* fixture);
 
 // The stable presentation object beneath a widget's public layout container.
 lv_obj_t* WidgetContent(const eerie_leap::views::widgets::IWidget& widget);
+
+// The bytes of a text, as the asset stores take them.
+std::span<const uint8_t> TextBytes(std::string_view text);
+
+// One row of an ARGB8888 snapshot or canvas buffer.
+const lv_color32_t* PixelRow(const lv_draw_buf_t& buffer, uint32_t row);
 
 // A store for a directory of the internal volume, which is mounted on first use. Files a test saved
 // there stay for the tests after it.

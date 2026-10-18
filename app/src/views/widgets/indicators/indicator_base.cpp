@@ -47,8 +47,10 @@ lv_anim_t IndicatorBase::CreateValueChangeAnimation() {
 
 void IndicatorBase::ValueChangeAnimation(lv_anim_t& anim, float range, float start_value, float end_value) {
     const uint32_t duration = 4000;
-    const uint32_t unit_duration = duration / range;
-    const uint32_t change_duration = unit_duration * abs(end_value - start_value);
+    const auto unit_duration = static_cast<uint32_t>(duration / range);
+    // The change is counted in whole units: a fractional part is cut off.
+    const uint32_t change_duration = unit_duration
+        * static_cast<uint32_t>(std::abs(static_cast<int>(end_value - start_value)));
 
     lv_anim_set_duration(&anim, change_duration);
     lv_anim_set_values(
@@ -87,7 +89,7 @@ void IndicatorBase::Update(float value) {
         value = range_end_;
 
     if(IsSmoothed()) {
-        if(std::abs(value - value_) < min_animation_delta_ratio_ * (range_end_ - range_start_))
+        if(std::abs(value - value_) < MIN_ANIMATION_DELTA_RATIO * (range_end_ - range_start_))
             return;
 
         ValueChangeAnimation(value_change_animation_, range_end_ - range_start_, value_, value);
@@ -117,11 +119,11 @@ void IndicatorBase::RegisterProperties(WidgetPropertyStore& store) const {
 void IndicatorBase::OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) {
     switch(type) {
         case WidgetPropertyType::MIN_VALUE:
-            range_start_ = ConfigValueAs<double>(value, 0);
+            range_start_ = static_cast<float>(ConfigValueAs<double>(value, 0));
             break;
 
         case WidgetPropertyType::MAX_VALUE:
-            range_end_ = ConfigValueAs<double>(value, 100);
+            range_end_ = static_cast<float>(ConfigValueAs<double>(value, 100));
             break;
 
         case WidgetPropertyType::VALUE:

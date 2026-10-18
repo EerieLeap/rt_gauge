@@ -45,9 +45,9 @@ using eerie_leap::subsys::event_bus::EventBus;
 using eerie_leap::subsys::fs::services::FsService;
 using eerie_leap::subsys::fs::services::IFsService;
 using eerie_leap::subsys::threading::WorkQueueThread;
-using eerie_leap::views::assets::animations::ui_lottie_spinner_json;
-using eerie_leap::views::assets::images::ui_img_arrow_al88_data;
-using eerie_leap::views::assets::images::ui_img_norma_al88_data;
+using eerie_leap::views::assets::animations::UI_LOTTIE_SPINNER_JSON;
+using eerie_leap::views::assets::images::UI_IMG_ARROW_AL88_DATA;
+using eerie_leap::views::assets::images::UI_IMG_NORMA_AL88_DATA;
 
 namespace {
 
@@ -198,12 +198,11 @@ void CheckDemoAssets(const AssetsManager& assets, const IFsService& fs_service) 
     zassert_not_null(images.get(), "Expected the images to be registered.");
     zassert_not_null(animations.get(), "Expected the animations to be registered.");
 
-    CheckLoads(*images, "ui_img_norma_al88.bin", ui_img_norma_al88_data);
-    CheckLoads(*images, "ui_img_arrow_al88.bin", ui_img_arrow_al88_data);
-    CheckLoads(
-        *animations, "ui_lottie_spinner.json",
-        std::span(reinterpret_cast<const uint8_t*>(ui_lottie_spinner_json.data()), ui_lottie_spinner_json.size())
-    );
+    CheckLoads(*images, "ui_img_norma_al88.bin", UI_IMG_NORMA_AL88_DATA);
+    CheckLoads(*images, "ui_img_arrow_al88.bin", UI_IMG_ARROW_AL88_DATA);
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): characters viewed as the bytes they are.
+    const auto* json_data = reinterpret_cast<const uint8_t*>(UI_LOTTIE_SPINNER_JSON.data());
+    CheckLoads(*animations, "ui_lottie_spinner.json", std::span(json_data, UI_LOTTIE_SPINNER_JSON.size()));
 
     for(const auto name : DEMO_ASSETS) {
         const auto legacy_path = "ui_assets/" + std::string(name);

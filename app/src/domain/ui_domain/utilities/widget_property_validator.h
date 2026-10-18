@@ -17,7 +17,7 @@ using eerie_leap::utilities::type::ConfigValue;
 
 class WidgetPropertyValidator {
 public:
-    static constexpr int max_anchor_coordinate = (1 << 29) - 1;
+    static constexpr int MAX_ANCHOR_COORDINATE = (1 << 29) - 1;
 
     static constexpr bool IsAnchorProperty(WidgetPropertyType type) {
         return type == WidgetPropertyType::ANCHOR_POINT_X || type == WidgetPropertyType::ANCHOR_POINT_Y;
@@ -28,7 +28,7 @@ public:
         return IsAnchorProperty(type)
             && coordinate != nullptr
             && *coordinate >= -1
-            && *coordinate <= max_anchor_coordinate;
+            && *coordinate <= MAX_ANCHOR_COORDINATE;
     }
 
     static constexpr bool IsStructuralProperty(WidgetPropertyType type) {
@@ -68,14 +68,14 @@ public:
             || type == WidgetPropertyType::OPACITY;
     }
 
-    static constexpr std::array color_properties{ WidgetPropertyType::COLOR_PRIMARY_ACTIVE,
+    static constexpr std::array COLOR_PROPERTIES{ WidgetPropertyType::COLOR_PRIMARY_ACTIVE,
         WidgetPropertyType::COLOR_PRIMARY_INACTIVE, WidgetPropertyType::COLOR_SECONDARY_ACTIVE,
         WidgetPropertyType::COLOR_SECONDARY_INACTIVE, WidgetPropertyType::COLOR_TERTIARY_ACTIVE,
         WidgetPropertyType::COLOR_TERTIARY_INACTIVE };
 
     static constexpr std::optional<std::size_t> GetColorPropertyIndex(WidgetPropertyType type) {
-        for(std::size_t index = 0; index < color_properties.size(); ++index) {
-            if(color_properties[index] == type)
+        for(std::size_t index = 0; index < COLOR_PROPERTIES.size(); ++index) {
+            if(COLOR_PROPERTIES[index] == type)
                 return index;
         }
         return std::nullopt;

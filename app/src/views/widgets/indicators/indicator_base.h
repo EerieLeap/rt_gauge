@@ -20,7 +20,7 @@ private:
     // ever finishes - the widget stays "in motion" and gets invalidated/
     // redrawn on every render tick indefinitely, even with no visually
     // meaningful change. Skip re-triggering for tiny deltas.
-    static constexpr float min_animation_delta_ratio_ = 0.001F; // 0.1% of range
+    static constexpr float MIN_ANIMATION_DELTA_RATIO = 0.001F; // 0.1% of range
 
 protected:
     lv_anim_t value_change_animation_{};
@@ -30,11 +30,15 @@ protected:
 
     virtual void UpdateIndicator(float value) = 0;
     lv_anim_t CreateValueChangeAnimation();
-    void ValueChangeAnimation(lv_anim_t& anim, float range, float start_value, float end_value);
+    static void ValueChangeAnimation(lv_anim_t& anim, float range, float start_value, float end_value);
 
 public:
     IndicatorBase(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context);
     ~IndicatorBase() override;
+    IndicatorBase(const IndicatorBase&) = delete;
+    IndicatorBase& operator=(const IndicatorBase&) = delete;
+    IndicatorBase(IndicatorBase&&) = delete;
+    IndicatorBase& operator=(IndicatorBase&&) = delete;
 
     virtual void Update(float value);
 

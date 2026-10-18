@@ -47,7 +47,7 @@ protected:
     // A binding that writes back. Resolved once at configure time so user input costs a scan of a
     // handful of entries rather than a registry lookup.
     struct OutboundBinding {
-        WidgetPropertyType target;
+        WidgetPropertyType target{};
         IEventChannel* channel{};
         uint32_t event_type{};
         uint32_t payload_key{};
@@ -143,6 +143,10 @@ public:
 
     WidgetBase(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context);
     ~WidgetBase() override;
+    WidgetBase(const WidgetBase&) = delete;
+    WidgetBase& operator=(const WidgetBase&) = delete;
+    WidgetBase(WidgetBase&&) = delete;
+    WidgetBase& operator=(WidgetBase&&) = delete;
 
     int Render() final;
     std::shared_ptr<Frame> GetChildMount() const final;

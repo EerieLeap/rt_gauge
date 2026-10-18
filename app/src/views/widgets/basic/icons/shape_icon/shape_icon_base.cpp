@@ -23,11 +23,11 @@ namespace {
 
 // Keep malformed configuration from becoming LVGL's encoded percentage sizes or
 // an unbounded allocation. Masks use external RAM where the board provides it.
-constexpr int max_dimension = 32767;
-constexpr size_t max_mask_bytes = 4 * 1024 * 1024;
-constexpr int tile_size = 32;
-constexpr int tile_padding = 2;
-constexpr int tile_extent = tile_size + 2 * tile_padding;
+constexpr int MAX_DIMENSION = 32767;
+constexpr size_t MAX_MASK_BYTES = 4 * 1024 * 1024;
+constexpr int TILE_SIZE = 32;
+constexpr int TILE_PADDING = 2;
+constexpr int TILE_EXTENT = TILE_SIZE + 2 * TILE_PADDING;
 
 using Path = std::unique_ptr<lv_vector_path_t, decltype(&lv_vector_path_delete)>;
 using DrawBuffer = std::unique_ptr<lv_draw_buf_t, decltype(&lv_draw_buf_destroy)>;
@@ -42,10 +42,10 @@ int ShapeIconBase::ReadPixels(
     bool is_dimension
 ) {
     const double value = store.GetAs<double>(type, fallback);
-    if(!std::isfinite(value) || (is_dimension && (value < 0 || value > max_dimension)))
+    if(!std::isfinite(value) || (is_dimension && (value < 0 || value > MAX_DIMENSION)))
         return is_dimension ? -1 : 0;
 
-    return static_cast<int>(std::clamp(value, 0.0, static_cast<double>(max_dimension)));
+    return static_cast<int>(std::clamp(value, 0.0, static_cast<double>(MAX_DIMENSION)));
 }
 
 ShapeIconBase::ShapeIconBase(std::shared_ptr<Frame> parent) :
@@ -128,7 +128,7 @@ void ShapeIconBase::UpdateImage() {
 
     if(width <= 0 || height <= 0 || !IsDrawable())
         return;
-    if(static_cast<size_t>(lv_draw_buf_width_to_stride(width, LV_COLOR_FORMAT_A8)) * height > max_mask_bytes) {
+    if(static_cast<size_t>(lv_draw_buf_width_to_stride(width, LV_COLOR_FORMAT_A8)) * height > MAX_MASK_BYTES) {
         LOG_WRN("Shape exceeds the 4 MiB mask limit.");
         return;
     }
@@ -136,7 +136,7 @@ void ShapeIconBase::UpdateImage() {
     const Path path(lv_vector_path_create(LV_VECTOR_PATH_QUALITY_HIGH), lv_vector_path_delete);
 
     try {
-        const float stroke_width = BuildPath(path.get(), width, height);
+        const float stroke_width = BuildPath(path.get(), static_cast<float>(width), static_cast<float>(height));
         Rasterize(path.get(), width, height, stroke_width);
         lv_image_set_src(image_object_, &image_);
     } catch(const std::bad_alloc&) {
@@ -155,7 +155,7 @@ void ShapeIconBase::Rasterize(lv_vector_path_t* path, int width_px, int height_p
     // Discard a small halo around each tile so clipping at the rasterizer's edge
     // cannot leave isolated antialiasing pixels along tile boundaries.
     DrawBuffer tile(
-        lv_draw_buf_create(tile_extent, tile_extent, LV_COLOR_FORMAT_ARGB8888, LV_STRIDE_AUTO), lv_draw_buf_destroy
+        lv_draw_buf_create(TILE_EXTENT, TILE_EXTENT, LV_COLOR_FORMAT_ARGB8888, LV_STRIDE_AUTO), lv_draw_buf_destroy
     );
     if(tile == nullptr)
         throw std::bad_alloc();
@@ -164,8 +164,8 @@ void ShapeIconBase::Rasterize(lv_vector_path_t* path, int width_px, int height_p
     lv_obj_set_hidden(canvas, true);
     lv_canvas_set_draw_buf(canvas, tile.get());
 
-    for(int y = 0; y < height_px; y += tile_size) {
-        for(int x = 0; x < width_px; x += tile_size) {
+    for(int y = 0; y < height_px; y += TILE_SIZE) {
+        for(int x = 0; x < width_px; x += TILE_SIZE) {
             lv_draw_buf_clear(tile.get(), nullptr);
             lv_layer_t layer;
             lv_canvas_init_layer(canvas, &layer);
@@ -174,7 +174,9 @@ void ShapeIconBase::Rasterize(lv_vector_path_t* path, int width_px, int height_p
                 lv_canvas_finish_layer(canvas, &layer);
                 throw std::bad_alloc();
             }
-            lv_draw_vector_dsc_translate(descriptor.get(), tile_padding - x, tile_padding - y);
+            lv_draw_vector_dsc_translate(
+                descriptor.get(), static_cast<float>(TILE_PADDING - x), static_cast<float>(TILE_PADDING - y)
+            );
             lv_draw_vector_dsc_set_fill_color(descriptor.get(), lv_color_white());
             lv_draw_vector_dsc_set_fill_rule(descriptor.get(), LV_VECTOR_FILL_EVENODD);
             lv_draw_vector_dsc_set_fill_opa(descriptor.get(), stroke_px > 0 ? LV_OPA_TRANSP : LV_OPA_COVER);
@@ -186,12 +188,13 @@ void ShapeIconBase::Rasterize(lv_vector_path_t* path, int width_px, int height_p
             lv_draw_vector(descriptor.get());
             lv_canvas_finish_layer(canvas, &layer);
 
-            for(int row = 0; row < std::min(tile_size, height_px - y); ++row) {
+            for(int row = 0; row < std::min(TILE_SIZE, height_px - y); ++row) {
+                // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): the ARGB8888 tile's bytes are LVGL pixels
                 const auto* pixels = reinterpret_cast<const lv_color32_t*>(
-                    tile->data + (row + tile_padding) * tile->header.stride
+                    tile->data + (row + TILE_PADDING) * tile->header.stride
                 );
-                for(int column = 0; column < std::min(tile_size, width_px - x); ++column)
-                    mask_[(y + row) * stride + x + column] = pixels[column + tile_padding].alpha;
+                for(int column = 0; column < std::min(TILE_SIZE, width_px - x); ++column)
+                    mask_[(y + row) * stride + x + column] = pixels[column + TILE_PADDING].alpha;
             }
         }
     }

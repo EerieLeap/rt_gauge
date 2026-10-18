@@ -78,6 +78,7 @@ public:
 
     NavigationProbe(const NavigationProbe&) = delete;
     NavigationProbe& operator=(const NavigationProbe&) = delete;
+    ~NavigationProbe() = default;
 
     bool WaitForEvent(int timeout_ms = DISPATCH_TIMEOUT_MS) {
         return k_sem_take(&delivered_, K_MSEC(timeout_ms)) == 0;

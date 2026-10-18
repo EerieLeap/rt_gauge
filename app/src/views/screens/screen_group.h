@@ -28,7 +28,7 @@ private:
     int ApplyTheme(const ITheme& theme) override;
 
 public:
-    ScreenGroup(uint32_t screen_group_id, std::shared_ptr<Frame> parent);
+    ScreenGroup(uint32_t screen_group_id, const std::shared_ptr<Frame>& parent);
 
     uint32_t GetGroupId() const;
 

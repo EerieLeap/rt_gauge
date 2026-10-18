@@ -29,12 +29,12 @@ using eerie_leap::views::utilitites::Frame;
 
 namespace {
 
-constexpr auto primary = WidgetPropertyType::COLOR_PRIMARY_ACTIVE;
-constexpr auto inactive = WidgetPropertyType::COLOR_PRIMARY_INACTIVE;
-constexpr auto opacity = WidgetPropertyType::OPACITY;
-constexpr int extent = 64;
+constexpr auto PRIMARY = WidgetPropertyType::COLOR_PRIMARY_ACTIVE;
+constexpr auto INACTIVE = WidgetPropertyType::COLOR_PRIMARY_INACTIVE;
+constexpr auto OPACITY = WidgetPropertyType::OPACITY;
+constexpr int EXTENT = 64;
 // Intermediate layers use RGB565. Allow rounding across color, widget, and ancestor composition.
-constexpr int rounding = 10;
+constexpr int ROUNDING = 10;
 
 class AlphaTheme : public DefaultTheme {
     uint8_t alpha_;
@@ -43,13 +43,13 @@ public:
     explicit AlphaTheme(uint8_t alpha) :
         alpha_(alpha) {}
     LvglColor GetPrimaryColor() const override {
-        return { 0xFFFFFF, alpha_ };
+        return LvglColor(0xFFFFFF, alpha_);
     }
     LvglColor GetSecondaryColor() const override {
-        return { 0xFFFFFF, alpha_ };
+        return LvglColor(0xFFFFFF, alpha_);
     }
     LvglColor GetAccentColor() const override {
-        return { 0xFFFFFF, alpha_ };
+        return LvglColor(0xFFFFFF, alpha_);
     }
 };
 
@@ -82,14 +82,14 @@ std::shared_ptr<WidgetConfiguration> Configuration(WidgetType type, IconType ico
 
 struct Scene {
     std::shared_ptr<Frame> root = std::make_shared<Frame>(
-        Frame::CreateWrapped().SetWidth(extent, true).SetHeight(extent, true).Build()
+        Frame::CreateWrapped().SetWidth(EXTENT, true).SetHeight(EXTENT, true).Build()
     );
     std::shared_ptr<Frame> parent = std::make_shared<Frame>(
-        Frame::CreateWrapped(root->GetObject()).SetWidth(extent, true).SetHeight(extent, true).Build()
+        Frame::CreateWrapped(root->GetObject()).SetWidth(EXTENT, true).SetHeight(EXTENT, true).Build()
     );
     std::unique_ptr<IWidget> widget;
 
-    explicit Scene(std::shared_ptr<WidgetConfiguration> configuration) {
+    explicit Scene(const std::shared_ptr<WidgetConfiguration>& configuration) {
         lv_obj_set_style_bg_color(root->GetObject(), lv_color_black(), 0);
         lv_obj_set_style_bg_opa(root->GetObject(), LV_OPA_COVER, 0);
         // Discover icon-specific properties before binding; only supported keys get subscriptions.
@@ -126,18 +126,18 @@ struct Scene {
             lv_snapshot_take(root->GetObject(), LV_COLOR_FORMAT_ARGB8888), lv_draw_buf_destroy
         );
         zassert_not_null(snapshot);
-        zassert_equal(snapshot->header.w, extent);
-        zassert_equal(snapshot->header.h, extent);
+        zassert_equal(snapshot->header.w, EXTENT);
+        zassert_equal(snapshot->header.h, EXTENT);
         return snapshot;
     }
 
     std::vector<uint8_t> RedPixels() const {
         auto snapshot = Snapshot();
-        std::vector<uint8_t> result(extent * extent);
-        for(int y = 0; y < extent; ++y) {
-            const auto* pixels = reinterpret_cast<const lv_color32_t*>(snapshot->data + y * snapshot->header.stride);
-            for(int x = 0; x < extent; ++x)
-                result[y * extent + x] = pixels[x].red;
+        std::vector<uint8_t> result(EXTENT * EXTENT);
+        for(int y = 0; y < EXTENT; ++y) {
+            const auto* pixels = views_test::PixelRow(*snapshot, static_cast<uint32_t>(y));
+            for(int x = 0; x < EXTENT; ++x)
+                result[y * EXTENT + x] = pixels[x].red;
         }
         return result;
     }
@@ -145,7 +145,7 @@ struct Scene {
     void CheckBrightness(int expected) const {
         const auto pixels = RedPixels();
         const auto brightest = *std::ranges::max_element(pixels);
-        zassert_within(brightest, expected, rounding, "expected=%d actual=%d", expected, brightest);
+        zassert_within(brightest, expected, ROUNDING, "expected=%d actual=%d", expected, brightest);
         if(expected == 0)
             zassert_equal(brightest, 0);
     }
@@ -154,24 +154,24 @@ struct Scene {
 void CheckAlphaMatrix(Scene& scene) {
     for(bool explicit_color : { false, true }) {
         for(int alpha : { 0, 128, 255 }) {
-            Publish(opacity, 255);
+            Publish(OPACITY, 255);
             // Explicit alpha replaces even a fully transparent theme alpha.
             Theme(explicit_color ? 0 : alpha);
-            Publish(primary, explicit_color ? White(alpha) : std::string{});
+            Publish(PRIMARY, explicit_color ? White(alpha) : std::string{});
             for(int widget_alpha : { 255, 128, 0 }) {
-                Publish(opacity, widget_alpha);
+                Publish(OPACITY, widget_alpha);
                 scene.CheckBrightness((alpha * widget_alpha + 127) / 255);
                 zassert_equal(scene.Base().IsProcessingEligible(), widget_alpha > 0);
             }
         }
     }
-    Publish(opacity, 128);
-    Publish(primary, White(128));
+    Publish(OPACITY, 128);
+    Publish(PRIMARY, White(128));
     lv_obj_set_style_opa_layered(scene.parent->GetObject(), 128, 0);
     scene.CheckBrightness(32);
     zassert_equal(lv_obj_get_style_opa_layered(scene.Outer(), LV_PART_MAIN), 128);
     lv_obj_set_style_opa_layered(scene.parent->GetObject(), 255, 0);
-    Publish(opacity, 255);
+    Publish(OPACITY, 255);
 }
 
 void* Setup() {
@@ -213,12 +213,12 @@ ZTEST(widget_alpha, test_chart_pixels_compose_series_alpha_once_and_preserve_his
         zassert_equal(lv_chart_get_y_array(chart, series), samples);
         zassert_true(std::equal(before.begin(), before.end(), samples));
         zassert_equal(lv_chart_get_x_start_point(chart, series), start);
-        Publish(primary, White(0));
+        Publish(PRIMARY, White(0));
         Publish(WidgetPropertyType::VALUE, 55);
         zassert_equal(lv_chart_get_x_start_point(chart, series), (start + 1) % 4);
         zassert_equal(samples[start], 55);
         scene.CheckBrightness(0);
-        Publish(primary, White(255));
+        Publish(PRIMARY, White(255));
         scene.CheckBrightness(255);
     }
 }
@@ -244,18 +244,19 @@ ZTEST(widget_alpha, test_shape_masks_compose_coverage_and_alpha_without_rasteriz
             lv_area_t bounds;
             lv_obj_get_coords(object, &bounds);
             CheckAlphaMatrix(scene);
-            Publish(primary, White(128));
-            Publish(opacity, 128);
+            Publish(PRIMARY, White(128));
+            Publish(OPACITY, 128);
             const auto pixels = scene.RedPixels();
             size_t antialiased = 0;
             for(uint32_t y = 0; y < mask->header.h; ++y) {
                 for(uint32_t x = 0; x < mask->header.w; ++x) {
                     const int coverage = data[y * mask->header.stride + x];
-                    antialiased += coverage > 0 && coverage < 255;
+                    if(coverage > 0 && coverage < 255)
+                        ++antialiased;
                     const int expected = (coverage * 128 * 128 + 32512) / (255 * 255);
-                    const int actual = pixels[(bounds.y1 + y) * extent + bounds.x1 + x];
+                    const int actual = pixels[(bounds.y1 + y) * EXTENT + bounds.x1 + x];
                     zassert_within(
-                        actual, expected, rounding, "shape=%d coverage=%d actual=%d expected=%d",
+                        actual, expected, ROUNDING, "shape=%d coverage=%d actual=%d expected=%d",
                         static_cast<int>(type), coverage, actual, expected
                     );
                 }
@@ -279,7 +280,7 @@ ZTEST(widget_alpha, test_static_oval_composes_theme_and_explicit_alpha) {
     Scene scene(Configuration(WidgetType::BasicIcon));
     const auto animations = lv_anim_count_running();
     CheckAlphaMatrix(scene);
-    Publish(primary, White(0));
+    Publish(PRIMARY, White(0));
     Publish(WidgetPropertyType::POSITION_X, 5);
     zassert_equal(lv_obj_get_style_x(scene.Inner(), LV_PART_MAIN), 5);
     zassert_true(scene.Base().IsProcessingEligible());
@@ -297,7 +298,7 @@ ZTEST(widget_alpha, test_layered_ancestor_opacity_restores_only_the_latest_hidde
     zassert_false(scene.Base().IsProcessingEligible());
     Publish(WidgetPropertyType::VALUE, 40);
     Publish(WidgetPropertyType::VALUE, 80);
-    Publish(primary, White(128));
+    Publish(PRIMARY, White(128));
     zassert_equal(lv_chart_get_x_start_point(chart, series), start);
     zassert_equal(samples[start], previous);
     lv_obj_set_style_opa_layered(scene.parent->GetObject(), 128, 0);
@@ -313,30 +314,30 @@ ZTEST(widget_alpha, test_segment_pixels_use_resolved_alpha_for_both_displayed_st
     // Isolate one stroke: neighboring segments overlap near the center in this small fixture.
     const auto count = lv_obj_get_child_count(views_test::WidgetContent(*scene.widget));
     for(uint32_t i = 0; i + 1 < count; ++i)
-        lv_obj_set_hidden(lv_obj_get_child(views_test::WidgetContent(*scene.widget), i), true);
+        lv_obj_set_hidden(lv_obj_get_child(views_test::WidgetContent(*scene.widget), static_cast<int32_t>(i)), true);
     Publish(WidgetPropertyType::VALUE, 100);
     CheckAlphaMatrix(scene);
-    Publish(primary, White(0));
+    Publish(PRIMARY, White(0));
     Publish(WidgetPropertyType::VALUE, 0);
     scene.CheckBrightness(0);
     for(int alpha : { 0, 128, 255 }) {
-        Publish(opacity, 255);
-        Publish(inactive, White(alpha));
+        Publish(OPACITY, 255);
+        Publish(INACTIVE, White(alpha));
         Theme(255 - alpha);
         for(int widget_alpha : { 255, 128, 0 }) {
-            Publish(opacity, widget_alpha);
+            Publish(OPACITY, widget_alpha);
             scene.CheckBrightness((alpha * widget_alpha + 127) / 255);
         }
     }
-    Publish(opacity, 255);
-    Publish(inactive, std::string{});
+    Publish(OPACITY, 255);
+    Publish(INACTIVE, std::string{});
     scene.CheckBrightness(0);
 }
 
 ZTEST(widget_alpha, test_segment_animation_recolors_displayed_state_without_jumping_to_target) {
     auto configuration = Configuration(WidgetType::IndicatorSegmentArc);
     configuration->properties[WidgetPropertyType::IS_SMOOTHED] = true;
-    configuration->properties[inactive] = std::pmr::string("#0000FF40");
+    configuration->properties[INACTIVE] = std::pmr::string("#0000FF40");
     Scene scene(configuration);
     Publish(WidgetPropertyType::VALUE, 100);
     lv_tick_inc(400);
@@ -347,7 +348,7 @@ ZTEST(widget_alpha, test_segment_animation_recolors_displayed_state_without_jump
     std::vector<lv_obj_t*> segments;
     std::vector<bool> active;
     for(uint32_t i = 0; i < count; ++i) {
-        auto* segment = lv_obj_get_child(views_test::WidgetContent(*scene.widget), i);
+        auto* segment = lv_obj_get_child(views_test::WidgetContent(*scene.widget), static_cast<int32_t>(i));
         segments.push_back(segment);
         active.push_back(
             lv_color_to_u32(lv_obj_get_style_arc_color(segment, LV_PART_INDICATOR)) == lv_color_to_u32(lv_color_white())
@@ -358,20 +359,20 @@ ZTEST(widget_alpha, test_segment_animation_recolors_displayed_state_without_jump
     Theme(128);
     for(uint32_t i = 0; i < count; ++i)
         zassert_equal(lv_obj_get_style_arc_opa(segments[i], LV_PART_INDICATOR), active[i] ? 128 : 64);
-    Publish(primary, std::string("#FF000020"));
+    Publish(PRIMARY, std::string("#FF000020"));
     zassert_equal(lv_anim_get(&scene.Base(), nullptr), animation);
     for(uint32_t i = 0; i < count; ++i) {
         zassert_equal(lv_obj_get_child(views_test::WidgetContent(*scene.widget), i), segments[i]);
         zassert_equal(lv_obj_get_style_arc_opa(segments[i], LV_PART_INDICATOR), active[i] ? 32 : 64);
     }
-    Publish(opacity, 0);
+    Publish(OPACITY, 0);
     zassert_is_null(lv_anim_get(&scene.Base(), nullptr));
     Publish(WidgetPropertyType::VALUE, 50);
-    Publish(primary, std::string("#00FF0080"));
+    Publish(PRIMARY, std::string("#00FF0080"));
     Theme(0);
     for(uint32_t i = 0; i < count; ++i)
         zassert_equal(lv_obj_get_style_arc_opa(segments[i], LV_PART_INDICATOR), active[i] ? 32 : 64);
-    Publish(opacity, 128);
+    Publish(OPACITY, 128);
     lv_tick_inc(5000);
     lv_anim_refr_now();
     zassert_equal(lv_obj_get_style_opa_layered(scene.Outer(), LV_PART_MAIN), 128);
@@ -383,16 +384,16 @@ ZTEST(widget_alpha, test_segment_animation_recolors_displayed_state_without_jump
 ZTEST(widget_alpha, test_fill_and_track_alpha_remain_independent_under_widget_fade) {
     auto configuration = Configuration(WidgetType::IndicatorBar);
     configuration->properties[WidgetPropertyType::VALUE] = 50.0;
-    configuration->properties[primary] = std::pmr::string("#FF000080");
+    configuration->properties[PRIMARY] = std::pmr::string("#FF000080");
     configuration->properties[WidgetPropertyType::COLOR_SECONDARY_ACTIVE] = std::pmr::string("#0000FF80");
-    configuration->properties[opacity] = 128;
+    configuration->properties[OPACITY] = 128;
     Scene scene(configuration);
     auto snapshot = scene.Snapshot();
-    const auto* pixels = reinterpret_cast<const lv_color32_t*>(snapshot->data + 32 * snapshot->header.stride);
-    zassert_within(pixels[16].red, 64, rounding);
-    zassert_within(pixels[16].blue, 32, rounding);
+    const auto* pixels = views_test::PixelRow(*snapshot, 32);
+    zassert_within(pixels[16].red, 64, ROUNDING);
+    zassert_within(pixels[16].blue, 32, ROUNDING);
     zassert_equal(pixels[48].red, 0);
-    zassert_within(pixels[48].blue, 64, rounding);
+    zassert_within(pixels[48].blue, 64, ROUNDING);
     zassert_equal(lv_bar_get_value(scene.Inner()), 50);
 }
 
@@ -411,13 +412,13 @@ ZTEST(widget_alpha, test_control_style_changes_preserve_values_states_and_event_
         const auto supported = scene.widget->GetSupportedProperties();
         for(int alpha : { 0, 128, 255 }) {
             Theme(alpha);
-            for(auto property : { primary, inactive, WidgetPropertyType::COLOR_SECONDARY_ACTIVE,
+            for(auto property : { PRIMARY, INACTIVE, WidgetPropertyType::COLOR_SECONDARY_ACTIVE,
                     WidgetPropertyType::COLOR_SECONDARY_INACTIVE, WidgetPropertyType::COLOR_TERTIARY_ACTIVE,
                     WidgetPropertyType::COLOR_TERTIARY_INACTIVE }) {
                 if(std::ranges::find(supported, property) != supported.end())
                     Publish(property, White(alpha));
             }
-            Publish(opacity, 128);
+            Publish(OPACITY, 128);
             zassert_equal(scene.Inner(), object);
             zassert_equal(lv_obj_get_state(object), state);
             zassert_equal(lv_obj_get_event_count(object), callbacks);
