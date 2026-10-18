@@ -25,8 +25,8 @@ public:
     // Serialize and Deserialize both validate; without child rules only domain checks run.
     explicit UiConfigurationCborParser(UiConfigurationValidator::ChildValidator validate_children = {});
 
-    eerie_memory::pmr_unique_ptr<CborUiConfig> Serialize(const UiConfiguration& configuration);
-    eerie_memory::pmr_unique_ptr<UiConfiguration>
+    eerie_memory::PmrUniquePtr<CborUiConfig> Serialize(const UiConfiguration& configuration);
+    eerie_memory::PmrUniquePtr<UiConfiguration>
     Deserialize(std::pmr::memory_resource* mr, const CborUiConfig& config);
 };
 

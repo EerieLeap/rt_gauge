@@ -15,7 +15,7 @@ static void InvalidDisplayConfiguration(std::string_view message) {
     throw std::invalid_argument("Invalid Display configuration. " + std::string(message));
 }
 
-pmr_unique_ptr<CborDisplayConfig> DisplayConfigurationCborParser::Serialize(const DisplayConfiguration& configuration) {
+PmrUniquePtr<CborDisplayConfig> DisplayConfigurationCborParser::Serialize(const DisplayConfiguration& configuration) {
     auto config = make_unique_pmr<CborDisplayConfig>(Mrm::GetExtPmr());
 
     config->version = configuration_version;
@@ -27,7 +27,7 @@ pmr_unique_ptr<CborDisplayConfig> DisplayConfigurationCborParser::Serialize(cons
     return config;
 }
 
-pmr_unique_ptr<DisplayConfiguration>
+PmrUniquePtr<DisplayConfiguration>
 DisplayConfigurationCborParser::Deserialize(std::pmr::memory_resource* mr, const CborDisplayConfig& config) {
 
     if(config.version != configuration_version)

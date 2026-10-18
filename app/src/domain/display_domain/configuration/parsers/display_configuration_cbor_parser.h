@@ -20,8 +20,8 @@ public:
 
     DisplayConfigurationCborParser() = default;
 
-    eerie_memory::pmr_unique_ptr<CborDisplayConfig> Serialize(const DisplayConfiguration& configuration);
-    eerie_memory::pmr_unique_ptr<DisplayConfiguration>
+    eerie_memory::PmrUniquePtr<CborDisplayConfig> Serialize(const DisplayConfiguration& configuration);
+    eerie_memory::PmrUniquePtr<DisplayConfiguration>
     Deserialize(std::pmr::memory_resource* mr, const CborDisplayConfig& config);
 };
 

@@ -109,7 +109,7 @@ PropertyBinding MakeBinding(
 
 // No properties at any level, since property maps encode in unordered_map order, and one widget,
 // so ordering by z-index on load cannot move anything.
-pmr_unique_ptr<UiConfiguration> MakeStoredConfiguration() {
+PmrUniquePtr<UiConfiguration> MakeStoredConfiguration() {
     auto configuration = make_unique_pmr<UiConfiguration>(Mrm::GetDefaultPmr());
     configuration->active_screen_group_id = 1;
 

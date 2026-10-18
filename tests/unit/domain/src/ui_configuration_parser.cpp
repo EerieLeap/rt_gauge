@@ -38,7 +38,7 @@ using namespace eerie_leap::views::widgets::indicators;
 
 ZTEST_SUITE(ui_configuration_parser, NULL, NULL, NULL, NULL, NULL);
 
-pmr_unique_ptr<UiConfiguration> ui_configuration_parser_GetTestUiConfiguration() {
+PmrUniquePtr<UiConfiguration> ui_configuration_parser_GetTestUiConfiguration() {
     auto ui_configuration = make_unique_pmr<UiConfiguration>(Mrm::GetDefaultPmr());
     ui_configuration->active_screen_group_id = 3;
 
@@ -819,7 +819,7 @@ std::vector<uint8_t> CompositionPayload(std::initializer_list<uint8_t> dial_prop
     return payload;
 }
 
-pmr_unique_ptr<CborUiConfig> Decode(const std::vector<uint8_t>& payload) {
+PmrUniquePtr<CborUiConfig> Decode(const std::vector<uint8_t>& payload) {
     auto decoded = make_unique_pmr<CborUiConfig>(Mrm::GetDefaultPmr());
     size_t decoded_size = 0;
     if(cbor_decode_CborUiConfig(payload.data(), payload.size(), decoded.get(), &decoded_size) != 0
@@ -829,7 +829,7 @@ pmr_unique_ptr<CborUiConfig> Decode(const std::vector<uint8_t>& payload) {
 }
 
 // Through the actual wire bytes, not only the intermediate CBOR structs.
-pmr_unique_ptr<UiConfiguration> RoundTrip(UiConfigurationCborParser& parser, const UiConfiguration& configuration) {
+PmrUniquePtr<UiConfiguration> RoundTrip(UiConfigurationCborParser& parser, const UiConfiguration& configuration) {
     auto serialized = parser.Serialize(configuration);
     std::vector<uint8_t> payload(cbor_get_size_CborUiConfig(*serialized));
     size_t encoded_size = 0;

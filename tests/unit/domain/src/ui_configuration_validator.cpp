@@ -86,7 +86,7 @@ std::shared_ptr<ScreenConfiguration> MakeScreen(uint32_t id, uint32_t screen_gro
     return screen_configuration;
 }
 
-pmr_unique_ptr<UiConfiguration> MakeConfiguration() {
+PmrUniquePtr<UiConfiguration> MakeConfiguration() {
     auto configuration = make_unique_pmr<UiConfiguration>(Mrm::GetDefaultPmr());
     configuration->active_screen_group_id = 1;
     configuration->screen_configurations.push_back(MakeScreen(0, 1));

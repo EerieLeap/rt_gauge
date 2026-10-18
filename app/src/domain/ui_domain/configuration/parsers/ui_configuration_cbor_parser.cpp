@@ -233,7 +233,7 @@ void ValueTypeToCborPropertyValueType(
 UiConfigurationCborParser::UiConfigurationCborParser(UiConfigurationValidator::ChildValidator validate_children) :
     validate_children_(std::move(validate_children)) {}
 
-pmr_unique_ptr<CborUiConfig> UiConfigurationCborParser::Serialize(const UiConfiguration& configuration) {
+PmrUniquePtr<CborUiConfig> UiConfigurationCborParser::Serialize(const UiConfiguration& configuration) {
     UiConfigurationValidator::Validate(configuration, validate_children_);
 
     auto config = make_unique_pmr<CborUiConfig>(Mrm::GetExtPmr());
@@ -303,7 +303,7 @@ pmr_unique_ptr<CborUiConfig> UiConfigurationCborParser::Serialize(const UiConfig
     return config;
 }
 
-pmr_unique_ptr<UiConfiguration>
+PmrUniquePtr<UiConfiguration>
 UiConfigurationCborParser::Deserialize(std::pmr::memory_resource* mr, const CborUiConfig& config) {
 
     // Nothing migrates, so a mismatch lets UiConfigurationManager fall through to its default.
