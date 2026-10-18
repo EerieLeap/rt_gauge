@@ -41,7 +41,7 @@ private:
 public:
     MainView();
 
-    std::shared_ptr<Frame> GetContainer() const;
+    std::shared_ptr<Frame> GetContainer() const override;
 
     // Building a group's LVGL tree costs tens of milliseconds and runs on a
     // large stack; without a dispatcher SetActiveGroup() renders inline on the

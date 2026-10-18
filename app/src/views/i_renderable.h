@@ -17,7 +17,7 @@ protected:
     virtual int DoRender() = 0;
 
 public:
-    virtual ~IRenderable() = default;
+    ~IRenderable() override = default;
 
     virtual int Render() = 0;
     virtual int ApplyTheme(const ITheme& theme) = 0;

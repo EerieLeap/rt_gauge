@@ -240,7 +240,7 @@ ZTEST(widget_colors, test_animation_simulator_gallery) {
         } else {
             widget = WidgetFactory::GetInstance().CreateWidget(configuration, root, context);
         }
-        widget->SetSizePx({ index == 2 ? 48 : 64, index == 2 ? 48 : 24 });
+        widget->SetSizePx({ static_cast<uint32_t>(index == 2 ? 48 : 64), static_cast<uint32_t>(index == 2 ? 48 : 24) });
         widget->SetPositionPx({ index == 2 ? 24 : 16, index == 2 ? 12 : 24 });
         zassert_equal(widget->Render(), 0);
         widget->OnActivated();

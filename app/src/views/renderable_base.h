@@ -31,7 +31,7 @@ public:
         ThemeManager::GetInstance().RegisterObserver(this);
     }
 
-    virtual ~RenderableBase() {
+    ~RenderableBase() override {
         ThemeManager::GetInstance().UnregisterObserver(this);
         is_ready_ = false;
     }

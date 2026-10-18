@@ -29,7 +29,7 @@ private:
 
 public:
     UiRendererService();
-    ~UiRendererService();
+    ~UiRendererService() override;
 
     int Initialize();
 

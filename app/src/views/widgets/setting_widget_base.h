@@ -20,7 +20,7 @@ protected:
     bool HasSetting() const;
 
 public:
-    ~SettingWidgetBase() = default;
+    ~SettingWidgetBase() override = default;
 
 protected:
     void RegisterProperties(WidgetPropertyStore& store) const override;
