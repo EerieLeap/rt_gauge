@@ -1,0 +1,148 @@
+# clang-tidy configuration for the EerieLeap C++ sources (Zephyr, C++23, exceptions on).
+# Needs clang-tidy 22 or later. Run it against a native_sim build: the cross-compiler command lines of
+# the hardware boards carry GCC-only flags and headers clang cannot use.
+#
+# Checks are enabled by family; a check is disabled only for a reason given next to it. Aliases are
+# disabled so a finding is reported once, under its primary name.
+---
+Checks: >
+  bugprone-*,
+  clang-analyzer-*,
+  concurrency-*,
+  cppcoreguidelines-*,
+  google-explicit-constructor,
+  misc-*,
+  modernize-*,
+  performance-*,
+  portability-*,
+  readability-*,
+
+  -bugprone-easily-swappable-parameters,
+  -clang-analyzer-optin.core.EnumCastOutOfRange,
+  -cppcoreguidelines-avoid-c-arrays,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-c-copy-assignment-signature,
+  -cppcoreguidelines-explicit-constructor,
+  -cppcoreguidelines-explicit-virtual-functions,
+  -cppcoreguidelines-macro-to-enum,
+  -cppcoreguidelines-narrowing-conversions,
+  -cppcoreguidelines-noexcept-destructor,
+  -cppcoreguidelines-noexcept-move-operations,
+  -cppcoreguidelines-noexcept-swap,
+  -cppcoreguidelines-non-private-member-variables-in-classes,
+  -cppcoreguidelines-use-default-member-init,
+
+  -cppcoreguidelines-avoid-do-while,
+  -cppcoreguidelines-avoid-non-const-global-variables,
+  -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+  -cppcoreguidelines-pro-type-cstyle-cast,
+  -cppcoreguidelines-pro-type-vararg,
+  -misc-use-anonymous-namespace,
+  -bugprone-signed-bitwise,
+  -readability-simplify-boolean-expr,
+
+  -cppcoreguidelines-avoid-const-or-ref-data-members,
+  -cppcoreguidelines-macro-usage,
+  -cppcoreguidelines-owning-memory,
+  -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,
+  -cppcoreguidelines-pro-bounds-constant-array-index,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -cppcoreguidelines-pro-type-union-access,
+  -modernize-avoid-c-arrays,
+  -performance-enum-size,
+  -portability-template-virtual-member-function,
+
+  -misc-explicit-constructor,
+  -misc-include-cleaner,
+  -misc-non-private-member-variables-in-classes,
+  -misc-override-with-different-visibility,
+  -modernize-use-auto,
+  -modernize-use-designated-initializers,
+  -modernize-use-nodiscard,
+  -modernize-use-trailing-return-type,
+  -portability-avoid-pragma-once,
+  -readability-braces-around-statements,
+  -readability-identifier-length,
+  -readability-magic-numbers,
+  -readability-math-missing-parentheses,
+  -readability-named-parameter,
+  -readability-trailing-comma
+
+# Reasons, by group above:
+# 1. Aliases of google-explicit-constructor (two more in clang-tidy 23), bugprone-narrowing-conversions, modernize-use-override, modernize-use-default-member-init,
+#    modernize-macro-to-enum, modernize-avoid-c-arrays, performance-noexcept-*, misc-non-private-member-
+#    variables-in-classes; plus bugprone-easily-swappable-parameters, which flags most multi-argument APIs,
+#    and the analyzer's EnumCastOutOfRange, which reports every combination of a bitmask enum's flags.
+# 2. Fire inside Zephyr macros (LOG_*, LOG_MODULE_REGISTER, K_MSEC, IS_ENABLED): do { } while (0), C casts,
+#    printf-style varargs, string decay, the signed flag arithmetic of the logging macros and the static
+#    variables LOG_MODULE_REGISTER defines (misc-use-anonymous-namespace) are how those macros work, not
+#    choices made in this code.
+# 3. Embedded and Zephyr idioms: C arrays and unions for Zephyr/zcbor structures, pointer arithmetic on
+#    frame buffers, operator[] in hot paths, #define for Kconfig and devicetree, enums sized by the
+#    event bus concept (uint32_t), GCC as the only compiler, no gsl::owner.
+# 4. House style (see .clang-format): unbraced single statements, #pragma once, trailing-return types not
+#    used, [[nodiscard]] and auto by judgement, positional rows in tables, a trailing comma only where a
+#    braced list is meant to stay one element per line, public data in structs, private
+#    overrides of public template methods, short names in small scopes, unnamed unused parameters;
+#    include-cleaner does not understand Zephyr's umbrella headers.
+
+WarningsAsErrors: ''
+HeaderFilterRegex: '.*/(src|tests|include/eerie_leap|libs/eerie_memory)/.*'
+# Build output (twister mirrors the source tree, so its generated headers sit under tests/) is never ours.
+ExcludeHeaderFilterRegex: '.*/(configuration/cbor/cbor_[a-z_]+_config|libs/nameof|zephyr_lua|fixtures/golden_file\.h|twister-out[^/]*|include/generated)(/.*)?'
+SystemHeaders: false
+FormatStyle: file
+# GCC-only flags of the Zephyr command lines that clang rejects.
+RemovedArgs:
+  - '-fno-freestanding'
+  - '-fno-reorder-functions'
+# LOG_MODULE_REGISTER redeclares a variable with a section attribute, and clang ignores some GCC
+# optimisation and warning flags; clang reports both, but neither says anything about the code.
+ExtraArgs:
+  - '-Wno-section'
+  - '-Wno-ignored-optimization-argument'
+  - '-Wno-unused-command-line-argument'
+  - '-Wno-unknown-warning-option'
+
+CheckOptions:
+  bugprone-unchecked-optional-access.IgnoreSmartPointerDereference: true
+  cppcoreguidelines-special-member-functions.AllowSoleDefaultDtor: true
+  cppcoreguidelines-special-member-functions.AllowMissingMoveFunctionsWhenCopyIsDeleted: true
+  cppcoreguidelines-rvalue-reference-param-not-moved.AllowPartialMove: true
+  misc-const-correctness.WarnPointersAsValues: false
+  # Zephyr's own headers include each other in a cycle (kernel.h and tracing.h).
+  misc-header-include-cycle.IgnoredFilesList: '.*/include/zephyr/.*'
+  readability-function-cognitive-complexity.Threshold: 40
+  readability-function-cognitive-complexity.IgnoreMacros: true
+  readability-implicit-bool-conversion.AllowPointerConditions: true
+  readability-uppercase-literal-suffix.NewSuffixes: 'F;U;L;UL;LL;ULL'
+
+  readability-identifier-naming.NamespaceCase: lower_case
+  readability-identifier-naming.ClassCase: CamelCase
+  readability-identifier-naming.StructCase: CamelCase
+  readability-identifier-naming.UnionCase: CamelCase
+  readability-identifier-naming.EnumCase: CamelCase
+  readability-identifier-naming.TypeAliasCase: CamelCase
+  readability-identifier-naming.TypedefCase: CamelCase
+  readability-identifier-naming.TemplateParameterCase: CamelCase
+  readability-identifier-naming.ConceptCase: CamelCase
+  readability-identifier-naming.FunctionCase: CamelCase
+  readability-identifier-naming.MethodCase: CamelCase
+  readability-identifier-naming.VariableCase: lower_case
+  readability-identifier-naming.ParameterCase: lower_case
+  readability-identifier-naming.PrivateMemberCase: lower_case
+  readability-identifier-naming.PrivateMemberSuffix: '_'
+  readability-identifier-naming.ProtectedMemberCase: lower_case
+  readability-identifier-naming.ProtectedMemberSuffix: '_'
+  readability-identifier-naming.PublicMemberCase: lower_case
+  readability-identifier-naming.ConstexprVariableCase: UPPER_CASE
+  readability-identifier-naming.GlobalConstantCase: UPPER_CASE
+  readability-identifier-naming.StaticConstantCase: UPPER_CASE
+  readability-identifier-naming.MacroDefinitionCase: UPPER_CASE
+  # Standard-library-shaped interfaces (containers, allocators, stream buffers, filesystem paths) keep their std names.
+  readability-identifier-naming.TypeAliasIgnoredRegexp: '^(allocator_type|key_type|mapped_type|value_type|size_type|difference_type|reference|const_reference|pointer|const_pointer|iterator|const_iterator|element_type)$'
+  readability-identifier-naming.MethodIgnoredRegexp: '^(begin|end|cbegin|cend|rbegin|rend|size|empty|capacity|data|find|at|contains|insert|insert_or_assign|emplace|emplace_back|push_back|pop_back|erase|clear|reserve|resize|swap|front|back|get_allocator|close|is_open|parent_path|allocate|deallocate|reallocate|do_allocate|do_deallocate|do_is_equal|overflow|underflow|uflow|sync|xsputn|xsgetn|seekoff|seekpos|showmanyc)$'
+  # C-callable free functions (Zephyr callbacks, shell handlers) and main.
+  readability-identifier-naming.FunctionIgnoredRegexp: '^(main|[a-z][a-z0-9]*(_[a-z0-9]+)+)$'
+  # Enumerators are split between UPPER_CASE and CamelCase; EnumConstantCase stays unset until decided.
+...

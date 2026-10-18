@@ -3,7 +3,6 @@
 .cache
 *.swp
 *~
-.clang-tidy
 
 # python
 .venv

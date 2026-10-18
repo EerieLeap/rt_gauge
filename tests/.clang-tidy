@@ -1,0 +1,21 @@
+# Tests inherit the shared configuration and relax only what ztest makes wrong.
+---
+InheritParentConfig: true
+Checks: >
+  -misc-use-internal-linkage,
+  -misc-use-anonymous-namespace,
+  -misc-const-correctness,
+  -bugprone-unchecked-optional-access
+
+# 1. ZTEST() and ZTEST_SUITE() define functions and statistics with external linkage; that is how the
+#    test runner finds them.
+# 2. ZTEST() hands each test a void* fixture and zassert_*() declares a local per assertion: those
+#    are the const-correctness findings in tests, all inside Zephyr's macros.
+# 3. zassert_*() ends the test on failure, which the optional-access analysis cannot see, so every
+#    access after an assertion would be reported.
+
+CheckOptions:
+  # Tests wrap Zephyr functions with the linker (--wrap): __real_<name> and __wrap_<name>.
+  readability-identifier-naming.FunctionIgnoredRegexp: '^(main|[a-z][a-z0-9]*(_[a-z0-9]+)+|__(real|wrap)_[a-z0-9_]+)$'
+  bugprone-reserved-identifier.AllowedIdentifiers: '^__(real|wrap)_[a-z0-9_]+$'
+...
