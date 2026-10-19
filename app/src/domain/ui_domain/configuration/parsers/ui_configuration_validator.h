@@ -6,11 +6,14 @@
 
 #include "domain/ui_domain/models/ui_configuration.h"
 
+#include "subsys/event_bus/event_binding.h"
+
 namespace eerie_leap::domain::ui_domain::configuration::parsers {
 
 using eerie_leap::domain::ui_domain::models::ScreenConfiguration;
 using eerie_leap::domain::ui_domain::models::UiConfiguration;
 using eerie_leap::domain::ui_domain::models::WidgetConfiguration;
+using eerie_leap::subsys::event_bus::EventBindingChecker;
 
 class UiConfigurationValidator {
 public:
@@ -39,6 +42,11 @@ public:
     // Widget-owned child rules come from the view layer (the widget factory). Omitting
     // them runs only the domain checks, including the composition graph.
     static void Validate(const UiConfiguration& configuration, const ChildValidator& validate_children = {});
+
+    // Checks every widget binding against the unit applying the configuration: @p check_binding returns
+    // why a binding does not resolve there, or an empty text. An inbound binding is checked as written,
+    // an outbound one under its outbound event type. Throws std::invalid_argument naming the widget.
+    static void ValidateBindings(const UiConfiguration& configuration, const EventBindingChecker& check_binding);
 
     // Checks a screen and invokes the supplied widget-owned child rules once.
     static void Validate(const ScreenConfiguration& configuration, const ChildValidator& validate_children = {});

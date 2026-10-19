@@ -3,6 +3,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -26,6 +27,7 @@ using namespace eerie_leap::utilities::memory;
 using namespace eerie_leap::domain::ui_domain::models;
 using namespace eerie_leap::domain::ui_domain::configuration::parsers;
 
+using eerie_leap::subsys::event_bus::EventBinding;
 using eerie_leap::subsys::event_bus::EventChannelId;
 
 ZTEST_SUITE(ui_configuration_validator, NULL, NULL, NULL, NULL, NULL);
@@ -155,6 +157,52 @@ ZTEST(ui_configuration_validator, test_sensors_binding_must_select_a_sensor) {
     auto other_channel = MakeConfiguration();
     AddBinding(*other_channel, binding);
     zassert_true(Validates(*other_channel));
+}
+
+ZTEST(ui_configuration_validator, test_binding_check_asks_the_inbound_and_outbound_event_types) {
+    auto make = [](PropertyBindingDirection direction) {
+        auto configuration = MakeConfiguration();
+        auto binding = MakeSensorBinding();
+        binding.direction = direction;
+        binding.event.event_type = 5;
+        binding.outbound_event_type = 9;
+        AddBinding(*configuration, binding);
+        return configuration;
+    };
+
+    auto message_for = [](const UiConfiguration& configuration, uint32_t refused_event_type) {
+        try {
+            UiConfigurationValidator::ValidateBindings(
+                configuration, [refused_event_type](const EventBinding& binding) {
+                    return binding.event_type == refused_event_type ? std::string_view("names an unknown thing.")
+                                                                    : std::string_view();
+                }
+            );
+        } catch(const std::invalid_argument& e) {
+            return std::string(e.what());
+        }
+
+        return std::string();
+    };
+
+    // An Out binding's event.event_type is unused: only the outbound type is asked.
+    zassert_true(message_for(*make(PropertyBindingDirection::Out), 5).empty());
+    auto message = message_for(*make(PropertyBindingDirection::Out), 9);
+    zassert_true(message.contains("Outbound binding names an unknown thing."), "%s", message.c_str());
+
+    // An In binding's outbound type is unused.
+    zassert_true(message_for(*make(PropertyBindingDirection::In), 9).empty());
+    message = message_for(*make(PropertyBindingDirection::In), 5);
+    zassert_true(message.contains("Binding names an unknown thing."), "%s", message.c_str());
+    zassert_true(!message.contains("Outbound"));
+
+    // Both are asked of InOut.
+    zassert_false(message_for(*make(PropertyBindingDirection::InOut), 5).empty());
+    zassert_false(message_for(*make(PropertyBindingDirection::InOut), 9).empty());
+    zassert_true(message_for(*make(PropertyBindingDirection::InOut), 7).empty());
+
+    // No checker, no check.
+    UiConfigurationValidator::ValidateBindings(*make(PropertyBindingDirection::InOut), {});
 }
 
 ZTEST(ui_configuration_validator, test_valid_configuration) {

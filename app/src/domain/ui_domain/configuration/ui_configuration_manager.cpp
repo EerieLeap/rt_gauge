@@ -8,10 +8,12 @@ using namespace eerie_leap::configuration::services;
 
 UiConfigurationManager::UiConfigurationManager(
     std::unique_ptr<CborConfigurationService<CborUiConfig>> cbor_configuration_service,
-    UiConfigurationValidator::ChildValidator validate_children
+    UiConfigurationValidator::ChildValidator validate_children,
+    EventBindingChecker check_binding
 ) :
     CborConfigurationManagerBase("UI", std::move(cbor_configuration_service)),
-    cbor_parser_(std::move(validate_children)) {
+    cbor_parser_(std::move(validate_children)),
+    check_binding_(std::move(check_binding)) {
 
     LoadOrCreateDefault();
 }
@@ -26,6 +28,10 @@ PmrUniquePtr<CborUiConfig> UiConfigurationManager::Serialize(const UiConfigurati
 
 PmrUniquePtr<UiConfiguration> UiConfigurationManager::Deserialize(const CborUiConfig& cbor_config) {
     return cbor_parser_.Deserialize(Mrm::GetExtPmr(), cbor_config);
+}
+
+void UiConfigurationManager::ValidateApply(const UiConfiguration& configuration) {
+    UiConfigurationValidator::ValidateBindings(configuration, check_binding_);
 }
 
 bool UiConfigurationManager::CreateDefaultConfiguration() {

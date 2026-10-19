@@ -1,8 +1,10 @@
 #include <array>
+#include <cstring>
 #include <eerie_memory.hpp>
 #include <memory>
 #include <memory_resource>
 #include <stdexcept>
+#include <string_view>
 #include <utility>
 #include <vector>
 #include <zephyr/kernel.h>
@@ -435,4 +437,49 @@ ZTEST(ui_configuration_manager, test_an_update_is_reported_to_the_configuration_
     zassert_equal(reports[0], Type::Ui);
 
     configuration_service.RegisterConfigurationStoredHandler(nullptr);
+}
+
+// A client's apply is checked against the unit's channels; loading and Update() are not.
+ZTEST(ui_configuration_manager, test_an_apply_is_refused_when_the_binding_checker_refuses_a_binding) {
+    DtFs::InitInternalFs();
+    auto fs_service = std::make_shared<FsService>(DtFs::GetInternalFsMp());
+
+    fs_service->Format();
+
+    size_t asked = 0;
+    auto ui_configuration_manager = std::make_shared<UiConfigurationManager>(
+        std::make_unique<CborConfigurationService<CborUiConfig>>("ui_config", fs_service), nullptr,
+        [&asked](const eerie_leap::subsys::event_bus::EventBinding& binding) -> std::string_view {
+            ++asked;
+            return binding.channel == eerie_leap::subsys::event_bus::EventChannelId::Settings
+                ? "names an event type its channel does not have."
+                : std::string_view();
+        }
+    );
+
+    zassert_true(ui_configuration_manager->Update(CreateManagerTestUiConfiguration()), "A save is not checked");
+    zassert_equal(asked, 0U);
+    const auto exported = ui_configuration_manager->GetCborConfiguration();
+
+    std::array<char, 160> reason{};
+    zassert_false(ui_configuration_manager->ApplyCborConfiguration(exported, reason));
+    zassert_not_equal(asked, 0U);
+    zassert_not_null(strstr(reason.data(), "names an event type its channel does not have."), "%s", reason.data());
+    zassert_not_null(strstr(reason.data(), "Binding"), "%s", reason.data());
+}
+
+ZTEST(ui_configuration_manager, test_an_apply_without_a_binding_checker_is_not_checked) {
+    DtFs::InitInternalFs();
+    auto fs_service = std::make_shared<FsService>(DtFs::GetInternalFsMp());
+
+    fs_service->Format();
+
+    auto ui_configuration_manager = std::make_shared<UiConfigurationManager>(
+        std::make_unique<CborConfigurationService<CborUiConfig>>("ui_config", fs_service)
+    );
+
+    zassert_true(ui_configuration_manager->Update(CreateManagerTestUiConfiguration()));
+    const auto exported = ui_configuration_manager->GetCborConfiguration();
+
+    zassert_true(ui_configuration_manager->ApplyCborConfiguration(exported));
 }

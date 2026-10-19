@@ -600,4 +600,38 @@ void UiConfigurationValidator::ValidateWidgetBindings(const ScreenConfiguration&
     }
 }
 
+void UiConfigurationValidator::ValidateBindings(
+    const UiConfiguration& configuration,
+    const EventBindingChecker& check_binding
+) {
+    if(!check_binding)
+        return;
+
+    for(const auto& screen_configuration : configuration.screen_configurations) {
+        for(const auto& widget_configuration : screen_configuration->widget_configurations) {
+            for(const auto& binding : widget_configuration->bindings) {
+                if(binding.direction != PropertyBindingDirection::Out) {
+                    const auto error = check_binding(binding.event);
+                    if(!error.empty())
+                        InvalidWidgetConfiguration(
+                            screen_configuration->id, widget_configuration->id, std::string("Binding ").append(error)
+                        );
+                }
+
+                if(binding.direction != PropertyBindingDirection::In) {
+                    auto outbound = binding.event;
+                    outbound.event_type = binding.outbound_event_type;
+
+                    const auto error = check_binding(outbound);
+                    if(!error.empty())
+                        InvalidWidgetConfiguration(
+                            screen_configuration->id, widget_configuration->id,
+                            std::string("Outbound binding ").append(error)
+                        );
+                }
+            }
+        }
+    }
+}
+
 } // namespace eerie_leap::domain::ui_domain::configuration::parsers

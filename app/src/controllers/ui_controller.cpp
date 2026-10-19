@@ -36,6 +36,7 @@
 
 #include "subsys/assets/asset_kind.h"
 #include "subsys/assets/asset_provider.h"
+#include "subsys/event_bus/event_binding_subscription.h"
 #include "subsys/event_bus/event_channel_id.h"
 
 #include "views/assets/animations/animations_register.h"
@@ -71,6 +72,7 @@ using eerie_leap::subsys::assets::AssetAccess;
 using eerie_leap::subsys::assets::AssetKind;
 using eerie_leap::subsys::assets::AssetProvider;
 using eerie_leap::subsys::event_bus::CreateScopedSubscription;
+using eerie_leap::subsys::event_bus::GetEventBindingError;
 using eerie_leap::utilities::reflection::GetCallerName;
 using eerie_leap::views::widgets::WidgetFactory;
 
@@ -208,9 +210,11 @@ int UiController::Initialize() {
         UI_CONFIGURATION_NAME, fs_service_, config_work_queue_thread_
     );
     ui_configuration_manager_ = std::make_shared<UiConfigurationManager>(
-        std::move(cbor_ui_config_service), [](const auto& owner, auto children) {
+        std::move(cbor_ui_config_service),
+        [](const auto& owner, auto children) {
             WidgetFactory::GetInstance().ValidateChildren(owner, children);
-        }
+        },
+        GetEventBindingError
     );
 
     if(configuration_service_ != nullptr)
