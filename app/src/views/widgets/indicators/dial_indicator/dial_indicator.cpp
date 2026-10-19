@@ -1,5 +1,5 @@
 #include <cerrno>
-#include <cstdlib>
+#include <cmath>
 #include <stdexcept>
 #include <string>
 
@@ -77,14 +77,15 @@ int DialIndicator::ApplyTheme(const ITheme&) {
 }
 
 uint32_t DialIndicator::GetAngleForValue(float value) {
-    // Both spans are whole numbers and so is their quotient: a fractional range or resolution is cut off.
-    const int angle_span = std::abs(end_angle_ - start_angle_) * 10;
-    const int range_span = std::abs(static_cast<int>(range_end_ - range_start_));
-    const int steps_per_unit = angle_span / range_span;
-    const auto resolution = static_cast<float>(steps_per_unit);
-    const float angle_delta = resolution * value;
+    // Tenths of a degree. MIN_VALUE points at START_ANGLE and MAX_VALUE at END_ANGLE, in either
+    // direction; an empty range leaves the needle at the start.
+    const auto start = static_cast<float>((start_angle_ * 10) - 1800);
+    const float range_span = range_end_ - range_start_;
+    const float angle = range_span == 0.0F
+        ? start
+        : start + (static_cast<float>((end_angle_ - start_angle_) * 10) * (value - range_start_) / range_span);
 
-    return start_angle_ * 10 - 1800 + static_cast<uint32_t>(angle_delta);
+    return static_cast<uint32_t>(static_cast<int32_t>(std::lround(angle)));
 }
 
 void DialIndicator::UpdateIndicator(float value) {

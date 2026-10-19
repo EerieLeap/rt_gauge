@@ -931,6 +931,89 @@ ZTEST(icon_lifecycle, test_dial_custom_angles_and_default_image_pivot_baseline) 
     }
 }
 
+ZTEST(icon_lifecycle, test_dial_maps_its_whole_range_onto_its_angles) {
+    ScopedLvglLock lock;
+    // GetAngleForValue() returns tenths of a degree, wrapping below zero.
+    const struct {
+        double min;
+        double max;
+        int start;
+        int end;
+        float value;
+        int32_t angle;
+    } cases[] = {
+        // A range much wider than the angle span (whole steps per unit gave 0: the needle never moved).
+        { 0, 8000, 45, 315, 0, -1350 },
+        { 0, 8000, 45, 315, 4000, 0 },
+        { 0, 8000, 45, 315, 8000, 1350 },
+        // A range narrower than one unit (a whole-number span of 0 divided by zero).
+        { 0, 0.5, 45, 315, 0.25F, 0 },
+        { 0, 0.5, 45, 315, 0.5F, 1350 },
+        // MIN_VALUE points at the start angle when it is not zero.
+        { 20, 120, 45, 315, 20, -1350 },
+        { 20, 120, 45, 315, 70, 0 },
+        { 20, 120, 45, 315, 120, 1350 },
+        // A fractional step per unit reaches the end angle (2700 / 120 = 22.5 was cut to 22).
+        { 0, 120, 45, 315, 2, -1305 },
+        { 0, 120, 45, 315, 120, 1350 },
+        // An end angle below the start turns the other way.
+        { 0, 100, 315, 45, 0, 1350 },
+        { 0, 100, 315, 45, 100, -1350 },
+        // An empty range leaves the needle at the start.
+        { 50, 50, 45, 315, 50, -1350 },
+    };
+    for(const auto& expected : cases) {
+        auto configuration = DialConfiguration();
+        configuration->properties[WidgetPropertyType::MIN_VALUE] = expected.min;
+        configuration->properties[WidgetPropertyType::MAX_VALUE] = expected.max;
+        configuration->properties[WidgetPropertyType::START_ANGLE] = expected.start;
+        configuration->properties[WidgetPropertyType::END_ANGLE] = expected.end;
+        auto needle = views_test::NeedleConfiguration(2, IconType::Image);
+        auto context = ImageContext(*needle, 15, 220);
+        TestDial dial(1, MakeRoot(), context);
+        dial.Assemble(configuration, needle, context);
+        zassert_equal(dial.Render(), 0);
+        zassert_equal(
+            static_cast<int32_t>(dial.GetAngleForValue(expected.value)), expected.angle,
+            "range %g..%g, angles %d..%d, value %g", expected.min, expected.max, expected.start, expected.end,
+            static_cast<double>(expected.value)
+        );
+    }
+}
+
+ZTEST(icon_lifecycle, test_dial_animation_takes_its_share_of_a_full_sweep) {
+    ScopedLvglLock lock;
+    // A full sweep takes 4000 ms. A wide range used to get 0 ms per unit, and a change smaller than
+    // one unit no time at all.
+    const struct {
+        double max;
+        float value;
+        uint32_t duration_ms;
+    } cases[] = { { 8000, 4000, 2000 }, { 100, 0.5F, 20 }, { 100, 25, 1000 } };
+    for(const auto& expected : cases) {
+        auto configuration = DialConfiguration();
+        configuration->properties[WidgetPropertyType::MIN_VALUE] = 0;
+        configuration->properties[WidgetPropertyType::MAX_VALUE] = expected.max;
+        configuration->properties[WidgetPropertyType::IS_SMOOTHED] = true;
+        auto needle = views_test::NeedleConfiguration(2, IconType::Image);
+        auto context = ImageContext(*needle, 15, 220);
+        TestDial dial(1, MakeRoot(), context);
+        dial.Assemble(configuration, needle, context);
+        zassert_equal(dial.Render(), 0);
+        dial.OnActivated();
+        Publish(WidgetPropertyType::VALUE, expected.value);
+        auto* animation = lv_anim_get(&dial, nullptr);
+        zassert_not_null(animation, "max %g, value %g", expected.max, static_cast<double>(expected.value));
+        zassert_equal(lv_anim_get_time(animation), expected.duration_ms, "duration %u", lv_anim_get_time(animation));
+        Tick(expected.duration_ms + 1);
+        zassert_is_null(lv_anim_get(&dial, nullptr));
+        auto* image = dial.Needle().GetIconContainer()->GetObject();
+        // The image's rotation is normalized to [0, 3600).
+        const int32_t angle = static_cast<int32_t>(dial.GetAngleForValue(expected.value));
+        zassert_equal(lv_image_get_rotation(image), ((angle % 3600) + 3600) % 3600);
+    }
+}
+
 ZTEST(icon_lifecycle, test_the_same_dial_drives_image_shape_and_label_needles) {
     ScopedLvglLock lock;
     for(auto type : { IconType::Image, IconType::TriangleIsosceles, IconType::Label }) {

@@ -46,11 +46,12 @@ lv_anim_t IndicatorBase::CreateValueChangeAnimation() {
 }
 
 void IndicatorBase::ValueChangeAnimation(lv_anim_t& anim, float range, float start_value, float end_value) {
-    const uint32_t duration = 4000;
-    const auto unit_duration = static_cast<uint32_t>(duration / range);
-    // The change is counted in whole units: a fractional part is cut off.
-    const uint32_t change_duration = unit_duration
-        * static_cast<uint32_t>(std::abs(static_cast<int>(end_value - start_value)));
+    // A sweep over the whole range takes FULL_RANGE_DURATION_MS and a change its share of that; an
+    // empty range jumps.
+    constexpr float FULL_RANGE_DURATION_MS = 4000.0F;
+    const uint32_t change_duration = range > 0.0F
+        ? static_cast<uint32_t>(std::lround(FULL_RANGE_DURATION_MS * std::abs(end_value - start_value) / range))
+        : 0U;
 
     lv_anim_set_duration(&anim, change_duration);
     lv_anim_set_values(
