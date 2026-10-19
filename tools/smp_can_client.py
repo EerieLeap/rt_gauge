@@ -929,8 +929,11 @@ def format_access(access: int) -> str:
 
 def format_kind(entry: dict) -> str:
     maximum = f"{entry['max']} B" if entry["max"] else "none"
+    # free and used are sent only while the volume is mounted; free is a hint, WRITE stays the authority.
+    space = f"  free {entry['free']} B  used {entry['used']} B" if "free" in entry else ""
     return (f"kind {entry['kind']}  {entry['name']}  dir {entry['dir']}  access {format_access(entry['access'])}  "
-            f"max {maximum}  ext {' '.join(entry['ext']) or '-'}  avail {'yes' if entry['avail'] else 'no'}")
+            f"max {maximum}  ext {' '.join(entry['ext']) or '-'}  avail {'yes' if entry['avail'] else 'no'}"
+            f"{space}")
 
 
 def asset_write_overhead(name: str) -> int:
@@ -1709,7 +1712,10 @@ def command_info(client: SmpClient, args: argparse.Namespace) -> None:
     for key in ("hw", "sw"):
         info[key] = unpack_version(info[key])
     for key, value in info.items():
-        print(f"{key}: {value:#010x}" if key == "uid" else f"{key}: {value}")
+        if key in ("event_channels", "settings"):
+            print(f"{key}: {' '.join(str(item) for item in value) or '-'}")
+        else:
+            print(f"{key}: {value:#010x}" if key == "uid" else f"{key}: {value}")
 
 
 def command_devices(client: SmpClient, args: argparse.Namespace) -> None:
