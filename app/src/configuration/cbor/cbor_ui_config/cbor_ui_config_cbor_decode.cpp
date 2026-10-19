@@ -17,6 +17,7 @@
 
 static bool decode_repeated_map_tstrtstr(zcbor_state_t *state, struct map_tstrtstr *result);
 static bool decode_CborPropertyValueType(zcbor_state_t *state, struct CborPropertyValueType_r *result);
+static bool decode_CborSelectorValueType(zcbor_state_t *state, struct CborPropertyValueType_r *result);
 static bool decode_repeated_CborPropertiesConfig_CborPropertyValueType_m(zcbor_state_t *state, struct CborPropertiesConfig_CborPropertyValueType_m *result);
 static bool decode_CborPropertiesConfig(zcbor_state_t *state, struct CborPropertiesConfig *result);
 static bool decode_CborGridSettingsConfig(zcbor_state_t *state, struct CborGridSettingsConfig *result);
@@ -173,6 +174,32 @@ static bool decode_CborPropertyValueType(
 	return res;
 }
 
+// A binding's selector may be written as a uint32 hash. It becomes the int choice with the same 32 bits,
+// which the subscription's selector match compares against a uint32 entry; the encoder writes it back
+// as int32 (negative), the same selector. Widget properties keep int32 only. Anything that is not an
+// integer decodes as a CborPropertyValueType, and an integer outside int32..uint32 fails.
+static bool decode_CborSelectorValueType(
+		zcbor_state_t *state, struct CborPropertyValueType_r *result)
+{
+	zcbor_log("%s\r\n", __func__);
+
+	zcbor_state_t backup_state = *state;
+
+	int64_t val;
+	if (zcbor_int64_decode(state, &val)) {
+		if (val < INT32_MIN || val > static_cast<int64_t>(UINT32_MAX)) {
+			return false;
+		}
+
+		result->value = static_cast<int32_t>(static_cast<uint32_t>(val));
+		result->CborPropertyValueType_choice = CborPropertyValueType_r::CborPropertyValueType_int_c;
+		return true;
+	}
+
+	*state = backup_state;
+	return decode_CborPropertyValueType(state, result);
+}
+
 static bool decode_repeated_CborPropertiesConfig_CborPropertyValueType_m(
 		zcbor_state_t *state, struct CborPropertiesConfig_CborPropertyValueType_m *result)
 {
@@ -265,7 +292,7 @@ static bool decode_CborPropertyBinding(
 	&& ((zcbor_uint32_decode(state, (&(*result).outbound_event_type))))
 	&& ((zcbor_bool_decode(state, (&(*result).has_selector))))
 	&& ((zcbor_uint32_decode(state, (&(*result).selector_key))))
-	&& ((decode_CborPropertyValueType(state, (&(*result).selector_value))))) || (zcbor_list_map_end_force_decode(state), false)) && zcbor_list_end_decode(state))));
+	&& ((decode_CborSelectorValueType(state, (&(*result).selector_value))))) || (zcbor_list_map_end_force_decode(state), false)) && zcbor_list_end_decode(state))));
 
 	log_result(state, res, __func__);
 	return res;

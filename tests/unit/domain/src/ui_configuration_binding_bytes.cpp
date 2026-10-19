@@ -1,10 +1,13 @@
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <iterator>
 #include <memory_resource>
 #include <span>
 #include <string>
 #include <utility>
 #include <variant>
+#include <vector>
 
 #include <eerie_memory.hpp>
 #include <zephyr/kernel.h>
@@ -180,6 +183,19 @@ PmrUniquePtr<UiConfiguration> MakeStoredConfiguration() {
     return configuration;
 }
 
+// The stored bytes with the integer selector 7 of the MIN_VALUE binding replaced by @p selector.
+std::vector<uint8_t> WithSelectorBytes(std::span<const uint8_t> selector) {
+    constexpr uint8_t MARK[] = { 0x9f, 0x03, 0x01, 0x00, 0x01, 0x00, 0x00, 0xf5, 0x00 };
+
+    std::vector<uint8_t> bytes(std::begin(STORED_CONFIGURATION), std::end(STORED_CONFIGURATION));
+    const auto mark = std::ranges::search(bytes, MARK).begin();
+    const auto value = mark + sizeof(MARK);
+    bytes.erase(value);
+    bytes.insert(value, selector.begin(), selector.end());
+
+    return bytes;
+}
+
 // For diagnosis only: the array a mismatch would have to be compared against.
 void PrintBytes(std::span<const uint8_t> bytes) {
     printk("Encoded %u bytes:\n", static_cast<unsigned>(bytes.size()));
@@ -277,4 +293,31 @@ ZTEST(ui_configuration_binding_bytes, test_stored_bytes_decode_to_the_same_bindi
     zassert_true(bindings[5].event.HasSelector());
     zassert_equal(bindings[5].event.selector_key, std::to_underlying(NavigationPayloadType::Action));
     zassert_equal(std::get<int>(bindings[5].event.selector_value), -2);
+}
+
+ZTEST(ui_configuration_binding_bytes, test_selector_written_as_uint32_reads_as_the_same_32_bits) {
+    constexpr uint8_t SELECTOR[] = { 0x1a, 0xff, 0xff, 0xff, 0xff }; // 4294967295
+    const auto bytes = WithSelectorBytes(SELECTOR);
+
+    auto cbor_configuration = CborSerializer<CborUiConfig>().Deserialize(bytes);
+    zassert_not_null(cbor_configuration.get());
+
+    auto configuration = UiConfigurationCborParser().Deserialize(Mrm::GetDefaultPmr(), *cbor_configuration);
+    const auto& bindings = configuration->screen_configurations[0]->widget_configurations[0]->bindings;
+
+    zassert_equal(std::get<int>(bindings[2].event.selector_value), -1);
+}
+
+ZTEST(ui_configuration_binding_bytes, test_selector_above_uint32_is_refused) {
+    constexpr uint8_t SELECTOR[] = { 0x1b, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00 }; // 0x1_0000_0000
+    const auto bytes = WithSelectorBytes(SELECTOR);
+
+    zassert_is_null(CborSerializer<CborUiConfig>().Deserialize(bytes).get());
+}
+
+ZTEST(ui_configuration_binding_bytes, test_selector_below_int32_is_refused) {
+    constexpr uint8_t SELECTOR[] = { 0x3b, 0x00, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00 }; // -2147483649
+    const auto bytes = WithSelectorBytes(SELECTOR);
+
+    zassert_is_null(CborSerializer<CborUiConfig>().Deserialize(bytes).get());
 }

@@ -42,7 +42,7 @@ CborPropertyBinding = [
     outbound_event_type: uint,
     has_selector: bool,
     selector_key: uint,
-    selector_value: CborPropertyValueType
+    selector_value: CborSelectorValueType
 ]
 
 ; Keys are UiPropertyType IDs for UI properties and WidgetPropertyType IDs for widget properties.
@@ -59,5 +59,10 @@ CborWidgetSizeConfig = [
     width: uint,
     height: uint
 ]
+
+; A hash may be written in the uint32 range. Only text, an integer or a bool selects; the validator
+; refuses the rest.
+CborSelectorInteger = -2147483648..4294967295
+CborSelectorValueType = CborSelectorInteger / float / tstr / bool / [* int] / [* tstr] / { * tstr => tstr }
 
 CborPropertyValueType = int / float / tstr / bool / [* int] / [* tstr] / { * tstr => tstr }

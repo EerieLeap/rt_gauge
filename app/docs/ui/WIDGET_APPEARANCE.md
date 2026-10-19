@@ -230,9 +230,11 @@ A binding on the Sensors channel must select a sensor by `SensorId`, in any
 direction: without a selector it would receive every sensor and make the unit
 publish every reading, so the validator refuses it. A client's apply also checks
 each binding's event type and payload keys (an outbound binding's under its
-outbound event type) against the channels this unit registers. Publish from
-services rather than accessing LVGL directly; widget dispatch takes the LVGL
-lock before its dispatch guard.
+outbound event type) against the channels this unit registers. An integer
+selector may be written in the uint32 range, as a hash is; it reads as the int32
+with the same 32 bits, the same selector, and a re-save writes it that way.
+Publish from services rather than accessing LVGL directly; widget dispatch takes
+the LVGL lock before its dispatch guard.
 
 ## Activity and compatibility
 
