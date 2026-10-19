@@ -6,6 +6,7 @@
 
 #include <zephyr/ztest.h>
 
+#include "domain/sensor_domain/event_bus/sensor_payload_type.h"
 #include "domain/ui_domain/configuration/parsers/ui_configuration_cbor_parser.h"
 #include "domain/ui_domain/configuration/parsers/ui_configuration_validator.h"
 #include "domain/ui_domain/models/animation.h"
@@ -211,7 +212,10 @@ ZTEST(widget_composition, test_dial_rejects_inbound_animation_type_bindings_and_
     screen->widget_configurations = { dial, needle };
     for(auto direction : { PropertyBindingDirection::In, PropertyBindingDirection::InOut }) {
         needle->bindings = { PropertyBinding{ .target = WidgetPropertyType::ANIMATION_TYPE,
-            .event = { .channel = EventChannelId::Sensors },
+            .event = { .channel = EventChannelId::Sensors,
+                .selector_key =
+                    std::to_underlying(eerie_leap::domain::sensor_domain::event_bus::SensorPayloadType::SensorId),
+                .selector_value = 1 },
             .direction = direction } };
         ExpectError(*screen, { "Widget ID: 9", "Child index 0, ID 12 (needle)", "inbound ANIMATION_TYPE" });
     }

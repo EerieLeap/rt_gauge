@@ -226,8 +226,11 @@ belongs to `eerie_leap::domain::ui_domain::models` and carries rt_core's
 event channels before publishing. Register bindings before configuring/rendering;
 only supported targets subscribe. Configured sensor-name selectors are hashed
 by the binding dispatcher; publish the matching hash in `SensorId` as above.
-Publish from services rather than accessing
-LVGL directly; widget dispatch takes the LVGL lock before its dispatch guard.
+A binding on the Sensors channel must select a sensor by `SensorId`, in any
+direction: without a selector it would receive every sensor and make the unit
+publish every reading, so the validator refuses it. Publish from services rather
+than accessing LVGL directly; widget dispatch takes the LVGL lock before its
+dispatch guard.
 
 ## Activity and compatibility
 

@@ -14,6 +14,8 @@
 #include "domain/ui_domain/models/widget_property.h"
 #include "domain/ui_domain/utilities/widget_property_validator.h"
 
+#include "domain/sensor_domain/event_bus/sensor_event_binding.h"
+
 #include "subsys/event_bus/event_binding.h"
 #include "subsys/event_bus/event_channel_id.h"
 
@@ -26,6 +28,7 @@ using namespace eerie_leap::domain::ui_domain::utilities;
 
 // Header only, so the domain checks link without the event bus. Named here because ADL cannot
 // find IsSelectorValue through a ConfigValue, a variant of std types.
+using eerie_leap::domain::sensor_domain::event_bus::SelectsSensor;
 using eerie_leap::subsys::event_bus::IsSelectorValue;
 using eerie_leap::subsys::event_bus::IsValidEventChannelId;
 
@@ -586,6 +589,12 @@ void UiConfigurationValidator::ValidateWidgetBindings(const ScreenConfiguration&
                 InvalidWidgetConfiguration(
                     screen_configuration.id, widget_configuration->id,
                     "Binding selector value must be text, an integer or a bool."
+                );
+
+            if(binding.event.channel == EventChannelId::Sensors && !SelectsSensor(binding.event))
+                InvalidWidgetConfiguration(
+                    screen_configuration.id, widget_configuration->id,
+                    "Binding on the Sensors channel must select a sensor by its SensorId."
                 );
         }
     }

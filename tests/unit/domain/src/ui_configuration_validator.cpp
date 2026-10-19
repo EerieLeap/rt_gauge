@@ -4,6 +4,7 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <eerie_memory.hpp>
@@ -24,6 +25,8 @@ using namespace eerie_memory;
 using namespace eerie_leap::utilities::memory;
 using namespace eerie_leap::domain::ui_domain::models;
 using namespace eerie_leap::domain::ui_domain::configuration::parsers;
+
+using eerie_leap::subsys::event_bus::EventChannelId;
 
 ZTEST_SUITE(ui_configuration_validator, NULL, NULL, NULL, NULL, NULL);
 
@@ -121,6 +124,38 @@ void AddBinding(UiConfiguration& configuration, PropertyBinding binding) {
 }
 
 } // namespace
+
+ZTEST(ui_configuration_validator, test_sensors_binding_must_select_a_sensor) {
+    auto configuration = MakeConfiguration();
+    AddBinding(*configuration, MakeSensorBinding());
+    zassert_true(Validates(*configuration));
+
+    for(auto direction :
+        { PropertyBindingDirection::In, PropertyBindingDirection::Out, PropertyBindingDirection::InOut }) {
+        auto binding = MakeSensorBinding();
+        binding.direction = direction;
+        binding.event.selector_value = std::monostate{};
+
+        auto without_selector = MakeConfiguration();
+        AddBinding(*without_selector, binding);
+        zassert_false(Validates(*without_selector));
+    }
+
+    // A selector on the Value key leaves the publisher's per-sensor cache answering from a first reading.
+    auto binding = MakeSensorBinding();
+    binding.event.selector_key = 1;
+    auto on_value_key = MakeConfiguration();
+    AddBinding(*on_value_key, binding);
+    zassert_false(Validates(*on_value_key));
+
+    // Other channels take no selector.
+    binding = MakeSensorBinding();
+    binding.event.channel = EventChannelId::Logging;
+    binding.event.selector_value = std::monostate{};
+    auto other_channel = MakeConfiguration();
+    AddBinding(*other_channel, binding);
+    zassert_true(Validates(*other_channel));
+}
 
 ZTEST(ui_configuration_validator, test_valid_configuration) {
     zassert_true(Validates(*MakeConfiguration()));
@@ -625,7 +660,9 @@ ZTEST(ui_configuration_validator, test_a_sensor_binding_is_valid) {
 ZTEST(ui_configuration_validator, test_an_unconditional_binding_is_valid) {
     auto configuration = MakeConfiguration();
 
+    // The Sensors channel needs a selector; an unconditional binding belongs to another channel.
     auto binding = MakeSensorBinding();
+    binding.event.channel = EventChannelId::Logging;
     binding.event.selector_key = 0;
     binding.event.selector_value = {};
 
