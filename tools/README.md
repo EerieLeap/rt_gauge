@@ -73,6 +73,8 @@ Leave DTR alone there. A port that the client holds is exclusive; close the term
 | `assets get KIND NAME [FILE] [--in-flight N] [--resume]` | either | Downloads a file and checks its CRC32. |
 | `assets put KIND NAME FILE` | either | Uploads a file under the name NAME. |
 | `assets rm KIND NAME` | either | Deletes a file. |
+| `logging status` | either | Whether the unit logs (`logging` group 71), why not, and the session's start, file and size. |
+| `logging start [--uid N]`, `logging stop [--uid N]` | either | Asks the units that can log to start or stop; `--uid` (decimal or `0x` hex) limits it to one unit, default every unit. |
 | `shell TEXT [--wait S]` | serial | Types TEXT as a shell command line and prints the console for S seconds (1). An empty TEXT only listens: `shell "" --wait 15` catches a thread analyzer report. |
 | `bench [--size N] [--count N]` | either | Echo round trips, for throughput. |
 
@@ -114,7 +116,8 @@ kind that takes none) and `avail` says whether the volume is mounted now.
 | 4 | `logs` | a unit that logs, from `logs` (download and delete only; the file being written is in use) |
 
 A unit serves the kinds it has the services for, so the gauge lists the first two. `assets ls` prints the
-size and name of each file. A name is 1 to 64 characters of `A-Z a-z 0-9 . _ -`, does not start with `.`,
+size and name of each file, and for a log the end time the unit reports (`end_ms`) and, when the name is
+`<prefix>_YYYYMMDDTHHMMSSZ_NNNN.mf4`, the duration from the time in the name. A name is 1 to 64 characters of `A-Z a-z 0-9 . _ -`, does not start with `.`,
 and ends in one of the kind's extensions with at least one character before it. A unit built before the
 group answers every `assets` command with `MCUmgr error 8 (the unit has no assets group (older firmware))`.
 

@@ -49,6 +49,7 @@ import binascii
 import collections
 import contextlib
 import dataclasses
+import datetime
 import importlib
 import io
 import json
@@ -143,9 +144,18 @@ class Group(IntEnum):
     CALIBRATION = 68
     FILES = 69
     ASSETS = 70
+    LOGGING = 71
 
 
 OS_RESET = 5
+
+LOGGING_STATUS = 0
+LOGGING_START = 1
+LOGGING_STOP = 2
+# LoggingStatusReason (logging_status_reason.h): add values, never renumber.
+LOGGING_REASONS = {0: "stopped", 1: "write failed", 2: "no space", 3: "rotation failed", 4: "unavailable"}
+# <prefix>_YYYYMMDDTHHMMSSZ_NNNN.mf4: the start of a log file's session, UTC.
+LOG_NAME_PATTERN = re.compile(r"_(\d{8}T\d{6}Z)_\d+\.mf4$")
 
 CONFIG_ERRORS = {
     2: "unknown type",
@@ -1790,9 +1800,57 @@ def command_assets_kinds(client: SmpClient, args: argparse.Namespace) -> None:
         print(format_kind(entry))
 
 
+def format_utc_ms(unix_ms: int) -> str:
+    moment = datetime.datetime.fromtimestamp(unix_ms / 1000, datetime.timezone.utc)
+    return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def format_duration(seconds: float) -> str:
+    seconds = max(0, int(round(seconds)))
+    if seconds < 60:
+        return f"{seconds} s"
+    if seconds < 3600:
+        return f"{seconds // 60} min"
+    return f"{seconds // 3600} h {seconds % 3600 // 60} min"
+
+
+def format_size(size: int) -> str:
+    if size < 1024:
+        return f"{size} B"
+    value = float(size)
+    for unit in ("KiB", "MiB", "GiB"):
+        value /= 1024
+        if value < 1024 or unit == "GiB":
+            return f"{value:.1f} {unit}"
+    raise AssertionError("unreachable")
+
+
+def log_start_ms(name: str) -> int | None:
+    """The session start a log file name carries, as Unix ms UTC; None when the name does not follow the naming."""
+    match = LOG_NAME_PATTERN.search(name)
+    if not match:
+        return None
+    try:
+        moment = datetime.datetime.strptime(match.group(1), "%Y%m%dT%H%M%SZ").replace(tzinfo=datetime.timezone.utc)
+    except ValueError:
+        return None
+    return int(moment.timestamp() * 1000)
+
+
+def format_asset_entry(entry: dict) -> str:
+    line = f"{entry['size']:>10}  {entry['name']}"
+    # end_ms (logs kind): when the file was last written, Unix ms UTC.
+    if "end_ms" in entry:
+        line += f"  end {format_utc_ms(entry['end_ms'])}"
+        start_ms = log_start_ms(entry["name"])
+        if start_ms is not None and entry["end_ms"] >= start_ms:
+            line += f"  duration {format_duration((entry['end_ms'] - start_ms) / 1000)}"
+    return line
+
+
 def command_assets_ls(client: SmpClient, args: argparse.Namespace) -> None:
     for entry in list_assets(client, args.kind):
-        print(f"{entry['size']:>10}  {entry['name']}")
+        print(format_asset_entry(entry))
 
 
 def command_assets_get(client: SmpClient, args: argparse.Namespace) -> None:
@@ -1870,6 +1928,48 @@ ASSETS_HANDLERS = {
 
 def command_assets(client: SmpClient, args: argparse.Namespace) -> None:
     ASSETS_HANDLERS[args.assets_command](client, args)
+
+
+def command_logging_status(client: SmpClient, args: argparse.Namespace) -> None:
+    response = client.read(Group.LOGGING, LOGGING_STATUS)
+    active = bool(response["active"])
+    print(f"active: {'yes' if active else 'no'}")
+    if not active:
+        reason = response.get("reason", 0)
+        print(f"reason: {LOGGING_REASONS.get(reason, f'unknown({reason})')}")
+    if "since_ms" in response:
+        since_ms = response["since_ms"]
+        elapsed = format_duration(time.time() - since_ms / 1000)
+        print(f"since: {format_utc_ms(since_ms)} ({elapsed} ago)")
+    if "file" in response:
+        print(f"file: {response['file']}")
+    if "bytes" in response:
+        print(f"bytes: {response['bytes']} ({format_size(response['bytes'])})")
+
+
+def logging_request(args: argparse.Namespace) -> dict | None:
+    return {"uid": args.uid} if args.uid is not None else None
+
+
+def command_logging_start(client: SmpClient, args: argparse.Namespace) -> None:
+    client.write(Group.LOGGING, LOGGING_START, logging_request(args))
+    print("logging start requested" + (f" for unit {args.uid:#010x}" if args.uid is not None else ""))
+
+
+def command_logging_stop(client: SmpClient, args: argparse.Namespace) -> None:
+    client.write(Group.LOGGING, LOGGING_STOP, logging_request(args))
+    print("logging stop requested" + (f" for unit {args.uid:#010x}" if args.uid is not None else ""))
+
+
+LOGGING_HANDLERS = {
+    "status": command_logging_status,
+    "start": command_logging_start,
+    "stop": command_logging_stop,
+}
+
+
+def command_logging(client: SmpClient, args: argparse.Namespace) -> None:
+    LOGGING_HANDLERS[args.logging_command](client, args)
 
 
 def command_shell(client: SmpClient, args: argparse.Namespace) -> None:
@@ -1976,6 +2076,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     asset_rename.add_argument("kind", type=parse_asset_kind, help="asset kind, a name or a number")
     asset_rename.add_argument("name")
     asset_rename.add_argument("to", help="the new name")
+    logging = commands.add_parser("logging", help="logging status, and start or stop logging on the units that log")
+    logging_commands = logging.add_subparsers(dest="logging_command", required=True)
+    logging_commands.add_parser("status", help="whether logging is active, why not, and the session")
+    for name in ("start", "stop"):
+        sub = logging_commands.add_parser(name, help=f"{name} logging on every unit that can log, or on one")
+        sub.add_argument("--uid", type=lambda text: int(text, 0), metavar="N",
+                         help="the unit's UID (decimal or 0x hex); default: every unit")
     shell = commands.add_parser("shell", help="serial only: type a shell command and print the console")
     shell.add_argument("text", help="the command line; empty to only listen")
     shell.add_argument("--wait", type=float, default=1.0, help="seconds to print the console for (default: 1)")
@@ -2023,6 +2130,7 @@ HANDLERS = {
     "config-encode": command_config_encode,
     "config-decode": command_config_decode,
     "assets": command_assets,
+    "logging": command_logging,
     "shell": command_shell,
     "bench": command_bench,
 }
