@@ -194,6 +194,7 @@ class AssetsCommand(IntEnum):
     READ = 2
     WRITE = 3
     DELETE = 4
+    STAT = 5
 
 
 ASSET_KINDS = {"images": 0, "animations": 1, "sensor_scripts": 2, "can_scripts": 3, "logs": 4}
@@ -1842,12 +1843,21 @@ def command_assets_rm(client: SmpClient, args: argparse.Namespace) -> None:
     print(f"deleted {args.name}")
 
 
+def command_assets_stat(client: SmpClient, args: argparse.Namespace) -> None:
+    response = client.read(Group.ASSETS, AssetsCommand.STAT, {"kind": args.kind, "name": args.name})
+    # No crc for a file above the unit's STAT limit that no checkpoint covers.
+    crc = f"{response['crc']:#010x}" if "crc" in response else "-"
+    print(f"len: {response['len']}")
+    print(f"crc: {crc}")
+
+
 ASSETS_HANDLERS = {
     "kinds": command_assets_kinds,
     "ls": command_assets_ls,
     "get": command_assets_get,
     "put": command_assets_put,
     "rm": command_assets_rm,
+    "stat": command_assets_stat,
 }
 
 
@@ -1952,6 +1962,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     asset_rm = assets_commands.add_parser("rm", help="delete a file")
     asset_rm.add_argument("kind", type=parse_asset_kind, help="asset kind, a name or a number")
     asset_rm.add_argument("name")
+    asset_stat = assets_commands.add_parser("stat", help="a file's size and CRC32, without downloading it")
+    asset_stat.add_argument("kind", type=parse_asset_kind, help="asset kind, a name or a number")
+    asset_stat.add_argument("name")
     shell = commands.add_parser("shell", help="serial only: type a shell command and print the console")
     shell.add_argument("text", help="the command line; empty to only listen")
     shell.add_argument("--wait", type=float, default=1.0, help="seconds to print the console for (default: 1)")
