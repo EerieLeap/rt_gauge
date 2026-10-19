@@ -44,6 +44,7 @@
 #include "domain/sensor_domain/models/sources/canbus_source.h"
 #include "domain/sensor_domain/services/sensor_events_publisher.h"
 #include "domain/sensor_domain/utilities/sensor_readings_frame.hpp"
+#include "domain/settings_domain/models/setting_id.h"
 #include "domain/settings_domain/services/settings_persistence_service.h"
 
 #include "event_bus/event_channels.h"
@@ -75,6 +76,7 @@ using namespace eerie_leap::domain::sensor_domain::services;
 using namespace eerie_leap::domain::sensor_domain::utilities;
 using namespace eerie_leap::domain::ui_domain::services;
 using namespace eerie_leap::domain::settings_domain::services;
+using eerie_leap::domain::settings_domain::models::SettingId;
 
 using namespace eerie_leap::event_bus;
 
@@ -314,7 +316,7 @@ int main() {
         configuration_service, config_work_queue_thread,
         canbus_com_service != nullptr ? canbus_com_service->GetNetworkInfo() : nullptr,
         system_configuration != nullptr ? system_configuration->build_number : 0, sensors_controller->GetCapabilities(),
-        nullptr, assets_manager
+        nullptr, assets_manager, SettingId::ALL
     );
     if(management_controller->Initialize() != 0)
         LOG_ERR("Failed to initialize the management controller.");
