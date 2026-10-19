@@ -34,8 +34,8 @@
 #include "domain/logging_domain/control/canbus_com_logging_command_sender.h"
 #include "domain/logging_domain/control/configuration/logging_control_configuration_manager.h"
 #include "domain/logging_domain/control/configuration_update_logging_stop.h"
+#include "domain/logging_domain/control/models/logging_control_binding.h"
 #include "domain/logging_domain/control/models/logging_control_configuration.h"
-#include "domain/logging_domain/control/models/logging_trigger.h"
 #include "domain/sensor_domain/event_bus/sensor_event_type.h"
 #include "domain/sensor_domain/event_bus/sensor_payload_type.h"
 #include "domain/sensor_domain/models/indicator_input_mode.h"
@@ -83,8 +83,8 @@ using namespace eerie_leap::controllers;
 using eerie_leap::domain::logging_domain::control::CanbusComLoggingCommandSender;
 using eerie_leap::domain::logging_domain::control::ConfigurationUpdateLoggingStop;
 using eerie_leap::domain::logging_domain::control::configuration::LoggingControlConfigurationManager;
+using eerie_leap::domain::logging_domain::control::models::LoggingControlBinding;
 using eerie_leap::domain::logging_domain::control::models::LoggingControlConfiguration;
-using eerie_leap::domain::logging_domain::control::models::LoggingTrigger;
 using eerie_leap::domain::sensor_domain::event_bus::SensorEventType;
 using eerie_leap::domain::sensor_domain::event_bus::SensorPayloadType;
 using eerie_leap::subsys::assets::AssetsManager;
@@ -127,8 +127,8 @@ bool HasLoggingButton(int gpio_channel_count) {
 
 // Whether a trigger is the button's: Sensors / DataUpdated / Value, selected by SensorId, with a selector
 // that matches the button by the subscription's own rule (a text id or its hash).
-bool IsLoggingButtonTrigger(const LoggingTrigger& trigger) {
-    const auto& binding = trigger.binding;
+bool IsLoggingButtonTrigger(const LoggingControlBinding& trigger) {
+    const auto& binding = trigger.event;
     if(binding.channel != EventChannelId::Sensors
         || binding.event_type != std::to_underlying(SensorEventType::DataUpdated)
         || binding.payload_key != std::to_underlying(SensorPayloadType::Value)
@@ -142,13 +142,13 @@ bool IsLoggingButtonTrigger(const LoggingTrigger& trigger) {
         && SelectorMatches(*selector, EventData(StringHelpers::GetHash(LOGGING_BUTTON_SENSOR_ID)));
 }
 
-LoggingTrigger MakeLoggingButtonTrigger() {
-    LoggingTrigger trigger;
-    trigger.binding.channel = EventChannelId::Sensors;
-    trigger.binding.event_type = std::to_underlying(SensorEventType::DataUpdated);
-    trigger.binding.payload_key = std::to_underlying(SensorPayloadType::Value);
-    trigger.binding.selector_key = std::to_underlying(SensorPayloadType::SensorId);
-    trigger.binding.selector_value = std::pmr::string(LOGGING_BUTTON_SENSOR_ID, Mrm::GetExtPmr());
+LoggingControlBinding MakeLoggingButtonTrigger() {
+    LoggingControlBinding trigger;
+    trigger.event.channel = EventChannelId::Sensors;
+    trigger.event.event_type = std::to_underlying(SensorEventType::DataUpdated);
+    trigger.event.payload_key = std::to_underlying(SensorPayloadType::Value);
+    trigger.event.selector_key = std::to_underlying(SensorPayloadType::SensorId);
+    trigger.event.selector_value = std::pmr::string(LOGGING_BUTTON_SENSOR_ID, Mrm::GetExtPmr());
     trigger.target_uid = 0; // Every unit that can log.
 
     return trigger;

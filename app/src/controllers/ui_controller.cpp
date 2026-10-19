@@ -111,7 +111,7 @@ PropertyBinding SensorBinding(const char* sensor_id) {
             .selector_value = std::pmr::string(sensor_id, Mrm::GetExtPmr()) } };
 }
 
-PropertyBinding LoggingBinding(WidgetPropertyType target) {
+PropertyBinding LoggingStatusBinding(WidgetPropertyType target) {
     return PropertyBinding{ .target = target,
         .event = { .channel = EventChannelId::Logging,
             .event_type = std::to_underlying(LoggingEventType::StatusUpdated),
@@ -674,7 +674,7 @@ void UiController::SetupTestConfiguration() {
     widget7->properties[WidgetPropertyType::IS_ANIMATION_ACTIVE] = true;
     widget7->properties[WidgetPropertyType::ANIMATION_TYPE] = static_cast<int>(Animation::Type::Blinking);
     widget7->properties[WidgetPropertyType::ANIMATION_DURATION_MS] = 1000;
-    widget7->bindings.push_back(LoggingBinding(WidgetPropertyType::IS_VISIBLE));
+    widget7->bindings.push_back(LoggingStatusBinding(WidgetPropertyType::IS_VISIBLE));
     screen_configuration->AddWidget(std::move(widget7));
 
     // auto widget8 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
@@ -692,7 +692,7 @@ void UiController::SetupTestConfiguration() {
     // widget8->properties[WidgetPropertyType::POSITION_ANGLE] = -56.0F;
     // widget8->properties[WidgetPropertyType::EDGE_OFFSET] = 2;
     // widget8->properties[WidgetPropertyType::LABEL] = "log";
-    // widget8->bindings.push_back(LoggingBinding(WidgetPropertyType::IS_VISIBLE));
+    // widget8->bindings.push_back(LoggingStatusBinding(WidgetPropertyType::IS_VISIBLE));
     // screen_configuration->AddWidget(std::move(widget8));
 
     // Widget: IndicatorDial, driving needle widget 12 (CHILD_WIDGET_IDS index 0)
