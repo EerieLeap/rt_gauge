@@ -53,11 +53,11 @@ int DisplayController::Initialize() {
     }
 
     // Weak, because the service owns the manager that owns this handler.
-    std::weak_ptr<DisplayService> display_service = display_service_;
+    const std::weak_ptr<DisplayService> display_service = display_service_;
 
     // A configuration pushed over BLE has to reach the panel without a reboot.
     display_configuration_manager_->RegisterConfigurationUpdatedHandler([display_service] {
-        if(auto service = display_service.lock())
+        if(const auto service = display_service.lock())
             service->Reload();
     });
 

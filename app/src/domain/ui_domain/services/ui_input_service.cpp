@@ -46,7 +46,7 @@ int UiInputService::Initialize(lv_obj_t* root) {
 
     // lv_obj_create() sets GESTURE_BUBBLE on every child; LVGL walks up while that
     // flag is set, so the gesture target must be the first object without it.
-    lv_obj_remove_flag(root_, LV_OBJ_FLAG_GESTURE_BUBBLE);
+    lv_obj_set_gesture_bubble(root_, false);
     lv_obj_add_event_cb(root_, GestureCb, LV_EVENT_GESTURE, this);
 
     LOG_INF("UI input service initialized.");
@@ -86,14 +86,14 @@ void UiInputService::HandleGesture() {
     if(!index.has_value())
         return;
 
-    auto intent = gesture_map_[*index].load(std::memory_order_relaxed);
+    const auto intent = gesture_map_[*index].load(std::memory_order_relaxed);
     if(intent == NavigationIntent::None)
         return;
 
     // One swipe must produce one action, not one per event tick.
     lv_indev_wait_release(indev);
 
-    if(last_gesture_tick_ != 0 && lv_tick_elaps(last_gesture_tick_) < k_gesture_cooldown_ms)
+    if(last_gesture_tick_ != 0 && lv_tick_elaps(last_gesture_tick_) < GESTURE_COOLDOWN_MS)
         return;
 
     last_gesture_tick_ = lv_tick_get();

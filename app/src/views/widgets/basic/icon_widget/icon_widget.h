@@ -16,8 +16,8 @@ using eerie_leap::views::widgets::basic::icons::IIcon;
 class IconWidget : public WidgetBase {
 protected:
     IconType icon_type_;
-    int position_x_;
-    int position_y_;
+    int position_x_{};
+    int position_y_{};
 
     std::unique_ptr<IIcon> icon_;
 
@@ -31,6 +31,10 @@ public:
 
     IconWidget(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context, IconType icon_type = IconType::None);
     ~IconWidget() override;
+    IconWidget(const IconWidget&) = delete;
+    IconWidget& operator=(const IconWidget&) = delete;
+    IconWidget(IconWidget&&) = delete;
+    IconWidget& operator=(IconWidget&&) = delete;
     std::shared_ptr<Frame> GetIconContainer() const;
 
 protected:

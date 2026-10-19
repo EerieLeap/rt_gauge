@@ -98,11 +98,13 @@ LOG_MODULE_REGISTER(main_logger);
 
 constexpr uint32_t SLEEP_TIME_MS = 10000;
 
-void SetupCanbusConfiguration(std::shared_ptr<CanbusConfigurationManager> canbus_configuration_manager);
-void SetupTestSensors(std::shared_ptr<SensorsConfigurationManager> sensors_configuration_manager);
-void SetupTestLoggingButton(std::shared_ptr<SensorsConfigurationManager> sensors_configuration_manager);
-void SetupTestLoggingTrigger(
-    std::shared_ptr<LoggingControlConfigurationManager> logging_control_configuration_manager,
+[[maybe_unused]] static void
+SetupCanbusConfiguration(const std::shared_ptr<CanbusConfigurationManager>& canbus_configuration_manager);
+[[maybe_unused]] static void
+SetupTestSensors(const std::shared_ptr<SensorsConfigurationManager>& sensors_configuration_manager);
+static void SetupTestLoggingButton(const std::shared_ptr<SensorsConfigurationManager>& sensors_configuration_manager);
+static void SetupTestLoggingTrigger(
+    const std::shared_ptr<LoggingControlConfigurationManager>& logging_control_configuration_manager,
     int gpio_channel_count
 );
 
@@ -154,6 +156,7 @@ LoggingTrigger MakeLoggingButtonTrigger() {
 
 } // namespace
 
+// NOLINTNEXTLINE(bugprone-exception-escape): the composition root; an exception during boot is fatal and ends in std::terminate
 int main() {
     // CoredumpReporter::PrintStoredDump();
 
@@ -163,23 +166,23 @@ int main() {
 
     DtConfigurator::Initialize(DtFeature::INTERNAL_FS | DtFeature::GPIO | DtFeature::DISPLAY | DtFeature::CANBUS);
 
-    auto fs_service = std::make_shared<FsService>(DtFs::GetInternalFsMp());
+    const auto fs_service = std::make_shared<FsService>(DtFs::GetInternalFsMp());
     if(!fs_service->Initialize()) {
         LOG_ERR("Failed to initialize File System.");
         return -1;
     }
 
     // Shared: controllers register the asset kinds they own, and the management controller serves them.
-    auto assets_manager = std::make_shared<AssetsManager>();
+    const auto assets_manager = std::make_shared<AssetsManager>();
 
-    auto rtc_provider = std::make_shared<RtcProvider>();
-    auto boot_elapsed_time_provider = std::make_shared<BootElapsedTimeProvider>();
-    auto time_service = std::make_shared<TimeService>(rtc_provider, boot_elapsed_time_provider);
-    time_service->Initialize();
+    const auto rtc_provider = std::make_shared<RtcProvider>();
+    const auto boot_elapsed_time_provider = std::make_shared<BootElapsedTimeProvider>();
+    const auto time_service = std::make_shared<TimeService>(rtc_provider, boot_elapsed_time_provider);
+    eerie_leap::subsys::time::TimeService::Initialize();
 
-    int config_work_queue_stack_size = 6144;
-    int config_work_queue_priority = 5;
-    auto config_work_queue_thread = std::make_shared<WorkQueueThread>(
+    const int config_work_queue_stack_size = 6144;
+    const int config_work_queue_priority = 5;
+    const auto config_work_queue_thread = std::make_shared<WorkQueueThread>(
         "config_work_queue", config_work_queue_stack_size, config_work_queue_priority
     );
     if(!config_work_queue_thread->Initialize()) {
@@ -187,11 +190,11 @@ int main() {
         return -1;
     }
 
-    auto system_controller = std::make_shared<SystemController>(fs_service, config_work_queue_thread);
+    const auto system_controller = std::make_shared<SystemController>(fs_service, config_work_queue_thread);
     if(system_controller->Initialize() != 0)
         LOG_ERR("Failed to initialize the system controller.");
 
-    auto configuration_service = std::make_shared<ConfigurationService>();
+    const auto configuration_service = std::make_shared<ConfigurationService>();
 
     std::shared_ptr<IGpio> gpio = GpioFactory(DtGpio::Get).Create();
     if(gpio->Initialize() != 0) {
@@ -201,11 +204,11 @@ int main() {
 
     // Owns the debounce between a setting settling and its owner writing flash. Constructed
     // before any owner so a change published during initialization is already observed.
-    auto settings_persistence_service = std::make_shared<SettingsPersistenceService>(config_work_queue_thread);
+    const auto settings_persistence_service = std::make_shared<SettingsPersistenceService>(config_work_queue_thread);
     if(settings_persistence_service->Initialize() != 0)
         LOG_ERR("Failed to initialize the settings persistence service.");
 
-    auto display_controller = std::make_shared<DisplayController>(
+    const auto display_controller = std::make_shared<DisplayController>(
         fs_service, config_work_queue_thread, configuration_service
     );
     if(display_controller->Initialize() != 0) {
@@ -213,9 +216,9 @@ int main() {
         return -1;
     }
 
-    auto sensor_readings_frame = std::make_shared<SensorReadingsFrame>();
+    const auto sensor_readings_frame = std::make_shared<SensorReadingsFrame>();
 
-    auto ui_controller = std::make_shared<UiController>(
+    const auto ui_controller = std::make_shared<UiController>(
         fs_service, config_work_queue_thread, configuration_service, assets_manager
     );
     if(ui_controller->Initialize() != 0) {
@@ -227,13 +230,13 @@ int main() {
     // Started once the UI controller has built its screens, whose widgets subscribe as they are
     // configured, so no reading is taken before they listen. An overlay subscribes when it is
     // shown and is honoured from the next tick.
-    auto sensor_events_publisher = std::make_shared<SensorEventsPublisher>(sensor_readings_frame);
+    const auto sensor_events_publisher = std::make_shared<SensorEventsPublisher>(sensor_readings_frame);
     if(!sensor_events_publisher->Initialize() || !sensor_events_publisher->Start())
         LOG_ERR("Failed to start the sensor events publisher.");
 
     // The gauge has no SD service, so the controllers below register no asset kind; the registry is
     // passed for uniformity with the units that do.
-    auto canbus_controller = std::make_shared<CanbusController>(
+    const auto canbus_controller = std::make_shared<CanbusController>(
         fs_service, config_work_queue_thread, configuration_service,
         nullptr, // sd_fs_service
         assets_manager
@@ -243,7 +246,7 @@ int main() {
         LOG_ERR("Failed to initialize the CANBus controller.");
     canbus_controller->Start();
 
-    auto sensors_controller = std::make_shared<SensorsController>(
+    const auto sensors_controller = std::make_shared<SensorsController>(
         fs_service, config_work_queue_thread, configuration_service, time_service, sensor_readings_frame,
         canbus_controller->GetService(), gpio,
         nullptr, // adc_manager
@@ -260,7 +263,7 @@ int main() {
 
     // Built after SensorsController::Initialize(), whose sensors it checks its triggers against, and
     // before SensorsController::Start(), so its triggers subscribe before the first reading.
-    auto logging_controller = std::make_shared<LoggingController>(
+    const auto logging_controller = std::make_shared<LoggingController>(
         fs_service, config_work_queue_thread, configuration_service, sensors_controller->GetConfigurationManager(),
         canbus_controller->GetComService(), sensor_events_publisher,
         nullptr,       // sd_fs_service
@@ -274,7 +277,7 @@ int main() {
     // The count the sensors manager was built with, which the button's sensor and trigger agree on.
     const int gpio_channel_count = gpio != nullptr ? gpio->GetChannelCount() : 0;
     // TODO: For test purposes only
-    if(logging_controller->Initialize([gpio_channel_count](auto logging_control_configuration_manager) {
+    if(logging_controller->Initialize([gpio_channel_count](const auto& logging_control_configuration_manager) {
            SetupTestLoggingTrigger(logging_control_configuration_manager, gpio_channel_count);
        })
         != 0) {
@@ -307,7 +310,7 @@ int main() {
     // Constructed after every controller that registers a configuration manager.
     const auto canbus_com_service = canbus_controller->GetComService();
     const auto system_configuration = system_controller->GetConfigurationManager()->Get();
-    auto management_controller = std::make_shared<ManagementController>(
+    const auto management_controller = std::make_shared<ManagementController>(
         configuration_service, config_work_queue_thread,
         canbus_com_service != nullptr ? canbus_com_service->GetNetworkInfo() : nullptr,
         system_configuration != nullptr ? system_configuration->build_number : 0, sensors_controller->GetCapabilities(),
@@ -316,11 +319,11 @@ int main() {
     if(management_controller->Initialize() != 0)
         LOG_ERR("Failed to initialize the management controller.");
 
-    auto ble_controller = std::make_shared<BleController>(
+    const auto ble_controller = std::make_shared<BleController>(
         sensors_controller->GetProcessingService(), sensor_readings_frame, canbus_com_service
     );
     if(ble_controller->Initialize() == 0)
-        ble_controller->Start();
+        eerie_leap::controllers::BleController::Start();
     else
         LOG_ERR("Failed to initialize the BLE controller.");
 
@@ -351,8 +354,8 @@ int main() {
     return 0;
 }
 
-void SetupCanbusConfiguration(std::shared_ptr<CanbusConfigurationManager> canbus_configuration_manager) {
-    auto canbus_configuration = make_shared_pmr<CanbusConfiguration>(Mrm::GetExtPmr());
+void SetupCanbusConfiguration(const std::shared_ptr<CanbusConfigurationManager>& canbus_configuration_manager) {
+    const auto canbus_configuration = make_shared_pmr<CanbusConfiguration>(Mrm::GetExtPmr());
     canbus_configuration->com_configuration.bus_channel = 0;
 
     CanChannelConfiguration canbus_channel_configuration_0(std::allocator_arg, Mrm::GetExtPmr());
@@ -377,7 +380,7 @@ void SetupCanbusConfiguration(std::shared_ptr<CanbusConfigurationManager> canbus
     // canbus_channel_configuration_0.message_configurations.emplace_back(std::move(message_configuration_0));
 
     for(int i = 0; i < 10; i++) {
-        auto message_configuration = make_shared_pmr<CanMessageConfiguration>(Mrm::GetExtPmr());
+        const auto message_configuration = make_shared_pmr<CanMessageConfiguration>(Mrm::GetExtPmr());
         message_configuration->frame_id = 100 + i;
         message_configuration->name = "EL_FRAME_" + std::to_string(i);
         message_configuration->message_size = 8;
@@ -389,7 +392,7 @@ void SetupCanbusConfiguration(std::shared_ptr<CanbusConfigurationManager> canbus
         signal_configuration.unit = "km/h";
         message_configuration->signal_configurations.emplace_back(std::move(signal_configuration));
 
-        canbus_channel_configuration_0.message_configurations.emplace_back(std::move(message_configuration));
+        canbus_channel_configuration_0.message_configurations.emplace_back(message_configuration);
     }
 
     canbus_configuration->channel_configurations.emplace(
@@ -399,7 +402,7 @@ void SetupCanbusConfiguration(std::shared_ptr<CanbusConfigurationManager> canbus
     canbus_configuration_manager->Update(*canbus_configuration);
 }
 
-void SetupTestSensors(std::shared_ptr<SensorsConfigurationManager> sensors_configuration_manager) {
+void SetupTestSensors(const std::shared_ptr<SensorsConfigurationManager>& sensors_configuration_manager) {
     // Test Sensors
 
     // auto sensor_1 = make_shared_pmr<Sensor>(Mrm::GetExtPmr(), "sensor_1");
@@ -418,7 +421,7 @@ void SetupTestSensors(std::shared_ptr<SensorsConfigurationManager> sensors_confi
     std::vector<std::shared_ptr<Sensor>> sensors;
 
     for(int i = 0; i < 10; i++) {
-        auto sensor = make_shared_pmr<Sensor>(Mrm::GetExtPmr(), "sensor_" + std::to_string(i));
+        const auto sensor = make_shared_pmr<Sensor>(Mrm::GetExtPmr(), "sensor_" + std::to_string(i));
 
         sensor->metadata.name = "Sensor 1";
         sensor->metadata.unit = "";
@@ -438,7 +441,7 @@ void SetupTestSensors(std::shared_ptr<SensorsConfigurationManager> sensors_confi
 // TODO: For test purposes only
 // Adds the logging button to the stored sensors, when it is missing and the unit has its GPIO channel.
 // The rest of the stored configuration stays as it is.
-void SetupTestLoggingButton(std::shared_ptr<SensorsConfigurationManager> sensors_configuration_manager) {
+void SetupTestLoggingButton(const std::shared_ptr<SensorsConfigurationManager>& sensors_configuration_manager) {
     if(!HasLoggingButton(sensors_configuration_manager->GetGpioChannelCount()))
         return;
 
@@ -481,7 +484,7 @@ void SetupTestLoggingButton(std::shared_ptr<SensorsConfigurationManager> sensors
 // Adds the trigger that follows the logging button, when it is missing and the unit has the button's
 // GPIO channel. The rest of the stored configuration stays as it is.
 void SetupTestLoggingTrigger(
-    std::shared_ptr<LoggingControlConfigurationManager> logging_control_configuration_manager,
+    const std::shared_ptr<LoggingControlConfigurationManager>& logging_control_configuration_manager,
     int gpio_channel_count
 ) {
 
@@ -492,7 +495,7 @@ void SetupTestLoggingTrigger(
     // default instead: the update below then replaces the stored file.
     const bool is_replacing_rejected = logging_control_configuration_manager->IsStoredConfigurationRejected();
 
-    auto logging_control_configuration = make_shared_pmr<LoggingControlConfiguration>(Mrm::GetExtPmr());
+    const auto logging_control_configuration = make_shared_pmr<LoggingControlConfiguration>(Mrm::GetExtPmr());
     if(const auto stored_configuration = logging_control_configuration_manager->Get(); stored_configuration != nullptr)
         logging_control_configuration->triggers = stored_configuration->triggers;
 

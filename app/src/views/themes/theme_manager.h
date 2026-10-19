@@ -17,17 +17,17 @@ private:
 
     // Renderables register/unregister from their ctor/dtor on any thread while
     // the renderer or event bus thread can be iterating observers_.
-    k_mutex observers_lock_;
+    k_mutex observers_lock_{};
 
     ThemeManager();
     ~ThemeManager() = default;
 
-    ThemeManager(const ThemeManager&) = delete;
-    ThemeManager& operator=(const ThemeManager&) = delete;
-
     void NotifyObservers();
 
 public:
+    ThemeManager(const ThemeManager&) = delete;
+    ThemeManager& operator=(const ThemeManager&) = delete;
+
     static ThemeManager& GetInstance();
 
     void SetTheme(std::shared_ptr<ITheme> theme);

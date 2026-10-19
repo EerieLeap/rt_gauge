@@ -46,7 +46,7 @@ int SettingsPersistenceService::Initialize() {
     changed_subscription_ = CreateScopedSubscription(
         SettingsEventsChannel::GetInstance(), SettingsEventType::Changed,
         [this](const SettingsEventsChannel::EventMessage& event) {
-            auto it = event.payload.find(SettingsPayloadType::SettingId);
+            const auto* it = event.payload.find(SettingsPayloadType::SettingId);
             if(it == event.payload.end())
                 return;
 
@@ -57,13 +57,12 @@ int SettingsPersistenceService::Initialize() {
             {
                 ScopedMutex guard(lock_);
 
-                if(std::find(pending_setting_ids_.begin(), pending_setting_ids_.end(), *setting_id)
-                    == pending_setting_ids_.end())
+                if(std::ranges::find(pending_setting_ids_, *setting_id) == pending_setting_ids_.end())
                     pending_setting_ids_.push_back(*setting_id);
             }
 
             // Every change pushes the deadline out, so a drag reaches flash once.
-            persist_task_->Reschedule(persist_debounce_);
+            persist_task_->Reschedule(PERSIST_DEBOUNCE);
         }
     );
 
@@ -82,7 +81,7 @@ WorkQueueTaskResult SettingsPersistenceService::PersistWork(PersistTask* task) {
 }
 
 void SettingsPersistenceService::PublishPendingPersistRequests() {
-    static constexpr auto caller = GetCallerName();
+    static constexpr auto CALLER = GetCallerName();
 
     std::vector<uint32_t> setting_ids;
     {
@@ -92,7 +91,7 @@ void SettingsPersistenceService::PublishPendingPersistRequests() {
 
     for(auto setting_id : setting_ids) {
         SettingsEventsChannel::GetInstance().PublishAsync(
-            { .source_id = caller.hash,
+            { .source_id = CALLER.hash,
                 .type = SettingsEventType::PersistRequested,
                 .payload = { { SettingsPayloadType::SettingId, setting_id } } }
         );

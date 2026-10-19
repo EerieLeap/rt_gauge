@@ -33,7 +33,7 @@ void MainView::SetRenderDispatcher(RenderDispatcher dispatcher) {
 }
 
 std::shared_ptr<ScreenGroup> MainView::GetOrCreateGroup(uint32_t screen_group_id) {
-    auto it = screen_groups_.find(screen_group_id);
+    const auto it = screen_groups_.find(screen_group_id);
     if(it != screen_groups_.end())
         return it->second;
 
@@ -68,7 +68,7 @@ void MainView::PruneEmptyGroups() {
 }
 
 int MainView::SetActiveGroup(uint32_t screen_group_id) {
-    auto it = screen_groups_.find(screen_group_id);
+    const auto it = screen_groups_.find(screen_group_id);
     if(it == screen_groups_.end()) {
         LOG_WRN("Screen group %u is not configured.", screen_group_id);
         return -ENOENT;
@@ -85,7 +85,7 @@ int MainView::SetActiveGroup(uint32_t screen_group_id) {
 
     std::shared_ptr<ScreenGroup> previous_screen_group = nullptr;
     if(active_screen_group_id_.has_value()) {
-        auto previous = screen_groups_.find(*active_screen_group_id_);
+        const auto previous = screen_groups_.find(*active_screen_group_id_);
         if(previous != screen_groups_.end())
             previous_screen_group = previous->second;
     }
@@ -93,7 +93,7 @@ int MainView::SetActiveGroup(uint32_t screen_group_id) {
     if(previous_screen_group != nullptr)
         previous_screen_group->Deactivate();
 
-    auto& screen_group = it->second;
+    const auto& screen_group = it->second;
 
     // Recorded now, applied by the group as soon as it is rendered.
     screen_group->Activate();
@@ -105,7 +105,7 @@ int MainView::SetActiveGroup(uint32_t screen_group_id) {
     if(render_dispatcher_ != nullptr) {
         // Capturing `this` is safe because the dispatcher's work queue is drained
         // and stopped before this view is destroyed.
-        auto deferred_screen_group = screen_group;
+        const auto deferred_screen_group = screen_group;
         render_dispatcher_([this, deferred_screen_group, previous_screen_group] {
             ScopedLvglLock lvgl_guard;
 
@@ -123,7 +123,7 @@ int MainView::RenderGroupOrRollBack(
     const std::shared_ptr<ScreenGroup>& previous_screen_group
 ) {
 
-    int res = screen_group->EnsureRendered();
+    const int res = screen_group->EnsureRendered();
     if(res == 0)
         return 0;
 
@@ -156,7 +156,7 @@ std::vector<uint32_t> MainView::GetGroupIds() const {
     for(const auto& [screen_group_id, screen_group] : screen_groups_)
         screen_group_ids.push_back(screen_group_id);
 
-    std::sort(screen_group_ids.begin(), screen_group_ids.end());
+    std::ranges::sort(screen_group_ids);
 
     return screen_group_ids;
 }
@@ -171,28 +171,26 @@ std::shared_ptr<IScreen> MainView::GetScreen(uint32_t screen_id) const {
     return nullptr;
 }
 
-static void RenderCenterCrossHelperGuides(lv_obj_t* screen) {
+[[maybe_unused]] static void RenderCenterCrossHelperGuides(lv_obj_t* screen) {
     lv_obj_t* panel1 = lv_obj_create(screen);
     lv_obj_set_width(panel1, 2);
     lv_obj_set_height(panel1, 466);
     lv_obj_set_align(panel1, LV_ALIGN_CENTER);
-    lv_obj_remove_flag(panel1, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollable(panel1, false);
     lv_obj_set_style_border_color(
-        panel1, ThemeManager::GetInstance().GetCurrentTheme().GetPrimaryColor().ToLvColor(),
-        LV_PART_MAIN | LV_STATE_DEFAULT
+        panel1, ThemeManager::GetInstance().GetCurrentTheme().GetPrimaryColor().ToLvColor(), LV_PART_MAIN
     );
-    lv_obj_set_style_border_opa(panel1, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_opa(panel1, 255, LV_PART_MAIN);
 
     lv_obj_t* panel2 = lv_obj_create(screen);
     lv_obj_set_width(panel2, 466);
     lv_obj_set_height(panel2, 2);
     lv_obj_set_align(panel2, LV_ALIGN_CENTER);
-    lv_obj_remove_flag(panel2, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollable(panel2, false);
     lv_obj_set_style_border_color(
-        panel2, ThemeManager::GetInstance().GetCurrentTheme().GetPrimaryColor().ToLvColor(),
-        LV_PART_MAIN | LV_STATE_DEFAULT
+        panel2, ThemeManager::GetInstance().GetCurrentTheme().GetPrimaryColor().ToLvColor(), LV_PART_MAIN
     );
-    lv_obj_set_style_border_opa(panel2, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_border_opa(panel2, 255, LV_PART_MAIN);
 }
 
 int MainView::DoRender() {
@@ -201,13 +199,13 @@ int MainView::DoRender() {
         return -ENOENT;
     }
 
-    auto it = screen_groups_.find(*active_screen_group_id_);
+    const auto it = screen_groups_.find(*active_screen_group_id_);
     if(it == screen_groups_.end()) {
         LOG_ERR("Active screen group %u is gone.", *active_screen_group_id_);
         return -ENOENT;
     }
 
-    int res = it->second->EnsureRendered();
+    const int res = it->second->EnsureRendered();
     if(res != 0)
         return res;
 
@@ -219,12 +217,8 @@ int MainView::DoRender() {
 }
 
 int MainView::ApplyTheme(const ITheme& theme) {
-    lv_obj_set_style_bg_color(
-        container_->GetObject(), theme.GetBackgroundColor().ToLvColor(), LV_PART_MAIN | LV_STATE_DEFAULT
-    );
-    lv_obj_set_style_bg_opa(
-        container_->GetObject(), theme.GetBackgroundColor().ToLvOpa(), LV_PART_MAIN | LV_STATE_DEFAULT
-    );
+    lv_obj_set_style_bg_color(container_->GetObject(), theme.GetBackgroundColor().ToLvColor(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(container_->GetObject(), theme.GetBackgroundColor().ToLvOpa(), LV_PART_MAIN);
 
     return 0;
 }

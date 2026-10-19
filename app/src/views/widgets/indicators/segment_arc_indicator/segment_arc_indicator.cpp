@@ -1,4 +1,5 @@
 #include <cmath>
+#include <utility>
 
 #include "domain/ui_domain/models/widget_property.h"
 
@@ -43,38 +44,40 @@ int SegmentArcIndicator::ApplyTheme(const ITheme& theme) {
     const auto active = properties_->ResolveColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE, theme.GetSecondaryColor());
     const auto inactive = properties_->ResolveColor(WidgetPropertyType::COLOR_PRIMARY_INACTIVE, LvglColor(0, 0));
 
-    for(auto& segment : segments_) {
+    for(const auto& segment : segments_) {
         const auto& color = segment.is_active ? active : inactive;
-        lv_obj_set_style_arc_color(segment.lv_segment, color.ToLvColor(), LV_PART_INDICATOR | LV_STATE_DEFAULT);
-        lv_obj_set_style_arc_opa(segment.lv_segment, color.ToLvOpa(), LV_PART_INDICATOR | LV_STATE_DEFAULT);
+        lv_obj_set_style_arc_color(segment.lv_segment, color.ToLvColor(), LV_PART_INDICATOR);
+        lv_obj_set_style_arc_opa(segment.lv_segment, color.ToLvOpa(), LV_PART_INDICATOR);
     }
 
     return 0;
 }
 
 lv_obj_t* SegmentArcIndicator::CreateSegment(lv_obj_t* parent, int start_angle, int end_angle, int i) {
-    int seg_start_angle = start_angle + 90 + i * step_deg_;
-    int seg_end_angle = start_angle + 90 + i * step_deg_ + 3;
+    const int seg_start_angle = start_angle + 90 + i * STEP_DEG;
+    const int seg_end_angle = start_angle + 90 + i * STEP_DEG + 3;
 
     if(seg_end_angle > end_angle + 90)
         return nullptr;
 
-    auto lv_arc_segment = lv_arc_create(parent);
+    auto* lv_arc_segment = lv_arc_create(parent);
 
     lv_arc_set_range(lv_arc_segment, 0, 1);
     lv_obj_set_width(lv_arc_segment, lv_pct(100));
     lv_obj_set_height(lv_arc_segment, lv_pct(100));
     lv_obj_set_align(lv_arc_segment, LV_ALIGN_CENTER);
-    lv_obj_remove_flag(lv_arc_segment, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_clickable(lv_arc_segment, false);
     lv_arc_set_value(lv_arc_segment, 1);
-    lv_obj_set_style_arc_width(lv_arc_segment, segment_length_, LV_PART_INDICATOR | LV_STATE_DEFAULT);
-    lv_obj_set_style_arc_rounded(lv_arc_segment, false, LV_PART_INDICATOR | LV_STATE_DEFAULT);
+    lv_obj_set_style_arc_width(lv_arc_segment, SEGMENT_LENGTH, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_rounded(lv_arc_segment, false, LV_PART_INDICATOR);
 
-    lv_arc_set_bg_angles(lv_arc_segment, seg_start_angle, seg_end_angle);
+    lv_arc_set_bg_angles(
+        lv_arc_segment, static_cast<lv_value_precise_t>(seg_start_angle), static_cast<lv_value_precise_t>(seg_end_angle)
+    );
 
-    lv_obj_set_style_bg_opa(lv_arc_segment, 0, LV_PART_KNOB | LV_STATE_DEFAULT);
-    lv_obj_set_style_arc_opa(lv_arc_segment, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_arc_opa(lv_arc_segment, 0, LV_PART_INDICATOR | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_opa(lv_arc_segment, 0, LV_PART_KNOB);
+    lv_obj_set_style_arc_opa(lv_arc_segment, 0, LV_PART_MAIN);
+    lv_obj_set_style_arc_opa(lv_arc_segment, 0, LV_PART_INDICATOR);
 
     return lv_arc_segment;
 }
@@ -83,23 +86,23 @@ void SegmentArcIndicator::Create(lv_obj_t* parent, int32_t range_start, int32_t 
     segments_.clear();
 
     for(int i = 0; i < 1000; i++) {
-        auto segment = CreateSegment(parent, start_angle_, end_angle_, i);
+        auto* segment = CreateSegment(parent, start_angle_, end_angle_, i);
         if(segment == nullptr)
             break;
 
         segments_.push_back({ .lv_segment = segment, .is_active = false });
     }
 
-    segments_per_value_ = (range_end - range_start) / static_cast<float>(segments_.size());
+    segments_per_value_ = static_cast<float>(range_end - range_start) / static_cast<float>(segments_.size());
 }
 
 void SegmentArcIndicator::UpdateIndicator(float value) {
-    int segment_index = value / segments_per_value_;
+    auto segment_index = static_cast<int>(value / segments_per_value_);
     if(segment_index >= segments_.size())
-        segment_index = segments_.size() - 1;
+        segment_index = static_cast<int>(segments_.size() - 1);
 
     for(size_t i = 0; i < segments_.size(); i++) {
-        segments_[i].is_active = i <= segment_index;
+        segments_[i].is_active = std::cmp_less_equal(i, segment_index);
     }
 
     ApplyTheme(ThemeManager::GetInstance().GetCurrentTheme());

@@ -17,7 +17,7 @@ bool WidgetAnimation::Attach(
     if(!animator_->Attach(
            presentation, layout,
            [](void* context) {
-               auto* animation = static_cast<WidgetAnimation*>(context);
+               const auto* animation = static_cast<WidgetAnimation*>(context);
                return animation->eligibility_(animation->context_);
            },
            this

@@ -30,7 +30,7 @@ using eerie_leap::views::utilitites::Frame;
 
 namespace {
 
-constexpr int extent = 96;
+constexpr int EXTENT = 96;
 
 static_assert(!std::is_copy_constructible_v<ViewAnimator>);
 static_assert(!std::is_move_constructible_v<ViewAnimator>);
@@ -89,6 +89,8 @@ public:
     ~PresentationProbe() override {
         DetachDispatch();
     }
+    PresentationProbe(const PresentationProbe&) = delete;
+    PresentationProbe& operator=(const PresentationProbe&) = delete;
     WidgetType GetType() const override {
         return WidgetType::BasicIcon;
     }
@@ -114,7 +116,7 @@ protected:
         for(int index = 0; index < 2; ++index) {
             auto* rectangle = lv_obj_create(content_frame_->GetObject());
             lv_obj_remove_style_all(rectangle);
-            lv_obj_remove_flag(rectangle, LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_set_scrollable(rectangle, false);
             lv_obj_set_pos(rectangle, index == 0 ? 2 : 42, index == 0 ? 2 : 12);
             lv_obj_set_size(rectangle, 20, index == 0 ? 8 : 10);
             lv_obj_set_style_bg_color(rectangle, lv_color_hex(index == 0 ? 0xFF0000 : 0x00FF00), 0);
@@ -140,6 +142,8 @@ public:
     ~LifecycleProbe() override {
         DetachDispatch();
     }
+    LifecycleProbe(const LifecycleProbe&) = delete;
+    LifecycleProbe& operator=(const LifecycleProbe&) = delete;
     WidgetType GetType() const override {
         return WidgetType::BasicIcon;
     }
@@ -212,6 +216,8 @@ public:
     ~TestButton() override {
         DetachDispatch();
     }
+    TestButton(const TestButton&) = delete;
+    TestButton& operator=(const TestButton&) = delete;
     int clicks = 0;
 
 protected:
@@ -247,6 +253,8 @@ public:
     ~Pointer() {
         lv_indev_delete(device_);
     }
+    Pointer(const Pointer&) = delete;
+    Pointer& operator=(const Pointer&) = delete;
 
     void Send(int column, int row, lv_indev_state_t state) {
         point_ = { column, row };
@@ -285,8 +293,8 @@ public:
     explicit PresentationStyles(const IWidget& widget) :
         layout_(widget.GetContainer()->GetObject()),
         content_(views_test::WidgetContent(widget)),
-        layout_overflow_(lv_obj_has_flag(layout_, LV_OBJ_FLAG_OVERFLOW_VISIBLE)),
-        content_overflow_(lv_obj_has_flag(content_, LV_OBJ_FLAG_OVERFLOW_VISIBLE)) {
+        layout_overflow_(lv_obj_is_overflow_visible(layout_)),
+        content_overflow_(lv_obj_is_overflow_visible(content_)) {
         lv_obj_add_event_cb(layout_, DrawMargin, LV_EVENT_REFR_EXT_DRAW_SIZE, this);
     }
 
@@ -294,10 +302,12 @@ public:
         Reset();
         lv_obj_remove_event_cb_with_user_data(layout_, DrawMargin, this);
     }
+    PresentationStyles(const PresentationStyles&) = delete;
+    PresentationStyles& operator=(const PresentationStyles&) = delete;
 
     void Rotate(int32_t angle) {
-        lv_obj_add_flag(layout_, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
-        lv_obj_add_flag(content_, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+        lv_obj_set_overflow_visible(layout_, true);
+        lv_obj_set_overflow_visible(content_, true);
         lv_obj_set_style_transform_rotation(content_, angle, LV_PART_MAIN);
         lv_obj_refresh_ext_draw_size(layout_);
     }
@@ -310,19 +320,19 @@ public:
         lv_obj_set_style_transform_rotation(content_, 0, LV_PART_MAIN);
         lv_obj_set_style_opa_layered(content_, LV_OPA_COVER, LV_PART_MAIN);
         if(!layout_overflow_)
-            lv_obj_remove_flag(layout_, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+            lv_obj_set_overflow_visible(layout_, false);
         if(!content_overflow_)
-            lv_obj_remove_flag(content_, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+            lv_obj_set_overflow_visible(content_, false);
         lv_obj_refresh_ext_draw_size(layout_);
     }
 };
 
 struct Scene {
     std::shared_ptr<Frame> root = std::make_shared<Frame>(
-        Frame::CreateWrapped().SetWidth(extent, true).SetHeight(extent, true).Build()
+        Frame::CreateWrapped().SetWidth(EXTENT, true).SetHeight(EXTENT, true).Build()
     );
     std::shared_ptr<Frame> clip = std::make_shared<Frame>(
-        Frame::CreateWrapped(root->GetObject()).SetWidth(extent, true).SetHeight(extent, true).Build()
+        Frame::CreateWrapped(root->GetObject()).SetWidth(EXTENT, true).SetHeight(EXTENT, true).Build()
     );
     PresentationProbe widget{ 1, clip, WidgetContext{} };
 
@@ -343,20 +353,20 @@ struct Scene {
             lv_snapshot_take(root->GetObject(), LV_COLOR_FORMAT_ARGB8888), lv_draw_buf_destroy
         );
         zassert_not_null(snapshot);
-        zassert_equal(snapshot->header.w, extent);
-        zassert_equal(snapshot->header.h, extent);
+        zassert_equal(snapshot->header.w, EXTENT);
+        zassert_equal(snapshot->header.h, EXTENT);
         std::vector<lv_color32_t> pixels;
-        pixels.reserve(extent * extent);
-        for(int row = 0; row < extent; ++row) {
-            auto* source = reinterpret_cast<const lv_color32_t*>(snapshot->data + row * snapshot->header.stride);
-            pixels.insert(pixels.end(), source, source + extent);
+        pixels.reserve(EXTENT * EXTENT);
+        for(int row = 0; row < EXTENT; ++row) {
+            const auto* source = views_test::PixelRow(*snapshot, static_cast<uint32_t>(row));
+            pixels.insert(pixels.end(), source, source + EXTENT);
         }
         return pixels;
     }
 };
 
 void CheckPixel(const std::vector<lv_color32_t>& pixels, int column, int row, int red, int green) {
-    const auto& pixel = pixels[row * extent + column];
+    const auto& pixel = pixels[row * EXTENT + column];
     zassert_within(pixel.red, red, 8, "red at %d,%d: %d != %d", column, row, pixel.red, red);
     zassert_within(pixel.green, green, 8, "green at %d,%d: %d != %d", column, row, pixel.green, green);
     zassert_equal(pixel.blue, 0);
@@ -482,7 +492,7 @@ ZTEST(widget_animations, test_widget_animation_render_order_failures_and_recover
         zassert_equal(views_test::WidgetContent(widget), content);
         Advance(500);
         zassert_equal(lv_obj_get_style_transform_rotation(content, LV_PART_MAIN), 900);
-    } while(std::next_permutation(order.begin(), order.end()));
+    } while(std::ranges::next_permutation(order).found);
     zassert_equal(lv_anim_count_running(), count);
 }
 
@@ -560,7 +570,7 @@ ZTEST(widget_animations, test_widget_animation_restoration_batches_settings_and_
                         widget.OnDeactivated();
                     break;
                 case 3:
-                    lv_obj_set_flag(root->GetObject(), LV_OBJ_FLAG_HIDDEN, !enabled);
+                    lv_obj_set_hidden(root->GetObject(), !enabled);
                     break;
                 case 4:
                     lv_obj_set_style_opa(root->GetObject(), enabled ? 255 : 0, LV_PART_MAIN);
@@ -573,6 +583,8 @@ ZTEST(widget_animations, test_widget_animation_restoration_batches_settings_and_
                     break;
                 case 7:
                     Publish(WidgetPropertyType::IS_ACTIVE, enabled);
+                    break;
+                default:
                     break;
             }
         };
@@ -629,16 +641,16 @@ ZTEST(widget_animations, test_animator_start_failure_stays_neutral_and_retries_o
             zassert_equal(lv_anim_count_running(), count);
             zassert_equal(scene.Opacity(), 255);
             zassert_equal(scene.Angle(), 0);
-            zassert_false(lv_obj_has_flag(scene.layout.GetObject(), LV_OBJ_FLAG_OVERFLOW_VISIBLE));
+            zassert_false(lv_obj_is_overflow_visible(scene.layout.GetObject()));
             zassert_equal(DrawMargin(scene.layout.GetObject()), 0);
             for(int iteration = 0; iteration < 5; ++iteration) {
                 Advance(100);
                 scene.animator.Synchronize(settings);
             }
             zassert_equal(animation_start_calls, attempts + 1);
-            if(transition == 0)
+            if(transition == 0) {
                 settings.duration_ms = 2000;
-            else if(transition == 1) {
+            } else if(transition == 1) {
                 scene.eligible = false;
                 scene.animator.Synchronize(settings);
                 scene.eligible = true;
@@ -780,7 +792,7 @@ ZTEST(widget_animations, test_animator_same_settings_preserve_phase_and_changed_
     zassert_equal(animation_start_calls, attempts + 2);
     zassert_equal(scene.Angle(), 0);
     zassert_equal(scene.Opacity(), 255);
-    zassert_false(lv_obj_has_flag(scene.layout.GetObject(), LV_OBJ_FLAG_OVERFLOW_VISIBLE));
+    zassert_false(lv_obj_is_overflow_visible(scene.layout.GetObject()));
     Advance(1000);
     zassert_equal(scene.Opacity(), 0);
     settings.active = false;
@@ -985,7 +997,7 @@ ZTEST(widget_animations, test_animator_target_and_wrapper_deletion_cancel_and_al
             } else {
                 target.reset();
                 zassert_equal(lv_obj_get_event_count(layout->GetObject()), callbacks);
-                zassert_false(lv_obj_has_flag(layout->GetObject(), LV_OBJ_FLAG_OVERFLOW_VISIBLE));
+                zassert_false(lv_obj_is_overflow_visible(layout->GetObject()));
                 zassert_equal(DrawMargin(layout->GetObject()), 0);
             }
             zassert_false(animator.IsRunning());
@@ -1020,8 +1032,8 @@ ZTEST(widget_animations, test_animator_scope_exit_restores_flags_margins_and_cal
                 scene.animator.Detach();
                 auto* layout = scene.layout.GetObject();
                 auto* content = scene.presentation.GetObject();
-                lv_obj_set_flag(layout, LV_OBJ_FLAG_OVERFLOW_VISIBLE, overflow);
-                lv_obj_set_flag(content, LV_OBJ_FLAG_OVERFLOW_VISIBLE, !overflow);
+                lv_obj_set_overflow_visible(layout, overflow);
+                lv_obj_set_overflow_visible(content, !overflow);
                 lv_obj_set_ext_draw_size(layout, 3);
                 lv_obj_refresh_ext_draw_size(layout);
                 const auto layout_callbacks = lv_obj_get_event_count(layout);
@@ -1043,8 +1055,8 @@ ZTEST(widget_animations, test_animator_scope_exit_restores_flags_margins_and_cal
                 zassert_equal(scene.Opacity(), 255);
                 zassert_equal(scene.Angle(), 0);
                 zassert_equal(DrawMargin(layout), 3);
-                zassert_equal(lv_obj_has_flag(layout, LV_OBJ_FLAG_OVERFLOW_VISIBLE), overflow);
-                zassert_equal(lv_obj_has_flag(content, LV_OBJ_FLAG_OVERFLOW_VISIBLE), !overflow);
+                zassert_equal(lv_obj_is_overflow_visible(layout), overflow);
+                zassert_equal(lv_obj_is_overflow_visible(content), !overflow);
                 zassert_equal(lv_obj_get_event_count(layout), layout_callbacks);
                 zassert_equal(lv_obj_get_event_count(content), content_callbacks);
             }
@@ -1078,7 +1090,7 @@ ZTEST(widget_animations, test_animator_rotation_pixels_resize_and_external_clipp
     pixels = scene.Pixels();
     CheckPixel(pixels, 56, 20, 255, 0);
     CheckPixel(pixels, 42, 70, 0, 0);
-    scene.clip->SetHeight(extent, true);
+    scene.clip->SetHeight(EXTENT, true);
     scene.widget.SetPositionPx({ 12, 32 });
     scene.widget.SetSizePx({ 72, 32 });
     pixels = scene.Pixels();
@@ -1144,10 +1156,11 @@ ZTEST(widget_animations, test_presentation_frame_is_neutral_stable_and_not_an_in
     zassert_equal(lv_obj_get_style_pad_bottom(content, LV_PART_MAIN), 0);
     zassert_equal(lv_obj_get_style_opa_layered(content, LV_PART_MAIN), LV_OPA_COVER);
     zassert_equal(lv_obj_get_style_transform_rotation(content, LV_PART_MAIN), 0);
-    for(auto flag :
-        { LV_OBJ_FLAG_CLICKABLE, LV_OBJ_FLAG_CLICK_FOCUSABLE, LV_OBJ_FLAG_SCROLLABLE, LV_OBJ_FLAG_SCROLL_ON_FOCUS })
-        zassert_false(lv_obj_has_flag(content, flag));
-    zassert_true(lv_obj_has_flag(content, LV_OBJ_FLAG_GESTURE_BUBBLE));
+    zassert_false(lv_obj_is_clickable(content));
+    zassert_false(lv_obj_is_click_focusable(content));
+    zassert_false(lv_obj_is_scrollable(content));
+    zassert_false(lv_obj_is_scroll_on_focus(content));
+    zassert_true(lv_obj_is_gesture_bubble(content));
     zassert_is_null(lv_obj_get_user_data(content));
     scene.widget.Configure(Configuration());
     scene.widget.OnDeactivated();
@@ -1186,9 +1199,9 @@ ZTEST(widget_animations, test_presentation_opacity_preserves_widget_icon_and_des
     zassert_equal(descendant.applied_value, 42.0);
 
     for(auto* target : { presentation, scene.widget.GetContainer()->GetObject(), scene.root->GetObject() }) {
-        lv_obj_add_flag(target, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(target, true);
         check(false);
-        lv_obj_remove_flag(target, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(target, false);
         lv_obj_set_style_opa(target, 0, 0);
         check(false);
         lv_obj_set_style_opa(target, 255, 0);
@@ -1303,13 +1316,13 @@ ZTEST(widget_animations, test_direct_widget_rotation_preserves_pixels_clipping_a
     pixels = scene.Pixels();
     CheckPixel(pixels, 34, 23, 255, 0);
     CheckPixel(pixels, 59, 68, 0, 0);
-    scene.clip->SetHeight(extent, true);
+    scene.clip->SetHeight(EXTENT, true);
     zassert_true(widget.SetRotation(0));
     const auto restored = scene.Pixels();
     zassert_mem_equal(baseline.data(), restored.data(), baseline.size() * sizeof(lv_color32_t));
-    zassert_false(lv_obj_has_flag(views_test::WidgetContent(widget), LV_OBJ_FLAG_OVERFLOW_VISIBLE));
-    zassert_false(lv_obj_has_flag(widget.GetContainer()->GetObject(), LV_OBJ_FLAG_OVERFLOW_VISIBLE));
-    zassert_false(lv_obj_has_flag(scene.clip->GetObject(), LV_OBJ_FLAG_OVERFLOW_VISIBLE));
+    zassert_false(lv_obj_is_overflow_visible(views_test::WidgetContent(widget)));
+    zassert_false(lv_obj_is_overflow_visible(widget.GetContainer()->GetObject()));
+    zassert_false(lv_obj_is_overflow_visible(scene.clip->GetObject()));
 }
 
 ZTEST(widget_animations, test_retained_rotation_is_not_rewritten_on_refresh) {
@@ -1340,7 +1353,7 @@ ZTEST(widget_animations, test_retained_rotation_is_not_rewritten_on_refresh) {
 
 ZTEST(widget_animations, test_anchor_resolves_only_once_the_widget_rotates) {
     ScopedLvglLock lock;
-    auto root = std::make_shared<Frame>(Frame::CreateWrapped().SetWidth(extent, true).SetHeight(extent, true).Build());
+    auto root = std::make_shared<Frame>(Frame::CreateWrapped().SetWidth(EXTENT, true).SetHeight(EXTENT, true).Build());
     auto configuration = Configuration();
     configuration->properties[WidgetPropertyType::ANCHOR_POINT_X] = 5;
     configuration->properties[WidgetPropertyType::ANCHOR_POINT_Y] = 4;
@@ -1395,9 +1408,9 @@ ZTEST(widget_animations, test_asymmetric_subtree_rotates_without_internal_clippi
     styles.Reset();
     const auto restored = scene.Pixels();
     zassert_mem_equal(baseline.data(), restored.data(), baseline.size() * sizeof(lv_color32_t));
-    zassert_false(lv_obj_has_flag(presentation, LV_OBJ_FLAG_OVERFLOW_VISIBLE));
-    zassert_false(lv_obj_has_flag(scene.widget.GetContainer()->GetObject(), LV_OBJ_FLAG_OVERFLOW_VISIBLE));
-    zassert_false(lv_obj_has_flag(scene.root->GetObject(), LV_OBJ_FLAG_OVERFLOW_VISIBLE));
+    zassert_false(lv_obj_is_overflow_visible(presentation));
+    zassert_false(lv_obj_is_overflow_visible(scene.widget.GetContainer()->GetObject()));
+    zassert_false(lv_obj_is_overflow_visible(scene.root->GetObject()));
     zassert_equal(lv_anim_count_running(), count);
 }
 
@@ -1415,7 +1428,7 @@ ZTEST(widget_animations, test_rotation_preserves_external_clipping_at_45_and_90_
     pixels = scene.Pixels();
     CheckPixel(pixels, 34, 23, 255, 0);
     CheckPixel(pixels, 59, 68, 0, 0);
-    zassert_false(lv_obj_has_flag(scene.clip->GetObject(), LV_OBJ_FLAG_OVERFLOW_VISIBLE));
+    zassert_false(lv_obj_is_overflow_visible(scene.clip->GetObject()));
     zassert_equal(DrawMargin(scene.clip->GetObject()), 0);
 }
 
@@ -1426,8 +1439,8 @@ ZTEST(widget_animations, test_center_pivot_tracks_resize_and_reset_restores_prio
             Scene scene;
             auto* layout = scene.widget.GetContainer()->GetObject();
             auto* content = views_test::WidgetContent(scene.widget);
-            lv_obj_set_flag(layout, LV_OBJ_FLAG_OVERFLOW_VISIBLE, layout_overflow);
-            lv_obj_set_flag(content, LV_OBJ_FLAG_OVERFLOW_VISIBLE, content_overflow);
+            lv_obj_set_overflow_visible(layout, layout_overflow);
+            lv_obj_set_overflow_visible(content, content_overflow);
             lv_obj_set_ext_draw_size(layout, 3);
             lv_obj_refresh_ext_draw_size(layout);
             const auto callbacks = lv_obj_get_event_count(layout);
@@ -1445,8 +1458,8 @@ ZTEST(widget_animations, test_center_pivot_tracks_resize_and_reset_restores_prio
                 styles.Reset();
                 styles.Reset();
             }
-            zassert_equal(lv_obj_has_flag(layout, LV_OBJ_FLAG_OVERFLOW_VISIBLE), layout_overflow);
-            zassert_equal(lv_obj_has_flag(content, LV_OBJ_FLAG_OVERFLOW_VISIBLE), content_overflow);
+            zassert_equal(lv_obj_is_overflow_visible(layout), layout_overflow);
+            zassert_equal(lv_obj_is_overflow_visible(content), content_overflow);
             zassert_equal(DrawMargin(layout), 3);
             zassert_equal(lv_obj_get_event_count(layout), callbacks);
             zassert_equal(lv_obj_get_style_transform_rotation(content, LV_PART_MAIN), 0);
@@ -1458,7 +1471,7 @@ ZTEST(widget_animations, test_center_pivot_tracks_resize_and_reset_restores_prio
 ZTEST(widget_animations, test_pointer_hits_rotated_button_even_at_zero_presentation_opacity) {
     ScopedLvglLock lock;
     Scene scene;
-    lv_obj_add_flag(scene.widget.GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(scene.widget.GetContainer()->GetObject(), true);
     TestButton button(2, scene.clip, WidgetContext{});
     button.SetPositionPx({ 16, 36 });
     button.SetSizePx({ 64, 24 });
@@ -1490,7 +1503,7 @@ ZTEST(widget_animations, test_pointer_hits_rotated_button_even_at_zero_presentat
     lv_obj_update_layout(scene.root->GetObject());
     pointer.Click(48, 22);
     zassert_equal(button.clicks, 2);
-    scene.clip->SetHeight(extent, true);
+    scene.clip->SetHeight(EXTENT, true);
     styles.Reset();
     lv_obj_update_layout(scene.root->GetObject());
     pointer.Click(20, 40);
@@ -1500,7 +1513,7 @@ ZTEST(widget_animations, test_pointer_hits_rotated_button_even_at_zero_presentat
 ZTEST(widget_animations, test_live_animated_button_accepts_transformed_and_transparent_input) {
     ScopedLvglLock lock;
     Scene scene;
-    lv_obj_add_flag(scene.widget.GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(scene.widget.GetContainer()->GetObject(), true);
     TestButton button(2, scene.clip, WidgetContext{});
     button.SetPositionPx({ 16, 36 });
     button.SetSizePx({ 64, 24 });
@@ -1539,8 +1552,8 @@ ZTEST(widget_animations, test_presentation_preserves_button_bubbling_and_slider_
     ScopedLvglLock lock;
     for(bool slider : { false, true }) {
         Scene scene;
-        lv_obj_add_flag(scene.widget.GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN);
-        lv_obj_remove_flag(scene.root->GetObject(), LV_OBJ_FLAG_GESTURE_BUBBLE);
+        lv_obj_set_hidden(scene.widget.GetContainer()->GetObject(), true);
+        lv_obj_set_gesture_bubble(scene.root->GetObject(), false);
         int gestures = 0;
         lv_obj_add_event_cb(
             scene.root->GetObject(),

@@ -15,8 +15,8 @@ using eerie_leap::subsys::threading::Thread;
 
 class UiRendererService : public IThread {
 private:
-    static constexpr int k_stack_size_ = CONFIG_EERIE_LEAP_UI_RENDERER_THREAD_STACK_SIZE;
-    static constexpr int k_priority_ = 8;
+    static constexpr int STACK_SIZE = CONFIG_EERIE_LEAP_UI_RENDERER_THREAD_STACK_SIZE;
+    static constexpr int PRIORITY = 8;
 
     std::unique_ptr<Thread> thread_;
 
@@ -24,12 +24,16 @@ private:
 
     void ThreadEntry() override;
 
-    void Render();
+    static void Render();
     static void DisplayInvalidateCb(lv_event_t* e);
 
 public:
     UiRendererService();
-    ~UiRendererService();
+    ~UiRendererService() override;
+    UiRendererService(const UiRendererService&) = delete;
+    UiRendererService& operator=(const UiRendererService&) = delete;
+    UiRendererService(UiRendererService&&) = delete;
+    UiRendererService& operator=(UiRendererService&&) = delete;
 
     int Initialize();
 

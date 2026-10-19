@@ -82,7 +82,7 @@ constexpr int NO_DISPATCH_TIMEOUT_MS = 200;
 
 K_THREAD_STACK_DEFINE(publisher_stack, 4096);
 
-constexpr WidgetPropertyType color_properties[] = { WidgetPropertyType::COLOR_PRIMARY_ACTIVE,
+constexpr WidgetPropertyType COLOR_PROPERTIES[] = { WidgetPropertyType::COLOR_PRIMARY_ACTIVE,
     WidgetPropertyType::COLOR_PRIMARY_INACTIVE, WidgetPropertyType::COLOR_SECONDARY_ACTIVE,
     WidgetPropertyType::COLOR_SECONDARY_INACTIVE, WidgetPropertyType::COLOR_TERTIARY_ACTIVE,
     WidgetPropertyType::COLOR_TERTIARY_INACTIVE };
@@ -101,6 +101,8 @@ public:
     ~ProbeWidget() override {
         DetachDispatch();
     }
+    ProbeWidget(const ProbeWidget&) = delete;
+    ProbeWidget& operator=(const ProbeWidget&) = delete;
 
     WidgetType GetType() const override {
         return WidgetType::BasicIcon;
@@ -141,7 +143,7 @@ private:
         store.Register(WidgetPropertyType::VALUE, ConfigValue{ 0.0 }, PropertyChangeEffect::None);
         store.Register(WidgetPropertyType::LABEL, ConfigValue{ std::pmr::string{} }, PropertyChangeEffect::None);
 
-        for(auto type : color_properties)
+        for(auto type : COLOR_PROPERTIES)
             store.Register(type, ConfigValue{ std::pmr::string{} }, PropertyChangeEffect::None);
     }
 
@@ -209,10 +211,10 @@ public:
         subscription_ = CreateScopedSubscription(
             SettingsEventsChannel::GetInstance(), SettingsEventType::ChangeRequested,
             [state = state_](const SettingsEventsChannel::EventMessage& event) {
-                if(auto it = event.payload.find(SettingsPayloadType::Value); it != event.payload.end())
+                if(const auto* it = event.payload.find(SettingsPayloadType::Value); it != event.payload.end())
                     state->value = std::get<float>(it->second);
 
-                if(auto it = event.payload.find(SettingsPayloadType::SettingId); it != event.payload.end())
+                if(const auto* it = event.payload.find(SettingsPayloadType::SettingId); it != event.payload.end())
                     state->setting_id = std::get<uint32_t>(it->second);
 
                 ++state->calls;
@@ -356,12 +358,12 @@ ZTEST(widget_bindings, test_anchor_bindings_keep_ordinary_tracking_and_local_upd
         PublishSensor(SENSOR_ID, 13);
         zassert_equal(widget.ReadNumber(target), 13);
         zassert_equal(std::count(widget.notified.begin(), widget.notified.end(), target), 1);
-        lv_obj_add_flag(widget.GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(widget.GetContainer()->GetObject(), true);
         widget.notified.clear();
         PublishSensor(SENSOR_ID, 21);
         zassert_equal(widget.ReadNumber(target), 21);
         zassert_true(widget.notified.empty());
-        lv_obj_remove_flag(widget.GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(widget.GetContainer()->GetObject(), false);
         lv_display_send_event(lv_display_get_default(), LV_EVENT_REFR_START, nullptr);
         zassert_equal(std::count(widget.notified.begin(), widget.notified.end(), target), 1);
         widget.WriteLocal(target, 34);
@@ -371,7 +373,7 @@ ZTEST(widget_bindings, test_anchor_bindings_keep_ordinary_tracking_and_local_upd
             zassert_equal(lv_obj_get_style_transform_pivot_x(content, LV_PART_MAIN), 34);
         else
             zassert_equal(lv_obj_get_style_transform_pivot_y(content, LV_PART_MAIN), lv_obj_get_height(content) - 34);
-        const ConfigValue invalid[] = { -2, static_cast<int>(INT32_MAX), 10.0, true, std::pmr::string("10") };
+        const ConfigValue invalid[] = { -2, INT32_MAX, 10.0, true, std::pmr::string("10") };
         for(const auto& value : invalid) {
             zassert_false(widget.GetStore()->Set(target, value));
             widget.WriteLocal(target, value);
@@ -432,10 +434,10 @@ ZTEST(widget_bindings, test_color_store_rejects_invalid_updates_and_accepts_rese
     WidgetPropertyStore store;
     const ConfigValue invalid_values[] = { {}, 0, 255, 128.0, true, false, std::pmr::string("#3366FF"),
         std::pmr::string("#3366FF8G"), std::pmr::string("#3366FF80\0", 10) };
-    for(auto type : color_properties) {
+    for(auto type : COLOR_PROPERTIES) {
         store.Register(type, std::pmr::string{}, PropertyChangeEffect::None);
         zassert_true(std::get<std::pmr::string>(store.Get(type)).empty());
-        for(auto text : { "#3366fF80", "#00000000", "#FFFFFFFF" }) {
+        for(const auto* text : { "#3366fF80", "#00000000", "#FFFFFFFF" }) {
             ConfigValue color = std::pmr::string(text, Mrm::GetExtPmr());
             zassert_true(store.Set(type, color));
             for(const auto& value : invalid_values) {
@@ -519,11 +521,11 @@ ZTEST(widget_bindings, test_color_bindings_preserve_exact_rgba_and_reject_invali
     // Numbers are 0xRRGGBB values and bind as opaque colors.
     const std::pair<EventData, const char*> numbers[] = { { 0x3366FF, "#3366FFFF" }, { uint32_t{ 255 }, "#0000FFFF" },
         { 128.0F, "#000080FF" } };
-    for(auto type : color_properties) {
+    for(auto type : COLOR_PROPERTIES) {
         auto configuration = MakeConfiguration();
         configuration->bindings.push_back(SensorBinding(type, SENSOR_ID));
         auto widget = MakeActiveWidget(std::move(configuration));
-        for(auto text : { "#3366fF80", "#00000000", "#FFFFFFFF", "" }) {
+        for(const auto* text : { "#3366fF80", "#00000000", "#FFFFFFFF", "" }) {
             PublishSensor(SENSOR_ID, std::string(text));
             zassert_true(std::get<std::pmr::string>(widget->Read(type)) == text);
             zassert_equal(widget->notified.size(), 1U);
@@ -946,7 +948,7 @@ ZTEST(widget_bindings, test_management_updates_work_while_multiple_conditions_su
     zassert_false(widget->IsProcessingEligible());
     PublishSensor("visibility", true);
     zassert_true(widget->IsVisible());
-    zassert_false(lv_obj_has_flag(widget->GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN));
+    zassert_false(lv_obj_is_hidden(widget->GetContainer()->GetObject()));
     zassert_false(widget->IsProcessingEligible());
     PublishSensor("opacity", 128);
     zassert_equal(widget->ReadNumber(WidgetPropertyType::OPACITY), 128);
@@ -985,7 +987,7 @@ ZTEST(widget_bindings, test_ancestor_visibility_and_opacity_preserve_incoming_tr
     configuration->bindings.push_back(SensorBinding(WidgetPropertyType::OPACITY, "opacity"));
     auto widget = MakeActiveWidget(std::move(configuration), parent);
     PublishSensor(SENSOR_ID, 7.0F);
-    lv_obj_add_flag(root->GetObject(), LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(root->GetObject(), true);
     lv_obj_set_style_opa(parent->GetObject(), 0, LV_PART_MAIN);
     PublishSensor("visibility", false);
     PublishSensor("opacity", 0);
@@ -994,7 +996,7 @@ ZTEST(widget_bindings, test_ancestor_visibility_and_opacity_preserve_incoming_tr
     zassert_true(widget->IsVisible());
     zassert_false(widget->IsProcessingEligible());
     PublishSensor(SENSOR_ID, 42.5F);
-    lv_obj_remove_flag(root->GetObject(), LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(root->GetObject(), false);
     zassert_false(widget->IsProcessingEligible());
     PublishSensor(SENSOR_ID, 55.0F);
     lv_obj_set_style_opa(parent->GetObject(), 128, LV_PART_MAIN);
@@ -1166,24 +1168,24 @@ ZTEST(widget_bindings, test_hidden_slider_replays_range_and_value_without_publis
     slider.OnActivated();
     ChangeRequestProbe probe;
     auto* slider_object = lv_obj_get_child(views_test::WidgetContent(slider), 0);
-    lv_obj_add_flag(root->GetObject(), LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(root->GetObject(), true);
     PublishSettingChanged(55.0F);
     PublishSensor("minimum", 50.0F);
     PublishSensor("maximum", 70.0F);
     PublishSensor("step", 5.0F);
     lv_refr_now(nullptr);
     zassert_equal(lv_slider_get_value(slider_object), 7);
-    lv_obj_remove_flag(root->GetObject(), LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(root->GetObject(), false);
     lv_refr_now(nullptr);
     zassert_equal(lv_slider_get_max_value(slider_object), 4);
     zassert_equal(lv_slider_get_value(slider_object), 1);
     zassert_true(probe.WaitForNoRequest());
 
-    lv_obj_add_flag(root->GetObject(), LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(root->GetObject(), true);
     PublishSettingChanged(80.0F);
     PublishSensor("maximum", 90.0F);
     PublishSensor("step", 10.0F);
-    lv_obj_remove_flag(root->GetObject(), LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(root->GetObject(), false);
     uint32_t key = LV_KEY_RIGHT;
     lv_obj_send_event(slider_object, LV_EVENT_KEY, &key);
     zassert_true(probe.WaitForRequest());
@@ -1461,7 +1463,7 @@ ZTEST(widget_bindings, test_indicator_animation_stops_for_each_suspension_condit
         PublishSensor(OTHER_SENSOR_ID, 1);
         PublishSensor(SENSOR_ID, 42.0F);
         zassert_not_null(lv_anim_get(&indicator, nullptr));
-        lv_obj_add_flag(root->GetObject(), LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(root->GetObject(), true);
         lv_tick_inc(100);
         lv_anim_refr_now();
         zassert_is_null(lv_anim_get(&indicator, nullptr));
@@ -1499,7 +1501,7 @@ ZTEST(widget_bindings, test_initial_value_replays_after_ancestor_restoration) {
     for(bool hidden : { false, true }) {
         auto root = MakeRoot();
         if(hidden)
-            lv_obj_add_flag(root->GetObject(), LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_hidden(root->GetObject(), true);
         else
             lv_obj_set_style_opa(root->GetObject(), 0, LV_PART_MAIN);
         auto configuration = MakeConfiguration();
@@ -1511,7 +1513,7 @@ ZTEST(widget_bindings, test_initial_value_replays_after_ancestor_restoration) {
         auto* bar = lv_obj_get_child(views_test::WidgetContent(indicator), 0);
         zassert_equal(lv_bar_get_value(bar), 0);
 
-        lv_obj_remove_flag(root->GetObject(), LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(root->GetObject(), false);
         lv_obj_set_style_opa(root->GetObject(), 255, LV_PART_MAIN);
         lv_refr_now(nullptr);
         zassert_equal(lv_bar_get_value(bar), 42);
@@ -1571,7 +1573,7 @@ ZTEST(widget_bindings, test_indicator_animation_resumes_after_ancestor_restorati
         const auto displayed = lv_bar_get_value(bar);
         zassert_true(displayed > 0 && displayed < 80);
         if(hidden)
-            lv_obj_add_flag(root->GetObject(), LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_hidden(root->GetObject(), true);
         else
             lv_obj_set_style_opa(root->GetObject(), 0, LV_PART_MAIN);
         lv_tick_inc(5000);
@@ -1579,7 +1581,7 @@ ZTEST(widget_bindings, test_indicator_animation_resumes_after_ancestor_restorati
         zassert_is_null(lv_anim_get(&indicator, nullptr));
         zassert_equal(lv_bar_get_value(bar), displayed);
 
-        lv_obj_remove_flag(root->GetObject(), LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(root->GetObject(), false);
         lv_obj_set_style_opa(root->GetObject(), 255, LV_PART_MAIN);
         lv_refr_now(nullptr);
         zassert_not_null(lv_anim_get(&indicator, nullptr));

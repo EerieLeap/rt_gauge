@@ -13,10 +13,10 @@ using eerie_leap::subsys::event_bus::EventChannel;
 
 class NavigationEventChannel : public EventChannel<NavigationEventType, NavigationPayloadType> {
 private:
-    static constexpr size_t k_max_queued_events = 16;
+    static constexpr size_t MAX_QUEUED_EVENTS = 16;
 
     NavigationEventChannel() :
-        EventChannel("navigation_events", k_max_queued_events) {}
+        EventChannel("navigation_events", MAX_QUEUED_EVENTS) {}
 
 public:
     static NavigationEventChannel& GetInstance() {

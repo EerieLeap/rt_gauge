@@ -26,7 +26,7 @@ std::shared_ptr<IScreen> ScreenFactory::CreateScreen(
     std::shared_ptr<Frame> parent,
     const WidgetContext& context
 ) {
-    auto it = creators_.find(type);
+    const auto it = creators_.find(type);
     if(it == creators_.end())
         throw std::runtime_error("Unknown screen type");
 

@@ -31,10 +31,15 @@ public:
         ThemeManager::GetInstance().RegisterObserver(this);
     }
 
-    virtual ~RenderableBase() {
+    ~RenderableBase() override {
         ThemeManager::GetInstance().UnregisterObserver(this);
         is_ready_ = false;
     }
+
+    RenderableBase(const RenderableBase&) = delete;
+    RenderableBase& operator=(const RenderableBase&) = delete;
+    RenderableBase(RenderableBase&&) = delete;
+    RenderableBase& operator=(RenderableBase&&) = delete;
 
     std::shared_ptr<Frame> GetContainer() const override {
         return container_;

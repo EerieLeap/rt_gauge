@@ -18,10 +18,10 @@ ArcFillIndicator::ArcFillIndicator(uint32_t id, std::shared_ptr<Frame> parent, W
     IndicatorBase(id, std::move(parent), std::move(context)) {}
 
 int ArcFillIndicator::DoRender() {
-    auto lv_obj = Create(
+    auto* lv_obj = Create(
         content_frame_->GetObject(), static_cast<int32_t>(range_start_), static_cast<int32_t>(range_end_)
     );
-    auto child = std::make_shared<Frame>(Frame::Create(lv_obj).Build());
+    const auto child = std::make_shared<Frame>(Frame::Create(lv_obj).Build());
     content_frame_->SetChild(child);
 
     return 0;
@@ -41,10 +41,10 @@ int ArcFillIndicator::ApplyTheme(const ITheme& theme) {
     const auto primary = properties_->ResolveColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE, theme.GetSecondaryColor());
     const auto secondary = properties_->ResolveColor(WidgetPropertyType::COLOR_SECONDARY_ACTIVE, LvglColor(0, 0));
 
-    lv_obj_set_style_arc_color(lv_arc_, primary.ToLvColor(), LV_PART_INDICATOR | LV_STATE_DEFAULT);
-    lv_obj_set_style_arc_opa(lv_arc_, primary.ToLvOpa(), LV_PART_INDICATOR | LV_STATE_DEFAULT);
-    lv_obj_set_style_arc_color(lv_arc_, secondary.ToLvColor(), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_arc_opa(lv_arc_, secondary.ToLvOpa(), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_arc_color(lv_arc_, primary.ToLvColor(), LV_PART_INDICATOR);
+    lv_obj_set_style_arc_opa(lv_arc_, primary.ToLvOpa(), LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(lv_arc_, secondary.ToLvColor(), LV_PART_MAIN);
+    lv_obj_set_style_arc_opa(lv_arc_, secondary.ToLvOpa(), LV_PART_MAIN);
 
     return 0;
 }
@@ -56,16 +56,18 @@ lv_obj_t* ArcFillIndicator::Create(lv_obj_t* parent, int32_t range_start, int32_
     lv_obj_set_width(lv_arc_, lv_pct(100));
     lv_obj_set_height(lv_arc_, lv_pct(100));
     lv_obj_set_align(lv_arc_, LV_ALIGN_CENTER);
-    lv_obj_remove_flag(lv_arc_, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_clickable(lv_arc_, false);
     lv_arc_set_value(lv_arc_, range_start);
-    lv_arc_set_bg_angles(lv_arc_, start_angle_ + 90, end_angle_ + 90);
-    // lv_obj_set_style_arc_rounded(ui_arc, false, LV_PART_INDICATOR | LV_STATE_DEFAULT);
+    lv_arc_set_bg_angles(
+        lv_arc_, static_cast<lv_value_precise_t>(start_angle_ + 90), static_cast<lv_value_precise_t>(end_angle_ + 90)
+    );
+    // lv_obj_set_style_arc_rounded(ui_arc, false, LV_PART_INDICATOR);
 
-    // lv_obj_set_style_bg_color(lv_arc_, lv_color_hex(0xFFFFFF), LV_PART_KNOB | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(lv_arc_, 0, LV_PART_KNOB | LV_STATE_DEFAULT);
+    // lv_obj_set_style_bg_color(lv_arc_, lv_color_hex(0xFFFFFF), LV_PART_KNOB);
+    lv_obj_set_style_bg_opa(lv_arc_, 0, LV_PART_KNOB);
 
-    // lv_obj_set_style_arc_color(lv_arc_, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_arc_opa(lv_arc_, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
+    // lv_obj_set_style_arc_color(lv_arc_, lv_color_hex(0xFFFFFF), LV_PART_MAIN);
+    lv_obj_set_style_arc_opa(lv_arc_, 0, LV_PART_MAIN);
 
     return lv_arc_;
 }

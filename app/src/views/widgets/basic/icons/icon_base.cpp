@@ -38,7 +38,7 @@ bool IconBase::IsProcessingEligible() const {
 
 void IconBase::Configure(std::shared_ptr<WidgetPropertyStore> properties) {
     properties_ = std::move(properties);
-    for(auto type : properties_->GetRegisteredTypes())
+    for(const auto type : properties_->GetRegisteredTypes())
         properties_->ApplyColor(type);
 }
 

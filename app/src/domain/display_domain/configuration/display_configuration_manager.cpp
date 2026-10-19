@@ -45,12 +45,12 @@ bool DisplayConfigurationManager::ApplyCborConfiguration(std::span<const uint8_t
     return true;
 }
 
-pmr_unique_ptr<CborDisplayConfig> DisplayConfigurationManager::Serialize(const DisplayConfiguration& configuration) {
-    return cbor_parser_.Serialize(configuration);
+PmrUniquePtr<CborDisplayConfig> DisplayConfigurationManager::Serialize(const DisplayConfiguration& configuration) {
+    return DisplayConfigurationCborParser::Serialize(configuration);
 }
 
-pmr_unique_ptr<DisplayConfiguration> DisplayConfigurationManager::Deserialize(const CborDisplayConfig& cbor_config) {
-    return cbor_parser_.Deserialize(Mrm::GetExtPmr(), cbor_config);
+PmrUniquePtr<DisplayConfiguration> DisplayConfigurationManager::Deserialize(const CborDisplayConfig& cbor_config) {
+    return DisplayConfigurationCborParser::Deserialize(Mrm::GetExtPmr(), cbor_config);
 }
 
 bool DisplayConfigurationManager::CreateDefaultConfiguration() {

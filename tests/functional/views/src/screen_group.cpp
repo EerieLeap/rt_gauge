@@ -21,7 +21,7 @@ std::shared_ptr<Frame> MakeRoot() {
 }
 
 bool IsHidden(const std::shared_ptr<ScreenGroup>& group) {
-    return lv_obj_has_flag(group->GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN);
+    return lv_obj_is_hidden(group->GetContainer()->GetObject());
 }
 
 void* SetUp() {

@@ -51,8 +51,8 @@ OverlayHost::OverlayHost(std::shared_ptr<NavigationService> navigation_service) 
         Frame::CreateWrapped(top_layer).SetWidth(100, false).SetHeight(100, false).Build()
     );
 
-    lv_obj_remove_flag(container_->GetObject(), LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_flag(container_->GetObject(), LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_clickable(container_->GetObject(), false);
+    lv_obj_set_hidden(container_->GetObject(), true);
 }
 
 // Unlike the rest of the class this locks for itself: teardown does not come
@@ -71,8 +71,8 @@ int OverlayHost::Push(std::unique_ptr<ScreenGroup> screen_group, const OverlayOp
     if(screen_group == nullptr || screen_group->IsEmpty())
         return -EINVAL;
 
-    if(entries_.size() >= k_max_depth) {
-        LOG_WRN("Refusing to stack more than %zu overlays.", k_max_depth);
+    if(entries_.size() >= MAX_DEPTH) {
+        LOG_WRN("Refusing to stack more than %zu overlays.", MAX_DEPTH);
         return -ENOSPC;
     }
 
@@ -104,7 +104,7 @@ int OverlayHost::Mount(Entry& entry, const OverlayOptions& options) {
     if(options.is_modal)
         entry.scrim = CreateScrim(options.close_on_scrim_tap);
 
-    int res = entry.screen_group->EnsureRendered();
+    const int res = entry.screen_group->EnsureRendered();
     if(res != 0) {
         LOG_ERR("Failed to render overlay group %u. Error: %d.", entry.screen_group->GetGroupId(), res);
 
@@ -113,7 +113,7 @@ int OverlayHost::Mount(Entry& entry, const OverlayOptions& options) {
 
     // The scrim was created after the group's container, so it would otherwise
     // cover the overlay it is supposed to sit behind.
-    if(auto container = entry.screen_group->GetContainer())
+    if(const auto container = entry.screen_group->GetContainer())
         lv_obj_move_foreground(container->GetObject());
 
     entry.screen_group->Activate();
@@ -160,7 +160,7 @@ std::shared_ptr<Frame> OverlayHost::CreateScrim(bool close_on_tap) {
     );
 
     // What makes the overlay modal, rather than a decoration the user can reach past.
-    lv_obj_add_flag(scrim->GetObject(), LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_clickable(scrim->GetObject(), true);
     StyleScrim(scrim->GetObject(), ThemeManager::GetInstance().GetCurrentTheme());
 
     if(close_on_tap)
@@ -170,8 +170,8 @@ std::shared_ptr<Frame> OverlayHost::CreateScrim(bool close_on_tap) {
 }
 
 void OverlayHost::StyleScrim(lv_obj_t* scrim, const ITheme& theme) {
-    lv_obj_set_style_bg_color(scrim, theme.GetBackgroundColor().ToLvColor(), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(scrim, scrim_opacity_, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(scrim, theme.GetBackgroundColor().ToLvColor(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(scrim, SCRIM_OPACITY, LV_PART_MAIN);
 }
 
 void OverlayHost::UpdateVisibility() {
@@ -179,9 +179,9 @@ void OverlayHost::UpdateVisibility() {
         return;
 
     if(entries_.empty())
-        lv_obj_add_flag(container_->GetObject(), LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(container_->GetObject(), true);
     else
-        lv_obj_remove_flag(container_->GetObject(), LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(container_->GetObject(), false);
 }
 
 // Invoked by LVGL on the renderer thread, which already holds the LVGL lock.

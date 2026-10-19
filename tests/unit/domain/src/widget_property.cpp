@@ -16,7 +16,7 @@ ZTEST_SUITE(widget_property, NULL, NULL, NULL, NULL, NULL);
 
 namespace {
 
-constexpr std::array all_types = { WidgetPropertyType::NONE, WidgetPropertyType::IS_ACTIVE,
+constexpr std::array ALL_TYPES = { WidgetPropertyType::NONE, WidgetPropertyType::IS_ACTIVE,
     WidgetPropertyType::IS_SMOOTHED, WidgetPropertyType::MIN_VALUE, WidgetPropertyType::MAX_VALUE,
     WidgetPropertyType::CHART_POINT_COUNT, WidgetPropertyType::CHART_TYPE, WidgetPropertyType::LABEL,
     WidgetPropertyType::VALUE_PRECISION, WidgetPropertyType::EDGE_OFFSET, WidgetPropertyType::POSITION_X,
@@ -53,17 +53,17 @@ ZTEST(widget_property, test_shape_additions_preserve_persisted_values) {
 
 // Persisted numeric IDs must stay stable when properties are added.
 ZTEST(widget_property, test_property_ids_preserve_persisted_values) {
-    zassert_equal(all_types.size(), 45);
-    zassert_equal(static_cast<uint16_t>(WidgetPropertyType::COUNT), all_types.size());
+    zassert_equal(ALL_TYPES.size(), 45);
+    zassert_equal(static_cast<uint16_t>(WidgetPropertyType::COUNT), ALL_TYPES.size());
     zassert_equal(static_cast<uint16_t>(WidgetPropertyType::ANCHOR_POINT_X), 19);
     zassert_equal(static_cast<uint16_t>(WidgetPropertyType::ANCHOR_POINT_Y), 20);
     zassert_equal(static_cast<uint16_t>(WidgetPropertyType::CHILD_WIDGET_IDS), 44);
-    for(size_t index = 0; index < all_types.size(); ++index)
-        zassert_equal(static_cast<uint16_t>(all_types[index]), index);
+    for(size_t index = 0; index < ALL_TYPES.size(); ++index)
+        zassert_equal(static_cast<uint16_t>(ALL_TYPES[index]), index);
 }
 
 ZTEST(widget_property, test_every_property_type_is_valid) {
-    for(auto type : all_types)
+    for(auto type : ALL_TYPES)
         zassert_equal(IsValidWidgetPropertyType(type), type != WidgetPropertyType::NONE);
 }
 
@@ -86,7 +86,7 @@ ZTEST(widget_property, test_sentinels_and_unknown_types_are_invalid) {
 }
 
 ZTEST(widget_property, test_color_parser_requires_explicit_rgba) {
-    for(auto text : { "#3366FF80", "#3366ff80", "#3366fF80" }) {
+    for(const auto* text : { "#3366FF80", "#3366ff80", "#3366fF80" }) {
         const auto parsed = Color::TryParse(text);
         zassert_true(parsed.has_value());
         zassert_true(parsed->has_value());
@@ -115,10 +115,10 @@ ZTEST(widget_property, test_color_parser_distinguishes_transparent_override_from
 }
 
 ZTEST(widget_property, test_color_parser_reports_invalid_argument_for_malformed_input) {
-    constexpr std::string_view invalid_values[] = { "#3366FF", "3366FF80", "#1234567", "#123456789", " #12345678",
+    constexpr std::string_view INVALID_VALUES[] = { "#3366FF", "3366FF80", "#1234567", "#123456789", " #12345678",
         "#12345678 ", "#GG345678", "#12GG5678", "#1234GG78", "#123456GG", "#+1345678", "#-1345678", "#1 345678",
         "#0x345678", "#1234567#", std::string_view("#1234567\0", 9), std::string_view("#12345678\0", 10) };
-    for(auto text : invalid_values) {
+    for(auto text : INVALID_VALUES) {
         const auto parsed = Color::TryParse(text);
         zassert_false(parsed.has_value(), "Accepted malformed color: %.*s", static_cast<int>(text.size()), text.data());
         zassert_true(parsed.error() == std::errc::invalid_argument);

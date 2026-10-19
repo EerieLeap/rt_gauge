@@ -58,7 +58,7 @@ public:
         subscription_ = CreateScopedSubscription(
             SettingsEventsChannel::GetInstance(), SettingsEventType::PersistRequested,
             [state = state_](const SettingsEventsChannel::EventMessage& event) {
-                auto it = event.payload.find(SettingsPayloadType::SettingId);
+                const auto* it = event.payload.find(SettingsPayloadType::SettingId);
                 if(it != event.payload.end()) {
                     if(const auto* setting_id = std::get_if<uint32_t>(&it->second))
                         state->setting_ids.push_back(*setting_id);

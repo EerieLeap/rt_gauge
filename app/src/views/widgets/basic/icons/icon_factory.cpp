@@ -37,7 +37,7 @@ void IconFactory::Register(const IconType type, IconCreator creator, PropertyReg
 }
 
 void IconFactory::RegisterProperties(IconType type, WidgetPropertyStore& store) const {
-    auto it = registrations_.find(type);
+    const auto it = registrations_.find(type);
     if(it != registrations_.end() && it->second.register_properties)
         it->second.register_properties(store);
 }
@@ -47,11 +47,11 @@ std::unique_ptr<IIcon> IconFactory::Create(
     std::shared_ptr<WidgetPropertyStore> properties,
     std::shared_ptr<Frame> parent
 ) {
-    auto it = registrations_.find(type);
+    const auto it = registrations_.find(type);
     if(it == registrations_.end())
         throw std::runtime_error("Unknown widget type");
 
-    auto icon = it->second.create(parent);
+    auto icon = it->second.create(std::move(parent));
     icon->Configure(std::move(properties));
 
     return icon;

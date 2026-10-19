@@ -33,7 +33,7 @@ std::shared_ptr<Frame> MakeRoot() {
 }
 
 bool Supports(const std::vector<WidgetPropertyType>& types, WidgetPropertyType type) {
-    return std::find(types.begin(), types.end(), type) != types.end();
+    return std::ranges::find(types, type) != types.end();
 }
 
 void* SetUp() {
@@ -134,7 +134,7 @@ ZTEST(widget_supported_properties, test_widgets_report_exact_color_roles) {
     for(const auto& expected : cases) {
         auto widget = WidgetFactory::GetInstance().CreateWidget(expected.type, 1, MakeRoot(), WidgetContext{});
         const auto supported = widget->GetSupportedProperties();
-        for(auto property : eerie_leap::domain::ui_domain::utilities::WidgetPropertyValidator::color_properties) {
+        for(auto property : eerie_leap::domain::ui_domain::utilities::WidgetPropertyValidator::COLOR_PROPERTIES) {
             zassert_equal(
                 Supports(supported, property), Supports(expected.colors, property), "widget %d property %d",
                 static_cast<int>(expected.type), static_cast<int>(property)

@@ -38,7 +38,7 @@ using namespace eerie_leap::views::widgets::indicators;
 
 ZTEST_SUITE(ui_configuration_parser, NULL, NULL, NULL, NULL, NULL);
 
-pmr_unique_ptr<UiConfiguration> ui_configuration_parser_GetTestUiConfiguration() {
+PmrUniquePtr<UiConfiguration> CreateParserTestUiConfiguration() {
     auto ui_configuration = make_unique_pmr<UiConfiguration>(Mrm::GetDefaultPmr());
     ui_configuration->active_screen_group_id = 3;
 
@@ -137,10 +137,7 @@ pmr_unique_ptr<UiConfiguration> ui_configuration_parser_GetTestUiConfiguration()
     return ui_configuration;
 }
 
-void ui_configuration_parser_CompareUiConfigurations(
-    UiConfiguration& ui_configuration,
-    UiConfiguration& deserialized_ui_configuration
-) {
+void CompareParserUiConfigurations(UiConfiguration& ui_configuration, UiConfiguration& deserialized_ui_configuration) {
     zassert_equal(deserialized_ui_configuration.active_screen_group_id, ui_configuration.active_screen_group_id);
 
     for(std::size_t i = 0; i < ui_configuration.screen_configurations.size(); i++) {
@@ -249,9 +246,9 @@ void ui_configuration_parser_CompareUiConfigurations(
 
 ZTEST(ui_configuration_parser, test_CborSerializeDeserialize) {
     UiConfigurationCborParser ui_configuration_cbor_parser;
-    zassert_equal(UiConfigurationCborParser::configuration_version, 1);
+    zassert_equal(UiConfigurationCborParser::CONFIGURATION_VERSION, 1);
 
-    auto ui_configuration = ui_configuration_parser_GetTestUiConfiguration();
+    auto ui_configuration = CreateParserTestUiConfiguration();
 
     auto serialized_ui_configuration = ui_configuration_cbor_parser.Serialize(*ui_configuration);
     zassert_equal(serialized_ui_configuration->version, 1);
@@ -259,12 +256,12 @@ ZTEST(ui_configuration_parser, test_CborSerializeDeserialize) {
         Mrm::GetDefaultPmr(), *serialized_ui_configuration.get()
     );
 
-    ui_configuration_parser_CompareUiConfigurations(*ui_configuration, *deserialized_ui_configuration);
+    CompareParserUiConfigurations(*ui_configuration, *deserialized_ui_configuration);
 }
 
 ZTEST(ui_configuration_parser, test_child_ids_and_anchor_keys_reuse_version_one_property_codec) {
     for(bool empty : { false, true }) {
-        auto configuration = ui_configuration_parser_GetTestUiConfiguration();
+        auto configuration = CreateParserTestUiConfiguration();
         auto& screen = *configuration->screen_configurations[0];
         auto& widget = *screen.widget_configurations[0];
         // The owner gives up ID 0 so that zero is also exercised as a real child reference.
@@ -289,7 +286,7 @@ ZTEST(ui_configuration_parser, test_child_ids_and_anchor_keys_reuse_version_one_
 
         UiConfigurationCborParser parser;
         auto serialized = parser.Serialize(*configuration);
-        zassert_equal(UiConfigurationCborParser::configuration_version, 1);
+        zassert_equal(UiConfigurationCborParser::CONFIGURATION_VERSION, 1);
         std::vector<uint8_t> payload(cbor_get_size_CborUiConfig(*serialized));
         size_t encoded_size = 0;
         zassert_equal(cbor_encode_CborUiConfig(payload.data(), payload.size(), serialized.get(), &encoded_size), 0);
@@ -308,12 +305,12 @@ ZTEST(ui_configuration_parser, test_child_ids_and_anchor_keys_reuse_version_one_
         zassert_equal(wire_widget.CborPropertyBinding_m[0].target, 19);
         zassert_equal(wire_widget.CborPropertyBinding_m[1].target, 20);
         auto restored = parser.Deserialize(Mrm::GetDefaultPmr(), *decoded);
-        ui_configuration_parser_CompareUiConfigurations(*configuration, *restored);
+        CompareParserUiConfigurations(*configuration, *restored);
     }
 }
 
 ZTEST(ui_configuration_parser, test_widget_child_rules_guard_save_and_load) {
-    auto configuration = ui_configuration_parser_GetTestUiConfiguration();
+    auto configuration = CreateParserTestUiConfiguration();
     auto serialized = UiConfigurationCborParser().Serialize(*configuration);
     bool reject = false;
     int checks = 0;
@@ -331,7 +328,7 @@ ZTEST(ui_configuration_parser, test_widget_child_rules_guard_save_and_load) {
         try {
             action();
         } catch(const std::invalid_argument& error) {
-            return std::string(error.what()).find("Widget rule rejected.") != std::string::npos;
+            return std::string(error.what()).contains("Widget rule rejected.");
         }
         return false;
     };
@@ -344,7 +341,7 @@ ZTEST(ui_configuration_parser, test_widget_child_rules_guard_save_and_load) {
 }
 
 ZTEST(ui_configuration_parser, test_shape_properties_and_bindings_round_trip) {
-    auto configuration = ui_configuration_parser_GetTestUiConfiguration();
+    auto configuration = CreateParserTestUiConfiguration();
     auto& widget = *configuration->screen_configurations[0]->widget_configurations[0];
     widget.type = WidgetType::BasicIcon;
     widget.properties.clear();
@@ -361,7 +358,7 @@ ZTEST(ui_configuration_parser, test_shape_properties_and_bindings_round_trip) {
     UiConfigurationCborParser parser;
     auto serialized = parser.Serialize(*configuration);
     auto deserialized = parser.Deserialize(Mrm::GetDefaultPmr(), *serialized);
-    ui_configuration_parser_CompareUiConfigurations(*configuration, *deserialized);
+    CompareParserUiConfigurations(*configuration, *deserialized);
 }
 
 ZTEST(ui_configuration_parser, test_animation_properties_and_numeric_binding_targets_round_trip) {
@@ -373,7 +370,7 @@ ZTEST(ui_configuration_parser, test_animation_properties_and_numeric_binding_tar
         { Animation::Type::Blinking, true, 3 }, { Animation::Type::Rotation, false, INT32_MAX },
         { Animation::Type::Rotation, true, 2 } };
     for(const auto& settings : cases) {
-        auto configuration = ui_configuration_parser_GetTestUiConfiguration();
+        auto configuration = CreateParserTestUiConfiguration();
         auto& widget = *configuration->screen_configurations[0]->widget_configurations[0];
         widget.properties.clear();
         widget.properties[WidgetPropertyType::ANIMATION_TYPE] = static_cast<int>(settings.type);
@@ -407,14 +404,14 @@ ZTEST(ui_configuration_parser, test_animation_properties_and_numeric_binding_tar
             zassert_equal(wire_widget.CborPropertyBinding_m[index].target, 41U + index);
 
         auto deserialized = parser.Deserialize(Mrm::GetDefaultPmr(), *decoded);
-        ui_configuration_parser_CompareUiConfigurations(*configuration, *deserialized);
+        CompareParserUiConfigurations(*configuration, *deserialized);
     }
 }
 
 ZTEST(ui_configuration_parser, test_CborRoundTripKeepsBindingDetail) {
     UiConfigurationCborParser parser;
 
-    auto ui_configuration = ui_configuration_parser_GetTestUiConfiguration();
+    auto ui_configuration = CreateParserTestUiConfiguration();
     auto serialized = parser.Serialize(*ui_configuration);
     auto deserialized = parser.Deserialize(Mrm::GetDefaultPmr(), *serialized.get());
 
@@ -444,7 +441,7 @@ ZTEST(ui_configuration_parser, test_CborRoundTripKeepsBindingDetail) {
 ZTEST(ui_configuration_parser, test_CborRoundTripKeepsAWidgetWithoutBindings) {
     UiConfigurationCborParser parser;
 
-    auto ui_configuration = ui_configuration_parser_GetTestUiConfiguration();
+    auto ui_configuration = CreateParserTestUiConfiguration();
     auto serialized = parser.Serialize(*ui_configuration);
     auto deserialized = parser.Deserialize(Mrm::GetDefaultPmr(), *serialized.get());
 
@@ -456,7 +453,7 @@ ZTEST(ui_configuration_parser, test_CborRoundTripKeepsAWidgetWithoutBindings) {
 ZTEST(ui_configuration_parser, test_CborRoundTripKeepsOverlayApartFromVisibility) {
     UiConfigurationCborParser parser;
 
-    auto ui_configuration = ui_configuration_parser_GetTestUiConfiguration();
+    auto ui_configuration = CreateParserTestUiConfiguration();
     auto& screen = *ui_configuration->screen_configurations[0];
     screen.is_visible = false;
     screen.is_overlay = true;
@@ -481,19 +478,19 @@ ZTEST(ui_configuration_parser, test_AScreenIsNotAnOverlayByDefault) {
 ZTEST(ui_configuration_parser, test_CborSerializeStampsTheCurrentVersion) {
     UiConfigurationCborParser parser;
 
-    auto ui_configuration = ui_configuration_parser_GetTestUiConfiguration();
+    auto ui_configuration = CreateParserTestUiConfiguration();
     auto serialized = parser.Serialize(*ui_configuration);
 
-    zassert_equal(serialized->version, UiConfigurationCborParser::configuration_version);
+    zassert_equal(serialized->version, UiConfigurationCborParser::CONFIGURATION_VERSION);
 }
 
 ZTEST(ui_configuration_parser, test_CborDeserializeRejectsAnotherVersion) {
     UiConfigurationCborParser parser;
 
-    auto ui_configuration = ui_configuration_parser_GetTestUiConfiguration();
+    auto ui_configuration = CreateParserTestUiConfiguration();
     auto serialized = parser.Serialize(*ui_configuration);
 
-    serialized->version = UiConfigurationCborParser::configuration_version - 1;
+    serialized->version = UiConfigurationCborParser::CONFIGURATION_VERSION - 1;
 
     bool threw = false;
 
@@ -509,7 +506,7 @@ ZTEST(ui_configuration_parser, test_CborDeserializeRejectsAnotherVersion) {
 ZTEST(ui_configuration_parser, test_CborDeserializeOrdersWidgetsByZIndex) {
     UiConfigurationCborParser ui_configuration_cbor_parser;
 
-    auto ui_configuration = ui_configuration_parser_GetTestUiConfiguration();
+    auto ui_configuration = CreateParserTestUiConfiguration();
     auto& widget_configurations = ui_configuration->screen_configurations[0]->widget_configurations;
     widget_configurations[0]->z_index = 5;
     widget_configurations[1]->z_index = 1;
@@ -556,7 +553,7 @@ std::vector<uint8_t> WidgetPropertyPayload(std::initializer_list<uint8_t> proper
 } // namespace
 
 ZTEST(ui_configuration_parser, test_widget_properties_round_trip_with_empty_ui_properties) {
-    auto configuration = ui_configuration_parser_GetTestUiConfiguration();
+    auto configuration = CreateParserTestUiConfiguration();
     auto& widget = *configuration->screen_configurations[0]->widget_configurations[0];
     auto& properties = widget.properties;
     properties[WidgetPropertyType::MAX_VALUE] = 100.5;
@@ -604,7 +601,7 @@ ZTEST(ui_configuration_parser, test_widget_properties_round_trip_with_empty_ui_p
         zassert_true(properties.contains(static_cast<WidgetPropertyType>(property.CborPropertyValueType_m_key)));
 
     auto deserialized = parser.Deserialize(Mrm::GetDefaultPmr(), *decoded);
-    ui_configuration_parser_CompareUiConfigurations(*configuration, *deserialized);
+    CompareParserUiConfigurations(*configuration, *deserialized);
     zassert_true(deserialized->properties.empty());
     zassert_true(deserialized->screen_configurations[0]->widget_configurations[2]->properties.empty());
 }
@@ -612,7 +609,7 @@ ZTEST(ui_configuration_parser, test_widget_properties_round_trip_with_empty_ui_p
 ZTEST(ui_configuration_parser, test_deserialize_rejects_malformed_persisted_colors) {
     using eerie_leap::utilities::cbor::CborHelpers;
 
-    auto configuration = ui_configuration_parser_GetTestUiConfiguration();
+    auto configuration = CreateParserTestUiConfiguration();
     auto& properties = configuration->screen_configurations[0]->widget_configurations[0]->properties;
     properties.clear();
     properties[WidgetPropertyType::COLOR_PRIMARY_ACTIVE] = std::pmr::string("#3366FF80");
@@ -644,7 +641,7 @@ ZTEST(ui_configuration_parser, test_deserialize_rejects_malformed_persisted_colo
 }
 
 ZTEST(ui_configuration_parser, test_deserialize_rejects_invalid_persisted_opacity) {
-    auto configuration = ui_configuration_parser_GetTestUiConfiguration();
+    auto configuration = CreateParserTestUiConfiguration();
     auto& properties = configuration->screen_configurations[0]->widget_configurations[0]->properties;
     properties.clear();
     properties[WidgetPropertyType::OPACITY] = 128;
@@ -698,7 +695,7 @@ ZTEST(ui_configuration_parser, test_decodes_integer_widget_property_keys) {
     auto serialized = parser.Serialize(*configuration);
     zassert_equal(serialized->version, 1);
     auto round_tripped = parser.Deserialize(Mrm::GetDefaultPmr(), *serialized);
-    ui_configuration_parser_CompareUiConfigurations(*configuration, *round_tripped);
+    CompareParserUiConfigurations(*configuration, *round_tripped);
 }
 
 ZTEST(ui_configuration_parser, test_rejects_legacy_text_widget_property_keys) {
@@ -712,7 +709,7 @@ ZTEST(ui_configuration_parser, test_rejects_unknown_widget_property_ids_before_n
     const std::array<uint32_t, 5> invalid_ids = { 0, static_cast<uint32_t>(WidgetPropertyType::COUNT), 9999,
         0x10000U + static_cast<uint32_t>(WidgetPropertyType::MIN_VALUE), UINT32_MAX };
     UiConfigurationCborParser parser;
-    auto configuration = ui_configuration_parser_GetTestUiConfiguration();
+    auto configuration = CreateParserTestUiConfiguration();
     auto serialized = parser.Serialize(*configuration);
     auto& widget = serialized->CborScreenConfig_m[0].CborWidgetConfig_m[0];
     auto& property_id = widget.properties.CborPropertyValueType_m[0].CborPropertyValueType_m_key;
@@ -731,7 +728,7 @@ ZTEST(ui_configuration_parser, test_rejects_unknown_widget_property_ids_before_n
 
 ZTEST(ui_configuration_parser, test_rejects_duplicate_widget_property_ids) {
     UiConfigurationCborParser parser;
-    auto configuration = ui_configuration_parser_GetTestUiConfiguration();
+    auto configuration = CreateParserTestUiConfiguration();
     auto serialized = parser.Serialize(*configuration);
     auto& properties = serialized->CborScreenConfig_m[0].CborWidgetConfig_m[0].properties.CborPropertyValueType_m;
     properties[1].CborPropertyValueType_m_key = properties[0].CborPropertyValueType_m_key;
@@ -775,7 +772,7 @@ ZTEST(ui_configuration_parser, test_rejects_undefined_ui_property_ids) {
     const std::array<uint32_t, 5> invalid_ids = { static_cast<uint32_t>(UiPropertyType::NONE),
         static_cast<uint32_t>(UiPropertyType::COUNT), 9999, 0x10000U, UINT32_MAX };
     UiConfigurationCborParser parser;
-    auto configuration = ui_configuration_parser_GetTestUiConfiguration();
+    auto configuration = CreateParserTestUiConfiguration();
     auto serialized = parser.Serialize(*configuration);
     serialized->properties_present = true;
     auto& property = serialized->properties.CborPropertyValueType_m.emplace_back();
@@ -790,7 +787,7 @@ ZTEST(ui_configuration_parser, test_rejects_undefined_ui_property_ids) {
 
 ZTEST(ui_configuration_parser, test_serialize_rejects_undefined_ui_properties) {
     UiConfigurationCborParser parser;
-    auto configuration = ui_configuration_parser_GetTestUiConfiguration();
+    auto configuration = CreateParserTestUiConfiguration();
     configuration->properties[static_cast<UiPropertyType>(29)] = 80;
 
     bool threw = false;
@@ -819,7 +816,7 @@ std::vector<uint8_t> CompositionPayload(std::initializer_list<uint8_t> dial_prop
     return payload;
 }
 
-pmr_unique_ptr<CborUiConfig> Decode(const std::vector<uint8_t>& payload) {
+PmrUniquePtr<CborUiConfig> Decode(const std::vector<uint8_t>& payload) {
     auto decoded = make_unique_pmr<CborUiConfig>(Mrm::GetDefaultPmr());
     size_t decoded_size = 0;
     if(cbor_decode_CborUiConfig(payload.data(), payload.size(), decoded.get(), &decoded_size) != 0
@@ -829,7 +826,7 @@ pmr_unique_ptr<CborUiConfig> Decode(const std::vector<uint8_t>& payload) {
 }
 
 // Through the actual wire bytes, not only the intermediate CBOR structs.
-pmr_unique_ptr<UiConfiguration> RoundTrip(UiConfigurationCborParser& parser, const UiConfiguration& configuration) {
+PmrUniquePtr<UiConfiguration> RoundTrip(UiConfigurationCborParser& parser, const UiConfiguration& configuration) {
     auto serialized = parser.Serialize(configuration);
     std::vector<uint8_t> payload(cbor_get_size_CborUiConfig(*serialized));
     size_t encoded_size = 0;
@@ -899,18 +896,18 @@ ZTEST(ui_configuration_parser, test_version_one_composition_payload_keeps_record
     zassert_equal(wire[0].properties.CborPropertyValueType_m.size(), 1);
     zassert_equal(wire[0].properties.CborPropertyValueType_m[0].CborPropertyValueType_m_key, 44);
     auto round_tripped = RoundTrip(parser, *configuration);
-    ui_configuration_parser_CompareUiConfigurations(*configuration, *round_tripped);
+    CompareParserUiConfigurations(*configuration, *round_tripped);
 }
 
 ZTEST(ui_configuration_parser, test_child_id_order_and_empty_lists_survive_z_ordering_on_load) {
-    auto configuration = ui_configuration_parser_GetTestUiConfiguration();
+    auto configuration = CreateParserTestUiConfiguration();
     auto& screen = *configuration->screen_configurations[0];
     screen.widget_configurations.clear();
     auto owner = Leaf(1);
     owner->properties[WidgetPropertyType::CHILD_WIDGET_IDS] = std::pmr::vector<int>({ 7, 3, 5 }, Mrm::GetDefaultPmr());
     auto empty = Leaf(5);
     empty->properties[WidgetPropertyType::CHILD_WIDGET_IDS] = std::pmr::vector<int>(Mrm::GetDefaultPmr());
-    for(auto widget : { Leaf(7, 5), owner, Leaf(3, -5), empty })
+    for(const auto& widget : { Leaf(7, 5), owner, Leaf(3, -5), empty })
         screen.AddWidget(widget);
 
     UiConfigurationCborParser parser;
@@ -960,12 +957,12 @@ ZTEST(ui_configuration_parser, test_child_ids_outside_the_signed_range_are_rejec
     zassert_not_null(negative.get());
     const auto error = DeserializeError(*negative);
     for(const auto* fragment : { "Screen ID: 8, Widget ID: 9", "Child index 0, ID -1", "between 0 and INT32_MAX" })
-        zassert_true(error.find(fragment) != std::string::npos, "Missing '%s' in '%s'", fragment, error.c_str());
+        zassert_true(error.contains(fragment), "Missing '%s' in '%s'", fragment, error.c_str());
 
     auto largest = Decode(CompositionPayload({ 0xa1, 0x18, 0x2c, 0x81, 0x1a, 0x7f, 0xff, 0xff, 0xff }));
     zassert_not_null(largest.get());
     zassert_true(
-        DeserializeError(*largest).find("ID 2147483647: target does not exist") != std::string::npos,
+        DeserializeError(*largest).contains("ID 2147483647: target does not exist"),
         "INT32_MAX decodes as a real reference, not a narrowed one"
     );
 }
@@ -975,7 +972,7 @@ ZTEST(ui_configuration_parser, test_anchor_coordinates_persist_exactly_without_c
         { -1, 536870911 } } };
     UiConfigurationCborParser parser;
     for(const auto& [x, y] : anchors) {
-        auto configuration = ui_configuration_parser_GetTestUiConfiguration();
+        auto configuration = CreateParserTestUiConfiguration();
         auto& properties = configuration->screen_configurations[0]->widget_configurations[0]->properties;
         properties.clear();
         properties[WidgetPropertyType::ANCHOR_POINT_X] = x;

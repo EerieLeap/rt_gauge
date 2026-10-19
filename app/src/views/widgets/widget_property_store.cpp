@@ -19,7 +19,7 @@ WidgetPropertyStore::WidgetPropertyStore() {
 }
 
 const WidgetPropertyStore::Entry* WidgetPropertyStore::Find(WidgetPropertyType type) const {
-    auto it = std::find_if(entries_.begin(), entries_.end(), [type](const Entry& entry) {
+    const auto it = std::ranges::find_if(entries_, [type](const Entry& entry) {
         return entry.type == type;
     });
 
@@ -27,7 +27,11 @@ const WidgetPropertyStore::Entry* WidgetPropertyStore::Find(WidgetPropertyType t
 }
 
 WidgetPropertyStore::Entry* WidgetPropertyStore::Find(WidgetPropertyType type) {
-    return const_cast<Entry*>(std::as_const(*this).Find(type));
+    const auto it = std::ranges::find_if(entries_, [type](const Entry& entry) {
+        return entry.type == type;
+    });
+
+    return it == entries_.end() ? nullptr : &(*it);
 }
 
 void WidgetPropertyStore::Register(WidgetPropertyType type, ConfigValue default_value, PropertyChangeEffect effect) {
@@ -36,7 +40,7 @@ void WidgetPropertyStore::Register(WidgetPropertyType type, ConfigValue default_
 
     ScopedMutex guard(lock_);
 
-    auto alternative = static_cast<uint8_t>(default_value.index());
+    const auto alternative = static_cast<uint8_t>(default_value.index());
 
     if(const auto index = WidgetPropertyValidator::GetColorPropertyIndex(type)) {
         const auto* text = std::get_if<std::pmr::string>(&default_value);

@@ -27,7 +27,7 @@ public:
         b(blue),
         a(alpha) {}
 
-    LvglColor(uint32_t rgb, uint8_t alpha = 255) :
+    explicit LvglColor(uint32_t rgb, uint8_t alpha = 255) :
         lv_color_(lv_color_hex(rgb)),
         r(rgb >> 16),
         g(rgb >> 8),

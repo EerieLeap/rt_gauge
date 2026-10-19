@@ -15,7 +15,7 @@ using eerie_leap::domain::ui_domain::ScopedLvglLock;
 
 LOG_MODULE_REGISTER(screen_logger);
 
-Screen::Screen(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context) :
+Screen::Screen(uint32_t id, const std::shared_ptr<Frame>& parent, WidgetContext context) :
     id_(id),
     parent_(parent),
     context_(std::move(context)) {
@@ -43,7 +43,7 @@ int Screen::DoRender() {
     return 0;
 }
 
-int Screen::ApplyTheme(const ITheme& theme) {
+int Screen::ApplyTheme(const ITheme& /*theme*/) {
     return 0;
 }
 
@@ -79,9 +79,9 @@ bool Screen::IsVisible() const {
 void Screen::SetVisibility(bool is_visible) {
     ScopedLvglLock lvgl_guard;
     if(is_visible)
-        lv_obj_remove_flag(container_->GetObject(), LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(container_->GetObject(), false);
     else
-        lv_obj_add_flag(container_->GetObject(), LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(container_->GetObject(), true);
 }
 
 void Screen::OnActivated() {

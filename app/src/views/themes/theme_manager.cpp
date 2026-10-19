@@ -53,7 +53,7 @@ void ThemeManager::RegisterObserver(IThemeObserver* observer) {
 void ThemeManager::UnregisterObserver(IThemeObserver* observer) {
     k_mutex_lock(&observers_lock_, K_FOREVER);
 
-    observers_.erase(std::remove(observers_.begin(), observers_.end(), observer), observers_.end());
+    observers_.erase(std::ranges::remove(observers_, observer).begin(), observers_.end());
 
     k_mutex_unlock(&observers_lock_);
 }
@@ -62,7 +62,7 @@ void ThemeManager::NotifyObservers() {
     // Snapshot: an observer may create or destroy renderables while handling the
     // change, and an erase would otherwise shift the vector and skip an observer.
     k_mutex_lock(&observers_lock_, K_FOREVER);
-    auto observers = observers_;
+    const auto observers = observers_;
     k_mutex_unlock(&observers_lock_);
 
     for(auto* observer : observers) {

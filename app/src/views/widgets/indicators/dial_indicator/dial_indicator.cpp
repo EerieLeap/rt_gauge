@@ -1,5 +1,5 @@
 #include <cerrno>
-#include <cstdlib>
+#include <cmath>
 #include <stdexcept>
 #include <string>
 
@@ -25,7 +25,7 @@ std::string NeedleError(uint32_t id, const char* reason) {
     return "Child index 0, ID " + std::to_string(id) + " (needle): " + reason;
 }
 
-constexpr const char* rotation_conflict =
+constexpr const char* ROTATION_CONFLICT =
     "driven rotation conflicts with a rotation animation or inbound ANIMATION_TYPE binding.";
 
 } // namespace
@@ -41,7 +41,7 @@ void DialIndicator::ValidateChildren(const WidgetConfiguration&, std::span<const
         || needle.size_grid.height != 1)
         throw std::invalid_argument(NeedleError(needle.id, "fill slot requires position (0, 0) and size (1, 1)."));
     if(!WidgetTransform::CanSetRotation(needle))
-        throw std::invalid_argument(NeedleError(needle.id, rotation_conflict));
+        throw std::invalid_argument(NeedleError(needle.id, ROTATION_CONFLICT));
 }
 
 DialIndicator::DialIndicator(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context) :
@@ -77,10 +77,15 @@ int DialIndicator::ApplyTheme(const ITheme&) {
 }
 
 uint32_t DialIndicator::GetAngleForValue(float value) {
-    float resolution = (abs(end_angle_ - start_angle_) * 10) / abs(range_end_ - range_start_);
-    float angle_delta = resolution * value;
+    // Tenths of a degree. MIN_VALUE points at START_ANGLE and MAX_VALUE at END_ANGLE, in either
+    // direction; an empty range leaves the needle at the start.
+    const auto start = static_cast<float>((start_angle_ * 10) - 1800);
+    const float range_span = range_end_ - range_start_;
+    const float angle = range_span == 0.0F
+        ? start
+        : start + (static_cast<float>((end_angle_ - start_angle_) * 10) * (value - range_start_) / range_span);
 
-    return start_angle_ * 10 - 1800 + static_cast<uint32_t>(angle_delta);
+    return static_cast<uint32_t>(static_cast<int32_t>(std::lround(angle)));
 }
 
 void DialIndicator::UpdateIndicator(float value) {

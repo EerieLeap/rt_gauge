@@ -26,7 +26,7 @@ public:
     virtual void OnActivated() = 0;
     virtual void OnDeactivated() = 0;
 
-    virtual ~IScreen() = default;
+    ~IScreen() override = default;
 };
 
 } // namespace eerie_leap::views::screens

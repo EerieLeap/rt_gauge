@@ -384,8 +384,9 @@ void WidgetBase::NotifyPropertyChanged(WidgetPropertyType type, const ConfigValu
         RunEffect(effect);
         transform_.Synchronize();
         return;
-    } else
+    } else {
         pending_properties_.set(static_cast<size_t>(type));
+    }
 
     ReplayPendingProperties();
 
@@ -396,7 +397,7 @@ void WidgetBase::NotifyPropertyChanged(WidgetPropertyType type, const ConfigValu
 }
 
 void WidgetBase::SetPropertyLocal(WidgetPropertyType type, const ConfigValue& value) {
-    static constexpr auto caller = GetCallerName();
+    static constexpr auto CALLER = GetCallerName();
     ScopedLvglLock lvgl_guard;
 
     if(WidgetPropertyValidator::IsStructuralProperty(type))
@@ -416,7 +417,7 @@ void WidgetBase::SetPropertyLocal(WidgetPropertyType type, const ConfigValue& va
             std::pair{ binding.selector_key, binding.selector_value.value_or(EventData{}) } };
 
         binding.channel->PublishErasedAsync(
-            binding.event_type, caller.hash,
+            binding.event_type, CALLER.hash,
             ErasedPayload{ payload.data(), binding.selector_value.has_value() ? 2U : 1U }
         );
     }
@@ -428,7 +429,7 @@ void WidgetBase::ResolveBindings() {
             throw std::invalid_argument("Bindings cannot target structural properties.");
     }
 
-    auto& registry = EventChannelRegistry::GetInstance();
+    const auto& registry = EventChannelRegistry::GetInstance();
 
     for(const auto& binding : configuration_->bindings) {
         if(!properties_->IsRegistered(binding.target)) {
@@ -495,7 +496,7 @@ void WidgetBase::ResolveBindings() {
 void WidgetBase::ReplayProperties() {
     PropertySet selected;
     const auto registered = properties_->GetRegisteredTypes();
-    for(auto type : registered)
+    for(const auto type : registered)
         selected.set(static_cast<size_t>(type));
 
     pending_properties_.reset();
@@ -504,7 +505,7 @@ void WidgetBase::ReplayProperties() {
     // Configuration seeds members before rendering. Those handlers cannot necessarily apply
     // their visual state yet, and activation may still be blocked by visibility or opacity.
     if(!IsReady() || !IsProcessingEligible()) {
-        for(auto type : registered) {
+        for(const auto type : registered) {
             if(!WidgetPropertyValidator::IsManagementProperty(type))
                 pending_properties_.set(static_cast<size_t>(type));
         }
@@ -513,7 +514,7 @@ void WidgetBase::ReplayProperties() {
 
 void WidgetBase::ApplyProperties(const PropertySet& selected) {
     auto strongest = PropertyChangeEffect::None;
-    auto apply = [&](WidgetPropertyType type) {
+    const auto apply = [&](WidgetPropertyType type) {
         if(!selected.test(static_cast<size_t>(type)))
             return;
 
@@ -524,7 +525,7 @@ void WidgetBase::ApplyProperties(const PropertySet& selected) {
     // VALUE consumes state declared by derived classes too (for example digital precision).
     // Registration order alone cannot express that dependency. Apply the value once, after
     // configuration, so charts still append at most one sample per replay.
-    for(auto type : properties_->GetRegisteredTypes()) {
+    for(const auto type : properties_->GetRegisteredTypes()) {
         if(type != WidgetPropertyType::VALUE)
             apply(type);
     }
@@ -572,7 +573,7 @@ void WidgetBase::Configure(std::shared_ptr<WidgetConfiguration> configuration) {
         if(WidgetPropertyValidator::IsStructuralProperty(type))
             continue;
 
-        if(!properties_->Set(type, value) && std::find(supported.begin(), supported.end(), type) == supported.end())
+        if(!properties_->Set(type, value) && std::ranges::find(supported, type) == supported.end())
             LOG_WRN("Widget %u does not support property %u.", id_, static_cast<unsigned>(type));
     }
 
@@ -588,10 +589,7 @@ std::shared_ptr<WidgetConfiguration> WidgetBase::GetConfiguration() const {
 int WidgetBase::SetVisibility(bool is_visible) {
     ScopedLvglLock lvgl_guard;
 
-    if(is_visible)
-        lv_obj_clear_flag(container_->GetObject(), LV_OBJ_FLAG_HIDDEN);
-    else
-        lv_obj_add_flag(container_->GetObject(), LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(container_->GetObject(), !is_visible);
 
     return 0;
 }
@@ -623,7 +621,8 @@ void WidgetBase::SetSizePx(const WidgetSize& size_px) {
 
     size_px_ = size_px;
 
-    container_->SetHeight(size_px.height, true).SetWidth(size_px.width, true);
+    container_->SetHeight(static_cast<int32_t>(size_px.height), true)
+        .SetWidth(static_cast<int32_t>(size_px.width), true);
 
     UpdateChildrenLayout();
     transform_.UpdateAnchor();

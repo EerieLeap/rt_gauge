@@ -12,6 +12,7 @@ enum class UiPropertyType : std::uint16_t {
 };
 
 constexpr bool IsValidUiPropertyType(UiPropertyType type) {
+    // NOLINTNEXTLINE(clang-diagnostic-tautological-overlap-compare): no property exists yet, so the valid range is empty until one is added before COUNT
     return type > UiPropertyType::NONE && type < UiPropertyType::COUNT;
 }
 

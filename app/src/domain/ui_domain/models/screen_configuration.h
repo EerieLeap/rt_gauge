@@ -14,15 +14,15 @@ namespace eerie_leap::domain::ui_domain::models {
 struct ScreenConfiguration {
     using allocator_type = std::pmr::polymorphic_allocator<>;
 
-    uint32_t id;
-    uint32_t screen_group_id;
-    ScreenType type;
+    uint32_t id{};
+    uint32_t screen_group_id{};
+    ScreenType type{};
     int32_t z_index = 0;
     bool is_visible = true;
 
     // An overlay is hosted by OverlayHost on the top layer instead of joining a screen group.
     bool is_overlay = false;
-    GridSettings grid;
+    GridSettings grid{};
     std::pmr::vector<std::shared_ptr<WidgetConfiguration>> widget_configurations;
 
     ScreenConfiguration(std::allocator_arg_t, allocator_type alloc) :
@@ -45,10 +45,10 @@ struct ScreenConfiguration {
         widget_configurations(std::move(other.widget_configurations), alloc) {}
 
     void AddWidget(std::shared_ptr<WidgetConfiguration> widget_configuration) {
-        auto insert_position = std::upper_bound(
-            widget_configurations.begin(), widget_configurations.end(), widget_configuration->z_index,
-            [](int32_t z_index, const std::shared_ptr<WidgetConfiguration>& current) {
-                return z_index < current->z_index;
+        const auto insert_position = std::ranges::upper_bound(
+            widget_configurations, widget_configuration->z_index, std::ranges::less{},
+            [](const std::shared_ptr<WidgetConfiguration>& current) {
+                return current->z_index;
             }
         );
 

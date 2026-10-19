@@ -174,6 +174,25 @@ saying why. CI fails on unformatted code and when `.clang-format` differs from r
 `git config blame.ignoreRevsFile .git-blame-ignore-revs` hides the reformat commit from `git blame`; GitHub reads the
 file by itself.
 
+### Linting
+
+[`.clang-tidy`](.clang-tidy), a copy of rt_core's, is written for clang-tidy 23 (`clang-tidy-23` from LLVM's apt
+repository, already in the dev container); [`tests/.clang-tidy`](tests/.clang-tidy) relaxes what ztest's macros make
+wrong. clang-tidy needs `native_sim` compile databases: the app's in `build/tidy`, the test suites' in a twister output
+directory.
+
+```shell
+scripts/tidy.sh --build                                  # build ./app for native_sim into build/tidy, lint app/src
+west twister -p native_sim --build-only -j 4 -O twister-out-tidy -T ./tests
+scripts/tidy.sh -p build/tidy -p twister-out-tidy        # lint app/src and tests/ (each -p adds a database)
+scripts/tidy.sh --changed [BASE] -p build/tidy           # only sources changed since the merge base with BASE
+scripts/tidy.sh --fix PATH...                            # apply clang-tidy's fixes, then review git diff
+```
+
+The script exits 0 without warnings, 1 with warnings and 2 on a setup error. Generated sources and rt_core's files are
+left out. Waive a finding only with a named check and a reason, `// NOLINT(check-name): reason` (also
+`NOLINTNEXTLINE`, `NOLINTBEGIN`/`NOLINTEND`), never a bare `NOLINT` or a wildcard. CI fails on any warning.
+
 ### Required tools
 
 #### CBOR

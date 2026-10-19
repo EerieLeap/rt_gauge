@@ -16,7 +16,7 @@ using namespace eerie_leap::views::themes;
 LOG_MODULE_REGISTER(button_control_logger);
 
 // A button carries no setting, so an unset target means "no navigation".
-static constexpr int32_t no_target = -1;
+static constexpr int32_t NO_TARGET = -1;
 
 ButtonControl::ButtonControl(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context) :
     ControlBase(id, std::move(parent), std::move(context), false) {}
@@ -30,7 +30,7 @@ void ButtonControl::RegisterProperties(WidgetPropertyStore& store) const {
     store.RegisterColor(WidgetPropertyType::COLOR_SECONDARY_INACTIVE);
 
     store.Register(WidgetPropertyType::LABEL, ConfigValue{ std::pmr::string{} }, PropertyChangeEffect::Repaint);
-    store.Register(WidgetPropertyType::TARGET_SCREEN_GROUP, ConfigValue{ no_target }, PropertyChangeEffect::None);
+    store.Register(WidgetPropertyType::TARGET_SCREEN_GROUP, ConfigValue{ NO_TARGET }, PropertyChangeEffect::None);
     store.Register(
         WidgetPropertyType::NAVIGATION_INTENT, ConfigValue{ static_cast<int>(NavigationIntent::None) },
         PropertyChangeEffect::None
@@ -38,9 +38,11 @@ void ButtonControl::RegisterProperties(WidgetPropertyStore& store) const {
 }
 
 int ButtonControl::ApplyTheme(const ITheme& theme) {
-    lv_obj_set_style_recolor_opa(lv_button_, LV_OPA_TRANSP, LV_PART_MAIN | LV_STATE_PRESSED);
+    lv_obj_set_style_recolor_opa(
+        lv_button_, LV_OPA_TRANSP, static_cast<lv_style_selector_t>(LV_PART_MAIN) | LV_STATE_PRESSED
+    );
 
-    for(bool pressed : { false, true }) {
+    for(const bool pressed : { false, true }) {
         const auto state = pressed ? LV_STATE_PRESSED : LV_STATE_DEFAULT;
         const auto primary = properties_->ResolveColor(
             pressed ? WidgetPropertyType::COLOR_PRIMARY_ACTIVE : WidgetPropertyType::COLOR_PRIMARY_INACTIVE,
@@ -51,13 +53,19 @@ int ButtonControl::ApplyTheme(const ITheme& theme) {
             theme.GetPrimaryColor()
         );
 
-        lv_obj_set_style_bg_color(lv_button_, primary.ToLvColor(), LV_PART_MAIN | state);
-        lv_obj_set_style_bg_opa(lv_button_, primary.ToLvOpa(), LV_PART_MAIN | state);
-        lv_obj_set_style_text_color(lv_label_, secondary.ToLvColor(), LV_PART_MAIN | state);
-        lv_obj_set_style_text_opa(lv_label_, secondary.ToLvOpa(), LV_PART_MAIN | state);
+        lv_obj_set_style_bg_color(
+            lv_button_, primary.ToLvColor(), static_cast<lv_style_selector_t>(LV_PART_MAIN) | state
+        );
+        lv_obj_set_style_bg_opa(lv_button_, primary.ToLvOpa(), static_cast<lv_style_selector_t>(LV_PART_MAIN) | state);
+        lv_obj_set_style_text_color(
+            lv_label_, secondary.ToLvColor(), static_cast<lv_style_selector_t>(LV_PART_MAIN) | state
+        );
+        lv_obj_set_style_text_opa(
+            lv_label_, secondary.ToLvOpa(), static_cast<lv_style_selector_t>(LV_PART_MAIN) | state
+        );
     }
 
-    lv_obj_set_style_text_font(lv_label_, theme.GetPrimaryFont().ToLvFont(), LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_text_font(lv_label_, theme.GetPrimaryFont().ToLvFont(), LV_PART_MAIN);
     lv_obj_set_state(lv_label_, LV_STATE_PRESSED, lv_obj_has_state(lv_button_, LV_STATE_PRESSED));
 
     return 0;
@@ -70,7 +78,7 @@ void ButtonControl::OnPropertyChanged(WidgetPropertyType type, const ConfigValue
             break;
 
         case WidgetPropertyType::TARGET_SCREEN_GROUP: {
-            auto target = ConfigValueAs<int>(value, no_target);
+            auto target = ConfigValueAs<int>(value, NO_TARGET);
 
             if(target >= 0)
                 target_id_ = static_cast<uint32_t>(target);
@@ -131,7 +139,8 @@ void ButtonControl::OnControlEvent(lv_event_code_t code) {
 
 std::optional<std::pair<NavigationIntent, uint32_t>> ButtonControl::ResolveNavigation() const {
     // A button configured with only a target predates NAVIGATION_INTENT.
-    auto intent = intent_ == NavigationIntent::None && target_id_.has_value() ? NavigationIntent::GoToGroup : intent_;
+    const auto intent = intent_ == NavigationIntent::None && target_id_.has_value() ? NavigationIntent::GoToGroup
+                                                                                    : intent_;
 
     switch(intent) {
         case NavigationIntent::GoToGroup:

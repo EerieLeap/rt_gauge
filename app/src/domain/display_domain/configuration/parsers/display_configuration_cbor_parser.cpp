@@ -15,10 +15,10 @@ static void InvalidDisplayConfiguration(std::string_view message) {
     throw std::invalid_argument("Invalid Display configuration. " + std::string(message));
 }
 
-pmr_unique_ptr<CborDisplayConfig> DisplayConfigurationCborParser::Serialize(const DisplayConfiguration& configuration) {
+PmrUniquePtr<CborDisplayConfig> DisplayConfigurationCborParser::Serialize(const DisplayConfiguration& configuration) {
     auto config = make_unique_pmr<CborDisplayConfig>(Mrm::GetExtPmr());
 
-    config->version = configuration_version;
+    config->version = CONFIGURATION_VERSION;
     config->brightness = configuration.brightness;
     config->blanking_enabled = configuration.blanking_enabled;
     config->screen_timeout_s = configuration.screen_timeout_s;
@@ -27,13 +27,13 @@ pmr_unique_ptr<CborDisplayConfig> DisplayConfigurationCborParser::Serialize(cons
     return config;
 }
 
-pmr_unique_ptr<DisplayConfiguration>
+PmrUniquePtr<DisplayConfiguration>
 DisplayConfigurationCborParser::Deserialize(std::pmr::memory_resource* mr, const CborDisplayConfig& config) {
 
-    if(config.version != configuration_version)
+    if(config.version != CONFIGURATION_VERSION)
         InvalidDisplayConfiguration(
             "Unsupported version: " + std::to_string(config.version)
-            + ". Expected: " + std::to_string(configuration_version) + "."
+            + ". Expected: " + std::to_string(CONFIGURATION_VERSION) + "."
         );
 
     if(config.brightness > std::numeric_limits<uint8_t>::max())

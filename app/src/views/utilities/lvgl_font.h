@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 
 #include <lvgl.h>
 
@@ -14,9 +15,10 @@ private:
 public:
     const std::string name;
 
-    LvglFont(const std::string& name, const lv_font_t* font, uint32_t size) :
+    // The size is part of a font's description in the themes, but LVGL's font already carries it.
+    LvglFont(std::string name, const lv_font_t* font, uint32_t /*size*/) :
         lv_font_(font),
-        name(name) {}
+        name(std::move(name)) {}
 
     [[nodiscard]] const lv_font_t* ToLvFont() const {
         return lv_font_;

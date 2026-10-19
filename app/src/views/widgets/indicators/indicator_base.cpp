@@ -30,7 +30,7 @@ void IndicatorBase::UpdateIndicatorCallback(void* obj, int32_t value) {
         return;
     }
 
-    float value_float = static_cast<float>(value) / (10 * CONFIG_EERIE_LEAP_FLOAT_SIGNIFICANT_DIGITS);
+    const float value_float = static_cast<float>(value) / (10 * CONFIG_EERIE_LEAP_FLOAT_SIGNIFICANT_DIGITS);
     indicator->UpdateIndicator(value_float);
     indicator->value_ = value_float;
 }
@@ -46,9 +46,12 @@ lv_anim_t IndicatorBase::CreateValueChangeAnimation() {
 }
 
 void IndicatorBase::ValueChangeAnimation(lv_anim_t& anim, float range, float start_value, float end_value) {
-    uint32_t duration = 4000;
-    uint32_t unit_duration = duration / range;
-    uint32_t change_duration = unit_duration * abs(end_value - start_value);
+    // A sweep over the whole range takes FULL_RANGE_DURATION_MS and a change its share of that; an
+    // empty range jumps.
+    constexpr float FULL_RANGE_DURATION_MS = 4000.0F;
+    const uint32_t change_duration = range > 0.0F
+        ? static_cast<uint32_t>(std::lround(FULL_RANGE_DURATION_MS * std::abs(end_value - start_value) / range))
+        : 0U;
 
     lv_anim_set_duration(&anim, change_duration);
     lv_anim_set_values(
@@ -87,7 +90,7 @@ void IndicatorBase::Update(float value) {
         value = range_end_;
 
     if(IsSmoothed()) {
-        if(std::abs(value - value_) < min_animation_delta_ratio_ * (range_end_ - range_start_))
+        if(std::abs(value - value_) < MIN_ANIMATION_DELTA_RATIO * (range_end_ - range_start_))
             return;
 
         ValueChangeAnimation(value_change_animation_, range_end_ - range_start_, value_, value);
@@ -117,11 +120,11 @@ void IndicatorBase::RegisterProperties(WidgetPropertyStore& store) const {
 void IndicatorBase::OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) {
     switch(type) {
         case WidgetPropertyType::MIN_VALUE:
-            range_start_ = ConfigValueAs<double>(value, 0);
+            range_start_ = static_cast<float>(ConfigValueAs<double>(value, 0));
             break;
 
         case WidgetPropertyType::MAX_VALUE:
-            range_end_ = ConfigValueAs<double>(value, 100);
+            range_end_ = static_cast<float>(ConfigValueAs<double>(value, 100));
             break;
 
         case WidgetPropertyType::VALUE:

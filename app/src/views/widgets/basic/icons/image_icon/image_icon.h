@@ -16,7 +16,7 @@ private:
     int image_width_ = 0;
     int image_height_ = 0;
 
-    lv_image_dsc_t lv_image_descriptor_;
+    lv_image_dsc_t lv_image_descriptor_{};
     std::optional<std::pmr::vector<uint8_t>> image_data_;
     // The object that reads lv_image_descriptor_ and image_data_; null until rendered.
     lv_obj_t* lv_image_ = nullptr;
@@ -26,6 +26,10 @@ private:
 public:
     explicit ImageIcon(std::shared_ptr<Frame> parent);
     ~ImageIcon() override;
+    ImageIcon(const ImageIcon&) = delete;
+    ImageIcon& operator=(const ImageIcon&) = delete;
+    ImageIcon(ImageIcon&&) = delete;
+    ImageIcon& operator=(ImageIcon&&) = delete;
 
     static void RegisterProperties(WidgetPropertyStore& store);
 

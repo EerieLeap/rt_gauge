@@ -131,6 +131,36 @@
             },
             "group": "none",
             "detail": "Reformat the sources in place with clang-format"
+        },
+        {
+            "label": "Lint: build database",
+            "type": "shell",
+            "command": "scripts/tidy.sh --build",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": "none",
+            "detail": "Build ./app for native_sim into build/tidy, then lint app/src with it"
+        },
+        {
+            "label": "Lint: changed",
+            "type": "shell",
+            "command": "scripts/tidy.sh --changed",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": "none",
+            "detail": "Lint only the app sources changed since the merge base with origin/main"
+        },
+        {
+            "label": "Lint: all",
+            "type": "shell",
+            "command": "scripts/tidy.sh",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": "none",
+            "detail": "Lint every app source with the build/tidy compile database"
         }
     ]
 }

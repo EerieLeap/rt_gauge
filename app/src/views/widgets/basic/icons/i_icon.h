@@ -19,7 +19,7 @@ using eerie_leap::views::utilitites::Frame;
 
 class IIcon : public virtual IRenderable {
 public:
-    virtual ~IIcon() = default;
+    ~IIcon() override = default;
 
     virtual void SetAssetsManager(std::shared_ptr<AssetsManager> ui_assets_manager) = 0;
 

@@ -39,15 +39,15 @@ ZTEST(widget_type, test_indicator_type_is_not_reported_as_basic) {
 }
 
 ZTEST(widget_type, test_types_are_unique) {
-    constexpr std::array types = { WidgetType::BasicIcon, WidgetType::BasicArcIcon, WidgetType::BasicLottie,
+    constexpr std::array TYPES = { WidgetType::BasicIcon, WidgetType::BasicArcIcon, WidgetType::BasicLottie,
         WidgetType::IndicatorArcFill, WidgetType::IndicatorDigital, WidgetType::IndicatorHorizontalChart,
         WidgetType::IndicatorSegmentArc, WidgetType::IndicatorDial, WidgetType::IndicatorBar,
         WidgetType::IndicatorSetting, WidgetType::ControlSlider, WidgetType::ControlToggle, WidgetType::ControlButton };
 
-    for(size_t i = 0; i < types.size(); i++)
-        for(size_t j = i + 1; j < types.size(); j++)
+    for(size_t i = 0; i < TYPES.size(); i++)
+        for(size_t j = i + 1; j < TYPES.size(); j++)
             zassert_not_equal(
-                static_cast<uint32_t>(types[i]), static_cast<uint32_t>(types[j]),
+                static_cast<uint32_t>(TYPES[i]), static_cast<uint32_t>(TYPES[j]),
                 "Widget types at %zu and %zu collide.", i, j
             );
 }

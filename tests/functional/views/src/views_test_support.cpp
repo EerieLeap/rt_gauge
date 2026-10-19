@@ -34,19 +34,19 @@ using eerie_leap::views::widgets::WidgetFactory;
 
 namespace {
 
-constexpr int32_t display_width = 466;
-constexpr int32_t display_height = 466;
-constexpr int32_t buffer_lines = 10;
-constexpr int32_t max_bytes_per_pixel = 4;
+constexpr int32_t DISPLAY_WIDTH = 466;
+constexpr int32_t DISPLAY_HEIGHT = 466;
+constexpr int32_t BUFFER_LINES = 10;
+constexpr int32_t MAX_BYTES_PER_PIXEL = 4;
 
 // A provider keeps only a span of its extensions.
-constexpr std::array<std::string_view, 1> image_extensions{ ".bin" };
-constexpr std::array<std::string_view, 1> animation_extensions{ ".json" };
+constexpr std::array<std::string_view, 1> IMAGE_EXTENSIONS{ ".bin" };
+constexpr std::array<std::string_view, 1> ANIMATION_EXTENSIONS{ ".json" };
 
-uint8_t draw_buffer[display_width * buffer_lines * max_bytes_per_pixel];
+uint8_t draw_buffer[DISPLAY_WIDTH * BUFFER_LINES * MAX_BYTES_PER_PIXEL];
 lv_display_t* test_display = nullptr;
 
-void FlushCb(lv_display_t* display, const lv_area_t* area, uint8_t* px_map) {
+void FlushCb(lv_display_t* display, const lv_area_t* /*area*/, uint8_t* /*px_map*/) {
     lv_display_flush_ready(display);
 }
 
@@ -59,18 +59,28 @@ void EnsureTestDisplay() {
     if(test_display != nullptr)
         return;
 
-    test_display = lv_display_create(display_width, display_height);
+    test_display = lv_display_create(DISPLAY_WIDTH, DISPLAY_HEIGHT);
     lv_display_set_buffers(test_display, draw_buffer, nullptr, sizeof(draw_buffer), LV_DISPLAY_RENDER_MODE_PARTIAL);
     lv_display_set_flush_cb(test_display, FlushCb);
 }
 
-void CleanTestDisplay(void* fixture) {
+void CleanTestDisplay(void* /*fixture*/) {
     if(test_display != nullptr)
         lv_obj_clean(lv_screen_active());
 }
 
 lv_obj_t* WidgetContent(const IWidget& widget) {
     return widget.GetContainer()->GetChild()->GetObject();
+}
+
+std::span<const uint8_t> TextBytes(std::string_view text) {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): characters viewed as the bytes they are.
+    return { reinterpret_cast<const uint8_t*>(text.data()), text.size() };
+}
+
+const lv_color32_t* PixelRow(const lv_draw_buf_t& buffer, uint32_t row) {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): an LVGL draw buffer is a byte array of pixels.
+    return reinterpret_cast<const lv_color32_t*>(buffer.data + (row * buffer.header.stride));
 }
 
 std::shared_ptr<AssetStore> MakeAssetStore(std::string_view directory) {
@@ -90,7 +100,7 @@ std::shared_ptr<AssetsManager> MakeAssetsManager(AssetKind kind, std::shared_ptr
         AssetProvider{ .kind = kind,
             .name = is_image ? "images" : "animations",
             .store = std::move(store),
-            .extensions = is_image ? image_extensions : animation_extensions,
+            .extensions = is_image ? IMAGE_EXTENSIONS : ANIMATION_EXTENSIONS,
             .access = static_cast<uint8_t>(
                 ToMask(AssetAccess::READ) | ToMask(AssetAccess::WRITE) | ToMask(AssetAccess::DELETE)
             ),
@@ -160,7 +170,7 @@ int FakeScreen::DoRender() {
     return 0;
 }
 
-int FakeScreen::ApplyTheme(const ITheme& theme) {
+int FakeScreen::ApplyTheme(const ITheme& /*theme*/) {
     return 0;
 }
 

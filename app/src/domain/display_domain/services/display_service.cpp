@@ -34,13 +34,13 @@ LOG_MODULE_REGISTER(display_service_logger);
 namespace {
 
 uint32_t BrightnessSettingId() {
-    static const uint32_t id = StringHelpers::GetHash(SettingId::DISPLAY_BRIGHTNESS);
+    static const uint32_t ID = StringHelpers::GetHash(SettingId::DISPLAY_BRIGHTNESS);
 
-    return id;
+    return ID;
 }
 
 bool IsBrightnessSetting(const SettingsEventsChannel::EventMessage& event) {
-    auto it = event.payload.find(SettingsPayloadType::SettingId);
+    const auto* it = event.payload.find(SettingsPayloadType::SettingId);
     if(it == event.payload.end())
         return false;
 
@@ -51,7 +51,7 @@ bool IsBrightnessSetting(const SettingsEventsChannel::EventMessage& event) {
 
 // A request that names no setting is addressed to every owner.
 bool IsBrightnessStateRequest(const SettingsEventsChannel::EventMessage& event) {
-    return event.payload.find(SettingsPayloadType::SettingId) == event.payload.end() || IsBrightnessSetting(event);
+    return !event.payload.contains(SettingsPayloadType::SettingId) || IsBrightnessSetting(event);
 }
 
 } // namespace
@@ -83,7 +83,7 @@ int DisplayService::Initialize() {
     }
 
     DisplayConfiguration snapshot;
-    auto configuration = configuration_manager_->Get();
+    const auto configuration = configuration_manager_->Get();
     if(configuration != nullptr)
         snapshot = *configuration;
     else
@@ -141,7 +141,7 @@ void DisplayService::SubscribeSettings() {
 }
 
 void DisplayService::OnBrightnessChangeRequested(const SettingsEventsChannel::EventMessage& event) {
-    auto it = event.payload.find(SettingsPayloadType::Value);
+    const auto* it = event.payload.find(SettingsPayloadType::Value);
     if(it == event.payload.end())
         return;
 
@@ -149,11 +149,11 @@ void DisplayService::OnBrightnessChangeRequested(const SettingsEventsChannel::Ev
     if(const auto* int_value = std::get_if<int>(&it->second))
         requested = *int_value;
     else if(const auto* float_value = std::get_if<float>(&it->second))
-        requested = *float_value;
+        requested = static_cast<double>(*float_value);
     else
         return;
 
-    auto clamped = static_cast<uint8_t>(std::lround(std::clamp(requested, brightness_min_, brightness_max_)));
+    const auto clamped = static_cast<uint8_t>(std::lround(std::clamp(requested, BRIGHTNESS_MIN, BRIGHTNESS_MAX)));
 
     // Only a value that actually moved is a fact worth waking every subscriber - and worth
     // re-arming the persistence debounce - for.
@@ -167,26 +167,26 @@ void DisplayService::OnBrightnessChangeRequested(const SettingsEventsChannel::Ev
 }
 
 void DisplayService::PublishBrightnessValue() const {
-    static constexpr auto caller = GetCallerName();
+    static constexpr auto CALLER = GetCallerName();
 
     SettingsEventsChannel::GetInstance().PublishAsync(
-        { .source_id = caller.hash,
+        { .source_id = CALLER.hash,
             .type = SettingsEventType::Changed,
             .payload = { { SettingsPayloadType::SettingId, BrightnessSettingId() },
                 { SettingsPayloadType::Value, static_cast<int>(GetBrightness()) } } }
     );
 }
 
-void DisplayService::PublishBrightnessRange() const {
-    static constexpr auto caller = GetCallerName();
+void DisplayService::PublishBrightnessRange() {
+    static constexpr auto CALLER = GetCallerName();
 
     SettingsEventsChannel::GetInstance().PublishAsync(
-        { .source_id = caller.hash,
+        { .source_id = CALLER.hash,
             .type = SettingsEventType::RangeChanged,
             .payload = { { SettingsPayloadType::SettingId, BrightnessSettingId() },
-                { SettingsPayloadType::MinValue, static_cast<float>(brightness_min_) },
-                { SettingsPayloadType::MaxValue, static_cast<float>(brightness_max_) },
-                { SettingsPayloadType::Step, static_cast<float>(brightness_step_) } } }
+                { SettingsPayloadType::MinValue, static_cast<float>(BRIGHTNESS_MIN) },
+                { SettingsPayloadType::MaxValue, static_cast<float>(BRIGHTNESS_MAX) },
+                { SettingsPayloadType::Step, static_cast<float>(BRIGHTNESS_STEP) } } }
     );
 }
 
@@ -194,7 +194,7 @@ bool DisplayService::IsInitialized() const {
     return is_initialized_;
 }
 
-int DisplayService::ApplyBrightness(uint8_t value) {
+int DisplayService::ApplyBrightness(uint8_t value) const {
     // Initialize() is what proves the device exists; without it the driver call
     // below would dereference a null device.
     if(!is_initialized_)
@@ -206,7 +206,7 @@ int DisplayService::ApplyBrightness(uint8_t value) {
     // lv_timer_handler() re-locks harmlessly.
     ScopedLvglLock lvgl_guard;
 
-    int res = display_set_brightness(DtDisplay::Get(), value);
+    const int res = display_set_brightness(DtDisplay::Get(), value);
 
     // A panel without brightness control must not make the setting fail, or the
     // control bound to it would be unusable on that board (native_sim included).
@@ -219,13 +219,13 @@ int DisplayService::ApplyBrightness(uint8_t value) {
     return res;
 }
 
-int DisplayService::ApplyBlanking(bool enabled) {
+int DisplayService::ApplyBlanking(bool enabled) const {
     if(!is_initialized_)
         return -ENODEV;
 
     ScopedLvglLock lvgl_guard;
 
-    int res = enabled ? display_blanking_on(DtDisplay::Get()) : display_blanking_off(DtDisplay::Get());
+    const int res = enabled ? display_blanking_on(DtDisplay::Get()) : display_blanking_off(DtDisplay::Get());
 
     if(res == -ENOTSUP || res == -ENOSYS)
         return 0;
@@ -234,7 +234,7 @@ int DisplayService::ApplyBlanking(bool enabled) {
 }
 
 int DisplayService::SetBrightness(uint8_t value) {
-    int res = ApplyBrightness(value);
+    const int res = ApplyBrightness(value);
     if(res != 0) {
         LOG_ERR("Failed to set display brightness to %u. Error: %d.", value, res);
         return res;
@@ -253,7 +253,7 @@ uint8_t DisplayService::GetBrightness() const {
 }
 
 int DisplayService::SetBlanking(bool enabled) {
-    int res = ApplyBlanking(enabled);
+    const int res = ApplyBlanking(enabled);
     if(res != 0) {
         LOG_ERR("Failed to set display blanking. Error: %d.", res);
         return res;
@@ -272,7 +272,7 @@ bool DisplayService::IsBlankingEnabled() const {
 }
 
 int DisplayService::Reload() {
-    auto configuration = configuration_manager_->Get();
+    const auto configuration = configuration_manager_->Get();
     if(configuration == nullptr)
         return -ENOENT;
 

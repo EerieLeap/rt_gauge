@@ -24,9 +24,11 @@ class UiConfigurationManager : public CborConfigurationManagerBase<UiConfigurati
 private:
     UiConfigurationCborParser cbor_parser_;
 
-    eerie_memory::pmr_unique_ptr<CborUiConfig> Serialize(const UiConfiguration& configuration) override;
-    eerie_memory::pmr_unique_ptr<UiConfiguration> Deserialize(const CborUiConfig& cbor_config) override;
+    eerie_memory::PmrUniquePtr<CborUiConfig> Serialize(const UiConfiguration& configuration) override;
+    eerie_memory::PmrUniquePtr<UiConfiguration> Deserialize(const CborUiConfig& cbor_config) override;
     bool CreateDefaultConfiguration() override;
+    // The base's Update(const UiConfiguration&) copies; callers use the overload that keeps the instance.
+    using CborConfigurationManagerBase::Update;
 
 public:
     explicit UiConfigurationManager(

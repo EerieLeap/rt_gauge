@@ -11,7 +11,7 @@ namespace eerie_leap::views::widgets::basic::icons {
 class LabelIcon : public IconBase {
 private:
     std::pmr::string label_;
-    lv_obj_t* lv_label_;
+    lv_obj_t* lv_label_{};
 
     lv_obj_t* Create(lv_obj_t* parent);
 

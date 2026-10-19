@@ -28,12 +28,12 @@ private:
         SettingsPersistenceService* service = nullptr;
     };
 
-    static constexpr k_timeout_t persist_debounce_ = K_MSEC(1000);
+    static constexpr k_timeout_t PERSIST_DEBOUNCE = K_MSEC(1000);
 
     std::shared_ptr<WorkQueueThread> work_queue_thread_;
 
     std::vector<uint32_t> pending_setting_ids_;
-    mutable k_mutex lock_;
+    mutable k_mutex lock_{};
 
     AnySubscription changed_subscription_;
     std::optional<WorkQueueTask<PersistTask>> persist_task_;

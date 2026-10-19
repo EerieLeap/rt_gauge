@@ -1,5 +1,6 @@
 #include <cstdlib>
 #include <stdexcept>
+#include <utility>
 
 #include <lvgl.h>
 
@@ -15,15 +16,15 @@ GridLayout::GridLayout(const GridSettings& grid, int32_t screen_width, int32_t s
     if(screen_width_ <= 0 || screen_height_ <= 0)
         throw std::invalid_argument("Invalid active screen size.");
 
-    if(grid_.width == 0 || grid_.width > static_cast<uint32_t>(screen_width_))
+    if(grid_.width == 0 || std::cmp_greater(grid_.width, screen_width_))
         throw std::invalid_argument("Invalid screen width.");
 
-    if(grid_.height == 0 || grid_.height > static_cast<uint32_t>(screen_height_))
+    if(grid_.height == 0 || std::cmp_greater(grid_.height, screen_height_))
         throw std::invalid_argument("Invalid screen height.");
 }
 
 GridLayout GridLayout::FromActiveScreen(const GridSettings& grid) {
-    lv_obj_t* active_screen = lv_screen_active();
+    const lv_obj_t* active_screen = lv_screen_active();
 
     return { grid, lv_obj_get_width(active_screen), lv_obj_get_height(active_screen) };
 }
@@ -54,11 +55,11 @@ WidgetPosition GridLayout::ToPx(const WidgetPosition& position_grid, const Widge
     if(size_px.width == 0 || size_px.height == 0)
         throw std::runtime_error("Widget size is not set.");
 
-    uint32_t cell_width = (screen_width_ / grid_.width) + (grid_.spacing_px * 2);
-    uint32_t cell_height = (screen_height_ / grid_.height) + (grid_.spacing_px * 2);
+    const uint32_t cell_width = (screen_width_ / grid_.width) + (grid_.spacing_px * 2);
+    const uint32_t cell_height = (screen_height_ / grid_.height) + (grid_.spacing_px * 2);
 
-    int x = cell_width * position_grid.x;
-    int y = screen_height_ - cell_height * position_grid.y - size_px.height;
+    const auto x = static_cast<int>(cell_width * position_grid.x);
+    const auto y = static_cast<int>(screen_height_ - cell_height * position_grid.y - size_px.height);
 
     return { .x = x, .y = std::abs(y) };
 }

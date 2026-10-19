@@ -2,6 +2,7 @@ name: Tests
 
 on:
   push:
+  pull_request:
   workflow_dispatch:
 
 concurrency:
@@ -10,13 +11,16 @@ concurrency:
 
 jobs:
   twister:
-    runs-on: ubuntu-latest
+    # The clang-tidy 23 repository below is the one for Ubuntu 24.04 (noble).
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout
         uses: actions/checkout@v7
         with:
           path: rt_gauge
+          # --changed needs the merge base with the target branch.
+          fetch-depth: 0
           submodules: recursive
 
       # native_sim builds 32-bit binaries.
@@ -48,4 +52,41 @@ jobs:
           path: |
             rt_gauge/twister-out/twister.xml
             rt_gauge/twister-out/twister.json
+          if-no-files-found: ignore
+
+      # The same major as the one the sources are checked with; apt.llvm.org pins the major only.
+      - name: Install clang-tidy 23
+        run: |
+          sudo curl -fsSL -o /etc/apt/trusted.gpg.d/apt.llvm.org.asc https://apt.llvm.org/llvm-snapshot.gpg.key
+          echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-23 main" | sudo tee /etc/apt/sources.list.d/llvm-23.list
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang-tidy-23 clang-tools-23
+
+      # The app's compile database; the test suites' are the native_sim builds of the twister run above.
+      - name: Build the app for native_sim
+        working-directory: rt_gauge
+        run: west build -p always -b native_sim ./app -d build/tidy -o=-j4
+
+      # Any warning in a source the pull request changed fails the job.
+      - name: Lint changed sources
+        if: github.event_name == 'pull_request'
+        working-directory: rt_gauge
+        run: |
+          set -o pipefail
+          scripts/tidy.sh --changed origin/${{ github.base_ref }} -p build/tidy -p twister-out/native_sim_native 2>&1 | tee tidy-report.txt
+
+      # Every source is clean: any warning fails the job.
+      - name: Lint all sources
+        if: github.event_name != 'pull_request'
+        working-directory: rt_gauge
+        run: |
+          set -o pipefail
+          scripts/tidy.sh -p build/tidy -p twister-out/native_sim_native 2>&1 | tee tidy-report.txt
+
+      - name: Upload lint report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tidy-report
+          path: rt_gauge/tidy-report.txt
           if-no-files-found: ignore

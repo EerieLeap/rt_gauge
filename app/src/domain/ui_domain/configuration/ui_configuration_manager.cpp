@@ -20,11 +20,11 @@ bool UiConfigurationManager::Update(std::shared_ptr<UiConfiguration> configurati
     return Adopt(std::move(configuration));
 }
 
-pmr_unique_ptr<CborUiConfig> UiConfigurationManager::Serialize(const UiConfiguration& configuration) {
+PmrUniquePtr<CborUiConfig> UiConfigurationManager::Serialize(const UiConfiguration& configuration) {
     return cbor_parser_.Serialize(configuration);
 }
 
-pmr_unique_ptr<UiConfiguration> UiConfigurationManager::Deserialize(const CborUiConfig& cbor_config) {
+PmrUniquePtr<UiConfiguration> UiConfigurationManager::Deserialize(const CborUiConfig& cbor_config) {
     return cbor_parser_.Deserialize(Mrm::GetExtPmr(), cbor_config);
 }
 

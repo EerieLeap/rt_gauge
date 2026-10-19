@@ -26,7 +26,7 @@ class IWidget : public virtual IRenderable {
 public:
     using Children = std::vector<std::unique_ptr<IWidget>>;
 
-    virtual ~IWidget() = default;
+    ~IWidget() override = default;
 
     virtual WidgetType GetType() const = 0;
     virtual uint32_t GetId() const = 0;

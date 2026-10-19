@@ -36,16 +36,16 @@ public:
 
     template<typename T>
     void RegisterScreen(const ScreenType type) {
-        creators_[type] = [](const uint32_t id, std::shared_ptr<Frame> parent,
+        creators_[type] = [](const uint32_t id, const std::shared_ptr<Frame>& parent,
                               const WidgetContext& context) -> std::shared_ptr<IScreen> {
-            return std::make_shared<T>(id, std::move(parent), context);
+            return std::make_shared<T>(id, parent, context);
         };
     }
 
-    void RegisterScreen(const ScreenType type, ScreenCreator creator);
+    void RegisterScreen(ScreenType type, ScreenCreator creator);
 
     std::shared_ptr<IScreen>
-    CreateScreen(const ScreenType type, const uint32_t id, std::shared_ptr<Frame> parent, const WidgetContext& context);
+    CreateScreen(ScreenType type, uint32_t id, std::shared_ptr<Frame> parent, const WidgetContext& context);
     std::shared_ptr<IScreen> CreateScreen(
         std::shared_ptr<ScreenConfiguration> configuration,
         std::shared_ptr<Frame> parent,

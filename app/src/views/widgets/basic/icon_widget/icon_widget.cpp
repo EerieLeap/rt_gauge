@@ -61,8 +61,7 @@ int IconWidget::DoRender() {
     icon_.reset();
     content_frame_->SetChild(nullptr);
 
-    auto lv_obj = Create();
-    if(lv_obj == nullptr)
+    if(Create() == nullptr)
         return -1;
 
     content_frame_->SetChild(icon_->GetContainer());
@@ -111,7 +110,7 @@ void IconWidget::RegisterProperties(WidgetPropertyStore& store) const {
     // here. A constructor-fixed icon wins.
     auto type = icon_type_;
     if(type == IconType::None && configuration_ != nullptr) {
-        auto it = configuration_->properties.find(WidgetPropertyType::ICON_TYPE);
+        const auto it = configuration_->properties.find(WidgetPropertyType::ICON_TYPE);
         if(it != configuration_->properties.end())
             type = static_cast<IconType>(ConfigValueAs<int>(it->second, 0));
     }

@@ -14,9 +14,9 @@ enum class HorizontalChartIndicatorType : uint8_t {
 
 class HorizontalChartIndicator : public IndicatorBase {
 private:
-    int32_t point_count_;
-    HorizontalChartIndicatorType chart_type_;
-    lv_obj_t* lv_chart_;
+    int32_t point_count_{};
+    HorizontalChartIndicatorType chart_type_{};
+    lv_obj_t* lv_chart_{};
 
     void UpdateIndicator(float value) override;
     lv_obj_t* Create(

@@ -32,21 +32,29 @@ int ToggleControl::ApplyTheme(const ITheme& theme) {
         WidgetPropertyType::COLOR_PRIMARY_INACTIVE, theme.GetSurfaceColor()
     );
 
-    lv_obj_set_style_bg_color(lv_switch_, inactive.ToLvColor(), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(lv_switch_, inactive.ToLvOpa(), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_color(lv_switch_, active.ToLvColor(), LV_PART_INDICATOR | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(lv_switch_, LV_OPA_TRANSP, LV_PART_INDICATOR | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_color(lv_switch_, active.ToLvColor(), LV_PART_INDICATOR | LV_STATE_CHECKED);
-    lv_obj_set_style_bg_opa(lv_switch_, active.ToLvOpa(), LV_PART_INDICATOR | LV_STATE_CHECKED);
+    lv_obj_set_style_bg_color(lv_switch_, inactive.ToLvColor(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(lv_switch_, inactive.ToLvOpa(), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(lv_switch_, active.ToLvColor(), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(lv_switch_, LV_OPA_TRANSP, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(
+        lv_switch_, active.ToLvColor(), static_cast<lv_style_selector_t>(LV_PART_INDICATOR) | LV_STATE_CHECKED
+    );
+    lv_obj_set_style_bg_opa(
+        lv_switch_, active.ToLvOpa(), static_cast<lv_style_selector_t>(LV_PART_INDICATOR) | LV_STATE_CHECKED
+    );
 
-    for(bool checked : { false, true }) {
+    for(const bool checked : { false, true }) {
         const auto state = checked ? LV_STATE_CHECKED : LV_STATE_DEFAULT;
         const auto secondary = properties_->ResolveColor(
             checked ? WidgetPropertyType::COLOR_SECONDARY_ACTIVE : WidgetPropertyType::COLOR_SECONDARY_INACTIVE,
             theme.GetAccentColor()
         );
-        lv_obj_set_style_bg_color(lv_switch_, secondary.ToLvColor(), LV_PART_KNOB | state);
-        lv_obj_set_style_bg_opa(lv_switch_, secondary.ToLvOpa(), LV_PART_KNOB | state);
+        lv_obj_set_style_bg_color(
+            lv_switch_, secondary.ToLvColor(), static_cast<lv_style_selector_t>(LV_PART_KNOB) | state
+        );
+        lv_obj_set_style_bg_opa(
+            lv_switch_, secondary.ToLvOpa(), static_cast<lv_style_selector_t>(LV_PART_KNOB) | state
+        );
     }
 
     return 0;

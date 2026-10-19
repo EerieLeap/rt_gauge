@@ -25,7 +25,7 @@ using views_test::FakeScreen;
 
 namespace {
 
-constexpr uint32_t overlay_screen_id = 7;
+constexpr uint32_t OVERLAY_SCREEN_ID = 7;
 
 // Pop() destroys the group and every screen in it, so a test that asserts on a
 // dismissed overlay has to outlive the screen with its own counter.
@@ -62,7 +62,7 @@ public:
 // overlay state is what a test can observe without a running event bus.
 std::shared_ptr<NavigationService> MakeNavigationWithOverlay() {
     auto navigation_service = std::make_shared<NavigationService>();
-    navigation_service->ShowOverlay(overlay_screen_id);
+    navigation_service->ShowOverlay(OVERLAY_SCREEN_ID);
 
     return navigation_service;
 }
@@ -96,7 +96,7 @@ int PushOverlay(const std::shared_ptr<OverlayHost>& host, uint32_t id, const Ove
 }
 
 bool IsHidden(const std::shared_ptr<OverlayHost>& host) {
-    return lv_obj_has_flag(host->GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN);
+    return lv_obj_is_hidden(host->GetContainer()->GetObject());
 }
 
 uint32_t ChildCount(const std::shared_ptr<OverlayHost>& host) {
@@ -107,7 +107,7 @@ uint32_t ChildCount(const std::shared_ptr<OverlayHost>& host) {
 // elapsed. The suites do not run Zephyr's LVGL init, so the tick may still be
 // LVGL's own counter rather than k_uptime_get_32(); advance both.
 void RunTimersFor(uint32_t duration_ms) {
-    k_msleep(duration_ms);
+    k_msleep(static_cast<int32_t>(duration_ms));
     lv_tick_inc(duration_ms);
     lv_timer_handler();
 }
@@ -143,7 +143,7 @@ ZTEST(overlay_host, test_the_container_lives_on_the_top_layer) {
 ZTEST(overlay_host, test_the_container_does_not_take_input) {
     auto host = MakeHost();
 
-    zassert_false(lv_obj_has_flag(host->GetContainer()->GetObject(), LV_OBJ_FLAG_CLICKABLE));
+    zassert_false(lv_obj_is_clickable(host->GetContainer()->GetObject()));
 }
 
 ZTEST(overlay_host, test_push_renders_activates_and_shows) {
@@ -203,7 +203,7 @@ ZTEST(overlay_host, test_a_modal_push_puts_the_group_above_its_scrim) {
 
     auto* scrim = lv_obj_get_child(host->GetContainer()->GetObject(), 0);
     zassert_not_equal(scrim, group_object);
-    zassert_true(lv_obj_has_flag(scrim, LV_OBJ_FLAG_CLICKABLE));
+    zassert_true(lv_obj_is_clickable(scrim));
 }
 
 ZTEST(overlay_host, test_a_non_modal_push_has_no_scrim) {

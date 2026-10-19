@@ -19,10 +19,10 @@ using eerie_leap::utilities::type::ConfigValue;
 struct WidgetConfiguration {
     using allocator_type = std::pmr::polymorphic_allocator<>;
 
-    WidgetType type;
-    uint32_t id;
-    WidgetPosition position_grid;
-    WidgetSize size_grid;
+    WidgetType type{};
+    uint32_t id{};
+    WidgetPosition position_grid{};
+    WidgetSize size_grid{};
     int32_t z_index = 0;
     std::pmr::unordered_map<WidgetPropertyType, ConfigValue> properties;
     std::pmr::vector<PropertyBinding> bindings;

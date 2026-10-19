@@ -57,7 +57,7 @@ class TestDial : public indicators::DialIndicator {
 public:
     using DialIndicator::DialIndicator;
     IconWidget& Needle() const {
-        return static_cast<IconWidget&>(*GetChildren().front());
+        return dynamic_cast<IconWidget&>(*GetChildren().front());
     }
     ConfigValue Read(WidgetPropertyType type) const {
         return properties_->Get(type);
@@ -151,10 +151,18 @@ lv_obj_t* Inner(const IconWidget& widget) {
 
 // The lv_image objects at or below an object.
 int CountImages(lv_obj_t* object) {
-    int count = lv_obj_check_type(object, &lv_image_class) ? 1 : 0;
-    const auto children = static_cast<int32_t>(lv_obj_get_child_count(object));
-    for(int32_t index = 0; index < children; ++index)
-        count += CountImages(lv_obj_get_child(object, index));
+    int count = 0;
+    std::vector<lv_obj_t*> pending{ object };
+    while(!pending.empty()) {
+        auto* current = pending.back();
+        pending.pop_back();
+        if(lv_obj_check_type(current, &lv_image_class))
+            ++count;
+
+        const auto children = static_cast<int32_t>(lv_obj_get_child_count(current));
+        for(int32_t index = 0; index < children; ++index)
+            pending.push_back(lv_obj_get_child(current, index));
+    }
     return count;
 }
 
@@ -192,17 +200,14 @@ WidgetContext ImageContext(
 }
 
 WidgetContext LottieContext(WidgetConfiguration& configuration) {
-    using eerie_leap::views::assets::animations::ui_lottie_spinner_json;
+    using eerie_leap::views::assets::animations::UI_LOTTIE_SPINNER_JSON;
     auto store = views_test::MakeAssetStore("icon-lifecycle");
-    zassert_true(store->Save(
-        "spinner.json",
-        std::span(reinterpret_cast<const uint8_t*>(ui_lottie_spinner_json.data()), ui_lottie_spinner_json.size())
-    ));
+    zassert_true(store->Save("spinner.json", views_test::TextBytes(UI_LOTTIE_SPINNER_JSON)));
     configuration.properties[WidgetPropertyType::FILE_PATH] = std::pmr::string("spinner.json");
     return WidgetContext{ .assets_manager = views_test::MakeAssetsManager(AssetKind::ANIMATIONS, std::move(store)) };
 }
 
-constexpr std::array native_rotation_icons{ IconType::Image, IconType::Rectangle, IconType::TriangleIsosceles,
+constexpr std::array NATIVE_ROTATION_ICONS{ IconType::Image, IconType::Rectangle, IconType::TriangleIsosceles,
     IconType::TriangleRight, IconType::Oval, IconType::Line };
 
 std::shared_ptr<WidgetConfiguration> RotationConfiguration(IconType type) {
@@ -243,7 +248,7 @@ ZTEST_SUITE(icon_lifecycle, NULL, Setup, NULL, Clean, NULL);
 
 ZTEST(icon_lifecycle, test_rotation_retains_signed_angles_anchors_and_rerender) {
     ScopedLvglLock lock;
-    for(auto type : native_rotation_icons) {
+    for(auto type : NATIVE_ROTATION_ICONS) {
         auto configuration = RotationConfiguration(type);
         configuration->properties[WidgetPropertyType::POSITION_X] = 13;
         configuration->properties[WidgetPropertyType::POSITION_Y] = -17;
@@ -280,7 +285,7 @@ ZTEST(icon_lifecycle, test_rotation_retains_signed_angles_anchors_and_rerender) 
 
 ZTEST(icon_lifecycle, test_rotation_replays_suspended_updates_and_blinking) {
     ScopedLvglLock lock;
-    for(auto type : native_rotation_icons) {
+    for(auto type : NATIVE_ROTATION_ICONS) {
         auto configuration = RotationConfiguration(type);
         configuration->properties[WidgetPropertyType::ANIMATION_TYPE] = static_cast<int>(Animation::Type::Blinking);
         configuration->properties[WidgetPropertyType::IS_ANIMATION_ACTIVE] = true;
@@ -316,7 +321,7 @@ ZTEST(icon_lifecycle, test_rotation_replays_suspended_updates_and_blinking) {
 
 ZTEST(icon_lifecycle, test_rotation_resize_preserves_angle_and_resolves_new_bounds) {
     ScopedLvglLock lock;
-    for(auto type : native_rotation_icons) {
+    for(auto type : NATIVE_ROTATION_ICONS) {
         auto configuration = RotationConfiguration(type);
         auto context = type == IconType::Image ? ImageContext(*configuration, 20, 60) : WidgetContext{};
         const auto width = type == IconType::Image ? WidgetPropertyType::IMG_WIDTH : WidgetPropertyType::WIDTH_PX;
@@ -564,7 +569,7 @@ ZTEST(icon_lifecycle, test_rotation_pixels_clipping_and_parent_animation) {
                 lv_snapshot_take(root->GetObject(), LV_COLOR_FORMAT_ARGB8888), lv_draw_buf_destroy
             );
             zassert_not_null(snapshot);
-            auto* row = reinterpret_cast<const lv_color32_t*>(snapshot->data + y * snapshot->header.stride);
+            const auto* row = views_test::PixelRow(*snapshot, y);
             zassert_equal(
                 row[x].red > 200, lit, "type %u sample %d pixel %d,%d = %u", static_cast<unsigned>(type), sample, x, y,
                 row[x].red
@@ -700,14 +705,13 @@ ZTEST(icon_lifecycle, test_anchor_binding_preserves_angles_and_replays_after_sus
     lv_image_get_pivot(image, &pivot);
     zassert_equal(pivot.x, 25);
     zassert_equal(pivot.y, -11);
-    const EventData invalid[] = { -2, static_cast<int>(INT32_MAX), uint32_t{ UINT32_MAX }, 10.0F, true,
-        std::string("10") };
+    const EventData invalid[] = { -2, INT32_MAX, uint32_t{ UINT32_MAX }, 10.0F, true, std::string("10") };
     for(const auto& value : invalid) {
         Publish(WidgetPropertyType::ANCHOR_POINT_X, value);
         zassert_equal(std::get<int>(widget.Read(WidgetPropertyType::ANCHOR_POINT_X)), 25);
         zassert_equal(lv_image_get_rotation(image), 900);
     }
-    lv_obj_add_flag(root->GetObject(), LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(root->GetObject(), true);
     lv_display_send_event(lv_display_get_default(), LV_EVENT_REFR_START, nullptr);
     Publish(WidgetPropertyType::ANCHOR_POINT_X, 17);
     Publish(WidgetPropertyType::ANCHOR_POINT_Y, 191);
@@ -715,7 +719,7 @@ ZTEST(icon_lifecycle, test_anchor_binding_preserves_angles_and_replays_after_sus
     lv_image_get_pivot(image, &pivot);
     zassert_equal(pivot.x, 25);
     zassert_equal(pivot.y, -11);
-    lv_obj_remove_flag(root->GetObject(), LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_hidden(root->GetObject(), false);
     lv_display_send_event(lv_display_get_default(), LV_EVENT_REFR_START, nullptr);
     lv_image_get_pivot(image, &pivot);
     zassert_equal(pivot.x, 17);
@@ -825,8 +829,8 @@ ZTEST(icon_lifecycle, test_a_live_image_resize_beyond_the_loaded_file_is_not_app
     // The descriptor and the object follow only the applied dimensions, and nothing is reloaded. The object
     // is as big as its content once the layout has run: lv_obj_get_width() reads the last layout's result.
     const auto check_size = [&](int width, int height) {
-        zassert_equal(source->header.w, width);
-        zassert_equal(source->header.h, height);
+        zassert_equal(static_cast<int>(source->header.w), width);
+        zassert_equal(static_cast<int>(source->header.h), height);
         lv_obj_update_layout(image);
         zassert_equal(lv_obj_get_width(image), width);
         zassert_equal(lv_obj_get_height(image), height);
@@ -927,6 +931,89 @@ ZTEST(icon_lifecycle, test_dial_custom_angles_and_default_image_pivot_baseline) 
     }
 }
 
+ZTEST(icon_lifecycle, test_dial_maps_its_whole_range_onto_its_angles) {
+    ScopedLvglLock lock;
+    // GetAngleForValue() returns tenths of a degree, wrapping below zero.
+    const struct {
+        double min;
+        double max;
+        int start;
+        int end;
+        float value;
+        int32_t angle;
+    } cases[] = {
+        // A range much wider than the angle span (whole steps per unit gave 0: the needle never moved).
+        { 0, 8000, 45, 315, 0, -1350 },
+        { 0, 8000, 45, 315, 4000, 0 },
+        { 0, 8000, 45, 315, 8000, 1350 },
+        // A range narrower than one unit (a whole-number span of 0 divided by zero).
+        { 0, 0.5, 45, 315, 0.25F, 0 },
+        { 0, 0.5, 45, 315, 0.5F, 1350 },
+        // MIN_VALUE points at the start angle when it is not zero.
+        { 20, 120, 45, 315, 20, -1350 },
+        { 20, 120, 45, 315, 70, 0 },
+        { 20, 120, 45, 315, 120, 1350 },
+        // A fractional step per unit reaches the end angle (2700 / 120 = 22.5 was cut to 22).
+        { 0, 120, 45, 315, 2, -1305 },
+        { 0, 120, 45, 315, 120, 1350 },
+        // An end angle below the start turns the other way.
+        { 0, 100, 315, 45, 0, 1350 },
+        { 0, 100, 315, 45, 100, -1350 },
+        // An empty range leaves the needle at the start.
+        { 50, 50, 45, 315, 50, -1350 },
+    };
+    for(const auto& expected : cases) {
+        auto configuration = DialConfiguration();
+        configuration->properties[WidgetPropertyType::MIN_VALUE] = expected.min;
+        configuration->properties[WidgetPropertyType::MAX_VALUE] = expected.max;
+        configuration->properties[WidgetPropertyType::START_ANGLE] = expected.start;
+        configuration->properties[WidgetPropertyType::END_ANGLE] = expected.end;
+        auto needle = views_test::NeedleConfiguration(2, IconType::Image);
+        auto context = ImageContext(*needle, 15, 220);
+        TestDial dial(1, MakeRoot(), context);
+        dial.Assemble(configuration, needle, context);
+        zassert_equal(dial.Render(), 0);
+        zassert_equal(
+            static_cast<int32_t>(dial.GetAngleForValue(expected.value)), expected.angle,
+            "range %g..%g, angles %d..%d, value %g", expected.min, expected.max, expected.start, expected.end,
+            static_cast<double>(expected.value)
+        );
+    }
+}
+
+ZTEST(icon_lifecycle, test_dial_animation_takes_its_share_of_a_full_sweep) {
+    ScopedLvglLock lock;
+    // A full sweep takes 4000 ms. A wide range used to get 0 ms per unit, and a change smaller than
+    // one unit no time at all.
+    const struct {
+        double max;
+        float value;
+        uint32_t duration_ms;
+    } cases[] = { { 8000, 4000, 2000 }, { 100, 0.5F, 20 }, { 100, 25, 1000 } };
+    for(const auto& expected : cases) {
+        auto configuration = DialConfiguration();
+        configuration->properties[WidgetPropertyType::MIN_VALUE] = 0;
+        configuration->properties[WidgetPropertyType::MAX_VALUE] = expected.max;
+        configuration->properties[WidgetPropertyType::IS_SMOOTHED] = true;
+        auto needle = views_test::NeedleConfiguration(2, IconType::Image);
+        auto context = ImageContext(*needle, 15, 220);
+        TestDial dial(1, MakeRoot(), context);
+        dial.Assemble(configuration, needle, context);
+        zassert_equal(dial.Render(), 0);
+        dial.OnActivated();
+        Publish(WidgetPropertyType::VALUE, expected.value);
+        auto* animation = lv_anim_get(&dial, nullptr);
+        zassert_not_null(animation, "max %g, value %g", expected.max, static_cast<double>(expected.value));
+        zassert_equal(lv_anim_get_time(animation), expected.duration_ms, "duration %u", lv_anim_get_time(animation));
+        Tick(expected.duration_ms + 1);
+        zassert_is_null(lv_anim_get(&dial, nullptr));
+        auto* image = dial.Needle().GetIconContainer()->GetObject();
+        // The image's rotation is normalized to [0, 3600).
+        const int32_t angle = static_cast<int32_t>(dial.GetAngleForValue(expected.value));
+        zassert_equal(lv_image_get_rotation(image), ((angle % 3600) + 3600) % 3600);
+    }
+}
+
 ZTEST(icon_lifecycle, test_the_same_dial_drives_image_shape_and_label_needles) {
     ScopedLvglLock lock;
     for(auto type : { IconType::Image, IconType::TriangleIsosceles, IconType::Label }) {
@@ -967,20 +1054,20 @@ ZTEST(icon_lifecycle, test_dial_and_needle_keep_isolated_properties_and_bindings
     auto needle = views_test::NeedleConfiguration(2, IconType::TriangleIsosceles);
     needle->properties[WidgetPropertyType::WIDTH_PX] = 20;
     needle->properties[WidgetPropertyType::HEIGHT_PX] = 60;
-    constexpr uint32_t needle_visibility = 1000;
+    constexpr uint32_t NEEDLE_VISIBILITY = 1000;
     needle->bindings.push_back(
         PropertyBinding{ .target = WidgetPropertyType::IS_VISIBLE,
             .event = { .channel = EventChannelId::Sensors,
                 .event_type = std::to_underlying(SensorEventType::DataUpdated),
                 .payload_key = std::to_underlying(SensorPayloadType::Value),
                 .selector_key = std::to_underlying(SensorPayloadType::SensorId),
-                .selector_value = static_cast<int>(needle_visibility) } }
+                .selector_value = static_cast<int>(NEEDLE_VISIBILITY) } }
     );
     auto set_needle_visible = [](bool visible) {
         SensorEventsChannel::GetInstance().Publish(
             { .source_id = 0,
                 .type = SensorEventType::DataUpdated,
-                .payload = { { SensorPayloadType::SensorId, static_cast<int>(needle_visibility) },
+                .payload = { { SensorPayloadType::SensorId, static_cast<int>(NEEDLE_VISIBILITY) },
                     { SensorPayloadType::Value, visible } } }
         );
     };
@@ -1045,7 +1132,7 @@ ZTEST(icon_lifecycle, test_screen_builds_the_demo_dial_from_a_separate_needle_de
     lv_obj_update_layout(root->GetObject());
     zassert_equal(lv_obj_get_width(roots[0]->GetContainer()->GetObject()), 466);
     zassert_equal(lv_obj_get_height(roots[0]->GetContainer()->GetObject()), 466);
-    auto* image = static_cast<const IconWidget&>(*children[0]).GetIconContainer()->GetObject();
+    auto* image = dynamic_cast<const IconWidget&>(*children[0]).GetIconContainer()->GetObject();
     zassert_equal(lv_obj_get_width(image), 15);
     zassert_equal(lv_obj_get_height(image), 220);
     zassert_equal(lv_obj_get_x(image), 226, "image x=%d", lv_obj_get_x(image));
@@ -1080,10 +1167,7 @@ ZTEST(icon_lifecycle, test_a_dial_without_its_needle_fails_validation_and_only_i
         validation_error = error.what();
     }
     for(const auto* fragment : { "Screen ID: 0", "Widget ID: 9", "exactly 1 child", "received 0" }) {
-        zassert_true(
-            validation_error.find(fragment) != std::string::npos, "Missing '%s' in '%s'", fragment,
-            validation_error.c_str()
-        );
+        zassert_true(validation_error.contains(fragment), "Missing '%s' in '%s'", fragment, validation_error.c_str());
     }
 
     // Screens trust validated input; if an unvalidated dial gets through, only it fails.
@@ -1125,7 +1209,7 @@ ZTEST(icon_lifecycle, test_all_factory_widgets_support_live_animation_without_re
             if(type == WidgetType::BasicLottie)
                 context = LottieContext(*configuration);
             // Lottie playback is an LVGL animation of the widget's own, paused while it cannot process.
-            const auto idle = count + (type == WidgetType::BasicLottie ? 1 : 0);
+            const auto idle = static_cast<uint16_t>(count + (type == WidgetType::BasicLottie ? 1 : 0));
             auto widget = factory.CreateWidget(type, 1, root, context);
             const auto supported = widget->GetSupportedProperties();
             for(auto property : { WidgetPropertyType::ANIMATION_TYPE, WidgetPropertyType::IS_ANIMATION_ACTIVE,
@@ -1245,13 +1329,13 @@ ZTEST(icon_lifecycle, test_oval_management_restoration_does_not_start_animation)
     widget.OnActivated();
     zassert_is_null(Pulse(widget));
     zassert_false(widget.IsVisible());
-    zassert_true(lv_obj_has_flag(widget.GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN));
+    zassert_true(lv_obj_is_hidden(widget.GetContainer()->GetObject()));
     ThemeManager::GetInstance().SetTheme(std::make_shared<BlueTheme>());
     Publish(WidgetPropertyType::IS_ACTIVE, true);
     Publish(WidgetPropertyType::IS_VISIBLE, true);
     zassert_is_null(Pulse(widget));
     zassert_true(widget.IsVisible());
-    zassert_false(lv_obj_has_flag(widget.GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN));
+    zassert_false(lv_obj_is_hidden(widget.GetContainer()->GetObject()));
     zassert_false(widget.IsProcessingEligible());
     Publish(WidgetPropertyType::OPACITY, 128);
     zassert_is_null(Pulse(widget));
@@ -1276,10 +1360,7 @@ ZTEST(icon_lifecycle, test_oval_management_changes_keep_static_appearance) {
         Publish(target, 0);
         zassert_is_null(Pulse(widget));
         zassert_false(widget.IsProcessingEligible());
-        zassert_equal(
-            lv_obj_has_flag(widget.GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN),
-            target == WidgetPropertyType::IS_VISIBLE
-        );
+        zassert_equal(lv_obj_is_hidden(widget.GetContainer()->GetObject()), target == WidgetPropertyType::IS_VISIBLE);
         Tick(2000);
         zassert_equal(lv_obj_get_style_opa(Inner(widget), LV_PART_MAIN), opacity);
         ThemeManager::GetInstance().SetTheme(std::make_shared<BlueTheme>());
@@ -1288,7 +1369,7 @@ ZTEST(icon_lifecycle, test_oval_management_changes_keep_static_appearance) {
         Publish(target, 1);
         zassert_is_null(Pulse(widget));
         zassert_true(widget.IsProcessingEligible());
-        zassert_false(lv_obj_has_flag(widget.GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN));
+        zassert_false(lv_obj_is_hidden(widget.GetContainer()->GetObject()));
         zassert_equal(lv_obj_get_style_opa(Inner(widget), LV_PART_MAIN), 128);
         Tick(100);
         zassert_equal(lv_obj_get_style_opa(Inner(widget), LV_PART_MAIN), 128);
@@ -1306,7 +1387,7 @@ ZTEST(icon_lifecycle, test_oval_ancestor_suspension_keeps_static_appearance) {
         const auto opacity = lv_obj_get_style_opa(Inner(widget), LV_PART_MAIN);
         zassert_equal(opacity, LV_OPA_COVER);
         if(gate == 0)
-            lv_obj_add_flag(root->GetObject(), LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_hidden(root->GetObject(), true);
         else if(gate == 1)
             lv_obj_set_style_opa(root->GetObject(), 0, 0);
         else
@@ -1315,7 +1396,7 @@ ZTEST(icon_lifecycle, test_oval_ancestor_suspension_keeps_static_appearance) {
         zassert_false(widget.IsProcessingEligible());
         zassert_is_null(Pulse(widget));
         zassert_equal(lv_obj_get_style_opa(Inner(widget), LV_PART_MAIN), opacity);
-        lv_obj_remove_flag(root->GetObject(), LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(root->GetObject(), false);
         lv_obj_set_style_opa(root->GetObject(), 255, 0);
         lv_obj_set_style_opa_layered(root->GetObject(), 255, 0);
         lv_refr_now(nullptr);
@@ -1388,25 +1469,25 @@ ZTEST(icon_lifecycle, test_logging_visibility_keeps_tracking_and_does_not_overri
     zassert_equal(widget.Render(), 0);
     widget.OnActivated();
     zassert_true(widget.IsActive());
-    zassert_true(lv_obj_has_flag(widget.GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN));
+    zassert_true(lv_obj_is_hidden(widget.GetContainer()->GetObject()));
     zassert_is_null(Pulse(widget));
     Publish(WidgetPropertyType::POSITION_X, 12);
     zassert_equal(std::get<int>(widget.Read(WidgetPropertyType::POSITION_X)), 12);
     PublishLogging(true);
     zassert_true(widget.IsVisible());
-    zassert_false(lv_obj_has_flag(widget.GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN));
+    zassert_false(lv_obj_is_hidden(widget.GetContainer()->GetObject()));
     zassert_is_null(Pulse(widget));
     zassert_equal(lv_obj_get_style_opa(Inner(widget), LV_PART_MAIN), LV_OPA_COVER);
     zassert_equal(lv_obj_get_style_x(Inner(widget), LV_PART_MAIN), 12);
     PublishLogging(false);
     zassert_false(widget.IsVisible());
-    zassert_true(lv_obj_has_flag(widget.GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN));
+    zassert_true(lv_obj_is_hidden(widget.GetContainer()->GetObject()));
     zassert_is_null(Pulse(widget));
     Publish(WidgetPropertyType::IS_ACTIVE, false);
     PublishLogging(true);
     zassert_true(widget.IsVisible());
     zassert_false(widget.IsActive());
-    zassert_false(lv_obj_has_flag(widget.GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN));
+    zassert_false(lv_obj_is_hidden(widget.GetContainer()->GetObject()));
     zassert_is_null(Pulse(widget));
     Publish(WidgetPropertyType::IS_ACTIVE, true);
     zassert_is_null(Pulse(widget));
@@ -1439,10 +1520,10 @@ ZTEST(icon_lifecycle, test_logging_oval_on_arc_preserves_size_position_and_blink
     zassert_equal(widget->Render(), 0);
     widget->OnActivated();
     zassert_equal(lv_anim_count_running(), animations);
-    zassert_true(lv_obj_has_flag(widget->GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN));
+    zassert_true(lv_obj_is_hidden(widget->GetContainer()->GetObject()));
 
     PublishLogging(true);
-    auto* icon = static_cast<IconWidget*>(widget.get())->GetIconContainer()->GetObject();
+    auto* icon = dynamic_cast<IconWidget*>(widget.get())->GetIconContainer()->GetObject();
     auto* content = views_test::WidgetContent(*widget);
     lv_obj_update_layout(root->GetObject());
     zassert_equal(lv_obj_get_width(icon), 16);
@@ -1451,16 +1532,16 @@ ZTEST(icon_lifecycle, test_logging_oval_on_arc_preserves_size_position_and_blink
     zassert_within(lv_obj_get_style_y(icon, LV_PART_MAIN), -36, 1);
     const auto* mask = static_cast<const lv_image_dsc_t*>(lv_image_get_src(icon));
     zassert_not_null(mask);
-    zassert_within(mask->data[8 * mask->header.stride + 8], LV_OPA_COVER, 1);
+    zassert_between_inclusive(mask->data[8 * mask->header.stride + 8], LV_OPA_COVER - 1, LV_OPA_COVER);
     zassert_equal(mask->data[0], LV_OPA_TRANSP);
-    zassert_false(lv_obj_has_flag(widget->GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN));
+    zassert_false(lv_obj_is_hidden(widget->GetContainer()->GetObject()));
     zassert_equal(lv_anim_count_running(), animations + 1);
     Tick(500);
     zassert_equal(lv_obj_get_style_opa_layered(content, LV_PART_MAIN), LV_OPA_TRANSP);
     Tick(500);
     zassert_equal(lv_obj_get_style_opa_layered(content, LV_PART_MAIN), LV_OPA_COVER);
     PublishLogging(false);
-    zassert_true(lv_obj_has_flag(widget->GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN));
+    zassert_true(lv_obj_is_hidden(widget->GetContainer()->GetObject()));
     zassert_equal(lv_anim_count_running(), animations);
     PublishLogging(true);
     zassert_equal(lv_anim_count_running(), animations + 1);
@@ -1484,7 +1565,7 @@ ZTEST(icon_lifecycle, test_inactive_label_keeps_the_normal_palette) {
     zassert_equal(lv_obj_get_style_bg_opa(object, LV_PART_MAIN), 128);
     Publish(WidgetPropertyType::IS_ACTIVE, true);
     Publish(WidgetPropertyType::IS_ACTIVE, false);
-    zassert_false(lv_obj_has_flag(widget.GetContainer()->GetObject(), LV_OBJ_FLAG_HIDDEN));
+    zassert_false(lv_obj_is_hidden(widget.GetContainer()->GetObject()));
     zassert_equal(lv_obj_get_style_bg_opa(object, LV_PART_MAIN), 128);
 }
 
@@ -1609,7 +1690,7 @@ ZTEST(icon_lifecycle, test_images_and_dials_apply_opacity_once_without_recolorin
         auto* image = lv_obj_get_child(views_test::WidgetContent(*widget), 0);
         if(is_dial) {
             zassert_equal(lv_obj_get_style_opa(image, LV_PART_MAIN), LV_OPA_COVER);
-            image = static_cast<TestDial*>(widget.get())->Needle().GetIconContainer()->GetObject();
+            image = dynamic_cast<TestDial*>(widget.get())->Needle().GetIconContainer()->GetObject();
         }
         const auto* source = lv_image_get_src(image);
         zassert_not_null(source);
@@ -1623,13 +1704,13 @@ ZTEST(icon_lifecycle, test_images_and_dials_apply_opacity_once_without_recolorin
             widget->OnDeactivated();
             widget->OnActivated();
             Tick(100);
-            zassert_equal(lv_obj_get_style_opa_layered(outer, LV_PART_MAIN), opacity);
+            zassert_equal(static_cast<int>(lv_obj_get_style_opa_layered(outer, LV_PART_MAIN)), opacity);
             zassert_equal(lv_obj_get_style_opa(image, LV_PART_MAIN), LV_OPA_COVER);
             zassert_equal(lv_obj_get_style_image_recolor_opa(image, LV_PART_MAIN), LV_OPA_TRANSP);
             zassert_equal(lv_image_get_src(image), source);
             zassert_equal(widget->IsProcessingEligible(), opacity > 0);
             if(is_dial) {
-                auto& needle = static_cast<TestDial*>(widget.get())->Needle();
+                auto& needle = dynamic_cast<TestDial*>(widget.get())->Needle();
                 zassert_equal(
                     lv_obj_get_style_opa_layered(needle.GetContainer()->GetObject(), LV_PART_MAIN), LV_OPA_COVER
                 );
@@ -1642,7 +1723,7 @@ ZTEST(icon_lifecycle, test_images_and_dials_apply_opacity_once_without_recolorin
             zassert_not_null(snapshot);
             int brightest = 0;
             for(uint32_t y = 0; y < snapshot->header.h; ++y) {
-                auto* pixels = reinterpret_cast<const lv_color32_t*>(snapshot->data + y * snapshot->header.stride);
+                const auto* pixels = views_test::PixelRow(*snapshot, y);
                 for(uint32_t x = 0; x < snapshot->header.w; ++x)
                     brightest = std::max(brightest, static_cast<int>(pixels[x].red));
             }

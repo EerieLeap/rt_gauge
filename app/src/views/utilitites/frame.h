@@ -16,7 +16,7 @@ namespace eerie_leap::views::utilitites {
 // nothing.
 class Frame {
 private:
-    lv_obj_t* lv_object_;
+    lv_obj_t* lv_object_{ nullptr };
     std::shared_ptr<Frame> child_;
     std::weak_ptr<Frame> processing_parent_;
     bool is_processing_enabled_ = true;
@@ -34,8 +34,8 @@ public:
     Frame(Frame&& other) noexcept;
     Frame& operator=(Frame&& other) noexcept;
 
-    static Frame Create(lv_obj_t* parent);
-    static Frame CreateWrapped(lv_obj_t* parent = nullptr);
+    static Frame Create(lv_obj_t* object);
+    static Frame CreateWrapped(lv_obj_t* object = nullptr);
     // Internal widget presentation node; only its layered opacity is excluded from logical visibility.
     static Frame CreatePresentation(lv_obj_t* parent);
     // Includes object itself and every LVGL ancestor. Caller holds the LVGL lock.

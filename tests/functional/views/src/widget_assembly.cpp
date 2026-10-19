@@ -1,9 +1,11 @@
 #include <algorithm>
 #include <cerrno>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <memory_resource>
 #include <optional>
+#include <ranges>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -68,6 +70,8 @@ public:
         DetachDispatch();
         --journal.live;
     }
+    Node(const Node&) = delete;
+    Node& operator=(const Node&) = delete;
 
     WidgetType GetType() const override {
         return type_;
@@ -109,6 +113,8 @@ public:
     ~Group() override {
         DetachDispatch();
     }
+    Group(const Group&) = delete;
+    Group& operator=(const Group&) = delete;
 
     static void ValidateChildren(const WidgetConfiguration&, std::span<const WidgetConfiguration* const>) {}
 
@@ -128,6 +134,8 @@ public:
     ~Pair() override {
         DetachDispatch();
     }
+    Pair(const Pair&) = delete;
+    Pair& operator=(const Pair&) = delete;
 
     static void ValidateChildren(const WidgetConfiguration&, std::span<const WidgetConfiguration* const> children) {
         if(children.size() != 2 || children[1]->type != WidgetType::IndicatorDigital)
@@ -184,6 +192,8 @@ public:
         factory.RegisterWidget<basic::ArcIconWidget>(WidgetType::BasicArcIcon);
         factory.RegisterWidget<basic::IconWidget>(WidgetType::BasicIcon);
     }
+    Registration(const Registration&) = delete;
+    Registration& operator=(const Registration&) = delete;
 };
 
 std::optional<Registration> registration;
@@ -267,10 +277,17 @@ std::vector<uint32_t> Ids(std::span<const std::unique_ptr<IWidget>> widgets) {
     return ids;
 }
 
+// Pre-order: a widget, then each of its children's subtrees in order.
 void Collect(const IWidget& widget, std::vector<const IWidget*>& nodes) {
-    nodes.push_back(&widget);
-    for(const auto& child : widget.GetChildren())
-        Collect(*child, nodes);
+    std::vector<const IWidget*> pending{ &widget };
+    while(!pending.empty()) {
+        const auto* current = pending.back();
+        pending.pop_back();
+        nodes.push_back(current);
+
+        for(const auto& child : std::views::reverse(current->GetChildren()))
+            pending.push_back(child.get());
+    }
 }
 
 const Node& AsNode(const IWidget& widget) {
@@ -294,7 +311,7 @@ void Publish(uint32_t id, float value) {
 }
 
 bool AllExpired(const std::vector<std::weak_ptr<WidgetPropertyStore>>& stores, size_t from = 0) {
-    return std::all_of(stores.begin() + from, stores.end(), [](const auto& store) {
+    return std::all_of(stores.begin() + static_cast<std::ptrdiff_t>(from), stores.end(), [](const auto& store) {
         return store.expired();
     });
 }
@@ -402,14 +419,14 @@ ZTEST(widget_assembly, test_roots_use_the_screen_grid_and_children_use_owner_loc
     lv_obj_update_layout(container->GetObject());
 
     const auto layout = GridLayout::FromActiveScreen(screen->grid);
-    for(size_t i = 0; i < roots.size(); ++i) {
-        const auto& definition = *roots[i]->GetConfiguration();
+    for(const auto& root : roots) {
+        const auto& definition = *root->GetConfiguration();
         const auto size = layout.ToPx(definition.size_grid);
         const auto position = layout.ToPx(definition.position_grid, size);
-        zassert_equal(roots[i]->GetSizePx().width, size.width);
-        zassert_equal(roots[i]->GetSizePx().height, size.height);
-        zassert_equal(roots[i]->GetPositionPx().x, position.x);
-        zassert_equal(roots[i]->GetPositionPx().y, position.y);
+        zassert_equal(root->GetSizePx().width, size.width);
+        zassert_equal(root->GetSizePx().height, size.height);
+        zassert_equal(root->GetPositionPx().x, position.x);
+        zassert_equal(root->GetPositionPx().y, position.y);
     }
     const auto halves = roots[0]->GetChildren();
     const auto width = lv_obj_get_width(roots[0]->GetChildMount()->GetObject());
@@ -501,21 +518,21 @@ ZTEST(widget_assembly, test_releasing_the_roots_releases_every_widget_once) {
 
 ZTEST(widget_assembly, test_assembly_metadata_is_bounded_and_released_at_the_graph_limits) {
     // Screen-scoped graph metadata only; widget instances and LVGL objects use their own heaps.
-    constexpr size_t metadata_budget = 4096;
+    constexpr size_t METADATA_BUDGET = 4096;
     auto container = Container();
     CountingResource resource;
     auto screen = Screen(&resource);
-    screen->widget_configurations.reserve(WidgetComposition::max_nodes);
+    screen->widget_configurations.reserve(WidgetComposition::MAX_NODES);
     for(uint32_t id = 1; id < 7; ++id)
         Add(*screen, id, WidgetType::BasicArcIcon, { static_cast<int>(id + 1) });
     auto last_owner = Add(*screen, 7, WidgetType::BasicArcIcon);
     std::pmr::vector<int> leaves;
-    for(uint32_t id = 8; id <= WidgetComposition::max_nodes; ++id) {
+    for(uint32_t id = 8; id <= WidgetComposition::MAX_NODES; ++id) {
         Add(*screen, id, WidgetType::IndicatorDigital);
         leaves.push_back(static_cast<int>(id));
     }
     last_owner->properties[WidgetPropertyType::CHILD_WIDGET_IDS] = leaves;
-    zassert_equal(screen->widget_configurations.size(), WidgetComposition::max_nodes);
+    zassert_equal(screen->widget_configurations.size(), WidgetComposition::MAX_NODES);
     Validate(*screen);
 
     const auto baseline = resource.outstanding;
@@ -523,13 +540,13 @@ ZTEST(widget_assembly, test_assembly_metadata_is_bounded_and_released_at_the_gra
     const auto roots = WidgetAssembly::Assemble(screen, container, WidgetContext{});
 
     zassert_equal(resource.outstanding, baseline, "Assembly metadata is released once the tree is built");
-    zassert_true(resource.peak - baseline <= metadata_budget, "Metadata peak %zu", resource.peak - baseline);
-    zassert_equal(static_cast<size_t>(journal.live), WidgetComposition::max_nodes);
+    zassert_true(resource.peak - baseline <= METADATA_BUDGET, "Metadata peak %zu", resource.peak - baseline);
+    zassert_equal(static_cast<size_t>(journal.live), WidgetComposition::MAX_NODES);
     const IWidget* owner = roots[0].get();
     for(int depth = 1; depth < 7; ++depth)
         owner = owner->GetChildren()[0].get();
     zassert_equal(owner->GetId(), 7);
-    zassert_equal(owner->GetChildren().size(), WidgetComposition::max_nodes - 7);
+    zassert_equal(owner->GetChildren().size(), WidgetComposition::MAX_NODES - 7);
 }
 
 ZTEST(widget_assembly, test_screen_replaces_its_tree_only_after_the_candidate_assembles) {

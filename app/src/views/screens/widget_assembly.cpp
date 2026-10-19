@@ -18,8 +18,8 @@ using eerie_leap::views::utilitites::GridLayout;
 using eerie_leap::views::widgets::WidgetFactory;
 
 WidgetAssembly::Roots WidgetAssembly::Assemble(
-    std::shared_ptr<ScreenConfiguration> configuration,
-    std::shared_ptr<Frame> container,
+    const std::shared_ptr<ScreenConfiguration>& configuration,
+    const std::shared_ptr<Frame>& container,
     const WidgetContext& context
 ) {
     ScopedLvglLock lvgl_guard;
@@ -34,13 +34,13 @@ WidgetAssembly::Roots WidgetAssembly::Assemble(
     std::pmr::vector<size_t> siblings(resource);
     siblings.reserve(definitions.size());
 
-    auto construct = [&](std::span<const size_t> indices, const std::shared_ptr<Frame>& mount) {
+    const auto construct = [&](std::span<const size_t> indices, const std::shared_ptr<Frame>& mount) {
         siblings.assign(indices.begin(), indices.end());
         // Creation order is sibling drawing order; semantic child order is untouched.
         std::ranges::sort(siblings, {}, [&](size_t i) {
             return std::pair{ definitions[i]->z_index, i };
         });
-        for(auto i : siblings)
+        for(const auto i : siblings)
             instances[i] = factory.CreateWidget(definitions[i]->type, definitions[i]->id, mount, context);
     };
 
@@ -53,31 +53,31 @@ WidgetAssembly::Roots WidgetAssembly::Assemble(
                 construct(children, instances[*it]->GetChildMount());
         }
 
-        for(auto i : composition.postorder) {
+        for(const auto i : composition.postorder) {
             const auto indices = composition.GetChildren(i);
             IWidget::Children children;
             children.reserve(indices.size());
-            for(auto child : indices)
+            for(const auto child : indices)
                 children.push_back(std::move(instances[child]));
 
-            factory.ConfigureWidget(*instances[i], definitions[i], std::move(children));
+            WidgetFactory::ConfigureWidget(*instances[i], definitions[i], std::move(children));
         }
 
-        for(auto i : composition.roots) {
+        for(const auto i : composition.roots) {
             const auto size_px = layout.ToPx(definitions[i]->size_grid);
             instances[i]->SetSizePx(size_px);
             instances[i]->SetPositionPx(layout.ToPx(definitions[i]->position_grid, size_px));
         }
     } catch(...) {
         // An owner's LVGL deletion would take unowned descendants' objects with it.
-        for(auto i : composition.postorder)
+        for(const auto i : composition.postorder)
             instances[i].reset();
         throw;
     }
 
     Roots roots;
     roots.reserve(composition.roots.size());
-    for(auto i : composition.roots)
+    for(const auto i : composition.roots)
         roots.push_back(std::move(instances[i]));
 
     return roots;

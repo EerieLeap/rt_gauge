@@ -23,7 +23,6 @@
 namespace eerie_leap::domain::ui_domain::services {
 
 using namespace eerie_leap::subsys::device_tree;
-using eerie_leap::utilities::memory::Mrm;
 
 LOG_MODULE_REGISTER(renderer_logger);
 
@@ -32,6 +31,9 @@ LOG_MODULE_REGISTER(renderer_logger);
 // The flush thread signals completion through the callback this replaces, so
 // leaving it enabled would park the renderer on a semaphore nobody gives.
 BUILD_ASSERT(!IS_ENABLED(CONFIG_LV_Z_FLUSH_THREAD), "CONFIG_LV_Z_FLUSH_THREAD must be disabled when the UI is rotated");
+
+// Only the rotation code allocates from the external heap.
+using eerie_leap::utilities::memory::Mrm;
 
 namespace {
 
@@ -342,7 +344,7 @@ int InitializeRotation(lv_display_t* display) {
 UiRendererService::UiRendererService() {
     // NOTE: Stack should be allocated on internal RAM to take an advantage of DMA for rendering
     thread_ = std::make_unique<Thread>(
-        "ui_renderer_service", this, UiRendererService::k_stack_size_, UiRendererService::k_priority_, false
+        "ui_renderer_service", this, UiRendererService::STACK_SIZE, UiRendererService::PRIORITY, false
     );
 }
 
@@ -375,8 +377,8 @@ int UiRendererService::Initialize() {
 #endif
 
     lv_obj_t* screen = lv_screen_active();
-    lv_obj_set_style_bg_color(screen, lv_color_black(), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_bg_color(screen, lv_color_black(), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, LV_PART_MAIN);
 
     return 0;
 }
@@ -400,7 +402,7 @@ void UiRendererService::ThreadEntry() {
 
 void UiRendererService::Render() {
     LvglLock::GetInstance().Lock();
-    uint32_t sleep_ms = lv_timer_handler();
+    const uint32_t sleep_ms = lv_timer_handler();
     LvglLock::GetInstance().Unlock();
 
     k_msleep(MIN(sleep_ms, INT32_MAX));

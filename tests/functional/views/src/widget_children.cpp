@@ -3,6 +3,7 @@
 #include <cerrno>
 #include <memory>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 #include <zephyr/ztest.h>
@@ -51,6 +52,8 @@ public:
         DetachDispatch();
         ++observations->destroyed;
     }
+    Leaf(const Leaf&) = delete;
+    Leaf& operator=(const Leaf&) = delete;
 
     WidgetType GetType() const override {
         return WidgetType::IndicatorDigital;
@@ -60,7 +63,7 @@ public:
         return properties_;
     }
 
-    void Apply(WidgetPropertyType property, ConfigValue value) {
+    void Apply(WidgetPropertyType property, const ConfigValue& value) {
         ScopedLvglLock lock;
         properties_->Set(property, value);
         NotifyPropertyChanged(property, value, properties_->GetEffect(property));
@@ -102,8 +105,9 @@ protected:
         if(type == WidgetPropertyType::VALUE) {
             ++observations->values;
             observations->value = std::get<double>(value);
-        } else
+        } else {
             WidgetBase::OnPropertyChanged(type, value);
+        }
     }
 
     void OnProcessingUpdated(bool enabled) override {
@@ -126,6 +130,8 @@ public:
     ~Pair() override {
         DetachDispatch();
     }
+    Pair(const Pair&) = delete;
+    Pair& operator=(const Pair&) = delete;
 
     WidgetType GetType() const override {
         return WidgetType::BasicArcIcon;
@@ -198,7 +204,7 @@ std::shared_ptr<WidgetConfiguration> Configuration(uint32_t id, WidgetType type 
     return configuration;
 }
 
-std::unique_ptr<Leaf> MakeLeaf(uint32_t id, std::shared_ptr<Frame> mount, bool blink = false) {
+std::unique_ptr<Leaf> MakeLeaf(uint32_t id, const std::shared_ptr<Frame>& mount, bool blink = false) {
     auto leaf = std::make_unique<Leaf>(id, mount);
     auto configuration = Configuration(id);
     if(blink) {
@@ -247,7 +253,7 @@ struct Tree {
     auto Nodes() const {
         return std::array<Leaf*, 5>{ root.get(), branch, first, second, last };
     }
-    void Start() {
+    void Start() const {
         zassert_equal(root->Render(), 0);
         root->OnActivated();
     }
@@ -266,7 +272,7 @@ template<typename Action>
 void ExpectRejected(Action&& action) {
     bool rejected = false;
     try {
-        action();
+        std::forward<Action>(action)();
     } catch(const std::logic_error&) {
         rejected = true;
     }
@@ -293,10 +299,7 @@ ZTEST(widget_children, test_nested_ownership_preserves_instances_configuration_a
     zassert_equal(&tree.branch->Left(), tree.first);
     zassert_equal(&tree.root->Right(), tree.last);
     const auto parent_properties = tree.root->GetSupportedProperties();
-    zassert_true(
-        std::find(parent_properties.begin(), parent_properties.end(), WidgetPropertyType::LABEL)
-        == parent_properties.end()
-    );
+    zassert_true(std::ranges::find(parent_properties, WidgetPropertyType::LABEL) == parent_properties.end());
     zassert_equal(
         std::count(parent_properties.begin(), parent_properties.end(), WidgetPropertyType::CHILD_WIDGET_IDS), 1
     );
@@ -436,7 +439,7 @@ ZTEST(widget_children, test_parent_frame_gates_and_mount_resize_preserve_semanti
     {
         ScopedLvglLock lock;
         lv_obj_move_to_index(last_object, 0);
-        lv_obj_add_flag(tree.mount->GetObject(), LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(tree.mount->GetObject(), true);
         lv_display_send_event(lv_display_get_default(), LV_EVENT_REFR_START, nullptr);
     }
     zassert_false(tree.first->IsProcessingEligible());
@@ -446,7 +449,7 @@ ZTEST(widget_children, test_parent_frame_gates_and_mount_resize_preserve_semanti
     zassert_equal(lv_obj_get_index(last_object), 0);
     {
         ScopedLvglLock lock;
-        lv_obj_remove_flag(tree.mount->GetObject(), LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(tree.mount->GetObject(), false);
         tree.mount->SetProcessingEnabled(false);
         lv_display_send_event(lv_display_get_default(), LV_EVENT_REFR_START, nullptr);
     }

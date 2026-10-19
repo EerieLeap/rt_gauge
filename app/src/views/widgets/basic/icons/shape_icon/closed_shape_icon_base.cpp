@@ -12,7 +12,7 @@ void ClosedShapeIconBase::RegisterProperties(WidgetPropertyStore& store) {
 
 bool ClosedShapeIconBase::ReadGeometry() {
     bool changed = ShapeIconBase::ReadGeometry();
-    auto fill = properties_->GetAs<double>(WidgetPropertyType::FILL_MODE, 0)
+    const auto fill = properties_->GetAs<double>(WidgetPropertyType::FILL_MODE, 0)
             == static_cast<int>(WidgetFillMode::Outline)
         ? WidgetFillMode::Outline
         : WidgetFillMode::Filled;

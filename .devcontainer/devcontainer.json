@@ -25,7 +25,9 @@
         "cmake.sourceDirectory": "./app",
         "python.defaultInterpreterPath": "/home/ubuntu/zephyr/.venv/bin/python3",
         "C_Cpp.formatting": "clangFormat",
-        "C_Cpp.clang_format_path": "/home/ubuntu/zephyr/.venv/bin/clang-format"
+        "C_Cpp.clang_format_path": "/home/ubuntu/zephyr/.venv/bin/clang-format",
+        "C_Cpp.codeAnalysis.clangTidy.enabled": true,
+        "C_Cpp.codeAnalysis.clangTidy.path": "/usr/bin/clang-tidy-23"
       },
       "extensions": [
         "ms-vscode.cpptools",

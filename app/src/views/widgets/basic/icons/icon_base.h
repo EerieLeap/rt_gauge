@@ -24,7 +24,7 @@ protected:
 
 public:
     explicit IconBase(std::shared_ptr<Frame> parent);
-    virtual ~IconBase() = default;
+    ~IconBase() override = default;
 
     // Factory metadata: declarations must be available without creating LVGL objects.
     static void RegisterProperties(WidgetPropertyStore&) {}

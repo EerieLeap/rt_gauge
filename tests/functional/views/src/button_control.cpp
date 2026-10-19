@@ -78,6 +78,7 @@ public:
 
     NavigationProbe(const NavigationProbe&) = delete;
     NavigationProbe& operator=(const NavigationProbe&) = delete;
+    ~NavigationProbe() = default;
 
     bool WaitForEvent(int timeout_ms = DISPATCH_TIMEOUT_MS) {
         return k_sem_take(&delivered_, K_MSEC(timeout_ms)) == 0;
@@ -103,15 +104,15 @@ private:
     AnySubscription subscription_;
 
     void Record(const NavigationEventChannel::EventMessage& event) {
-        if(auto it = event.payload.find(NavigationPayloadType::Action); it != event.payload.end())
+        if(const auto* it = event.payload.find(NavigationPayloadType::Action); it != event.payload.end())
             if(const auto* action = std::get_if<uint32_t>(&it->second))
                 actions_.push_back(static_cast<NavigationAction>(*action));
 
-        if(auto it = event.payload.find(NavigationPayloadType::TargetGroupId); it != event.payload.end())
+        if(const auto* it = event.payload.find(NavigationPayloadType::TargetGroupId); it != event.payload.end())
             if(const auto* screen_group_id = std::get_if<uint32_t>(&it->second))
                 target_group_ids_.push_back(*screen_group_id);
 
-        if(auto it = event.payload.find(NavigationPayloadType::TargetScreenId); it != event.payload.end())
+        if(const auto* it = event.payload.find(NavigationPayloadType::TargetScreenId); it != event.payload.end())
             if(const auto* screen_id = std::get_if<uint32_t>(&it->second))
                 target_screen_ids_.push_back(*screen_id);
 

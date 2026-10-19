@@ -80,7 +80,7 @@ namespace {
 
 std::optional<uint32_t> GetPayloadId(const NavigationEventChannel::EventMessage& event, NavigationPayloadType key) {
 
-    auto it = event.payload.find(key);
+    const auto* it = event.payload.find(key);
     if(it == event.payload.end())
         return std::nullopt;
 
@@ -237,19 +237,21 @@ int UiController::Initialize() {
     }
 
     ui_render_work_queue_thread_ = std::make_unique<WorkQueueThread>(
-        "ui_render_work_q", ui_render_work_queue_stack_size_, ui_render_work_queue_priority_
+        "ui_render_work_q", UI_RENDER_WORK_QUEUE_STACK_SIZE, UI_RENDER_WORK_QUEUE_PRIORITY
     );
 
     if(ui_render_work_queue_thread_->Initialize()) {
         // Keeps the event bus worker - and the LVGL lock it holds while
         // dispatching - out of the multi-frame first render of a screen group.
-        main_view_->SetRenderDispatcher([work_queue = ui_render_work_queue_thread_.get()](std::function<void()> work) {
-            try {
-                work_queue->Run(std::move(work));
-            } catch(const std::exception& e) {
-                LOG_ERR("Failed to queue a screen group render. %s", e.what());
+        main_view_->SetRenderDispatcher(
+            [work_queue = ui_render_work_queue_thread_.get()](const std::function<void()>& work) {
+                try {
+                    work_queue->Run(work);
+                } catch(const std::exception& e) {
+                    LOG_ERR("Failed to queue a screen group render. %s", e.what());
+                }
             }
-        });
+        );
     } else {
         LOG_ERR("Failed to start the UI render work queue, rendering inline.");
         ui_render_work_queue_thread_.reset();
@@ -277,7 +279,7 @@ void UiController::RegisterAssets() {
 
     // Widgets keep RAM copies of what they load, so a client may overwrite or delete a file a widget
     // shows: nothing is ever in use, and the change appears at the widget's next render.
-    constexpr auto access = static_cast<uint8_t>(
+    constexpr auto ACCESS = static_cast<uint8_t>(
         ToMask(AssetAccess::READ) | ToMask(AssetAccess::WRITE) | ToMask(AssetAccess::DELETE)
     );
 
@@ -286,7 +288,7 @@ void UiController::RegisterAssets() {
             .name = "images",
             .store = images_store_,
             .extensions = IMAGE_EXTENSIONS,
-            .access = access,
+            .access = ACCESS,
             .max_size = CONFIG_EERIE_LEAP_UI_IMAGE_MAX_SIZE }
     );
     if(!images_registered_)
@@ -297,7 +299,7 @@ void UiController::RegisterAssets() {
             .name = "animations",
             .store = animations_store_,
             .extensions = ANIMATION_EXTENSIONS,
-            .access = access,
+            .access = ACCESS,
             .max_size = CONFIG_EERIE_LEAP_UI_ANIMATION_MAX_SIZE }
     );
     if(!animations_registered_)
@@ -336,7 +338,7 @@ int UiController::Configure(std::shared_ptr<UiConfiguration> config) {
     // thread is already running.
     ScopedLvglLock lvgl_guard;
 
-    for(auto& screen_config : configuration_->screen_configurations) {
+    for(const auto& screen_config : configuration_->screen_configurations) {
         // An overlay is built on demand by OverlayHost; it belongs to no group.
         if(screen_config->is_overlay) {
             if(!default_overlay_screen_id_.has_value() || screen_config->id < *default_overlay_screen_id_)
@@ -376,11 +378,11 @@ int UiController::Configure(std::shared_ptr<UiConfiguration> config) {
 
 // Every screen group is built here, not on first render, so one broadcast reaches every binding
 // that was just resolved. Settings owners only publish on change, and none of them has yet.
-void UiController::RequestSettingsState() const {
-    static constexpr auto caller = GetCallerName();
+void UiController::RequestSettingsState() {
+    static constexpr auto CALLER = GetCallerName();
 
     SettingsEventsChannel::GetInstance().PublishAsync(
-        { .source_id = caller.hash, .type = SettingsEventType::StateRequested }
+        { .source_id = CALLER.hash, .type = SettingsEventType::StateRequested }
     );
 }
 
@@ -452,7 +454,7 @@ void UiController::ShowOverlay(uint32_t screen_id) {
         return;
     }
 
-    auto configuration = FindOverlayConfiguration(screen_id);
+    const auto configuration = FindOverlayConfiguration(screen_id);
     if(configuration == nullptr) {
         LOG_ERR("Screen %u is not a configured overlay.", screen_id);
         navigation_service_->CloseOverlay();
@@ -462,7 +464,7 @@ void UiController::ShowOverlay(uint32_t screen_id) {
 
     // Built fresh on every show: Pop() destroys the group and everything under it.
     auto screen_group = overlay_host_->CreateGroup(configuration->screen_group_id);
-    auto screen = CreateScreen(std::move(configuration), screen_group->GetContainer());
+    auto screen = CreateScreen(configuration, screen_group->GetContainer());
     if(screen == nullptr) {
         LOG_ERR("Failed to build overlay screen %u.", screen_id);
         navigation_service_->CloseOverlay();
@@ -495,7 +497,7 @@ std::shared_ptr<NavigationService> UiController::GetNavigationService() const {
 }
 
 std::shared_ptr<IScreen>
-UiController::CreateScreen(std::shared_ptr<ScreenConfiguration> configuration, std::shared_ptr<Frame> parent) {
+UiController::CreateScreen(const std::shared_ptr<ScreenConfiguration>& configuration, std::shared_ptr<Frame> parent) {
 
     try {
         return ScreenFactory::GetInstance().CreateScreen(configuration, std::move(parent), widget_context_);
@@ -555,7 +557,7 @@ void UiController::SetupTestConfiguration() {
     screen_configuration->AddWidget(std::move(widget0));
 
     // Widget 1: IndicatorDigital
-    auto widget1 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
+    const auto widget1 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
     widget1->type = WidgetType::IndicatorDigital;
     widget1->id = 1;
     widget1->position_grid.x = 0;
@@ -571,7 +573,7 @@ void UiController::SetupTestConfiguration() {
     // screen_configuration->AddWidget(std::move(widget1));
 
     // Widget 2: IndicatorHorizontalChart (Bar)
-    auto widget2 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
+    const auto widget2 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
     widget2->type = WidgetType::IndicatorHorizontalChart;
     widget2->id = 2;
     widget2->position_grid.x = 0;
@@ -590,7 +592,7 @@ void UiController::SetupTestConfiguration() {
     // screen_configuration->AddWidget(std::move(widget2));
 
     // Widget 3: IndicatorHorizontalChart (Line)
-    auto widget3 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
+    const auto widget3 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
     widget3->type = WidgetType::IndicatorHorizontalChart;
     widget3->id = 3;
     widget3->position_grid.x = 0;
@@ -605,7 +607,7 @@ void UiController::SetupTestConfiguration() {
     widget3->properties[WidgetPropertyType::CHART_TYPE] = static_cast<int>(HorizontalChartIndicatorType::Line);
     // screen_configuration->AddWidget(std::move(widget3));
 
-    auto widget4 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
+    const auto widget4 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
     widget4->type = WidgetType::IndicatorHorizontalChart;
     widget4->id = 4;
     widget4->position_grid.x = 0;
@@ -620,7 +622,7 @@ void UiController::SetupTestConfiguration() {
     // screen_configuration->AddWidget(std::move(widget4));
 
     // Widget: IndicatorArcFill
-    auto widget5 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
+    const auto widget5 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
     widget5->type = WidgetType::IndicatorArcFill;
     widget5->id = 5;
     widget5->position_grid.x = 0;
@@ -732,7 +734,7 @@ void UiController::SetupTestConfiguration() {
     screen_configuration->AddWidget(std::move(widget12));
 
     // Widget: IndicatorBar - Horizontal Left to right
-    auto widget10 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
+    const auto widget10 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
     widget10->type = WidgetType::IndicatorBar;
     widget10->id = 10;
     widget10->position_grid.x = 0;
@@ -747,7 +749,7 @@ void UiController::SetupTestConfiguration() {
     // screen_configuration->AddWidget(std::move(widget10));
 
     // Widget: IndicatorBar - Vertical Bottom to top
-    auto widget11 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
+    const auto widget11 = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
     widget11->type = WidgetType::IndicatorBar;
     widget11->id = 11;
     widget11->position_grid.x = 200;
@@ -939,17 +941,18 @@ void UiController::SetupTestAssets() {
         if(const auto size = animations_store_->GetSize(name); size.has_value() && *size == json.size())
             return;
 
+        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): the embedded JSON text is stored as raw bytes
         animations_store_->Save(name, std::span(reinterpret_cast<const uint8_t*>(json.data()), json.size()));
     };
 
-    save_if_stale("ui_lottie_spinner.json", ui_lottie_spinner_json);
+    save_if_stale("ui_lottie_spinner.json", UI_LOTTIE_SPINNER_JSON);
 
     if(images_store_->Exists("ui_img_norma_al88.bin"))
         return;
 
-    images_store_->Save("ui_img_norma_al88.bin", ui_img_norma_al88_data);
+    images_store_->Save("ui_img_norma_al88.bin", UI_IMG_NORMA_AL88_DATA);
 
-    images_store_->Save("ui_img_arrow_al88.bin", ui_img_arrow_al88_data);
+    images_store_->Save("ui_img_arrow_al88.bin", UI_IMG_ARROW_AL88_DATA);
 }
 
 } // namespace eerie_leap::controllers

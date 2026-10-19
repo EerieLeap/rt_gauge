@@ -7,7 +7,7 @@ namespace eerie_leap::views::assets::animations {
 
 // A 120x120 spinner at 60 fps: an arc grows around a faint track, then shrinks from its tail
 // while the layer turns once every two seconds.
-const std::string_view ui_lottie_spinner_json = R"json({
+const std::string_view UI_LOTTIE_SPINNER_JSON = R"json({
   "v": "5.7.4", "fr": 60, "ip": 0, "op": 120, "w": 120, "h": 120, "nm": "spinner", "ddd": 0, "assets": [],
   "layers": [{
     "ddd": 0, "ind": 1, "ty": 4, "nm": "ring", "sr": 1, "ao": 0,

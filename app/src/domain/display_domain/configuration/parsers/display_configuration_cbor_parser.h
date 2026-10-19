@@ -16,12 +16,12 @@ public:
     // Bumped whenever the CBOR layout changes; a stored config that does not
     // match is rejected so defaults are regenerated instead of decoding a
     // field-shifted layout into the current struct.
-    static constexpr uint32_t configuration_version = 1;
+    static constexpr uint32_t CONFIGURATION_VERSION = 1;
 
     DisplayConfigurationCborParser() = default;
 
-    eerie_memory::pmr_unique_ptr<CborDisplayConfig> Serialize(const DisplayConfiguration& configuration);
-    eerie_memory::pmr_unique_ptr<DisplayConfiguration>
+    static eerie_memory::PmrUniquePtr<CborDisplayConfig> Serialize(const DisplayConfiguration& configuration);
+    static eerie_memory::PmrUniquePtr<DisplayConfiguration>
     Deserialize(std::pmr::memory_resource* mr, const CborDisplayConfig& config);
 };
 

@@ -15,7 +15,7 @@ ControlBase::ControlBase(uint32_t id, std::shared_ptr<Frame> parent, WidgetConte
     // Without this a drag over an interactive control would climb to the gesture
     // root and navigate away instead of moving the control.
     if(consumes_gestures)
-        lv_obj_remove_flag(container_->GetObject(), LV_OBJ_FLAG_GESTURE_BUBBLE);
+        lv_obj_set_gesture_bubble(container_->GetObject(), false);
 }
 
 ControlBase::~ControlBase() {
@@ -45,7 +45,7 @@ void ControlBase::AttachEvents(lv_obj_t* object, std::initializer_list<lv_event_
 
     event_object_ = object;
 
-    for(auto code : codes)
+    for(const auto code : codes)
         lv_obj_add_event_cb(object, EventCb, code, this);
 }
 

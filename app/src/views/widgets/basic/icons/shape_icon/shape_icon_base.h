@@ -26,7 +26,7 @@ protected:
     static int ReadPixels(const WidgetPropertyStore& store, WidgetPropertyType type, int fallback, bool is_dimension);
     template<typename T>
     static bool UpdateValue(T& target, T value) {
-        bool changed = target != value;
+        const bool changed = target != value;
         target = value;
         return changed;
     }
@@ -40,6 +40,10 @@ protected:
 public:
     explicit ShapeIconBase(std::shared_ptr<Frame> parent);
     ~ShapeIconBase() override;
+    ShapeIconBase(const ShapeIconBase&) = delete;
+    ShapeIconBase& operator=(const ShapeIconBase&) = delete;
+    ShapeIconBase(ShapeIconBase&&) = delete;
+    ShapeIconBase& operator=(ShapeIconBase&&) = delete;
 
     static void RegisterProperties(WidgetPropertyStore& store);
     void Configure(std::shared_ptr<WidgetPropertyStore> properties) override;

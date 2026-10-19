@@ -34,11 +34,11 @@ enum class WidgetType : uint32_t {
 
 class WidgetTypeHelpers {
 private:
-    static constexpr uint32_t category_mask_ = 0xFFFF0000U;
+    static constexpr uint32_t CATEGORY_MASK = 0xFFFF0000U;
 
 public:
     static constexpr WidgetCategory GetCategory(WidgetType widget_type) {
-        return static_cast<WidgetCategory>(static_cast<uint32_t>(widget_type) & category_mask_);
+        return static_cast<WidgetCategory>(static_cast<uint32_t>(widget_type) & CATEGORY_MASK);
     }
 
     // Control (3 << 16) contains the bits of Basic and Indicator, so the masked

@@ -556,8 +556,8 @@ ZTEST(
     // string vector
     std::pmr::vector<zcbor_string> string_vector_value_zcbor;
     string_vector_value_zcbor.reserve(string_vector_value.size());
-    for(int i = 0; i < string_vector_value.size(); i++)
-        string_vector_value_zcbor.push_back(CborHelpers::ToZcborString(string_vector_value[i]));
+    for(const auto& i : string_vector_value)
+        string_vector_value_zcbor.push_back(CborHelpers::ToZcborString(i));
 
     CborPropertiesConfig_CborPropertyValueType_m property_value_string_vector(std::allocator_arg, Mrm::GetDefaultPmr());
     property_value_string_vector.CborPropertyValueType_m_key = static_cast<uint32_t>(keys[5]);

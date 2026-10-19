@@ -9,8 +9,8 @@ namespace eerie_leap::views::widgets::indicators {
 
 class DialIndicator : public IndicatorBase {
 private:
-    int start_angle_;
-    int end_angle_;
+    int start_angle_{};
+    int end_angle_{};
 
     static constexpr int DEFAULT_START_ANGLE = 45;
     static constexpr int DEFAULT_END_ANGLE = 315;
@@ -31,7 +31,6 @@ protected:
 public:
     uint32_t GetAngleForValue(float value);
 
-public:
     // Index 0 is the driven needle. Its outer geometry is a fill-slot placeholder:
     // position (0, 0), size (1, 1); renderer dimensions/offsets/anchors stay local.
     static void
@@ -39,6 +38,10 @@ public:
 
     explicit DialIndicator(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context);
     ~DialIndicator() override;
+    DialIndicator(const DialIndicator&) = delete;
+    DialIndicator& operator=(const DialIndicator&) = delete;
+    DialIndicator(DialIndicator&&) = delete;
+    DialIndicator& operator=(DialIndicator&&) = delete;
 
     std::vector<WidgetPropertyType> GetSupportedProperties() const override;
 
