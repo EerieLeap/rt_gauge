@@ -16,7 +16,7 @@ private:
     static constexpr size_t MAX_QUEUED_EVENTS = 16;
 
     SettingsEventsChannel() :
-        EventChannel("settings_events", MAX_QUEUED_EVENTS) {}
+        EventChannel("settings_events", LAST_SETTINGS_EVENT_TYPE, LAST_SETTINGS_PAYLOAD_TYPE, MAX_QUEUED_EVENTS) {}
 
 public:
     static SettingsEventsChannel& GetInstance() {

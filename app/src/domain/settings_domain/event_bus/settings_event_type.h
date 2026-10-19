@@ -23,4 +23,7 @@ enum class SettingsEventType : std::uint32_t {
     PersistRequested
 };
 
+// The channel bounds HasEventType() with it; appending a value means moving this to it.
+inline constexpr SettingsEventType LAST_SETTINGS_EVENT_TYPE = SettingsEventType::PersistRequested;
+
 } // namespace eerie_leap::domain::settings_domain::event_bus

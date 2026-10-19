@@ -16,7 +16,8 @@ private:
     static constexpr size_t MAX_QUEUED_EVENTS = 16;
 
     NavigationEventChannel() :
-        EventChannel("navigation_events", MAX_QUEUED_EVENTS) {}
+        EventChannel("navigation_events", LAST_NAVIGATION_EVENT_TYPE, LAST_NAVIGATION_PAYLOAD_TYPE, MAX_QUEUED_EVENTS) {
+    }
 
 public:
     static NavigationEventChannel& GetInstance() {
