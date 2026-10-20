@@ -445,7 +445,6 @@ triggers:
 development aid that is not for a shipped build:
 
 ```shell
-# TO CONFIRM: under sysbuild the variable may have to be the image-prefixed -Dapp_EXTRA_CONF_FILE=bench.conf
 west build -d build_bench -b esp32s3_touch_amoled_1_75/esp32s3/procpu --sysbuild ./app -- -DEXTRA_CONF_FILE=bench.conf
 ```
 

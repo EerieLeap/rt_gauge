@@ -253,7 +253,7 @@ LOGGING_STATUS = 0
 LOGGING_START = 1
 LOGGING_STOP = 2
 # LoggingStatusReason (logging_status_reason.h): add values, never renumber.
-LOGGING_REASONS = {0: "stopped", 1: "write failed", 2: "no space", 3: "rotation failed", 4: "unavailable"}
+LOGGING_REASONS = {0: "stopped", 1: "write failed", 2: "no space", 3: "rotation failed", 4: "unavailable", 5: "firmware update"}
 # <prefix>_YYYYMMDDTHHMMSSZ_NNNN.mf4: the start of a log file's session, UTC.
 LOG_NAME_PATTERN = re.compile(r"_(\d{8}T\d{6}Z)_\d+\.mf4$")
 
