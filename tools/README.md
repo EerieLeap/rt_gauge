@@ -2,15 +2,16 @@
 
 | File | Purpose |
 | --- | --- |
-| `smp_can_client.py` | An SMP client for a unit, over CAN or over its console. Reads and writes stored configurations as YAML or JSON, and lists, downloads, uploads and deletes its asset files. |
+| `smp_can_client.py` | An SMP client for a unit, over CAN, over its console or over Bluetooth. Reads and writes stored configurations as YAML or JSON, lists, downloads, uploads and deletes its asset files, and inspects, uploads, tests and confirms firmware images (`image update` runs a whole update). |
+| `test_smp_can_client.py` | Self-test of the client's image, `dfu` and Bluetooth parts against simulated units: `python3 tools/test_smp_can_client.py` (needs `cbor2` only). |
 | `LVGLImage.py` | LVGL's image converter, for the UI's asset files. |
 | `update_zephyr.sh` | Updates the west workspace to `west.yml` with the build's patches reverted and applied again. |
 
 ## SMP client
 
-`smp_can_client.py` sends SMP requests to one unit and prints the responses. It speaks the `os`,
-`device`, `network`, `config` and `assets` groups the units serve (see rt_core's `docs/smp.md`); the `live`,
-`calibration` and `files` groups have no command here.
+`smp_can_client.py` sends SMP requests to one unit and prints the responses. It speaks the `os`, `img`
+(MCUmgr's image management, group 1), `device`, `network`, `config`, `assets`, `logging` and `dfu` groups the
+units serve (see rt_core's `docs/smp.md`); the `live`, `calibration` and `files` groups have no command here.
 
 ### Requirements
 
@@ -19,9 +20,10 @@
 | Every command | `cbor2` |
 | CAN | `python-can` |
 | Serial | `pyserial` |
+| Bluetooth (`--ble`, `ble-scan`) | `bleak` 0.20 or newer (BlueZ on Linux) |
 | Descriptions (`config-get`, `config-set`, `config-encode`, `config-decode`) | `PyYAML` and `zcbor` 0.9.1 |
 
-A package is imported when a command needs it, so a serial bench needs no `python-can`. zcbor 0.9.1
+A package is imported when a command needs it, so a serial bench needs no `python-can`, and a CAN bench no `bleak`. zcbor 0.9.1
 imports a name that cbor2 6 removed; the client restores it before the import.
 
 ### Transports
@@ -30,10 +32,11 @@ imports a name that cbor2 6 removed; the client restores it before the import.
 | --- | --- | --- |
 | CAN | `--target ID` | `--interface`, `--channel`, `--bitrate`, `--fd`, `--data-bitrate`, `--base`, `--source`, `--share` |
 | Serial | `--serial PORT` | `--baud` (115200), `--line-delay` (seconds between the lines of a request, 0), `--show-console` |
+| Bluetooth | `--ble NAME\|ADDRESS` | `--route ID` (0), `--ble-no-pair`, `--scan-timeout S` (10) |
 
-`--serial` and `--target` exclude each other. `--timeout` (2 s) and `--retries` apply to both. A failed
-request is resent once on CAN and three times on serial, where a log line that lands inside a response
-corrupts it.
+`--target`, `--serial` and `--ble` exclude each other. `--timeout` (2 s) and `--retries` apply to all three. A
+failed request is resent once on CAN, three times on serial, where a log line that lands inside a response
+corrupts it, and once over Bluetooth.
 
 The serial transport speaks MCUmgr's shell transport on the unit's console: lines that start `0x06 0x09`
 (first) or `0x04 0x14` (continuation), the base64 of a 16-bit length, the packet and its CRC16, at most
@@ -58,25 +61,61 @@ python -m serial.tools.miniterm --rts 0 /dev/ttyACM1 115200
 
 Leave DTR alone there. A port that the client holds is exclusive; close the terminal first.
 
+#### Bluetooth
+
+A unit with BLE advertises the access point service of rt_core's `docs/bluetooth.md`
+(`e7a1b2c3-d4e5-6f78-9a0b-c1d2e3f40000`). The client uses two of its characteristics: `info` (read: protocol
+version, the largest SMP packet, the requests in flight the unit takes) and `smp` (write without response, notify).
+It is the configurator app's counterpart: every command but `shell` works over it, the same as over CAN and the console.
+
+`--ble` takes the device name the unit advertises (compared without regard to case) or its address (a MAC address,
+or the UUID macOS shows in its place). `ble-scan [--time S] [--all]` lists the access points in range with their
+name, address and signal strength. `--route` says which unit the requests are for: 0 (the default) is the access
+point itself, and another CDMP device ID is forwarded by the access point over CAN.
+
+Every packet on `smp` is `[route][SMP packet]`. A request goes out as ATT writes without response of at most
+MTU - 3 bytes (bleak's `max_write_without_response_size`); only the first starts with the route byte, and the length
+in the SMP header ends the packet. The responses arrive as notifications, put together the same way. The route byte
+of a response is the unit that answered; the client skips packets of another route (and counts them), and drops a
+partial packet that stalls for 1 s, as the unit does.
+
+The `smp` characteristic refuses writes on a link that is not encrypted, and a write without response that is
+refused is not reported: the unit would just stay silent. The client therefore pairs first (Just Works, bleak's
+`pair()`; BlueZ uses bleak's own no-input agent). `--ble-no-pair` skips it for a host that paired the unit already,
+and macOS pairs by itself when the first encrypted access needs it. A unit that was reflashed has lost its bond: remove
+the old pairing on the host (`bluetoothctl remove ADDRESS`).
+
+bleak is asyncio; its loop runs on a thread of its own, so the commands are the same as on the other transports. A
+lost connection is a `ConnectionError`; `image upload` and `image update` reconnect (scanning for the unit again) and
+carry on. Not tested against a radio yet: this checkout's tests use a stand-in for bleak.
+
 ### Commands
 
 | Command | Transport | Action |
 | --- | --- | --- |
-| `echo TEXT`, `params`, `info`, `devices`, `config-list` | either | One request each. |
-| `reset` | either | Restarts the unit (`os` reset); a lost answer is no failure. |
-| `config-crc TYPE` | either | Length, CRC32 and applied flag of the stored configuration. |
-| `config-read TYPE FILE`, `config-write TYPE FILE` | either | The stored CBOR bytes, unchanged. `TYPE` is a number or a name. |
-| `config-get TYPE [FILE]` | either | Reads a configuration and prints it as a description (YAML; a `.json` file name selects JSON). |
-| `config-set TYPE FILE` | either | Encodes a description (`-` is standard input) and writes it; the unit validates and applies it. |
+| `echo TEXT`, `params`, `info`, `devices`, `config-list` | any | One request each. |
+| `reset` | any | Restarts the unit (`os` reset); a lost answer is no failure. |
+| `config-crc TYPE` | any | Length, CRC32 and applied flag of the stored configuration. |
+| `config-read TYPE FILE`, `config-write TYPE FILE` | any | The stored CBOR bytes, unchanged. `TYPE` is a number or a name. |
+| `config-get TYPE [FILE]` | any | Reads a configuration and prints it as a description (YAML; a `.json` file name selects JSON). |
+| `config-set TYPE FILE` | any | Encodes a description (`-` is standard input) and writes it; the unit validates and applies it. |
 | `config-encode TYPE DESCRIPTION OUTPUT`, `config-decode TYPE INPUT [OUTPUT]` | none | The same conversion offline, between a description and a CBOR file. |
-| `assets kinds`, `assets ls KIND` | either | The asset kinds the unit serves, and the files of one (see [Assets](#assets)). |
-| `assets get KIND NAME [FILE] [--in-flight N] [--resume]` | either | Downloads a file and checks its CRC32. |
-| `assets put KIND NAME FILE` | either | Uploads a file under the name NAME. |
-| `assets rm KIND NAME` | either | Deletes a file. |
-| `logging status` | either | Whether the unit logs (`logging` group 71), why not, and the session's start, file and size. |
-| `logging start [--uid N]`, `logging stop [--uid N]` | either | Asks the units that can log to start or stop; `--uid` (decimal or `0x` hex) limits it to one unit, default every unit. |
+| `assets kinds`, `assets ls KIND` | any | The asset kinds the unit serves, and the files of one (see [Assets](#assets)). |
+| `assets get KIND NAME [FILE] [--in-flight N] [--resume]` | any | Downloads a file and checks its CRC32. |
+| `assets put KIND NAME FILE` | any | Uploads a file under the name NAME. |
+| `assets rm KIND NAME` | any | Deletes a file. |
+| `logging status` | any | Whether the unit logs (`logging` group 71), why not, and the session's start, file and size. |
+| `logging start [--uid N]`, `logging stop [--uid N]` | any | Asks the units that can log to start or stop; `--uid` (decimal or `0x` hex) limits it to one unit, default every unit. |
+| `image info FILE` | none | Offline: the header, TLVs, identity, signature type and image hash of a `.signed.bin` (see [Firmware images](#firmware-images)). |
+| `image list` | any | The image slots: version, hash and flags (`active`, `confirmed`, `pending`, `permanent`, `bootable`). |
+| `image upload FILE [--in-flight N] [--upgrade]` | any | Uploads an image into slot 1 (`img_mgmt`), resuming a transfer the unit holds. |
+| `image test [HASH]`, `image confirm [HASH]` | any | Marks an image for one test boot (default: the image in slot 1), or makes it permanent (default: the running image). |
+| `image erase` | any | Erases slot 1. |
+| `image update FILE [--no-reset] [--timeout-s N] [--in-flight N] [--upgrade]` | any | The whole update: checks, upload, test, reset, wait for the swap, wait for the confirmation or the revert. |
+| `dfu status` | any | Whether the running image is confirmed, the confirmation state, and why the unit last reset. |
+| `ble-scan [--time S] [--all]` | none | Lists the access points in range (needs `bleak`). |
 | `shell TEXT [--wait S]` | serial | Types TEXT as a shell command line and prints the console for S seconds (1). An empty TEXT only listens: `shell "" --wait 15` catches a thread analyzer report. |
-| `bench [--size N] [--count N]` | either | Echo round trips, for throughput. |
+| `bench [--size N] [--count N]` | any | Echo round trips, for throughput. |
 
 #### Writing a configuration
 
@@ -187,6 +226,132 @@ that takes no uploads (`DENIED`) fails with the unit's reason, and so does a CRC
 `rm` deletes a file. A delete whose answer was lost and that is sent again meets `NOT_FOUND`, which the client
 takes for done; a first request that meets it fails.
 
+### Firmware images
+
+The units run MCUboot with two equal slots. An update uploads the new image into slot 1 with MCUmgr's standard
+image management (group 1), marks it for one test boot, and resets; MCUboot swaps the slots, the new image
+confirms itself once it is healthy, and a failed one is reverted. `os` reset is group 0, and the `dfu` group (72)
+adds what `img_mgmt` does not report: the confirmation state. All of it works over CAN, the console of a bench build
+and Bluetooth, and through the access point to the units behind it.
+
+**Image files.** The release workflow names the over-the-air image `rt_gauge_<board>_<version>.signed.bin`, for
+example `rt_gauge_esp32s3_touch_amoled_1_75_0.0.2.signed.bin`; it is the application's `zephyr.signed.bin`. The name
+means nothing to the unit: the file carries its identity in a signed TLV (`0x00A0`: format, product ID and the
+board name, `CONFIG_BOARD_TARGET`), and the unit refuses an image of another product or board.
+
+`image info FILE` works offline and prints what imgtool's `dumpinfo` does, plus the checks: the MCUboot header
+(magic `0x96f3b83d`, load address, header size, image size, protected TLV size, flags, version as
+`major.minor.revision+build`), the protected TLVs (area magic `0x6908`) and unprotected TLVs (`0x6907`) with their
+types, the identity, the signature type (`ECDSA-SIG` `0x22`, `ED25519` `0x24`, ...), the key hash, and the image hash.
+That hash is the SHA-256 TLV, which is what `image list` shows and what `image test HASH` takes. The command
+recomputes the SHA-256 of the header, image and protected TLVs and fails when it differs from the TLV.
+
+```
+$ python3 tools/smp_can_client.py image info rt_gauge_esp32s3_touch_amoled_1_75_0.0.2.signed.bin
+version: 0.0.2+0
+...
+identity: product 0xa401, board esp32s3_touch_amoled_1_75/esp32s3/procpu
+signature: ECDSA-SIG (0x22)
+hash: a8c279150734d02eb19f224d1550d6d052f265101eaf5cbb87c2910c51b50ae9
+digest of header, image and protected TLVs: matches the hash
+```
+
+**Commands.** `image list` prints one line per slot, such as
+`slot 0  version 0.0.1  hash 4f...  active confirmed bootable`. A slot that is `pending` without `permanent` boots
+once at the next reset and reverts unless it confirms (a test); with `permanent` it stays. `image test [HASH]` marks
+the image in slot 1 (or the one with that hash) for a test boot, `image confirm [HASH]` confirms the running image
+(or makes the one with that hash permanent), and `image erase` erases slot 1; the unit refuses it while an update is
+pending (`NO_FREE_SLOT`). `dfu status` prints:
+
+```
+confirmed: no
+state: CONFIRMING (2)
+confirm_in_ms: 12000 (12 s)
+reset_cause: 0x00000002 (SOFTWARE)
+```
+
+`state` is `CONFIRMED` (0), `VERIFYING` (1: a test boot, waiting for the unit to report boot complete),
+`CONFIRMING` (2: counting the confirmation delay, `confirm_in_ms` is what is left) or `FAILED` (3: the unit stopped
+feeding its watchdog, a reset and the revert follow). `reset_cause` is the `hwinfo` bit mask of the last reset with its
+names: `PIN`, `SOFTWARE`, `BROWNOUT`, `POR`, `WATCHDOG`, `DEBUG`, `SECURITY`, `LOW_POWER_WAKE`, `CPU_LOCKUP`, `PARITY`,
+`PLL`, `CLOCK`, `HARDWARE`, `USER`, `TEMPERATURE`, `BOOTLOADER`, `FLASH`. A watchdog reset after an update is a revert.
+
+#### Uploading
+
+`image upload FILE` sends `{image: 0, len, sha, off, data}` requests (group 1, command 1). The first carries the
+image's size and the SHA-256 of the whole file; the others carry the offset and the data. The chunks fit the unit's
+packet (`params` `buf_size`): the later ones carry `buf_size - 64` bytes, the first less, since it carries the size and
+hash as well (the client encodes the request to see how much); over the console the 4 bytes of the frame count, and over
+Bluetooth the access point's largest packet from `info` caps the size. `--upgrade` asks the unit to refuse an image that
+is not newer than the running one.
+
+The window, the chunks in flight, defaults to **1 on CAN, on the console, and over Bluetooth for a route to a unit
+behind CAN**, because the target erases flash with interrupts off and a second request on the wire arrives during an
+erase and is lost. Over Bluetooth to the access point itself it is min(the `info` window, `buf_count - 1`), where
+`buf_count` is the unit's packet count from `params`. `--in-flight N` overrides it (and is lowered below `buf_count`;
+a larger value than the default prints a warning). The chunks go out in order. The unit writes a chunk only at the
+offset it expects and otherwise answers with that offset, so an answer that does not lead to the next chunk makes the
+client let the window drain and continue from the unit's offset.
+
+The first chunk is answered with the offset the unit has: 0 plus the chunk for a new transfer, more for one it holds
+already (a transfer interrupted by a lost connection, with the same `sha`: **resuming is just uploading again**, the
+client starts at offset 0 and skips what the unit has), and the image's size when slot 1 holds the image already
+(nothing is sent). The first chunk waits up to 10 s, since the unit compares the slot with the hash; the last waits up
+to 5 s for the slot check, is sent once and, if its answer is lost, the client looks in the slot list for the image. A
+transfer that breaks off (no answer, a dropped connection) starts over like that up to twice more, reconnecting first
+over Bluetooth or the console. The last answer says whether the SHA-256 of the slot matched.
+
+The unit's refusals are named. `img_mgmt` errors come as SMP v2 `{group: 1, rc}`, by name (`NO_FREE_SLOT`,
+`IMAGE_ALREADY_PENDING`, `CURRENT_VERSION_IS_NEWER`, `INVALID_IMAGE_TOO_LARGE`, `HASH_NOT_FOUND`, ...). The identity
+check is group 72:
+
+| rc | Name | Meaning |
+| --- | --- | --- |
+| 2 | `NO_IDENTITY` | The image has no identity TLV among its protected TLVs. |
+| 3 | `WRONG_PRODUCT` | The image is for another product. |
+| 4 | `WRONG_BOARD` | The image is for another board of the product. |
+| 5 | `BAD_IDENTITY` | The identity TLV is malformed. |
+
+The unit checks the identity as the last chunks arrive and then erases the slot's header sector, so the partial image
+cannot be listed or tested. `image update` checks it first, so a wrong image costs no upload.
+
+#### Updating
+
+`image update FILE` is the client flow of the update plan, steps 1 to 8:
+
+1. `device info` (`product`, `board`, `sw`, `build`, `uid`) and the slot list. The file's identity must match the
+   product and the board; a unit that reports no `board` (older firmware) gets a warning and no board check. A file
+   older than the unit's version is a warning (a downgrade), the same version a note. A unit that runs the file's image
+   already is left alone.
+2. It refuses when a test image is running (not confirmed: slot 1 holds its backup and the unit refuses uploads;
+   wait for the confirmation, or `image confirm`) or an update is pending.
+3. The upload, as above.
+4. `image test` with the file's hash; the unit must report it `pending`. `--no-reset` stops here.
+5. `os` reset (a lost answer is fine), then the wait. The unit is silent during the swap, up to ~2.5 min for the
+   gauge and ~1.5 min for rt_daq. The client polls `device info` with a growing pause, from the first moment it goes
+   silent, for up to `--timeout-s` (300) seconds, and brings a dropped link back (Bluetooth scans for the unit again,
+   the console reopens the port). The unit must answer with the same `uid`: a unit may claim another CDMP ID after it
+   restarts, and a different one answering at the old ID is an error. Over Bluetooth, `--route 0` updates the access
+   point itself, which drops the link; update the units behind it first and the access point last.
+6. It polls `dfu status` and the slot list until `CONFIRMED`: `VERIFYING`, then `CONFIRMING` with the time left, then
+   `CONFIRMED`, and prints each change. A unit with no `dfu` group never confirms itself: the update then ends with an error (exit 1) saying the new image runs unconfirmed, and `image confirm` makes it permanent (a reset reverts it).
+   The limit `--timeout-s` starts again whenever the unit goes silent. If the old image runs again, the update was
+   **reverted**: the error says whether the new image sits unconfirmed in slot 1 (it failed and the watchdog reset the
+   unit) or is gone (MCUboot refused it, a signature or key problem), and gives the `reset_cause`.
+
+The exit status is 1 for a refusal, a revert or a timeout. A power cut within about a minute of the swap also reverts
+the update, which is why the client waits for the confirmation.
+
+```shell
+python3 tools/smp_can_client.py --ble "EerieLeap Gauge" image update rt_gauge_esp32s3_touch_amoled_1_75_0.0.2.signed.bin
+python3 tools/smp_can_client.py --ble "EerieLeap Gauge" --route 5 image update rt_daq_0.0.2.signed.bin
+python3 tools/smp_can_client.py --channel can0 --target 1 image update rt_daq_0.0.2.signed.bin --timeout-s 400
+python3 tools/smp_can_client.py --serial /dev/ttyACM0 image upload new.signed.bin --in-flight 1
+python3 tools/smp_can_client.py --serial /dev/ttyACM0 image test
+python3 tools/smp_can_client.py --serial /dev/ttyACM0 reset
+python3 tools/smp_can_client.py --serial /dev/ttyACM0 dfu status
+```
+
 ### Types
 
 | Number | Name | Schema |
@@ -280,11 +445,14 @@ triggers:
 development aid that is not for a shipped build:
 
 ```shell
-west build -d build_bench -b esp32s3_touch_amoled_1_75/esp32s3/procpu ./app -- -DEXTRA_CONF_FILE=bench.conf
+# TO CONFIRM: under sysbuild the variable may have to be the image-prefixed -Dapp_EXTRA_CONF_FILE=bench.conf
+west build -d build_bench -b esp32s3_touch_amoled_1_75/esp32s3/procpu --sysbuild ./app -- -DEXTRA_CONF_FILE=bench.conf
 ```
 
 `EXTRA_CONF_FILE` stays in the CMake cache: build the bench image in a directory of its own, or leave it
-with `-p always`, so a later build of the same directory is not a bench build by accident.
+with `-p always`, so a later build of the same directory is not a bench build by accident. The signed image
+of such a build is `build_bench/app/zephyr/zephyr.signed.bin`. A bench unit can take it over the console
+(`--serial PORT image update ...`), which is how the revert path is tested without a radio or a bus.
 
 | Setting | Why |
 | --- | --- |
