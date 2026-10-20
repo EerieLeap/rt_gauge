@@ -1,0 +1,81 @@
+/*
+ * Flash partition table of the Waveshare ESP32-P4-WIFI6-Touch-LCD-5 (32 MB), two equal image slots
+ * for MCUboot (swap using move). Plan: dev_docs/plans/todo/FIRMWARE_UPDATE_PLAN.md, D2.
+ *
+ * It replaces the board's stock table (espressif/partitions_0x2000_default_32M.dtsi) completely:
+ * the lpcore slots go, nothing builds an LP core image. The stock labels stay, so
+ * zephyr,code-partition = &slot0_partition still resolves.
+ *
+ * Two images include this file, and it holds the flash layout only (no fstab, no aliases):
+ *   - the application, from app/boards/esp32p4_wifi6_touch_lcd_5_esp32p4_hpcore.overlay;
+ *   - MCUboot, from app/sysbuild.cmake (mcuboot_EXTRA_DTC_OVERLAY_FILE).
+ * The two must see the same layout, which is why it is one file.
+ *
+ *   0x0002000  boot_partition     56 KB     MCUboot (the ROM reserves the first 8 KB)
+ *   0x0010000  sys_partition      64 KB
+ *   0x0020000  slot0_partition    4 MB      the running image
+ *   0x0420000  slot1_partition    4 MB      the candidate or the backup
+ *   0x0820000  intfs0_partition   24128 KB  LittleFS
+ *   0x1fb0000  storage_partition  192 KB    NVS (settings, BLE bonds)
+ *   0x1fe0000  unused             124 KB
+ *   0x1fff000  coredump_partition 4 KB
+ *
+ * Every slot starts on a 64 KB boundary (the MMU page of the ESP32), which keeps direct-XIP open.
+ * Swap using move spends one sector and the status area of the slots: the largest image is
+ * (slot size / 4 KB - 1) sectors minus the trailer.
+ */
+
+&flash0 {
+	/* Drop the stock table whole, so no stock node can overlap a node below. */
+	/delete-node/ partitions;
+
+	partitions {
+		compatible = "fixed-partitions";
+		ranges;
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		boot_partition: partition@2000 {
+			compatible = "zephyr,mapped-partition";
+			label = "mcuboot";
+			reg = <0x2000 DT_SIZE_K(56)>;
+		};
+
+		sys_partition: partition@10000 {
+			compatible = "zephyr,mapped-partition";
+			label = "sys";
+			reg = <0x10000 DT_SIZE_K(64)>;
+		};
+
+		slot0_partition: partition@20000 {
+			compatible = "zephyr,mapped-partition";
+			label = "image-0";
+			reg = <0x20000 DT_SIZE_M(4)>;
+		};
+
+		slot1_partition: partition@420000 {
+			compatible = "zephyr,mapped-partition";
+			label = "image-1";
+			reg = <0x420000 DT_SIZE_M(4)>;
+		};
+
+		/* Up to the storage partition. */
+		intfs0_partition: partition@820000 {
+			compatible = "zephyr,mapped-partition";
+			label = "intfs0_storage";
+			reg = <0x820000 DT_SIZE_K(24128)>;
+		};
+
+		storage_partition: partition@1fb0000 {
+			compatible = "zephyr,mapped-partition";
+			label = "storage";
+			reg = <0x1fb0000 DT_SIZE_K(192)>;
+		};
+
+		coredump_partition: partition@1fff000 {
+			compatible = "zephyr,mapped-partition";
+			label = "coredump";
+			reg = <0x1fff000 DT_SIZE_K(4)>;
+		};
+	};
+};
