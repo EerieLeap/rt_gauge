@@ -4,40 +4,42 @@
         {
             "label": "Build 1.75AMO",
             "type": "shell",
-            "command": "west build -p auto -b esp32s3_touch_amoled_1_75/esp32s3/procpu ./app",
-            "group": {
-                "kind": "build",
-                "isDefault": true
-            },
-            "problemMatcher": ["$gcc"],
-            "detail": "Build the Zephyr project using native_sim POSIX board"
-        },
-        {
-            "label": "Build 1.75AMO With Bootloader",
-            "type": "shell",
             "command": "west build -p auto -b esp32s3_touch_amoled_1_75/esp32s3/procpu --sysbuild ./app",
             "group": {
                 "kind": "build",
                 "isDefault": true
             },
             "problemMatcher": ["$gcc"],
-            "detail": "Build the Zephyr project using native_sim POSIX board",
-            "options": {
-                "statusbar": {
-                    "hide": true
-                }
-            }
+            "detail": "Build the gauge for the Waveshare ESP32-S3-Touch-AMOLED-1.75 with MCUboot (sysbuild: build/mcuboot and build/app)"
+        },
+        {
+            "label": "Build 1.75AMO Bench",
+            "type": "shell",
+            "command": "west build -d build_bench -p auto -b esp32s3_touch_amoled_1_75/esp32s3/procpu --sysbuild ./app -- -DEXTRA_CONF_FILE=bench.conf",
+            "group": "build",
+            "problemMatcher": ["$gcc"],
+            "detail": "Bench build (shell, SMP over the console, stack reports) in build_bench, with MCUboot"
         },
         {
             "label": "Build P4 LCD5",
             "type": "shell",
-            "command": "west build --build-dir ./build -p auto -b esp32p4_wifi6_touch_lcd_5/esp32p4/hpcore ./app -- -DOPENOCD=/home/ubuntu/zephyr/workspace/utilities/openocd-esp32/bin/openocd -DOPENOCD_DEFAULT_PATH=/home/ubuntu/zephyr/workspace/utilities/openocd-esp32/share/openocd/scripts",
+            "command": "west build --build-dir ./build -p auto -b esp32p4_wifi6_touch_lcd_5/esp32p4/hpcore --sysbuild ./app -- -DOPENOCD=/home/ubuntu/zephyr/workspace/utilities/openocd-esp32/bin/openocd -DOPENOCD_DEFAULT_PATH=/home/ubuntu/zephyr/workspace/utilities/openocd-esp32/share/openocd/scripts",
             "group": {
                 "kind": "build",
                 "isDefault": true
             },
             "problemMatcher": ["$gcc"],
-            "detail": "Build the Zephyr project for the Waveshare ESP32-P4-WIFI6-Touch-LCD-5"
+            "detail": "Build the gauge for the Waveshare ESP32-P4-WIFI6-Touch-LCD-5 with MCUboot (sysbuild)"
+        },
+        {
+            "label": "Check image sizes",
+            "type": "shell",
+            "command": "scripts/check_image_sizes.py build",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": "none",
+            "detail": "MCUboot against its boot partition and the signed application against slot0 minus the swap trailer, for the last hardware build (runs at the end of every sysbuild build)"
         },
         {
             "label": "Build NativeSim",

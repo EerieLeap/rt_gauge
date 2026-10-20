@@ -8,7 +8,7 @@
             "type": "cortex-debug",
             "request": "attach", // attach instead of launch, because otherwise flash write is attempted, but fails
             "cwd": "${workspaceRoot}",
-            "executable": "./build/zephyr/zephyr.elf",
+            "executable": "./build/app/zephyr/zephyr.elf",
             "servertype": "openocd",
             "interface": "jtag",
             "toolchainPrefix": "xtensa-espressif_esp32s3_zephyr-elf",
@@ -74,7 +74,7 @@
             "preLaunchTask": "Build QEMU Cortex-M3",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/build/zephyr/zephyr.elf",
+            "program": "${workspaceFolder}/build/app/zephyr/zephyr.elf",
             "args": [],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",

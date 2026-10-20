@@ -15,6 +15,34 @@ Memory region         Used Size  Region Size  %age Used
         IDT_LIST:          0 GB         8 KB      0.00%
 ```
 
+## Flash Partition Table (MCUboot)
+
+The 16 MB flash holds two equal image slots for MCUboot (swap using move). The table is
+`app/boards/partitions/esp32s3_touch_amoled_1_75_esp32s3_procpu.dtsi`; the application's overlay and MCUboot both include it,
+and it replaces the stock `partitions_0x0_amp_16M` table completely (no APP CPU or LP core slots).
+
+| Partition | Offset | Size | Note |
+| --- | --- | --- | --- |
+| `boot_partition` (MCUboot) | 0x000000 | 64 KB | |
+| `sys_partition` | 0x010000 | 64 KB | |
+| `slot0_partition` | 0x020000 | 4 MB | the running image; the application is linked to run from here |
+| `slot1_partition` | 0x420000 | 4 MB | the update candidate, then the backup |
+| `intfs0_partition` (LittleFS) | 0x820000 | 7744 KB | moved from 0x600000 and shrunk from 8 MB |
+| `storage_partition` (NVS, BLE bonds) | 0xFB0000 | 192 KB | |
+| unused | 0xFE0000 | 124 KB | |
+| `coredump_partition` | 0xFFF000 | 4 KB | |
+
+- Every slot starts on a 64 KB boundary, the MMU page of the ESP32.
+- The largest signed image is `slot0` minus the swap trailer, `CONFIG_MCUBOOT_UPDATE_FOOTER_SIZE` (0x5000, 20 KB): about
+  4076 KB. `scripts/check_image_sizes.py` checks it, and MCUboot's size against `boot_partition`, at the end of every
+  sysbuild build.
+- The linker does not know the slot: the **FLASH** line of the memory report is still measured against the whole chip
+  (16777088 B). The slot limit is enforced after the link, by imgtool (`--max-sectors`, from the signing wrapper) and by
+  `scripts/check_image_sizes.py`.
+- `ROM_START_OFFSET` is 0x20 (the MCUboot image header, the `mcuboot_hdr` region of the report) and `ROM_END_OFFSET` 0x5096.
+- Under MCUboot the application gets less internal data RAM than with simple boot: `dram0_0_seg` is 380672 B instead
+  of 399108 B (-18436 B), because `USER_DRAM_END` stops at the bootloader's loader segment.
+
 ## Memory Regions
 
 ### FLASH (External Flash Chip)

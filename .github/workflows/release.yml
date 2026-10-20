@@ -1,0 +1,168 @@
+name: Release
+
+# Builds the signed release images of both gauge boards with the release key, a GitHub Actions secret.
+#
+# The key never enters the repository, and a pull request never sees it: the job runs in the
+# protected `release` environment (Settings > Environments), which should allow version tags only and
+# hold the secret RELEASE_SIGNING_KEY (an ECDSA P-256 PEM private key). One build signs the
+# application and embeds the matching public key in MCUboot, so a unit flashed with these artifacts
+# accepts release images only. Keep an offline copy of the key: GitHub never shows a stored secret
+# again, and losing the key ends over-the-air updates for every unit that trusts it.
+#
+# Per board, the workflow artifact holds
+#   rt_gauge_<board>_<version>.signed.bin          the over-the-air image (img_mgmt upload)
+#   rt_gauge_<board>_<version>.mcuboot.bin         MCUboot, for the first install over USB
+#   rt_gauge_<board>_<version>.app.confirmed.bin   the application, padded to its slot and confirmed,
+#                                                  for the first install over USB
+#   rt_gauge_<board>_<version>.dumpinfo.txt        imgtool dumpinfo of the signed image: version,
+#                                                  SHA-256, signature, identity TLV
+#   rt_gauge_<board>_<version>.flash.txt           the esptool line for the USB install
+#   rt_gauge_<board>_<version>.sizes.txt           the check_image_sizes.py report
+#
+# Tag vMAJOR.MINOR.PATCHLEVEL (+TWEAK when app/VERSION has one) must match app/VERSION.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    environment: release
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: esp32s3_touch_amoled_1_75
+            target: esp32s3_touch_amoled_1_75/esp32s3/procpu
+            chip: esp32s3
+            boot_offset: '0x0'
+          - name: esp32p4_wifi6_touch_lcd_5
+            target: esp32p4_wifi6_touch_lcd_5/esp32p4/hpcore
+            chip: esp32p4
+            boot_offset: '0x2000'
+
+    env:
+      # slot0_partition of both boards (app/boards/partitions/).
+      SLOT0_OFFSET: '0x20000'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          path: rt_gauge
+          submodules: recursive
+
+      # app/VERSION is the one source of the version: it becomes MCUboot's image version and the
+      # version `device info` reports.
+      - name: Read the version
+        working-directory: rt_gauge
+        run: |
+          set -eu
+          get() { sed -n "s/^$1 *= *//p" app/VERSION | tr -d '[:space:]'; }
+          version="$(get VERSION_MAJOR).$(get VERSION_MINOR).$(get PATCHLEVEL)"
+          [ "$(get VERSION_TWEAK)" = "0" ] || version="$version+$(get VERSION_TWEAK)"
+          [ -z "$(get EXTRAVERSION)" ] || version="$version-$(get EXTRAVERSION)"
+          echo "app/VERSION is $version"
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match app/VERSION ($version): expected v$version"
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Set up Zephyr
+        uses: zephyrproject-rtos/action-zephyr-setup@v1
+        with:
+          app-path: rt_gauge
+          toolchains: xtensa-espressif_esp32s3_zephyr-elf:riscv64-zephyr-elf
+
+      - name: Install the build tools
+        run: |
+          west packages pip --install
+          pip install protobuf grpcio-tools zcbor
+
+      - name: Fetch the Espressif blobs
+        run: west blobs fetch hal_espressif
+
+      # The secret goes through the environment into a file that only this user can read, never onto a
+      # command line or into the log. The file is deleted by the last step, even when the build fails.
+      - name: Write the release key
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          set -eu
+          if [ -z "$RELEASE_SIGNING_KEY" ]; then
+            echo "::error::the secret RELEASE_SIGNING_KEY is not set in the release environment"
+            exit 1
+          fi
+          key="$RUNNER_TEMP/release-ec-p256.pem"
+          (umask 077 && printf '%s\n' "$RELEASE_SIGNING_KEY" > "$key")
+          chmod 600 "$key"
+          # A wrong key type would build images that no unit accepts; say so before the build.
+          if ! openssl pkey -in "$key" -noout -text 2>/dev/null | grep -q prime256v1; then
+            echo "::error::RELEASE_SIGNING_KEY is not an ECDSA P-256 PEM private key"
+            exit 1
+          fi
+          echo "RELEASE_KEY_FILE=$key" >> "$GITHUB_ENV"
+
+      # -DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE replaces the development key of app/sysbuild.conf for both
+      # images (a Kconfig string, so the value carries its own quotes). The confirmed image is padded to the slot and confirmed, so a first install over USB
+      # boots without a test swap.
+      - name: Build ${{ matrix.target }}
+        working-directory: rt_gauge
+        run: |
+          west build -p always -b ${{ matrix.target }} --sysbuild ./app -d build -o=-j4 -- \
+            "-DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE=\"$RELEASE_KEY_FILE\"" \
+            -Dapp_CONFIG_MCUBOOT_GENERATE_CONFIRMED_IMAGE=y
+
+      - name: Collect the artifacts
+        working-directory: rt_gauge
+        run: |
+          set -euo pipefail
+          out="$GITHUB_WORKSPACE/release"
+          base="rt_gauge_${{ matrix.name }}_${VERSION}"
+          mkdir -p "$out"
+          cp build/app/zephyr/zephyr.signed.bin "$out/$base.signed.bin"
+          cp build/mcuboot/zephyr/zephyr.bin "$out/$base.mcuboot.bin"
+          cp build/app/zephyr/zephyr.signed.confirmed.bin "$out/$base.app.confirmed.bin"
+          python3 scripts/check_image_sizes.py build | tee "$out/$base.sizes.txt"
+          imgtool="$(west topdir)/bootloader/mcuboot/scripts/imgtool.py"
+          python3 "$imgtool" dumpinfo "$out/$base.signed.bin" | tee "$out/$base.dumpinfo.txt"
+          cat > "$out/$base.flash.txt" <<EOF
+          # First install over USB (the chip is erased first; see README.md, "Moving a unit from simple boot to MCUboot"):
+          esptool --chip ${{ matrix.chip }} --port <PORT> erase-flash
+          esptool --chip ${{ matrix.chip }} --port <PORT> write-flash ${{ matrix.boot_offset }} $base.mcuboot.bin $SLOT0_OFFSET $base.app.confirmed.bin
+          # Later updates: upload $base.signed.bin over the air (img_mgmt, tools/smp_can_client.py image).
+          EOF
+          (cd "$out" && sha256sum "$base".* | tee "$base.sha256")
+
+      - name: Upload the artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: rt_gauge_${{ matrix.name }}_${{ env.VERSION }}
+          path: release/*
+          if-no-files-found: error
+
+      # Whatever happened above, the key does not stay on the runner.
+      - name: Delete the release key
+        if: always()
+        run: |
+          if [ -n "${RELEASE_KEY_FILE:-}" ]; then
+            shred -u "$RELEASE_KEY_FILE" 2>/dev/null || rm -f "$RELEASE_KEY_FILE"
+          fi
+          rm -f "$RUNNER_TEMP/release-ec-p256.pem"
