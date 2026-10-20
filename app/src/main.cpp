@@ -311,12 +311,10 @@ int main() {
 
     // Constructed after every controller that registers a configuration manager.
     const auto canbus_com_service = canbus_controller->GetComService();
-    const auto system_configuration = system_controller->GetConfigurationManager()->Get();
     const auto management_controller = std::make_shared<ManagementController>(
         configuration_service, config_work_queue_thread,
         canbus_com_service != nullptr ? canbus_com_service->GetNetworkInfo() : nullptr,
-        system_configuration != nullptr ? system_configuration->build_number : 0, sensors_controller->GetCapabilities(),
-        nullptr, assets_manager, SettingId::ALL
+        sensors_controller->GetCapabilities(), nullptr, assets_manager, SettingId::ALL
     );
     if(management_controller->Initialize() != 0)
         LOG_ERR("Failed to initialize the management controller.");
