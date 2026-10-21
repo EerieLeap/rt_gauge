@@ -61,6 +61,22 @@ python -m serial.tools.miniterm --rts 0 /dev/ttyACM1 115200
 
 Leave DTR alone there. A port that the client holds is exclusive; close the terminal first.
 
+#### After a reset on a console
+
+The S3's USB-Serial-JTAG keeps its receive FIFO over a warm reset (`os reset`, and the watchdog's). A line the host
+writes between the reset and the moment the app enables the receive interrupt stays in that FIFO; Zephyr's driver
+clears the interrupt status without draining it, so no further interrupt comes and every later write times out.
+Reopening the port does not help, and only a hardware reset (RTS) clears it, which would revert an unconfirmed test
+image. So on a console the client **stops writing after it sends `os reset`** and only reads (reading is harmless)
+until the unit prints `*** Booting Zephyr` (MCUboot's own banner does not count: the swap follows it) or the shell
+prompt `uart:~$`, then keeps listening for another 1.5 s, since the shell enables its receive a moment later. Then it
+resumes polling. This applies to `reset` (which returns only once the unit is up, so the next command is safe), to
+`image update` (the reset, and the revert path: a `FAILED` dfu state, or a unit that goes silent while the new image
+is watched, also means a reset, and nothing is written until the banner), and to nothing else; normal commands
+write as before. A port that leaves the USB bus meanwhile is opened again. If no banner shows within the time
+given (`--timeout-s`, 300; the swap takes up to ~2.5 min) the client says so and polls the unit anyway, for up to
+60 s more. Progress goes to stderr every 10 s. CAN and Bluetooth are unchanged.
+
 #### Bluetooth
 
 A unit with BLE advertises the access point service of rt_core's `docs/bluetooth.md`
@@ -94,7 +110,7 @@ carry on. Not tested against a radio yet: this checkout's tests use a stand-in f
 | Command | Transport | Action |
 | --- | --- | --- |
 | `echo TEXT`, `params`, `info`, `devices`, `config-list` | any | One request each. |
-| `reset` | any | Restarts the unit (`os` reset); a lost answer is no failure. |
+| `reset [--timeout-s N]` | any | Restarts the unit (`os` reset); a lost answer is no failure. On a console it then listens for the boot banner (up to N s, default 300) before it returns; see [After a reset](#after-a-reset-on-a-console). |
 | `config-crc TYPE` | any | Length, CRC32 and applied flag of the stored configuration. |
 | `config-read TYPE FILE`, `config-write TYPE FILE` | any | The stored CBOR bytes, unchanged. `TYPE` is a number or a name. |
 | `config-get TYPE [FILE]` | any | Reads a configuration and prints it as a description (YAML; a `.json` file name selects JSON). |
@@ -328,9 +344,10 @@ cannot be listed or tested. `image update` checks it first, so a wrong image cos
 3. The upload, as above.
 4. `image test` with the file's hash; the unit must report it `pending`. `--no-reset` stops here.
 5. `os` reset (a lost answer is fine), then the wait. The unit is silent during the swap, up to ~2.5 min for the
-   gauge and ~1.5 min for rt_daq. The client polls `device info` with a growing pause, from the first moment it goes
-   silent, for up to `--timeout-s` (300) seconds, and brings a dropped link back (Bluetooth scans for the unit again,
-   the console reopens the port). The unit must answer with the same `uid`: a unit may claim another CDMP ID after it
+   gauge and ~1.5 min for rt_daq. Over a console the client writes nothing until the boot banner shows (see
+   [After a reset](#after-a-reset-on-a-console)); on the other links it polls `device info` with a growing pause,
+   from the first moment the unit goes silent, for up to `--timeout-s` (300) seconds, and brings a dropped link back
+   (Bluetooth scans for the unit again, the console reopens the port). The unit must answer with the same `uid`: a unit may claim another CDMP ID after it
    restarts, and a different one answering at the old ID is an error. Over Bluetooth, `--route 0` updates the access
    point itself, which drops the link; update the units behind it first and the access point last.
 6. It polls `dfu status` and the slot list until `CONFIRMED`: `VERIFYING`, then `CONFIRMING` with the time left, then

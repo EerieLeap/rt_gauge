@@ -213,6 +213,14 @@ IMAGE_POLL_MAX_INTERVAL_S = 5.0
 IMAGE_VERIFY_INTERVAL_S = 2.0
 IMAGE_NOTE_INTERVAL_S = 10.0
 DEFAULT_UPDATE_TIMEOUT_S = 300.0
+# What a console shows when the app of a unit is up: the Zephyr boot banner (MCUboot's reads "*** Booting MCUboot",
+# the swap is still to come) or the shell's prompt. The shell enables its receive interrupt a moment after either.
+SERIAL_BOOT_MARKERS = ("*** Booting Zephyr", "uart:~$")
+SERIAL_BOOT_SETTLE_S = 1.5
+# A console unit that printed no banner within the time given is polled all the same, for this long.
+IMAGE_POLL_FALLBACK_S = 60.0
+# Polling after the banner: at least this long, whatever is left of the time given.
+IMAGE_POST_BOOT_POLL_S = 30.0
 
 DEFAULT_ASSET_IN_FLIGHT = 2
 MAX_ASSET_IN_FLIGHT = 255
@@ -578,6 +586,10 @@ class SerialFrameDecoder:
             if packet is not None:
                 packets.append(packet)
 
+    def pending_text(self) -> bytes:
+        """The console line being assembled, such as a prompt that has no newline yet."""
+        return self._text
+
     def flush_text(self) -> None:
         """Hands over the console line still being assembled, such as a prompt without a newline."""
         if self._text:
@@ -683,6 +695,7 @@ class SmpSerialLink:
         self._console: list[str] = []
         self._packets: collections.deque[bytes] = collections.deque()
         self._decoder = SerialFrameDecoder(self._on_console_line)
+        self._boot_seen = False
         self._port = open_serial_port(self._serial_module, port, baud)
 
     def __enter__(self) -> "SmpSerialLink":
@@ -704,6 +717,57 @@ class SmpSerialLink:
         self._port = open_serial_port(self._serial_module, self._port_name, self._baud)
         self._packets.clear()
         self._decoder = SerialFrameDecoder(self._on_console_line)
+
+    @property
+    def boot_seen(self) -> bool:
+        """Whether the console showed a boot banner or the shell's prompt since expect_boot()."""
+        pending = ANSI_ESCAPE.sub("", self._decoder.pending_text().decode("utf-8", errors="replace"))
+        return self._boot_seen or any(marker in pending for marker in SERIAL_BOOT_MARKERS)
+
+    def expect_boot(self) -> None:
+        """Forgets the boot markers read so far; call it before whatever may reset the unit.
+
+        The S3's USB-Serial-JTAG keeps its OUT FIFO over a warm reset, and a line written between the reset
+        and the moment the app enables the receive interrupt stays in it: the driver does not drain it, no
+        further interrupt comes, and every later write times out until a hardware reset (which reverts a test
+        image). So after a reset nothing is written until wait_for_boot() says the unit is up; reading is harmless.
+        """
+        with contextlib.suppress(OSError):
+            while self._port.in_waiting:
+                self._pump()
+        self._boot_seen = False
+
+    def wait_for_boot(self, timeout_s: float, *, what: str = "waiting for the boot banner",
+                      settle_s: float | None = None) -> bool:
+        """Listens without writing until the console shows the boot banner or the prompt, then for the settle time.
+
+        Returns False when nothing showed within @p timeout_s. A port that left the USB bus is opened again.
+        """
+        settle_s = SERIAL_BOOT_SETTLE_S if settle_s is None else settle_s
+        started_s = time.monotonic()
+        next_note_s = started_s + IMAGE_NOTE_INTERVAL_S
+        while not self.boot_seen:
+            now_s = time.monotonic()
+            if now_s >= started_s + timeout_s:
+                return False
+            if now_s >= next_note_s:
+                print(f"{what}: {format_duration(now_s - started_s)} so far", file=sys.stderr)
+                next_note_s = now_s + IMAGE_NOTE_INTERVAL_S
+            self._listen()
+        settle_until_s = time.monotonic() + settle_s
+        while time.monotonic() < settle_until_s:
+            self._listen()
+        return True
+
+    def _listen(self) -> None:
+        try:
+            self._pump()
+        except OSError:
+            # The port is gone while the unit restarts (or a read failed): open it again; the next read says
+            # whether that worked.
+            with contextlib.suppress(OSError):
+                self.reconnect()
+            time.sleep(0.2)
 
     def send(self, packet: bytes) -> None:
         for line in encode_serial_lines(packet):
@@ -743,6 +807,8 @@ class SmpSerialLink:
 
     def _on_console_line(self, line: str) -> None:
         line = ANSI_ESCAPE.sub("", line)
+        if any(marker in line for marker in SERIAL_BOOT_MARKERS):
+            self._boot_seen = True
         self._console.append(line)
         if self._show_console:
             print(f"console: {line}", file=sys.stderr)
@@ -2707,12 +2773,26 @@ def command_devices(client: SmpClient, args: argparse.Namespace) -> None:
 
 def command_reset(client: SmpClient, args: argparse.Namespace) -> None:
     # The unit restarts shortly after it answers; it is not asked twice, and a lost answer is no failure.
+    listens = hasattr(client.link, "wait_for_boot")
+    if listens:
+        client.link.expect_boot()
     try:
         client.write(Group.OS, OS_RESET, {}, retries=0)
     except TimeoutError:
         print("no response; the unit may have restarted")
+    else:
+        print("reset requested")
+    if not listens:
         return
-    print("reset requested")
+
+    # On a console nothing may be written while the unit boots (see SmpSerialLink.expect_boot); a command that
+    # follows this one is safe once it returns.
+    print(f"listening for the boot banner (up to {format_duration(args.timeout_s)}; a swap takes up to ~2.5 min)")
+    if client.link.wait_for_boot(args.timeout_s, what="waiting for the boot banner"):
+        print("the unit is up")
+    else:
+        print(f"warning: no boot banner within {format_duration(args.timeout_s)}; give the unit time before the "
+              f"next command", file=sys.stderr)
 
 
 def command_config_list(client: SmpClient, args: argparse.Namespace) -> None:
@@ -3136,6 +3216,23 @@ def request_reset(client: SmpClient) -> None:
         pass
 
 
+def restart_unit(client: SmpClient, timeout_s: float, what: str) -> bool | None:
+    """Resets the unit. On a console it then stops writing and listens until the unit prints its boot banner.
+
+    Returns True when the unit announced its boot, False when the console showed nothing within @p timeout_s,
+    and None on a link with no console to listen to (CAN, Bluetooth), where nothing changes.
+    """
+    link = client.link
+    listens = hasattr(link, "wait_for_boot")
+    if listens:
+        link.expect_boot()
+    request_reset(client)
+    if not listens:
+        return None
+    print("not writing to the console until the unit prints its boot banner")
+    return link.wait_for_boot(timeout_s, what=what)
+
+
 def watch_confirmation(client: SmpClient, *, new_hash: bytes, timeout_s: float) -> bool:
     """Polls until the running image is the new one and confirmed. Raises when it was reverted or never confirms.
 
@@ -3150,10 +3247,13 @@ def watch_confirmation(client: SmpClient, *, new_hash: bytes, timeout_s: float) 
     last_state = None
     last_error: Exception | None = None
     deadline_s = time.monotonic() + timeout_s
+    listens = hasattr(client.link, "wait_for_boot")
     while True:
         if time.monotonic() > deadline_s:
             detail = f" (last error: {last_error})" if last_error else ""
             raise TimeoutError(f"the new image did not confirm within {format_duration(timeout_s)}{detail}")
+        if listens:
+            client.link.expect_boot()
         status = None
         try:
             images = read_images(client)
@@ -3167,6 +3267,12 @@ def watch_confirmation(client: SmpClient, *, new_hash: bytes, timeout_s: float) 
                     print("note: the unit has no dfu group, so the image will not confirm itself: run `image confirm`")
         except (TimeoutError, SmpError, OSError) as error:
             last_error = error
+            if listens:
+                # Silent: the unit may be rebooting (a failed image is reset by its watchdog, and MCUboot
+                # swaps back). A console must not be written to meanwhile, so listen first.
+                if client.link.wait_for_boot(timeout_s, what="the unit went silent; listening for its boot"):
+                    deadline_s = time.monotonic() + timeout_s
+                    continue
             try:
                 client.read(Group.DEVICE, 0, retries=0)
             except (TimeoutError, SmpError, OSError):
@@ -3210,6 +3316,12 @@ def watch_confirmation(client: SmpClient, *, new_hash: bytes, timeout_s: float) 
         if note != last_state:
             print(f"the new image runs: {note}")
             last_state = note
+        if state == DFU_FAILED and listens:
+            # A reset follows: write nothing until the unit is up again. The markers have been forgotten at
+            # the top of this pass, so a banner that came since counts.
+            if client.link.wait_for_boot(timeout_s, what="the new image failed; listening for the unit's boot"):
+                deadline_s = time.monotonic() + timeout_s
+            continue
         time.sleep(IMAGE_VERIFY_INTERVAL_S)
 
 
@@ -3255,10 +3367,20 @@ def command_image_update(client: SmpClient, args: argparse.Namespace) -> None:
     # 6 and 7: reset, and wait for the swap. The unit has the same UID afterwards, or it is another unit.
     uid = device.get("uid")
     print("resetting; the swap keeps the unit silent for up to ~2.5 min")
-    request_reset(client)
     reset_s = time.monotonic()
-    after = poll_device_info(client, deadline_s=reset_s + args.timeout_s, expect_restart=True,
-                             what="waiting for the swap (up to ~2.5 min on the gauge, ~1.5 min on rt_daq)")
+    what = "waiting for the swap (up to ~2.5 min on the gauge, ~1.5 min on rt_daq)"
+    booted = restart_unit(client, args.timeout_s, what)
+    now_s = time.monotonic()
+    if booted is None:
+        after = poll_device_info(client, deadline_s=reset_s + args.timeout_s, expect_restart=True, what=what)
+    elif booted:
+        after = poll_device_info(client, deadline_s=max(reset_s + args.timeout_s, now_s + IMAGE_POST_BOOT_POLL_S),
+                                 expect_restart=False, what="the unit booted; asking it")
+    else:
+        print(f"warning: no boot banner within {format_duration(args.timeout_s)}; asking the unit anyway",
+              file=sys.stderr)
+        after = poll_device_info(client, deadline_s=now_s + IMAGE_POLL_FALLBACK_S, expect_restart=False,
+                                 what="no boot banner; asking the unit")
     print(f"the unit answers again after {format_duration(time.monotonic() - reset_s)}: {describe_unit(after)}")
     if uid is not None and after.get("uid") != uid:
         raise RuntimeError(f"another unit answers now (uid {after.get('uid', 0):#010x} instead of {uid:#010x}); "
@@ -3355,7 +3477,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     commands.add_parser("params", help="os mcumgr params: buffer size and count")
     commands.add_parser("info", help="device info")
     commands.add_parser("devices", help="network devices, as the unit sees them")
-    commands.add_parser("reset", help="os reset: restart the unit")
+    reset = commands.add_parser("reset", help="os reset: restart the unit")
+    reset.add_argument("--timeout-s", type=float, default=DEFAULT_UPDATE_TIMEOUT_S, metavar="N",
+                       help=f"serial: seconds to listen for the boot banner before the command returns "
+                            f"(default: {DEFAULT_UPDATE_TIMEOUT_S:g}; a swap takes up to ~2.5 min)")
     commands.add_parser("config-list", help="configuration types and their size caps")
     for name in ("config-crc", "config-read", "config-write"):
         sub = commands.add_parser(name, help=name.replace("-", " ") + " (raw bytes)")

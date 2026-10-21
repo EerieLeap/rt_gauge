@@ -44,7 +44,7 @@ KEY = Path(__file__).resolve().parent.parent / "modules/eerie_leap_rt_core/keys/
 # Fast clocks for the waits; the client's real values are minutes.
 FAST = dict(IMAGE_FIRST_CHUNK_TIMEOUT_S=0.1, IMAGE_LAST_CHUNK_TIMEOUT_S=0.1, IMAGE_RESUME_PAUSE_S=0.0,
             IMAGE_POLL_INTERVAL_S=0.001, IMAGE_POLL_MAX_INTERVAL_S=0.004, IMAGE_VERIFY_INTERVAL_S=0.001,
-            IMAGE_RESTART_GRACE_S=0.5)
+            IMAGE_RESTART_GRACE_S=0.5, SERIAL_BOOT_SETTLE_S=0.5, IMAGE_POLL_FALLBACK_S=2.0, IMAGE_POST_BOOT_POLL_S=3.0)
 
 
 def build_image(size: int = 3000, *, version=(0, 0, 2, 0), product: int = PRODUCT, board: str = BOARD,
@@ -90,6 +90,8 @@ class FakeUnit:
         self.frugal = False
         self.dfu_polls = 0
         self.revert_next = False
+        self.auto_revert = True                     # False: a ConsoleServer reverts it, as a watchdog would.
+        self.reboots = 0
         self.silent_after_reset = 4
 
     @staticmethod
@@ -100,7 +102,7 @@ class FakeUnit:
         return slot
 
     def handle(self, packet: bytes) -> list[bytes]:
-        if self.revert_next:
+        if self.revert_next and self.auto_revert:
             self.revert_next = False
             self._revert()
         if self.silent_requests > 0:
@@ -233,6 +235,7 @@ class FakeUnit:
 
     def _reset(self) -> None:
         self.resets += 1
+        self.reboots += 1
         self.reset_cause = 1 << 1
         self.silent_requests = self.silent_after_reset
         self.dfu_polls = 0
@@ -246,6 +249,7 @@ class FakeUnit:
                 old["confirmed"] = False
 
     def _revert(self) -> None:
+        self.reboots += 1
         new, old = self.slots
         new.update(active=False, confirmed=False)
         old.update(active=True, confirmed=True)
@@ -1061,6 +1065,164 @@ class SerialTest(ClientCase):
         path = self.tmp / "image.bin"
         path.write_bytes(image)
         return path
+
+
+class ConsoleServer:
+    """A pty console with a FakeUnit behind it that boots as the S3's USB-Serial-JTAG does over a reset.
+
+    From the reset until `rx_delay_s` after the banner, the app is not reading. Any data the host writes in that
+    time stays in the peripheral's FIFO, the driver never drains it, and from then on the unit hears nothing
+    (`wedged`), whatever the host writes. MCUboot prints its own banner first (a swap follows, silent).
+    """
+
+    BANNER = b"*** Booting Zephyr OS build test ***\r\n"
+
+    def __init__(self, unit: FakeUnit, *, announce: bytes | None = BANNER, mcuboot: bool = True,
+                 boot_s: float = 0.4, rx_delay_s: float = 0.3, revert_delay_s: float = 0.15) -> None:
+        self.unit, self.announce, self.mcuboot = unit, announce, mcuboot
+        self.boot_s, self.rx_delay_s, self.revert_delay_s = boot_s, rx_delay_s, revert_delay_s
+        self.master, self.slave = pty.openpty()
+        self.name = os.ttyname(self.slave)
+        self.wedged = False
+        self.booted_at: list[float] = []
+        self.stop = threading.Event()
+        self.thread = threading.Thread(target=self.serve, daemon=True)
+        self.thread.start()
+
+    def close(self) -> None:
+        self.stop.set()
+        self.thread.join(2.0)
+        os.close(self.slave)
+        os.close(self.master)
+
+    def serve(self) -> None:
+        decoder = client.SerialFrameDecoder()
+        reboots = self.unit.reboots
+        rx_from, announce_at, revert_at = 0.0, None, None
+        while not self.stop.is_set():
+            now = time.monotonic()
+            if self.unit.revert_next and revert_at is None:
+                revert_at = now + self.revert_delay_s       # The watchdog resets the unit a moment after FAILED.
+            if revert_at is not None and now >= revert_at:
+                self.unit.revert_next, revert_at = False, None
+                self.unit._revert()
+            if self.unit.reboots != reboots:
+                reboots = self.unit.reboots
+                self.booted_at.append(now)
+                if self.mcuboot:
+                    os.write(self.master, b"*** Booting MCUboot v2.2.0 ***\r\n")
+                announce_at = now + self.boot_s
+                rx_from = announce_at + self.rx_delay_s
+            if announce_at is not None and now >= announce_at:
+                announce_at = None
+                if self.announce:
+                    os.write(self.master, self.announce)
+            if not select.select([self.master], [], [], 0.01)[0]:
+                continue
+            try:
+                data = os.read(self.master, 4096)
+            except OSError:
+                return
+            if time.monotonic() < rx_from:
+                self.wedged = True
+            if self.wedged:
+                continue
+            for packet in decoder.feed(data):
+                for response in self.unit.handle(packet):
+                    for line in client.encode_serial_lines(response):
+                        os.write(self.master, line)
+
+
+class SerialBootTest(ClientCase):
+    """After a reset a console is not written to until the unit says it is up (the S3 would wedge for good)."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.unit.silent_after_reset = 0
+
+    def console(self, **options) -> tuple[ConsoleServer, client.SmpClient]:
+        server = ConsoleServer(self.unit, **options)
+        self.addCleanup(server.close)
+        try:
+            link = client.SmpSerialLink(server.name)
+        except OSError as error:
+            self.skipTest(f"no usable pty: {error}")
+        self.addCleanup(link.close)
+        return server, client.SmpClient(link, 0.3, 1)
+
+    def test_a_write_while_the_unit_boots_wedges_the_fake(self) -> None:
+        server, smp = self.console()
+        client.request_reset(smp)
+        with self.assertRaises(TimeoutError):
+            smp.read(client.Group.DEVICE, 0, retries=0)
+        time.sleep(1.2)
+        with self.assertRaises(TimeoutError):
+            smp.read(client.Group.DEVICE, 0, retries=0)
+        self.assertTrue(server.wedged)
+
+    def test_reset_listens_for_the_banner_and_writes_nothing_meanwhile(self) -> None:
+        server, smp = self.console()
+        started_s = time.monotonic()
+        out, err = run(client.command_reset, smp)
+        self.assertGreater(time.monotonic() - started_s, 0.4 + client.SERIAL_BOOT_SETTLE_S - 0.1)
+        self.assertIn("reset requested", out)
+        self.assertIn("the unit is up", out)
+        self.assertFalse(server.wedged)
+        self.assertEqual(smp.read(client.Group.DEVICE, 0)["uid"], self.unit.uid)
+
+    def test_the_mcuboot_banner_is_not_the_apps(self) -> None:
+        # MCUboot prints first, and the swap that follows is silent for longer than the settle time.
+        server, smp = self.console(boot_s=0.9)
+        run(client.command_reset, smp)
+        self.assertFalse(server.wedged)
+        self.assertEqual(smp.read(client.Group.DEVICE, 0)["uid"], self.unit.uid)
+
+    def test_the_prompt_alone_ends_the_wait(self) -> None:
+        # A prompt has no newline, and a terminal colors it.
+        server, smp = self.console(announce=b"\x1b[1;32muart:~$ \x1b[m", mcuboot=False)
+        out, _ = run(client.command_reset, smp)
+        self.assertIn("the unit is up", out)
+        self.assertFalse(server.wedged)
+
+    def test_without_a_banner_the_wait_ends_with_the_time_given(self) -> None:
+        server, smp = self.console(announce=None)
+        started_s = time.monotonic()
+        out, err = run(client.command_reset, smp, timeout_s=0.7)
+        self.assertGreaterEqual(time.monotonic() - started_s, 0.7)
+        self.assertNotIn("the unit is up", out)
+        self.assertIn("no boot banner within 1 s", err)
+        self.assertFalse(server.wedged)
+
+    def test_update_over_the_console_does_not_write_while_the_unit_boots(self) -> None:
+        server, smp = self.console()
+        out, _ = run(client.command_image_update, smp, file=self.image_file())
+        self.assertIn("not writing to the console until the unit prints its boot banner", out)
+        self.assertIn("updated to 0.0.2+0, confirmed", out)
+        self.assertFalse(server.wedged)
+        self.assertEqual(self.unit.resets, 1)
+
+    def test_update_without_a_banner_asks_the_unit_after_the_time_given(self) -> None:
+        server, smp = self.console(announce=None)
+        out, err = run(client.command_image_update, smp, file=self.image_file(), timeout_s=0.7)
+        self.assertIn("warning: no boot banner within 1 s; asking the unit anyway", err)
+        self.assertIn("updated to 0.0.2+0, confirmed", out)
+        self.assertFalse(server.wedged)
+
+    def test_a_failing_image_is_reverted_without_writes_to_the_unit_that_resets(self) -> None:
+        self.unit.fails_new_image = True
+        self.unit.auto_revert = False
+        server, smp = self.console()
+        with self.assertRaises(RuntimeError) as caught:
+            run(client.command_image_update, smp, file=self.image_file())
+        self.assertIn("the update was reverted", str(caught.exception))
+        self.assertEqual(len(server.booted_at), 2)
+        self.assertFalse(server.wedged)
+
+    def test_other_links_do_not_listen(self) -> None:
+        self.assertFalse(hasattr(FakeLink(self.unit), "wait_for_boot"))
+        self.assertIsNone(client.restart_unit(client.SmpClient(FakeLink(self.unit), 0.03, 1), 1.0, "test"))
+        self.assertFalse(hasattr(client.SmpCanLink, "wait_for_boot"))
+        self.assertFalse(hasattr(client.SmpBleLink, "wait_for_boot"))
 
 
 class ReassemblerTest(unittest.TestCase):
