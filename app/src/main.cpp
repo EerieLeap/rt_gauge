@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <exception>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -52,6 +53,9 @@
 #include "controllers/ble_controller.h"
 #include "controllers/canbus_controller.h"
 #include "controllers/display_controller.h"
+#ifdef CONFIG_EERIE_LEAP_CONTROLLER_DFU
+    #include "controllers/dfu_controller.h"
+#endif
 #include "controllers/logging_controller.h"
 #include "controllers/management_controller.h"
 #include "controllers/sensors_controller.h"
@@ -162,6 +166,15 @@ LoggingControlBinding MakeLoggingButtonTrigger() {
 int main() {
     // CoredumpReporter::PrintStoredDump();
 
+#ifdef CONFIG_EERIE_LEAP_CONTROLLER_DFU
+    // First, before anything can fail or hang: after a swap the new image is unconfirmed, and from here on the
+    // watchdog resets a unit that does not come up healthy, which makes MCUboot revert. A confirmed image
+    // (every normal boot) only has its slot trailer read.
+    const auto dfu_controller = std::make_shared<DfuController>();
+    if(dfu_controller->Initialize() != 0)
+        LOG_ERR("Failed to initialize the DFU controller.");
+#endif
+
     // Channels are inert until their bus registers them, thus this has to run before any
     // publisher does.
     InitializeEventChannels();
@@ -191,6 +204,10 @@ int main() {
         LOG_ERR("Failed to initialize the configuration work queue.");
         return -1;
     }
+
+#ifdef CONFIG_EERIE_LEAP_CONTROLLER_DFU
+    dfu_controller->RegisterLivenessProbe("config_work_queue", config_work_queue_thread->GetWorkQueue());
+#endif
 
     const auto system_controller = std::make_shared<SystemController>(fs_service, config_work_queue_thread);
     if(system_controller->Initialize() != 0)
@@ -247,6 +264,21 @@ int main() {
     if(canbus_controller->Initialize() != 0)
         LOG_ERR("Failed to initialize the CANBus controller.");
     canbus_controller->Start();
+
+#ifdef CONFIG_EERIE_LEAP_CONTROLLER_DFU
+    // The CDMP work queue carries the unit's CAN management; without a COM service there is none to probe.
+    if(const auto canbus_com_work_queue_thread = canbus_controller->GetComService() != nullptr
+            ? canbus_controller->GetComService()->GetWorkQueueThread()
+            : nullptr;
+        canbus_com_work_queue_thread != nullptr) {
+        try {
+            dfu_controller->RegisterLivenessProbe("cdmp_work_queue", canbus_com_work_queue_thread->GetWorkQueue());
+        } catch(const std::exception& e) {
+            // Not running: the COM service did not come up, so the CAN management is not available either.
+            LOG_WRN("The CDMP work queue is not probed: %s", e.what());
+        }
+    }
+#endif
 
     const auto sensors_controller = std::make_shared<SensorsController>(
         fs_service, config_work_queue_thread, configuration_service, time_service, sensor_readings_frame,
@@ -316,16 +348,28 @@ int main() {
         canbus_com_service != nullptr ? canbus_com_service->GetNetworkInfo() : nullptr,
         sensors_controller->GetCapabilities(), nullptr, assets_manager, SettingId::ALL
     );
-    if(management_controller->Initialize() != 0)
+    const bool is_management_ready = management_controller->Initialize() == 0;
+    if(!is_management_ready)
         LOG_ERR("Failed to initialize the management controller.");
 
     const auto ble_controller = std::make_shared<BleController>(
         sensors_controller->GetProcessingService(), sensor_readings_frame, canbus_com_service
     );
-    if(ble_controller->Initialize() == 0)
+    const bool is_ble_ready = ble_controller->Initialize() == 0;
+    if(is_ble_ready)
         eerie_leap::controllers::BleController::Start();
     else
         LOG_ERR("Failed to initialize the BLE controller.");
+
+#ifdef CONFIG_EERIE_LEAP_CONTROLLER_DFU
+    // The unit can be managed again: the config groups are served and a transport is up (BLE access point
+    // or CAN COM). An unconfirmed image then confirms itself after the delay; until then, and on every early
+    // `return -1` above, the watchdog and the deadline decide, and a failure ends in MCUboot's revert.
+    if(is_management_ready && (is_ble_ready || canbus_com_service != nullptr))
+        dfu_controller->ReportBootComplete();
+    else
+        LOG_WRN("The unit cannot be managed: boot complete is not reported.");
+#endif
 
     // SystemInfo::PrintStackInfo();
     SystemInfo::PrintThreadIds();
