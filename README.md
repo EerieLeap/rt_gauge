@@ -44,7 +44,8 @@ Currently, the following boards are supported:
 two image slots, the application is linked for the first and signed, and only MCUboot starts it. A plain `west build` of
 a SoC board produces an image that nothing boots. A sysbuild directory holds the two images in `mcuboot/` and `app/`
 (the application's ELF is `build/app/zephyr/zephyr.elf`, the signed image `build/app/zephyr/zephyr.signed.bin`).
-Simulated boards build without it.
+Simulated boards build without it (sysbuild on them builds only the application, since only the Waveshare boards select
+MCUboot), so do not make `--sysbuild` a default with `west config build.sysbuild true`.
 
 ```shell
 west build -p auto -b esp32s3_touch_amoled_1_75/esp32s3/procpu --sysbuild ./app
@@ -121,12 +122,11 @@ afterwards. Updates after that go over the air.
    ```
 
 2. Erase the chip and flash the new layout. The old file system's blocks sit inside the new `slot` and `intfs0`
-   partitions, and a leftover block must not be taken for a file system or an image. Erase once, then write both images
-   (`west flash --erase` for both domains would erase again before the application's write, and wipe MCUboot):
+   partitions, and a leftover block must not be taken for a file system or an image. `--erase` runs once, before the
+   first image, and then MCUboot and the application are written:
 
    ```shell
-   west flash --erase --domain mcuboot
-   west flash --domain app
+   west flash --erase
    ```
 
    The erase also removes the BLE bonds, so the configurator app pairs again.

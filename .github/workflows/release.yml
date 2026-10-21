@@ -19,7 +19,9 @@ name: Release
 #   rt_gauge_<board>_<version>.flash.txt           the esptool line for the USB install
 #   rt_gauge_<board>_<version>.sizes.txt           the check_image_sizes.py report
 #
-# Tag vMAJOR.MINOR.PATCHLEVEL (+TWEAK when app/VERSION has one) must match app/VERSION.
+# The workflow runs on a version tag only: a push of vMAJOR.MINOR.PATCHLEVEL (+TWEAK when app/VERSION has
+# one, -EXTRAVERSION when it has one), or a manual run started from such a tag (choose the tag as the ref
+# of "Run workflow"). The tag must match app/VERSION; any other ref fails before the build.
 
 on:
   push:
@@ -74,7 +76,11 @@ jobs:
           [ "$(get VERSION_TWEAK)" = "0" ] || version="$version+$(get VERSION_TWEAK)"
           [ -z "$(get EXTRAVERSION)" ] || version="$version-$(get EXTRAVERSION)"
           echo "app/VERSION is $version"
-          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+          if [ "$GITHUB_REF_TYPE" != "tag" ]; then
+            echo "::error::a release is built from a version tag, not from $GITHUB_REF_TYPE $GITHUB_REF_NAME: push the tag v$version, or start the manual run from it"
+            exit 1
+          fi
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
             echo "::error::tag $GITHUB_REF_NAME does not match app/VERSION ($version): expected v$version"
             exit 1
           fi

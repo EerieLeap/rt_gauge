@@ -27,7 +27,7 @@
                 "esp32s3.cpu0 configure -rtos Zephyr",
                 "init",
                 "reset halt",
-                "esp appimage_offset 0",
+                "esp appimage_offset 0x20000",
                 "reset"
             ],
             "overrideAttachCommands": [
@@ -74,7 +74,7 @@
             "preLaunchTask": "Build QEMU Cortex-M3",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/build/app/zephyr/zephyr.elf",
+            "program": "${workspaceFolder}/build/zephyr/zephyr.elf",
             "args": [],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
