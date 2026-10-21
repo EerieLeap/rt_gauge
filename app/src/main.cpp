@@ -362,11 +362,24 @@ int main() {
     }
 
 #ifdef CONFIG_EERIE_LEAP_CONTROLLER_DFU
-    // The unit can be managed again: the config groups are served and a transport is really up (the BLE
-    // access point started, or the CAN COM service running). An unconfirmed image then confirms itself after
-    // the delay; until then, and on every early `return -1` above, the watchdog and the deadline decide, and
-    // a failure ends in MCUboot's revert.
-    if(is_management_ready && (is_ble_up || is_can_com_up))
+    // The unit can be managed again: the config groups are served and a transport is really up. That is the
+    // BLE access point, or the CAN COM service with CDMP online and SMP bound to its claimed ID, which comes a
+    // few seconds after the service started (a unit refused for its CDMP version never gets one). An
+    // unconfirmed image waits for it, up to half the boot deadline; a confirmed one has nothing to prove and
+    // does not wait. An unconfirmed image then confirms itself after the delay; until then, and on every early
+    // `return -1` above, the watchdog and the deadline decide, and a failure ends in MCUboot's revert.
+    bool is_transport_up = is_ble_up;
+    if(is_management_ready && !is_transport_up && is_can_com_up && canbus_com_service != nullptr) {
+        is_transport_up = dfu_controller->GetState() == DfuState::CONFIRMED || canbus_com_service->IsSmpBound();
+
+        const int64_t wait_until_ms = k_uptime_get() + CONFIG_EERIE_LEAP_DFU_BOOT_DEADLINE_MS / 2;
+        while(!is_transport_up && k_uptime_get() < wait_until_ms) {
+            k_msleep(100);
+            is_transport_up = canbus_com_service->IsSmpBound();
+        }
+    }
+
+    if(is_management_ready && is_transport_up)
         dfu_controller->ReportBootComplete();
     else
         LOG_WRN("The unit cannot be managed: boot complete is not reported.");
