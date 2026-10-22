@@ -99,7 +99,7 @@ jobs:
 
       - name: Install the build tools
         run: |
-          west packages pip --install
+          west packages pip --install --ignore-venv-check
           pip install protobuf grpcio-tools zcbor
 
       - name: Fetch the Espressif blobs
