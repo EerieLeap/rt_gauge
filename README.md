@@ -42,7 +42,9 @@ Currently, the following boards are supported:
 
 **Hardware builds always use `--sysbuild`.** MCUboot sits in front of the application on both SoC boards: the flash holds
 two image slots, the application is linked for the first and signed, and only MCUboot starts it. A plain `west build` of
-a SoC board produces an image that nothing boots. A sysbuild directory holds the two images in `mcuboot/` and `app/`
+a SoC board (without `--sysbuild`) builds an ESP simple-boot image instead, linked for and flashed at 0x0: it boots, but it
+overwrites MCUboot and ignores the slot layout, so no update can follow. To get MCUboot back, flash a sysbuild build with
+`west flash --erase` (see below). A sysbuild directory holds the two images in `mcuboot/` and `app/`
 (the application's ELF is `build/app/zephyr/zephyr.elf`, the signed image `build/app/zephyr/zephyr.signed.bin`).
 Simulated boards build without it (sysbuild on them builds only the application, since only the Waveshare boards select
 MCUboot), so do not make `--sysbuild` a default with `west config build.sysbuild true`.
