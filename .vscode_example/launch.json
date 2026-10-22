@@ -8,7 +8,7 @@
             "type": "cortex-debug",
             "request": "attach", // attach instead of launch, because otherwise flash write is attempted, but fails
             "cwd": "${workspaceRoot}",
-            "executable": "./build/zephyr/zephyr.elf",
+            "executable": "./build/app/zephyr/zephyr.elf",
             "servertype": "openocd",
             "interface": "jtag",
             "toolchainPrefix": "xtensa-espressif_esp32s3_zephyr-elf",
@@ -27,7 +27,7 @@
                 "esp32s3.cpu0 configure -rtos Zephyr",
                 "init",
                 "reset halt",
-                "esp appimage_offset 0",
+                "esp appimage_offset 0x20000",
                 "reset"
             ],
             "overrideAttachCommands": [

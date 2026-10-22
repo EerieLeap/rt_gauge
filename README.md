@@ -34,10 +34,55 @@ Currently, the following boards are supported:
 
 #### Simulated boards:
 - `native_sim`
-- `qemu_cortex_m3`
+- `qemu_cortex_a9`
 
 #### SoC boards:
-- `esp32s3_devkitc_procpu`
+- `esp32s3_touch_amoled_1_75/esp32s3/procpu` (Waveshare ESP32-S3-Touch-AMOLED-1.75)
+- `esp32p4_wifi6_touch_lcd_5/esp32p4/hpcore` (Waveshare ESP32-P4-WIFI6-Touch-LCD-5)
+
+**Hardware builds always use `--sysbuild`.** MCUboot sits in front of the application on both SoC boards: the flash holds
+two image slots, the application is linked for the first and signed, and only MCUboot starts it. A plain `west build` of
+a SoC board (without `--sysbuild`) builds an ESP simple-boot image instead, linked for and flashed at 0x0: it boots, but it
+overwrites MCUboot and ignores the slot layout, so no update can follow. To get MCUboot back, flash a sysbuild build with
+`west flash --erase` (see below). A sysbuild directory holds the two images in `mcuboot/` and `app/`
+(the application's ELF is `build/app/zephyr/zephyr.elf`, the signed image `build/app/zephyr/zephyr.signed.bin`).
+Simulated boards build without it (sysbuild on them builds only the application, since only the Waveshare boards select
+MCUboot), so do not make `--sysbuild` a default with `west config build.sysbuild true`.
+
+```shell
+west build -p auto -b esp32s3_touch_amoled_1_75/esp32s3/procpu --sysbuild ./app
+west build -p auto -b esp32p4_wifi6_touch_lcd_5/esp32p4/hpcore --sysbuild ./app
+```
+
+The bench build (shell, SMP over the console, stack reports; see [tools/README.md](tools/README.md)) adds `app/bench.conf`
+to the application image only:
+
+```shell
+west build -d build_bench -p always -b esp32s3_touch_amoled_1_75/esp32s3/procpu --sysbuild ./app -- -DEXTRA_CONF_FILE=bench.conf
+```
+
+(`-Dapp_EXTRA_CONF_FILE=bench.conf` addresses the application image by name and does the same. Do not give MCUboot a
+`-Dmcuboot_EXTRA_CONF_FILE`: it replaces `app/sysbuild/mcuboot.conf`.)
+
+#### Flash layout, signing and size checks
+
+Each board's partition table is one file, `app/boards/partitions/<board>.dtsi`: two 4 MB image slots (`slot0` runs,
+`slot1` takes the update and then holds the previous image as the backup), LittleFS for the unit's files, and the NVS
+partition with the settings and the BLE bonds. The application's overlay includes it and `app/sysbuild.cmake` hands the
+same file to MCUboot, so the two cannot disagree. MCUboot swaps the slots in "swap using move" mode and verifies an
+ECDSA P-256 signature before every swap (`app/sysbuild.conf`). `app/sysbuild/mcuboot.conf` switches off the display,
+MSPI, input and the other board drivers that MCUboot does not need, which it must fit into 64 KB (S3) or 56 KB (P4).
+
+Every sysbuild build ends with `scripts/check_image_sizes.py`, which fails the build when MCUboot outgrows its boot
+partition or the signed application outgrows `slot0` minus the swap trailer, and prints both margins. It also compares
+the two images' partition tables. Run it by hand on a build directory with `scripts/check_image_sizes.py build`.
+
+Images are signed with the development key, `modules/eerie_leap_rt_core/keys/dev-ec-p256.pem`. It is public and protects
+nothing: it only keeps a bench unit from accepting images that were not built for this project. Release images are built
+by `.github/workflows/release.yml` with the release key, which lives in a GitHub Actions secret and never in the
+repository. A unit trusts the key its MCUboot was built with, so a unit flashed with release artifacts accepts release
+images only; changing the key, the mode or the partition table takes a USB flash. To sign a local build with another key,
+pass an absolute path, quoted because it is a Kconfig string: `-- '-DSB_CONFIG_BOOT_SIGNATURE_KEY_FILE="/path/to/key.pem"'`.
 
 ### Running and Debugging in a Simulator
 
@@ -56,6 +101,41 @@ Once the application is built, flash it to the target board with:
 ```shell
 west flash
 ```
+
+For a sysbuild directory this writes MCUboot and then the application into `slot0` (`--domain mcuboot` or `--domain app`
+writes one of them). esptool erases only the sectors it writes, so the swap state MCUboot keeps at the end of `slot0`
+survives a plain `west flash`. If a freshly flashed image is swapped back or treated as an update, erase the chip first, as
+in the next section.
+
+#### Moving a unit from simple boot to MCUboot
+
+Units built before MCUboot ran the application straight from the ROM bootloader, with the file system at another
+offset. Moving a unit to the new layout is a one-time USB flash that erases the file system, so back up first and restore
+afterwards. Updates after that go over the air.
+
+1. Back up every configuration and the uploaded assets with the bench client (`tools/smp_can_client.py`; on CAN, with
+   `--target`, or on the console of a bench build, with `--serial`):
+
+   ```shell
+   python3 tools/smp_can_client.py --serial /dev/ttyACM0 config-list
+   python3 tools/smp_can_client.py --serial /dev/ttyACM0 config-read <type> backup/<type>.cbor    # for every type listed
+   python3 tools/smp_can_client.py --serial /dev/ttyACM0 assets ls images                         # and animations
+   python3 tools/smp_can_client.py --serial /dev/ttyACM0 assets get images <name> backup/<name>   # for every file
+   ```
+
+2. Erase the chip and flash the new layout. The old file system's blocks sit inside the new `slot` and `intfs0`
+   partitions, and a leftover block must not be taken for a file system or an image. `--erase` runs once, before the
+   first image, and then MCUboot and the application are written:
+
+   ```shell
+   west flash --erase
+   ```
+
+   The erase also removes the BLE bonds, so the configurator app pairs again.
+
+3. Restore: `config-write <type> backup/<type>.cbor` for every type, and `assets put <kind> <name> <file>` for the files.
+   The gauge rewrites its demo screens and demo assets on every boot while the test scaffolding in
+   `UiController::Initialize()` is in place, so its UI configuration may need no restore.
 
 ### Board-Specific Commands
 
@@ -76,14 +156,14 @@ west build -p auto -b native_sim ./app
 
 <details>
 <summary>
-    QEMU Cortex M3
-    <a href="https://docs.zephyrproject.org/latest/boards/qemu/cortex_m3/doc/index.html">(Reference Docs)</a>
+    QEMU Cortex A9
+    <a href="https://docs.zephyrproject.org/latest/boards/qemu/cortex_a9/doc/index.html">(Reference Docs)</a>
 </summary>
 <br>
 
 **Build:**  
 ```shell
-west build -p auto -b qemu_cortex_m3 ./app
+west build -p auto -b qemu_cortex_a9 ./app
 ```
 
 </details>
@@ -96,14 +176,9 @@ west build -p auto -b qemu_cortex_m3 ./app
 </summary>
 <br>
 
-**Build with Bootloader:**  
+**Build:**  
 ```shell
-west build -p auto -b esp32s3_devkitc/esp32s3/procpu --sysbuild ./app
-```
-
-**Simple Build:**  
-```shell
-west build -p auto -b esp32s3_devkitc/esp32s3/procpu ./app
+west build -p auto -b esp32s3_touch_amoled_1_75/esp32s3/procpu --sysbuild ./app
 ```
 
 **Serial Monitor:**  
@@ -120,7 +195,7 @@ For manual GDB run use ether `west debug` or run OpenOCD in one terminal:
 /home/ubuntu/zephyr/workspace/utilities/openocd-esp32/bin/openocd \
 -f /home/ubuntu/zephyr/workspace/utilities/openocd-esp32/share/openocd/scripts/board/esp32s3-builtin.cfg \
 -c "set ESP32_ONLYCPU 1; set ESP_FLASH_SIZE 0; set ESP_RTOS Zephyr" \
--c "init; halt; esp appimage_offset 0" \
+-c "init; halt; esp appimage_offset 0x20000" \
 -c "esp32s3.cpu0 configure -rtos Zephyr" \
 -c "init" \
 -c "reset init"
@@ -130,10 +205,29 @@ And GDB in another:
 ```shell
 /home/ubuntu/zephyr-sdk-0.17.4/xtensa-espressif_esp32s3_zephyr-elf/bin/xtensa-espressif_esp32s3_zephyr-elf-gdb \
 -ex 'target extended-remote :3333' \
--ex 'symbol-file build/zephyr/zephyr.elf' \
+-ex 'symbol-file build/app/zephyr/zephyr.elf' \
 -ex 'mon reset halt'   -ex 'maintenance flush register-cache' \
 -ex 'break main' \
 -ex 'continue'
+```
+
+</details>
+
+<details>
+<summary>
+    Waveshare ESP32-P4-WIFI6-Touch-LCD-5
+    <a href="https://www.waveshare.com/wiki/ESP32-P4-WIFI6-Touch-LCD-5">(Reference Docs)</a>
+</summary>
+<br>
+
+**Build:**  
+```shell
+west build -p auto -b esp32p4_wifi6_touch_lcd_5/esp32p4/hpcore --sysbuild ./app
+```
+
+**Serial Monitor:**  
+```shell
+west espressif monitor
 ```
 
 </details>

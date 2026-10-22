@@ -52,6 +52,9 @@
 #include "controllers/ble_controller.h"
 #include "controllers/canbus_controller.h"
 #include "controllers/display_controller.h"
+#ifdef CONFIG_EERIE_LEAP_CONTROLLER_DFU
+    #include "controllers/dfu_controller.h"
+#endif
 #include "controllers/logging_controller.h"
 #include "controllers/management_controller.h"
 #include "controllers/sensors_controller.h"
@@ -162,6 +165,15 @@ LoggingControlBinding MakeLoggingButtonTrigger() {
 int main() {
     // CoredumpReporter::PrintStoredDump();
 
+#ifdef CONFIG_EERIE_LEAP_CONTROLLER_DFU
+    // First, before anything can fail or hang: after a swap the new image is unconfirmed, and from here on the
+    // watchdog resets a unit that does not come up healthy, which makes MCUboot revert. A confirmed image
+    // (every normal boot) only has its slot trailer read.
+    const auto dfu_controller = std::make_shared<DfuController>();
+    if(dfu_controller->Initialize() != 0)
+        LOG_ERR("Failed to initialize the DFU controller.");
+#endif
+
     // Channels are inert until their bus registers them, thus this has to run before any
     // publisher does.
     InitializeEventChannels();
@@ -191,6 +203,11 @@ int main() {
         LOG_ERR("Failed to initialize the configuration work queue.");
         return -1;
     }
+
+#ifdef CONFIG_EERIE_LEAP_CONTROLLER_DFU
+    // Shared: the probe keeps the queue alive, which the early `return -1` paths below would free first.
+    dfu_controller->RegisterLivenessProbe("config_work_queue", config_work_queue_thread);
+#endif
 
     const auto system_controller = std::make_shared<SystemController>(fs_service, config_work_queue_thread);
     if(system_controller->Initialize() != 0)
@@ -246,7 +263,19 @@ int main() {
     // if(canbus_controller->Initialize(SetupCanbusConfiguration) != 0)
     if(canbus_controller->Initialize() != 0)
         LOG_ERR("Failed to initialize the CANBus controller.");
-    canbus_controller->Start();
+    // The CAN COM service runs: CDMP and SMP over CAN are up, so the unit can be managed over the bus. The
+    // service exists on a unit whose bus did not come up (the P4 has no COM bus), so only its start tells.
+    const bool is_can_com_up = canbus_controller->Start() == 0;
+    if(!is_can_com_up)
+        LOG_WRN("The CAN COM service is not running.");
+
+#ifdef CONFIG_EERIE_LEAP_CONTROLLER_DFU
+    // The CDMP work queue carries the unit's CAN management; without a running COM service there is none to probe.
+    if(is_can_com_up && canbus_controller->GetComService() != nullptr)
+        dfu_controller->RegisterLivenessProbe(
+            "cdmp_work_queue", canbus_controller->GetComService()->GetWorkQueueThread()
+        );
+#endif
 
     const auto sensors_controller = std::make_shared<SensorsController>(
         fs_service, config_work_queue_thread, configuration_service, time_service, sensor_readings_frame,
@@ -311,23 +340,50 @@ int main() {
 
     // Constructed after every controller that registers a configuration manager.
     const auto canbus_com_service = canbus_controller->GetComService();
-    const auto system_configuration = system_controller->GetConfigurationManager()->Get();
     const auto management_controller = std::make_shared<ManagementController>(
         configuration_service, config_work_queue_thread,
         canbus_com_service != nullptr ? canbus_com_service->GetNetworkInfo() : nullptr,
-        system_configuration != nullptr ? system_configuration->build_number : 0, sensors_controller->GetCapabilities(),
-        nullptr, assets_manager, SettingId::ALL
+        sensors_controller->GetCapabilities(), nullptr, assets_manager, SettingId::ALL
     );
-    if(management_controller->Initialize() != 0)
+    const bool is_management_ready = management_controller->Initialize() == 0;
+    if(!is_management_ready)
         LOG_ERR("Failed to initialize the management controller.");
 
     const auto ble_controller = std::make_shared<BleController>(
         sensors_controller->GetProcessingService(), sensor_readings_frame, canbus_com_service
     );
-    if(ble_controller->Initialize() == 0)
-        eerie_leap::controllers::BleController::Start();
-    else
+    bool is_ble_up = false;
+    if(ble_controller->Initialize() == 0) {
+        is_ble_up = eerie_leap::controllers::BleController::Start() == 0;
+        if(!is_ble_up)
+            LOG_ERR("Failed to start the BLE controller.");
+    } else {
         LOG_ERR("Failed to initialize the BLE controller.");
+    }
+
+#ifdef CONFIG_EERIE_LEAP_CONTROLLER_DFU
+    // The unit can be managed again: the config groups are served and a transport is really up. That is the
+    // BLE access point, or the CAN COM service with CDMP online and SMP bound to its claimed ID, which comes a
+    // few seconds after the service started (a unit refused for its CDMP version never gets one). An
+    // unconfirmed image waits for it, up to half the boot deadline; a confirmed one has nothing to prove and
+    // does not wait. An unconfirmed image then confirms itself after the delay; until then, and on every early
+    // `return -1` above, the watchdog and the deadline decide, and a failure ends in MCUboot's revert.
+    bool is_transport_up = is_ble_up;
+    if(is_management_ready && !is_transport_up && is_can_com_up && canbus_com_service != nullptr) {
+        is_transport_up = dfu_controller->GetState() == DfuState::CONFIRMED || canbus_com_service->IsSmpBound();
+
+        const int64_t wait_until_ms = k_uptime_get() + CONFIG_EERIE_LEAP_DFU_BOOT_DEADLINE_MS / 2;
+        while(!is_transport_up && k_uptime_get() < wait_until_ms) {
+            k_msleep(100);
+            is_transport_up = canbus_com_service->IsSmpBound();
+        }
+    }
+
+    if(is_management_ready && is_transport_up)
+        dfu_controller->ReportBootComplete();
+    else
+        LOG_WRN("The unit cannot be managed: boot complete is not reported.");
+#endif
 
     // SystemInfo::PrintStackInfo();
     SystemInfo::PrintThreadIds();

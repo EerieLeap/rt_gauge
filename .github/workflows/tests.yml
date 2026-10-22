@@ -93,3 +93,51 @@ jobs:
           name: tidy-report
           path: rt_gauge/tidy-report.txt
           if-no-files-found: ignore
+
+  # Build-only: both hardware boards with MCUboot, signed with the committed development key. The
+  # native_sim suites above cannot see a partition table that no longer fits, MCUboot outgrowing
+  # its boot partition, or a driver that does not link into MCUboot; the sysbuild build ends with
+  # scripts/check_image_sizes.py, which fails on the first two.
+  hardware-build:
+    runs-on: ubuntu-24.04
+
+    strategy:
+      fail-fast: false
+      matrix:
+        board:
+          - esp32s3_touch_amoled_1_75/esp32s3/procpu
+          - esp32p4_wifi6_touch_lcd_5/esp32p4/hpcore
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          path: rt_gauge
+          submodules: recursive
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      # The S3 builds with the Espressif Xtensa toolchain, the P4 with the RISC-V one.
+      - name: Set up Zephyr
+        uses: zephyrproject-rtos/action-zephyr-setup@v1
+        with:
+          app-path: rt_gauge
+          toolchains: xtensa-espressif_esp32s3_zephyr-elf:riscv64-zephyr-elf
+
+      # imgtool's requirements (MCUboot signs the application with it), and protoc for the P4's
+      # esp-hosted-mcu transport (nanopb).
+      - name: Install the build tools
+        run: |
+          west packages pip --install --ignore-venv-check
+          pip install protobuf grpcio-tools zcbor
+
+      # The Wi-Fi and Bluetooth libraries of hal_espressif are binary blobs.
+      - name: Fetch the Espressif blobs
+        run: west blobs fetch hal_espressif
+
+      - name: Build ${{ matrix.board }}
+        working-directory: rt_gauge
+        run: west build -p always -b ${{ matrix.board }} --sysbuild ./app -d build -o=-j4

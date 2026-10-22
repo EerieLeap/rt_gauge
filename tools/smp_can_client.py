@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""SMP bench client for EerieLeap units, over CAN or over a unit's console.
+"""SMP bench client for EerieLeap units, over CAN, over a unit's console or over Bluetooth.
 
-Sends SMP requests to one unit and prints the responses. Two transports:
+Sends SMP requests to one unit and prints the responses. Three transports:
 
 * CAN: any CAN adapter python-can supports, with the framing of the CDMP README, section 5. The
   client takes a CDMP device ID of its own (--source, 254 by default) that no unit on the bus may
@@ -11,18 +11,27 @@ Sends SMP requests to one unit and prints the responses. Two transports:
   (app/bench.conf of the gauge and of rt_daq). Selected by --serial. Opening the port does not
   reset an ESP32-S3: Linux raises DTR and RTS when it opens a USB-Serial-JTAG port, and the chip is
   held in reset while RTS is high and DTR low, so the lines are put through RTS 0 first.
+* Bluetooth: the access point service of a unit with BLE (rt_core docs/bluetooth.md). Every packet is
+  prefixed with a route byte; --route 0 reaches the access point itself and another CDMP device ID is
+  forwarded over CAN by the access point. Selected by --ble NAME|ADDRESS.
 
 Configurations can be written and read as YAML or JSON descriptions (config-get, config-set,
 config-encode, config-decode), encoded against the CDDL schemas in this checkout; the format is in
-tools/README.md. Failed SMP requests are resent: once on CAN, three times on serial, where a log
-line landing in a response corrupts it. The request that completes a configuration write is never
-resent blindly; the client reads the stored CRC to learn whether it was applied.
+tools/README.md. Failed SMP requests are resent: once on CAN and over Bluetooth, three times on serial,
+where a log line landing in a response corrupts it. The request that completes a configuration write is
+never resent blindly; the client reads the stored CRC to learn whether it was applied.
 
 Asset files (images, animations, scripts, logs) are listed, downloaded, uploaded and deleted with the
 assets commands. A download keeps several requests in flight, can continue a partial file and checks
 the file's CRC32 against the unit's; the format is in tools/README.md.
 
-Requires cbor2; python-can for CAN, pyserial for serial, PyYAML and zcbor for descriptions.
+Firmware images are inspected offline (image info), listed, uploaded, tested, confirmed and erased
+over MCUmgr's image group, and image update runs the whole sequence of the firmware update plan:
+check the file against the unit, upload, mark for test, reset, wait for the swap and watch the unit
+confirm itself (dfu status) or revert. The format is in tools/README.md.
+
+Requires cbor2; python-can for CAN, pyserial for serial, bleak for Bluetooth, PyYAML and zcbor for
+descriptions.
 
 Examples:
     smp_can_client.py --channel can0 --target 1 info
@@ -39,25 +48,36 @@ Examples:
     smp_can_client.py --channel can0 --target 1 assets get logs log_data_0001.mf4 --resume --in-flight 2
     smp_can_client.py --serial /dev/ttyACM0 assets put images logo.bin ./logo.bin
     smp_can_client.py config-decode sensors sensors_config.cbor
+    smp_can_client.py image info rt_gauge_esp32s3_touch_amoled_1_75_0.0.2.signed.bin
+    smp_can_client.py --serial /dev/ttyACM0 image list
+    smp_can_client.py --channel can0 --target 1 image update rt_gauge_esp32s3_touch_amoled_1_75_0.0.2.signed.bin
+    smp_can_client.py --ble "EerieLeap Gauge" info
+    smp_can_client.py --ble AA:BB:CC:DD:EE:FF --route 5 image upload rt_daq_0.0.2.signed.bin
+    smp_can_client.py --serial /dev/ttyACM0 dfu status
 """
 
 from __future__ import annotations
 
 import argparse
+import asyncio
 import base64
 import binascii
 import collections
+import concurrent.futures
 import contextlib
 import dataclasses
 import datetime
+import hashlib
 import importlib
 import io
 import json
 import math
+import queue
 import random
 import re
 import struct
 import sys
+import threading
 import time
 import types
 import zlib
@@ -106,8 +126,28 @@ SERIAL_BASE64 = re.compile(rb"[A-Za-z0-9+/=]*")
 DEFAULT_BAUD = 115200
 ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 
+# The access point service of rt_core's docs/bluetooth.md: info (read), smp (write without response, notify) and
+# live (notify). `info` is [protocol version u8][largest SMP packet u16 LE][requests in flight u8].
+BLE_SERVICE_UUID = "e7a1b2c3-d4e5-6f78-9a0b-c1d2e3f40000"
+BLE_INFO_UUID = "e7a1b2c3-d4e5-6f78-9a0b-c1d2e3f40001"
+BLE_SMP_UUID = "e7a1b2c3-d4e5-6f78-9a0b-c1d2e3f40002"
+BLE_PROTOCOL_VERSION = 1
+BLE_INFO = struct.Struct("<BHB")
+# An ATT write carries the MTU less its 3-byte header; 23 is the MTU before any exchange.
+BLE_MIN_WRITE_SIZE = 20
+# The unit drops a partial packet after EERIE_LEAP_SMP_BLE_RX_TIMEOUT_MS (1 s); a gap that long ends one here too.
+BLE_REASSEMBLY_TIMEOUT_S = 1.0
+DEFAULT_BLE_SCAN_TIMEOUT_S = 10.0
+BLE_CONNECT_TIMEOUT_S = 20.0
+BLE_PAIR_TIMEOUT_S = 30.0
+BLE_WRITE_TIMEOUT_S = 10.0
+# A device address (BlueZ and Windows) or the UUID macOS uses in its place; anything else is a name.
+BLE_ADDRESS = re.compile(
+    r"(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}|[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}")
+
 DEFAULT_CAN_RETRIES = 1
 DEFAULT_SERIAL_RETRIES = 3
+DEFAULT_BLE_RETRIES = 1
 # The request that completes a configuration write answers after the unit applied it, and applying
 # restarts services that log; it gets this long, once.
 FINAL_REQUEST_TIMEOUT_S = 15.0
@@ -115,6 +155,72 @@ FINAL_REQUEST_TIMEOUT_S = 15.0
 CONFIG_SESSION_TIMEOUT_S = 5.0
 # How long to look for a write whose answer got lost.
 CONFIRM_WINDOW_S = 8.0
+
+# img_mgmt (group 1) commands, and the dfu group's (72).
+IMG_STATE = 0
+IMG_UPLOAD = 1
+IMG_ERASE = 5
+DFU_STATUS = 0
+DFU_STATES = {0: "CONFIRMED", 1: "VERIFYING", 2: "CONFIRMING", 3: "FAILED"}
+DFU_CONFIRMED = 0
+DFU_FAILED = 3
+# hwinfo's RESET_* bits (drivers/hwinfo.h), which the dfu STATUS reports as reset_cause.
+RESET_CAUSES = ("PIN", "SOFTWARE", "BROWNOUT", "POR", "WATCHDOG", "DEBUG", "SECURITY", "LOW_POWER_WAKE", "CPU_LOCKUP",
+                "PARITY", "PLL", "CLOCK", "HARDWARE", "USER", "TEMPERATURE", "BOOTLOADER", "FLASH")
+
+# MCUboot's image format (bootutil/image.h): a 32-byte header, the image, the protected TLVs (signed with the
+# image), then the unprotected TLVs; each TLV area starts with {u16 magic, u16 total length}, and each entry is
+# {u16 type, u16 length} and its value. Everything is little-endian.
+IMAGE_MAGIC = 0x96F3B83D
+IMAGE_HEADER = struct.Struct("<IIHHIIBBHII")
+IMAGE_TLV_HEADER = struct.Struct("<HH")
+IMAGE_TLV_MAGIC = 0x6907
+IMAGE_TLV_PROTECTED_MAGIC = 0x6908
+IMAGE_TLV_SHA256 = 0x10
+# D5: [format u8 = 1][product_id u16 LE][board_len u8][board ASCII], in the protected TLVs.
+IMAGE_TLV_IDENTITY = 0x00A0
+IMAGE_IDENTITY_FORMAT = 1
+# The unit refuses an image whose protected TLVs are larger (ImageUploadGuard's buffer).
+IMAGE_MAX_PROTECTED_SIZE = 128
+IMAGE_TLV_NAMES = {
+    0x01: "KEYHASH", 0x02: "PUBKEY", 0x10: "SHA256", 0x11: "SHA384", 0x12: "SHA512", 0x20: "RSA2048-PSS",
+    0x22: "ECDSA-SIG", 0x23: "RSA3072-PSS", 0x24: "ED25519", 0x25: "SIG-PURE", 0x30: "ENC-RSA2048", 0x31: "ENC-KW",
+    0x32: "ENC-EC256", 0x33: "ENC-X25519", 0x40: "DEPENDENCY", 0x50: "SEC-CNT", 0x60: "BOOT-RECORD",
+    IMAGE_TLV_IDENTITY: "IDENTITY",
+}
+IMAGE_SIGNATURE_TLVS = (0x20, 0x22, 0x23, 0x24, 0x25)
+IMAGE_KEY_HASH_TLV = 0x01
+IMAGE_FLAGS = {0x01: "PIC", 0x04: "ENCRYPTED_AES128", 0x08: "ENCRYPTED_AES256", 0x10: "NON_BOOTABLE", 0x20: "RAM_LOAD",
+               0x100: "ROM_FIXED"}
+
+# The room around `data` in a later upload chunk, as the plan sizes chunks: buf_size - 64.
+IMAGE_WRITE_OVERHEAD = 64
+# The first chunk makes the unit compare the slot with the image's SHA-256 (it reads the old content to see
+# whether the image is there already) before it answers; the last chunk waits for the slot check (D3).
+IMAGE_FIRST_CHUNK_TIMEOUT_S = 10.0
+IMAGE_LAST_CHUNK_TIMEOUT_S = 5.0
+# A broken transfer starts over at offset 0 with the same sha, and the unit answers with the offset it has.
+IMAGE_UPLOAD_ATTEMPTS = 3
+IMAGE_RESUME_PAUSE_S = 1.0
+IMAGE_RECONNECT_WINDOW_S = 60.0
+# Answers that do not move the unit's offset forward, one after the other, before the upload gives up.
+IMAGE_MAX_STALLS = 8
+# After the reset command the unit answers for a moment before it restarts; one that still answers after this
+# long did not restart.
+IMAGE_RESTART_GRACE_S = 20.0
+IMAGE_POLL_INTERVAL_S = 1.0
+IMAGE_POLL_MAX_INTERVAL_S = 5.0
+IMAGE_VERIFY_INTERVAL_S = 2.0
+IMAGE_NOTE_INTERVAL_S = 10.0
+DEFAULT_UPDATE_TIMEOUT_S = 300.0
+# What a console shows when the app of a unit is up: the Zephyr boot banner (MCUboot's reads "*** Booting MCUboot",
+# the swap is still to come) or the shell's prompt. The shell enables its receive interrupt a moment after either.
+SERIAL_BOOT_MARKERS = ("*** Booting Zephyr", "uart:~$")
+SERIAL_BOOT_SETTLE_S = 1.5
+# A console unit that printed no banner within the time given is polled all the same, for this long.
+IMAGE_POLL_FALLBACK_S = 60.0
+# Polling after the banner: at least this long, whatever is left of the time given.
+IMAGE_POST_BOOT_POLL_S = 30.0
 
 DEFAULT_ASSET_IN_FLIGHT = 2
 MAX_ASSET_IN_FLIGHT = 255
@@ -137,6 +243,7 @@ class Op(IntEnum):
 
 class Group(IntEnum):
     OS = 0
+    IMG = 1
     CONFIG = 64
     DEVICE = 65
     NETWORK = 66
@@ -145,6 +252,7 @@ class Group(IntEnum):
     FILES = 69
     ASSETS = 70
     LOGGING = 71
+    DFU = 72
 
 
 OS_RESET = 5
@@ -153,7 +261,7 @@ LOGGING_STATUS = 0
 LOGGING_START = 1
 LOGGING_STOP = 2
 # LoggingStatusReason (logging_status_reason.h): add values, never renumber.
-LOGGING_REASONS = {0: "stopped", 1: "write failed", 2: "no space", 3: "rotation failed", 4: "unavailable"}
+LOGGING_REASONS = {0: "stopped", 1: "write failed", 2: "no space", 3: "rotation failed", 4: "unavailable", 5: "firmware update"}
 # <prefix>_YYYYMMDDTHHMMSSZ_NNNN.mf4: the start of a log file's session, UTC.
 LOG_NAME_PATTERN = re.compile(r"_(\d{8}T\d{6}Z)_\d+\.mf4$")
 
@@ -193,9 +301,48 @@ ASSETS_BAD_TOKEN = 11
 ASSETS_BUSY = 12
 ASSETS_NOT_FOUND = 4
 
-GROUP_ERRORS = {Group.CONFIG: CONFIG_ERRORS, Group.ASSETS: ASSETS_ERRORS}
+# Zephyr's img_mgmt_err_code_t (img_mgmt.h), by number. Group 1 reports them as SMP v2 {group, rc}.
+IMG_ERROR_NAMES = (
+    "OK", "UNKNOWN", "FLASH_CONFIG_QUERY_FAIL", "NO_IMAGE", "NO_TLVS", "INVALID_TLV", "TLV_MULTIPLE_HASHES_FOUND",
+    "TLV_INVALID_SIZE", "HASH_NOT_FOUND", "NO_FREE_SLOT", "FLASH_OPEN_FAILED", "FLASH_READ_FAILED",
+    "FLASH_WRITE_FAILED", "FLASH_ERASE_FAILED", "INVALID_SLOT", "NO_FREE_MEMORY", "FLASH_CONTEXT_ALREADY_SET",
+    "FLASH_CONTEXT_NOT_SET", "FLASH_AREA_DEVICE_NULL", "INVALID_PAGE_OFFSET", "INVALID_OFFSET", "INVALID_LENGTH",
+    "INVALID_IMAGE_HEADER", "INVALID_IMAGE_HEADER_MAGIC", "INVALID_HASH", "INVALID_FLASH_ADDRESS",
+    "VERSION_GET_FAILED", "CURRENT_VERSION_IS_NEWER", "IMAGE_ALREADY_PENDING", "INVALID_IMAGE_VECTOR_TABLE",
+    "INVALID_IMAGE_TOO_LARGE", "INVALID_IMAGE_DATA_OVERRUN", "IMAGE_CONFIRMATION_DENIED",
+    "IMAGE_SETTING_TEST_TO_ACTIVE_DENIED", "ACTIVE_SLOT_NOT_KNOWN",
+)
+IMG_ERROR_HINTS = {
+    3: "the slot holds no image",
+    8: "no slot holds an image with this hash",
+    9: "slot 1 is in use: a test image runs, or an update is pending",
+    22: "the first chunk is shorter than an MCUboot header",
+    23: "not an MCUboot image",
+    27: "the unit runs this version or a newer one, and the upload asked for an upgrade only",
+    28: "an image operation is pending; reset the unit, or erase the slot",
+    30: "the image does not fit the slot (less the swap trailer)",
+    32: "the image cannot be confirmed now",
+}
+IMG_ERRORS = {code: name + (f": {IMG_ERROR_HINTS[code]}" if code in IMG_ERROR_HINTS else "")
+              for code, name in enumerate(IMG_ERROR_NAMES) if code}
+
+# The dfu group's errors (SmpGroupId::DFU), which the unit's upload check raises while an image arrives.
+DFU_ERRORS = {
+    2: "NO_IDENTITY: the image carries no product and board identity (TLV 0x00A0)",
+    3: "WRONG_PRODUCT: the image is for another product",
+    4: "WRONG_BOARD: the image is for another board",
+    5: "BAD_IDENTITY: the identity TLV of the image is malformed",
+}
+
+GROUP_ERRORS = {Group.CONFIG: CONFIG_ERRORS, Group.ASSETS: ASSETS_ERRORS, Group.IMG: IMG_ERRORS,
+                Group.DFU: DFU_ERRORS}
 # MCUmgr's MGMT_ERR_ENOTSUP, which a unit answers at the top level for a group it does not serve.
 MGMT_ERR_ENOTSUP = 8
+MISSING_GROUP_HINTS = {
+    Group.ASSETS: "the unit has no assets group (older firmware)",
+    Group.IMG: "the unit has no image management (built without DFU)",
+    Group.DFU: "the unit has no dfu group (older firmware, or built without DFU)",
+}
 
 
 class AssetsCommand(IntEnum):
@@ -217,13 +364,15 @@ class SmpError(Exception):
         self.group = group
         self.response = response
         reason = GROUP_ERRORS.get(group, {}).get(rc, "")
-        if group is None and rc == MGMT_ERR_ENOTSUP and request_group == Group.ASSETS:
-            reason = "the unit has no assets group (older firmware)"
+        if group is None and rc == MGMT_ERR_ENOTSUP and request_group in MISSING_GROUP_HINTS:
+            reason = MISSING_GROUP_HINTS[request_group]
         where = f"group {group} error" if group is not None else "MCUmgr error"
         message = f"{where} {rc}" + (f" ({reason})" if reason else "")
-        # APPLY_FAILED carries the validator's reason.
-        if isinstance(response.get("msg"), str) and response["msg"]:
-            message += f": {response['msg']}"
+        # APPLY_FAILED carries the validator's reason in `msg`, img_mgmt's verbose errors in `rsn`.
+        for key in ("msg", "rsn"):
+            if isinstance(response.get(key), str) and response[key]:
+                message += f": {response[key]}"
+                break
         super().__init__(message)
 
     def is_config_error(self, rc: int) -> bool:
@@ -231,6 +380,10 @@ class SmpError(Exception):
 
     def is_assets_error(self, rc: int) -> bool:
         return self.group == Group.ASSETS and self.rc == rc
+
+    def is_missing_group(self) -> bool:
+        """Whether the unit answered that it does not serve the group of the request."""
+        return self.group is None and self.rc == MGMT_ERR_ENOTSUP
 
 
 def require(module: str, package: str) -> types.ModuleType:
@@ -299,6 +452,11 @@ class Reassembler:
 class SmpCanLink:
     """Sends packets to one unit, paced to a share of the bus, and receives its packets to us."""
 
+    # Image chunks in flight by default: the target erases flash with interrupts off, and a second request on
+    # the wire would arrive during the erase and be lost (firmware update plan, D3).
+    image_window = 1
+    max_packet_size: int | None = None
+
     def __init__(self, bus: can.BusABC, *, target: int, source: int, base: int, is_can_fd: bool,
                  bitrate: int, data_bitrate: int, share_percent: int) -> None:
         self._can = require("can", "python-can")
@@ -334,6 +492,9 @@ class SmpCanLink:
             if packet is not None:
                 return packet
         return None
+
+    def reconnect(self) -> None:
+        """Nothing to do: the bus stays up while a unit restarts."""
 
     def _pace(self) -> None:
         now_s = time.monotonic()
@@ -424,6 +585,10 @@ class SerialFrameDecoder:
             packet = self._accept_line(marker, body)
             if packet is not None:
                 packets.append(packet)
+
+    def pending_text(self) -> bytes:
+        """The console line being assembled, such as a prompt that has no newline yet."""
+        return self._text
 
     def flush_text(self) -> None:
         """Hands over the console line still being assembled, such as a prompt without a newline."""
@@ -516,15 +681,22 @@ def open_serial_port(serial_module: types.ModuleType, name: str, baud: int):
 class SmpSerialLink:
     """SMP over a unit's shell console (MCUMGR_TRANSPORT_SHELL), as a bench build serves it."""
 
+    # See SmpCanLink.
+    image_window = 1
+    max_packet_size: int | None = None
+
     def __init__(self, port: str, baud: int = DEFAULT_BAUD, line_delay_s: float = 0.0,
                  show_console: bool = False) -> None:
-        serial_module = require("serial", "pyserial")
+        self._serial_module = require("serial", "pyserial")
+        self._port_name = port
+        self._baud = baud
         self._line_delay_s = line_delay_s
         self._show_console = show_console
         self._console: list[str] = []
         self._packets: collections.deque[bytes] = collections.deque()
         self._decoder = SerialFrameDecoder(self._on_console_line)
-        self._port = open_serial_port(serial_module, port, baud)
+        self._boot_seen = False
+        self._port = open_serial_port(self._serial_module, port, baud)
 
     def __enter__(self) -> "SmpSerialLink":
         return self
@@ -537,6 +709,65 @@ class SmpSerialLink:
         if self._show_console and self._decoder.corrupt_lines:
             print(f"console: {self._decoder.corrupt_lines} corrupt line(s), "
                   f"{self._decoder.dropped_packets} dropped packet(s)", file=sys.stderr)
+
+    def reconnect(self) -> None:
+        """Opens the port again: a unit that restarted may have dropped off the USB bus and come back."""
+        with contextlib.suppress(OSError):
+            self._port.close()
+        self._port = open_serial_port(self._serial_module, self._port_name, self._baud)
+        self._packets.clear()
+        self._decoder = SerialFrameDecoder(self._on_console_line)
+
+    @property
+    def boot_seen(self) -> bool:
+        """Whether the console showed a boot banner or the shell's prompt since expect_boot()."""
+        pending = ANSI_ESCAPE.sub("", self._decoder.pending_text().decode("utf-8", errors="replace"))
+        return self._boot_seen or any(marker in pending for marker in SERIAL_BOOT_MARKERS)
+
+    def expect_boot(self) -> None:
+        """Forgets the boot markers read so far; call it before whatever may reset the unit.
+
+        The S3's USB-Serial-JTAG keeps its OUT FIFO over a warm reset, and a line written between the reset
+        and the moment the app enables the receive interrupt stays in it: the driver does not drain it, no
+        further interrupt comes, and every later write times out until a hardware reset (which reverts a test
+        image). So after a reset nothing is written until wait_for_boot() says the unit is up; reading is harmless.
+        """
+        with contextlib.suppress(OSError):
+            while self._port.in_waiting:
+                self._pump()
+        self._boot_seen = False
+
+    def wait_for_boot(self, timeout_s: float, *, what: str = "waiting for the boot banner",
+                      settle_s: float | None = None) -> bool:
+        """Listens without writing until the console shows the boot banner or the prompt, then for the settle time.
+
+        Returns False when nothing showed within @p timeout_s. A port that left the USB bus is opened again.
+        """
+        settle_s = SERIAL_BOOT_SETTLE_S if settle_s is None else settle_s
+        started_s = time.monotonic()
+        next_note_s = started_s + IMAGE_NOTE_INTERVAL_S
+        while not self.boot_seen:
+            now_s = time.monotonic()
+            if now_s >= started_s + timeout_s:
+                return False
+            if now_s >= next_note_s:
+                print(f"{what}: {format_duration(now_s - started_s)} so far", file=sys.stderr)
+                next_note_s = now_s + IMAGE_NOTE_INTERVAL_S
+            self._listen()
+        settle_until_s = time.monotonic() + settle_s
+        while time.monotonic() < settle_until_s:
+            self._listen()
+        return True
+
+    def _listen(self) -> None:
+        try:
+            self._pump()
+        except OSError:
+            # The port is gone while the unit restarts (or a read failed): open it again; the next read says
+            # whether that worked.
+            with contextlib.suppress(OSError):
+                self.reconnect()
+            time.sleep(0.2)
 
     def send(self, packet: bytes) -> None:
         for line in encode_serial_lines(packet):
@@ -576,9 +807,265 @@ class SmpSerialLink:
 
     def _on_console_line(self, line: str) -> None:
         line = ANSI_ESCAPE.sub("", line)
+        if any(marker in line for marker in SERIAL_BOOT_MARKERS):
+            self._boot_seen = True
         self._console.append(line)
         if self._show_console:
             print(f"console: {line}", file=sys.stderr)
+
+
+class BleReassembler:
+    """Rebuilds `[route][SMP packet]` from the bytes of the notifications on the smp characteristic.
+
+    Only the first fragment of a packet carries the route; the length in the SMP header ends the packet.
+    A gap longer than BLE_REASSEMBLY_TIMEOUT_S inside a packet drops it, and so does a length no packet
+    can have: a unit that fails to notify the middle of a response drops the rest of it, and the next
+    packet would otherwise be read as the end of that one.
+    """
+
+    def __init__(self, max_packet: int | None = None) -> None:
+        self._buffer = bytearray()
+        self._last_s = 0.0
+        self._max_packet = max_packet
+        self.dropped = 0
+
+    def accept(self, data: bytes, now_s: float) -> list[tuple[int, bytes]]:
+        if self._buffer and now_s - self._last_s > BLE_REASSEMBLY_TIMEOUT_S:
+            self._drop()
+        self._last_s = now_s
+        self._buffer += data
+
+        packets = []
+        while len(self._buffer) >= 1 + SMP_HEADER_SIZE:
+            size = SMP_HEADER_SIZE + int.from_bytes(self._buffer[3:5], "big")
+            if self._max_packet is not None and size > self._max_packet:
+                self._drop()
+                break
+            if len(self._buffer) < 1 + size:
+                break
+            packets.append((self._buffer[0], bytes(self._buffer[1:1 + size])))
+            del self._buffer[:1 + size]
+        return packets
+
+    def _drop(self) -> None:
+        self.dropped += 1
+        self._buffer.clear()
+
+
+class SmpBleLink:
+    """SMP through a unit's Bluetooth access point, as the configurator app talks to it.
+
+    Every packet on the smp characteristic is `[route][SMP packet]`: route 0 reaches the access point
+    itself, another CDMP device ID is forwarded over CAN, and the route of a response is the unit that
+    answered. A request goes out as ATT writes without response of at most MTU - 3 bytes; the route
+    is in the first only, and the length in the SMP header ends the packet. Responses arrive as
+    notifications. bleak is asyncio; its loop runs on a thread of its own so that the synchronous
+    SmpClient and SmpPipeline work as they do on the other links.
+    """
+
+    max_packet_size: int | None = None
+
+    def __init__(self, target: str, *, route: int = 0, pair: bool = True,
+                 scan_timeout_s: float = DEFAULT_BLE_SCAN_TIMEOUT_S) -> None:
+        self._bleak = require("bleak", "bleak")
+        self._bleak_exc = require("bleak.exc", "bleak")
+        self.route = route
+        self.stray_packets = 0
+        self._target = target
+        self._pair = pair
+        self._scan_timeout_s = scan_timeout_s
+        self._client = None
+        self._smp = None
+        self._write_size = BLE_MIN_WRITE_SIZE
+        self._info_window = 1
+        self._reassembler = BleReassembler()
+        self._packets: queue.Queue = queue.Queue()
+        self._lost = threading.Event()
+        self._closing = False
+
+        self._loop = asyncio.new_event_loop()
+        self._thread = threading.Thread(target=self._run_loop, name="ble", daemon=True)
+        self._thread.start()
+        try:
+            self._connect_blocking()
+        except BaseException:
+            self.close()
+            raise
+
+    def __enter__(self) -> "SmpBleLink":
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        self.close()
+
+    @property
+    def image_window(self) -> int:
+        """Image chunks in flight by default: the access point's window, 1 for a unit behind CAN (D3)."""
+        return self._info_window if self.route == 0 else 1
+
+    def close(self) -> None:
+        self._closing = True
+        with contextlib.suppress(Exception):
+            self._run(self._disconnect(), BLE_WRITE_TIMEOUT_S)
+        self._loop.call_soon_threadsafe(self._loop.stop)
+        self._thread.join(5.0)
+        if not self._thread.is_alive():
+            self._loop.close()
+        if self.stray_packets or self._reassembler.dropped:
+            print(f"bluetooth: {self.stray_packets} packet(s) from another route, "
+                  f"{self._reassembler.dropped} dropped partial packet(s)", file=sys.stderr)
+
+    def reconnect(self) -> None:
+        """Connects again, after the unit restarted or the link dropped; scans for the unit once more."""
+        with contextlib.suppress(Exception):
+            self._run(self._disconnect(), BLE_WRITE_TIMEOUT_S)
+        self._connect_blocking()
+
+    def send(self, packet: bytes) -> None:
+        if self._lost.is_set() or self._client is None:
+            raise ConnectionError("the Bluetooth link was lost")
+        data = bytes([self.route]) + packet
+        pieces = [data[offset:offset + self._write_size] for offset in range(0, len(data), self._write_size)]
+        self._run(self._write(pieces), BLE_WRITE_TIMEOUT_S)
+
+    def receive(self, timeout_s: float) -> bytes | None:
+        deadline_s = time.monotonic() + timeout_s
+        while True:
+            try:
+                item = self._packets.get(timeout=max(deadline_s - time.monotonic(), 0.0))
+            except queue.Empty:
+                if self._lost.is_set() or self._client is None:
+                    raise ConnectionError("the Bluetooth link was lost") from None
+                return None
+            if item is None:
+                raise ConnectionError("the Bluetooth link was lost")
+            route, packet = item
+            if route != self.route:
+                self.stray_packets += 1
+                continue
+            return packet
+
+    def _run_loop(self) -> None:
+        asyncio.set_event_loop(self._loop)
+        self._loop.run_forever()
+
+    def _run(self, coroutine, timeout_s: float):
+        """Runs a coroutine on the loop's thread; whatever goes wrong on the link is a ConnectionError."""
+        future = asyncio.run_coroutine_threadsafe(coroutine, self._loop)
+        try:
+            return future.result(timeout_s)
+        except (concurrent.futures.TimeoutError, asyncio.TimeoutError):
+            future.cancel()
+            raise ConnectionError("a Bluetooth operation timed out") from None
+        except ConnectionError:
+            raise
+        except self._bleak_exc.BleakError as error:
+            raise ConnectionError(f"Bluetooth: {error}") from None
+        except OSError as error:
+            raise ConnectionError(f"Bluetooth: {error} (is there an adapter, and BlueZ running?)") from None
+
+    def _connect_blocking(self) -> None:
+        while not self._packets.empty():
+            self._packets.get_nowait()
+        self._lost.clear()
+        self._reassembler = BleReassembler()
+        timeout_s = self._scan_timeout_s + BLE_CONNECT_TIMEOUT_S + BLE_PAIR_TIMEOUT_S + BLE_WRITE_TIMEOUT_S
+        try:
+            self._run(self._connect(), timeout_s)
+        except BaseException:
+            # A connect that failed (the unit is still swapping and does not advertise) leaves no client: the
+            # link stays lost, and the next send or receive says so instead of finding nothing to write to.
+            self._lost.set()
+            raise
+
+    async def _find_device(self):
+        scanner = self._bleak.BleakScanner
+        if BLE_ADDRESS.fullmatch(self._target):
+            device = await scanner.find_device_by_address(self._target, timeout=self._scan_timeout_s)
+        else:
+            wanted = self._target.lower()
+            device = await scanner.find_device_by_filter(
+                lambda device, advertisement: wanted in ((device.name or "").lower(),
+                                                         (advertisement.local_name or "").lower()),
+                timeout=self._scan_timeout_s)
+        if device is None:
+            raise ConnectionError(f"no Bluetooth device {self._target!r} found within {self._scan_timeout_s:.0f} s")
+        return device
+
+    async def _connect(self) -> None:
+        device = await self._find_device()
+        client = self._bleak.BleakClient(device, disconnected_callback=self._on_disconnected,
+                                         timeout=BLE_CONNECT_TIMEOUT_S)
+        await client.connect()
+        self._client = client
+        try:
+            if self._pair:
+                await self._pair_link(client)
+
+            info = bytes(await client.read_gatt_char(BLE_INFO_UUID))
+            if len(info) < BLE_INFO.size:
+                raise ConnectionError(f"the info characteristic holds {len(info)} B, expected {BLE_INFO.size}")
+            version, max_packet, window = BLE_INFO.unpack_from(info)
+            if version != BLE_PROTOCOL_VERSION:
+                print(f"warning: the unit speaks access point protocol {version}, this client {BLE_PROTOCOL_VERSION}",
+                      file=sys.stderr)
+            self.max_packet_size = max_packet or None
+            self._info_window = max(1, window)
+            self._reassembler = BleReassembler(self.max_packet_size)
+
+            self._smp = client.services.get_characteristic(BLE_SMP_UUID)
+            if self._smp is None:
+                raise ConnectionError("the unit has no smp characteristic: it is not an EerieLeap access point")
+            self._write_size = self._get_write_size(client, self._smp)
+            await client.start_notify(self._smp, self._on_notification)
+        except BaseException:
+            await self._disconnect()
+            raise
+
+    async def _pair_link(self, client) -> None:
+        """Pairs (Just Works). The smp characteristic refuses writes on a link that is not encrypted, and a
+        write without response that is refused is not reported, so the pairing has to be done first."""
+        try:
+            await client.pair()
+        except NotImplementedError:
+            pass  # CoreBluetooth pairs when the first encrypted access needs it.
+        except self._bleak_exc.BleakError as error:
+            raise ConnectionError(
+                f"pairing failed: {error}; a unit that was reflashed needs its old pairing removed on this host "
+                f"(Linux: bluetoothctl remove ADDRESS), and --ble-no-pair skips the step") from None
+
+    @staticmethod
+    def _get_write_size(client, characteristic) -> int:
+        size = None
+        with contextlib.suppress(Exception):
+            size = characteristic.max_write_without_response_size
+        if not isinstance(size, int) or size < BLE_MIN_WRITE_SIZE:
+            size = max(getattr(client, "mtu_size", 0) - 3, BLE_MIN_WRITE_SIZE)
+        return size
+
+    async def _write(self, pieces: list[bytes]) -> None:
+        for piece in pieces:
+            client = self._client
+            if client is None:
+                raise ConnectionError("the Bluetooth link was lost")
+            await client.write_gatt_char(self._smp, piece, response=False)
+
+    async def _disconnect(self) -> None:
+        client, self._client = self._client, None
+        if client is not None:
+            with contextlib.suppress(Exception):
+                await client.disconnect()
+
+    def _on_notification(self, characteristic, data: bytearray) -> None:
+        for route, packet in self._reassembler.accept(bytes(data), time.monotonic()):
+            self._packets.put((route, packet))
+
+    def _on_disconnected(self, client) -> None:
+        # A client that was dropped on purpose (a reconnect, a failed connect) is no longer self._client.
+        if self._closing or client is not self._client:
+            return
+        self._lost.set()
+        self._packets.put(None)
 
 
 def encode_request(op: Op, group: int, command: int, body: dict | None, sequence: int) -> bytes:
@@ -606,14 +1093,14 @@ def decode_response(packet: bytes, length: int, request_group: int) -> dict:
 
 
 class SmpClient:
-    def __init__(self, link: SmpCanLink | SmpSerialLink, timeout_s: float, retries: int) -> None:
+    def __init__(self, link: SmpCanLink | SmpSerialLink | SmpBleLink, timeout_s: float, retries: int) -> None:
         self._link = link
         self._timeout_s = timeout_s
         self._retries = retries
         self._sequence = random.randrange(256)
 
     @property
-    def link(self) -> SmpCanLink | SmpSerialLink:
+    def link(self) -> SmpCanLink | SmpSerialLink | SmpBleLink:
         return self._link
 
     @property
@@ -1293,6 +1780,549 @@ def delete_asset(client: SmpClient, kind: int, name: str) -> None:
     raise TimeoutError(f"no response to group {Group.ASSETS} command {AssetsCommand.DELETE}")
 
 
+class ImageError(RuntimeError):
+    """A file that is not an MCUboot image, or whose structure is damaged."""
+
+
+@dataclasses.dataclass(frozen=True)
+class ImageIdentity:
+    product_id: int
+    board: str
+
+
+@dataclasses.dataclass(frozen=True)
+class ImageTlv:
+    protected: bool
+    tag: int
+    value: bytes
+
+
+@dataclasses.dataclass(frozen=True)
+class ImageInfo:
+    size: int                               # The file's size.
+    load_address: int
+    header_size: int
+    image_size: int
+    protected_size: int                     # The protected TLV area, with its 4-byte header; 0 if none.
+    flags: int
+    version: tuple[int, int, int, int]      # major, minor, revision, build number
+    tlvs: tuple[ImageTlv, ...]
+    trailing: int                           # Bytes after the last TLV area (padding, the swap trailer).
+    digest: bytes                           # SHA-256 of the header, the image and the protected TLVs.
+
+    def find(self, tag: int, protected: bool) -> bytes | None:
+        return next((tlv.value for tlv in self.tlvs if tlv.tag == tag and tlv.protected == protected), None)
+
+    @property
+    def hash(self) -> bytes | None:
+        """The image hash img_mgmt reports and `image test` takes: the SHA-256 TLV."""
+        return self.find(IMAGE_TLV_SHA256, protected=False)
+
+    @property
+    def signature_tag(self) -> int | None:
+        return next((tlv.tag for tlv in self.tlvs if not tlv.protected and tlv.tag in IMAGE_SIGNATURE_TLVS), None)
+
+    @property
+    def identity(self) -> ImageIdentity | None:
+        value = self.find(IMAGE_TLV_IDENTITY, protected=True)
+        return None if value is None else parse_identity(value)
+
+    @property
+    def has_unprotected_identity(self) -> bool:
+        return self.find(IMAGE_TLV_IDENTITY, protected=False) is not None
+
+
+def parse_identity(value: bytes) -> ImageIdentity:
+    if len(value) < 4:
+        raise ImageError(f"the identity TLV holds {len(value)} B, its header is 4 B")
+    if value[0] != IMAGE_IDENTITY_FORMAT:
+        raise ImageError(f"the identity TLV has format {value[0]}, this client reads {IMAGE_IDENTITY_FORMAT}")
+    board_length = value[3]
+    if len(value) != 4 + board_length:
+        raise ImageError(f"the identity TLV holds {len(value) - 4} B of board name, its length says {board_length}")
+    try:
+        board = value[4:].decode("ascii")
+    except UnicodeDecodeError:
+        raise ImageError("the board name of the identity TLV is not ASCII") from None
+    return ImageIdentity(int.from_bytes(value[1:3], "little"), board)
+
+
+def read_image_tlvs(data: bytes, start: int, magic: int, protected: bool) -> tuple[list[ImageTlv], int]:
+    """Reads one TLV area at @p start. Returns its entries and the offset after it."""
+    name = "protected" if protected else "unprotected"
+    if start + IMAGE_TLV_HEADER.size > len(data):
+        raise ImageError(f"the file ends at {len(data)} B, before the {name} TLV area at {start}")
+    found, total = IMAGE_TLV_HEADER.unpack_from(data, start)
+    if found != magic:
+        raise ImageError(f"the {name} TLV area at {start} has magic {found:#06x}, expected {magic:#06x}")
+    end = start + total
+    if total < IMAGE_TLV_HEADER.size or end > len(data):
+        raise ImageError(f"the {name} TLV area at {start} claims {total} B, the file holds {len(data) - start}")
+
+    tlvs = []
+    position = start + IMAGE_TLV_HEADER.size
+    while position < end:
+        if position + IMAGE_TLV_HEADER.size > end:
+            raise ImageError(f"a {name} TLV entry at {position} runs past its area")
+        tag, length = IMAGE_TLV_HEADER.unpack_from(data, position)
+        position += IMAGE_TLV_HEADER.size
+        if position + length > end:
+            raise ImageError(f"the {name} TLV {tag:#06x} at {position - 4} is {length} B and runs past its area")
+        tlvs.append(ImageTlv(protected, tag, data[position:position + length]))
+        position += length
+    return tlvs, end
+
+
+def parse_image(data: bytes) -> ImageInfo:
+    """Reads the header and TLVs of an MCUboot image (a .signed.bin) and checks that they fit the file."""
+    if len(data) < IMAGE_HEADER.size:
+        raise ImageError(f"{len(data)} B is shorter than an MCUboot header ({IMAGE_HEADER.size} B)")
+    (magic, load_address, header_size, protected_size, image_size, flags,
+     major, minor, revision, build, _) = IMAGE_HEADER.unpack_from(data)
+    if magic != IMAGE_MAGIC:
+        raise ImageError(f"magic {magic:#010x}, not an MCUboot image ({IMAGE_MAGIC:#010x})")
+    if header_size < IMAGE_HEADER.size:
+        raise ImageError(f"header size {header_size} B is smaller than the header")
+
+    tlvs: list[ImageTlv] = []
+    position = header_size + image_size
+    if protected_size:
+        protected, end = read_image_tlvs(data, position, IMAGE_TLV_PROTECTED_MAGIC, protected=True)
+        if end - position != protected_size:
+            raise ImageError(f"the header says {protected_size} B of protected TLVs, the area holds {end - position} B")
+        tlvs += protected
+        position = end
+    unprotected, position = read_image_tlvs(data, position, IMAGE_TLV_MAGIC, protected=False)
+    tlvs += unprotected
+
+    signed_end = header_size + image_size + protected_size
+    return ImageInfo(len(data), load_address, header_size, image_size, protected_size, flags,
+                     (major, minor, revision, build), tuple(tlvs), len(data) - position,
+                     hashlib.sha256(data[:signed_end]).digest())
+
+
+def format_image_version(version: tuple[int, int, int, int]) -> str:
+    """imgtool's spelling: major.minor.revision+build."""
+    return "{}.{}.{}+{}".format(*version)
+
+
+def parse_version_string(text: str) -> tuple[int, int, int, int]:
+    """img_mgmt's version string, `major.minor.revision` with `.build` when the build number is not 0."""
+    try:
+        numbers = [int(part) for part in text.split(".")]
+    except ValueError:
+        raise ValueError(f"{text!r} is not a version") from None
+    if not 3 <= len(numbers) <= 4:
+        raise ValueError(f"{text!r} is not a version")
+    return (numbers[0], numbers[1], numbers[2], numbers[3] if len(numbers) == 4 else 0)
+
+
+def format_image_flags(flags: int) -> str:
+    names = [name for bit, name in IMAGE_FLAGS.items() if flags & bit]
+    rest = flags & ~sum(IMAGE_FLAGS)
+    if rest:
+        names.append(f"{rest:#x}")
+    return f"{flags:#010x} ({' '.join(names) or 'none'})"
+
+
+def format_tlv(tlv: ImageTlv) -> str:
+    name = IMAGE_TLV_NAMES.get(tlv.tag, "unknown")
+    line = f"  {tlv.tag:#06x} {name}  {len(tlv.value)} B"
+    if tlv.tag in (IMAGE_KEY_HASH_TLV, IMAGE_TLV_SHA256, 0x11, 0x12):
+        line += f"  {tlv.value.hex()}"
+    return line
+
+
+def print_image_info(path: Path, info: ImageInfo) -> bool:
+    """Prints what is known about an image. Returns False when its own digest does not match its hash TLV."""
+    print(f"file: {path} ({info.size} B)")
+    print(f"magic: {IMAGE_MAGIC:#010x}")
+    print(f"version: {format_image_version(info.version)}")
+    print(f"load address: {info.load_address:#010x}")
+    print(f"header size: {info.header_size} B")
+    print(f"image size: {info.image_size} B")
+    print(f"protected TLV size: {info.protected_size} B")
+    print(f"flags: {format_image_flags(info.flags)}")
+
+    for protected in (True, False):
+        entries = [tlv for tlv in info.tlvs if tlv.protected == protected]
+        if entries or not protected:
+            magic = IMAGE_TLV_PROTECTED_MAGIC if protected else IMAGE_TLV_MAGIC
+            print(f"{'protected' if protected else 'unprotected'} TLVs (magic {magic:#06x}):")
+            for tlv in entries:
+                print(format_tlv(tlv))
+    if info.trailing:
+        print(f"trailing bytes: {info.trailing} B (a padded image; an upload sends them too)")
+
+    try:
+        identity = info.identity
+        if identity is not None:
+            print(f"identity: product {identity.product_id:#06x}, board {identity.board}")
+        else:
+            print("identity: none (a unit with the dfu group refuses the image)"
+                  + ("; the identity TLV is in the unprotected area, where it is not signed"
+                     if info.has_unprotected_identity else ""))
+    except ImageError as error:
+        print(f"identity: malformed ({error})")
+
+    signature = info.signature_tag
+    if signature is None:
+        print("signature: none")
+    else:
+        print(f"signature: {IMAGE_TLV_NAMES.get(signature, 'unknown')} ({signature:#04x})")
+    key_hash = info.find(IMAGE_KEY_HASH_TLV, protected=False)
+    if key_hash is not None:
+        print(f"key hash: {key_hash.hex()}")
+    if info.protected_size > IMAGE_MAX_PROTECTED_SIZE:
+        print(f"warning: {info.protected_size} B of protected TLVs; the unit refuses more than "
+              f"{IMAGE_MAX_PROTECTED_SIZE} B")
+
+    image_hash = info.hash
+    if image_hash is None:
+        print("hash: none (no SHA256 TLV)")
+        return False
+    print(f"hash: {image_hash.hex()}")
+    if image_hash != info.digest:
+        print(f"digest of header, image and protected TLVs: {info.digest.hex()}  DOES NOT MATCH the hash")
+        return False
+    print("digest of header, image and protected TLVs: matches the hash")
+    return True
+
+
+@dataclasses.dataclass(frozen=True)
+class ImageSlot:
+    """One entry of img_mgmt's state read. A flag that is absent is false (the list may be frugal)."""
+    image: int
+    slot: int
+    version: str
+    hash: bytes
+    bootable: bool
+    pending: bool
+    confirmed: bool
+    active: bool
+    permanent: bool
+
+    @classmethod
+    def from_entry(cls, entry: dict) -> "ImageSlot":
+        flags = ("bootable", "pending", "confirmed", "active", "permanent")
+        return cls(entry.get("image", 0), entry["slot"], entry.get("version", "?"), bytes(entry.get("hash", b"")),
+                   *(bool(entry.get(flag, False)) for flag in flags))
+
+    @property
+    def version_tuple(self) -> tuple[int, int, int, int] | None:
+        try:
+            return parse_version_string(self.version)
+        except ValueError:
+            return None
+
+    def describe(self) -> str:
+        flags = [name for name in ("active", "confirmed", "pending", "permanent", "bootable") if getattr(self, name)]
+        where = f"image {self.image} slot {self.slot}" if self.image else f"slot {self.slot}"
+        line = f"{where}  version {self.version}  hash {self.hash.hex()}  {' '.join(flags) or 'no flags'}"
+        if self.pending:
+            line += "  (permanent swap at the next reset)" if self.permanent else "  (test boot at the next reset)"
+        elif not self.active and not self.confirmed and not self.permanent:
+            line += "  (not selected)"
+        return line
+
+
+def images_from(response: dict) -> list[ImageSlot]:
+    return [ImageSlot.from_entry(entry) for entry in response.get("images", [])]
+
+
+def read_images(client: "SmpClient") -> list[ImageSlot]:
+    return images_from(client.read(Group.IMG, IMG_STATE))
+
+
+def find_running(images: list[ImageSlot]) -> ImageSlot | None:
+    return next((entry for entry in images if entry.active), None)
+
+
+def find_by_hash(images: list[ImageSlot], image_hash: bytes) -> ImageSlot | None:
+    return next((entry for entry in images if entry.hash == image_hash), None)
+
+
+def parse_image_hash(text: str) -> bytes:
+    """An image hash as 64 hex digits, as `image list` prints it."""
+    digits = text[2:] if text.lower().startswith("0x") else text
+    try:
+        value = bytes.fromhex(digits)
+    except ValueError:
+        value = b""
+    if len(value) != 32:
+        raise argparse.ArgumentTypeError(f"{text!r} is not an image hash (64 hex digits, as `image list` shows it)")
+    return value
+
+
+def format_reset_cause(bits: int) -> str:
+    names = [name for index, name in enumerate(RESET_CAUSES) if bits & 1 << index]
+    rest = bits & ~((1 << len(RESET_CAUSES)) - 1)
+    if rest:
+        names.append(f"{rest:#x}")
+    return f"{bits:#010x} ({' '.join(names) or 'none'})"
+
+
+def read_dfu_status(client: "SmpClient") -> dict:
+    return client.read(Group.DFU, DFU_STATUS)
+
+
+def format_dfu_state(state: int) -> str:
+    return f"{DFU_STATES.get(state, 'unknown')} ({state})"
+
+
+def image_chunk_sizes(buf_size: int, *, is_serial: bool, max_packet: int | None, upgrade: bool) -> tuple[int, int]:
+    """The data of the first upload chunk and of the others, for a unit whose packets hold @p buf_size bytes.
+
+    The others are buf_size - 64 as the plan has it. The first carries the whole image's size and SHA-256
+    besides, so it is encoded to see how much room is left. A request that does not fit is dropped by the unit's
+    transport without an answer.
+    """
+    available = buf_size - (SERIAL_FRAME_OVERHEAD if is_serial else 0)
+    if max_packet:
+        available = min(available, max_packet)
+    first_body = {"image": 0, "len": 0xFFFFFFFF, "sha": bytes(32), "off": 0, "data": b""}
+    if upgrade:
+        first_body["upgrade"] = True
+    # The empty `data` has a 1-byte head; up to 65535 B take 3.
+    first_overhead = len(encode_request(Op.WRITE, Group.IMG, IMG_UPLOAD, first_body, 0)) + 2
+    first, rest = available - first_overhead, available - IMAGE_WRITE_OVERHEAD
+    if first < IMAGE_HEADER.size or rest < 1:
+        raise RuntimeError(f"the unit's packets of {available} B are too small for image chunks "
+                           f"(the first needs more than {first_overhead + IMAGE_HEADER.size} B)")
+    return first, rest
+
+
+class UploadLost(Exception):
+    """The transfer broke off. It can start over: the unit answers a first chunk with the offset it has."""
+
+    def __init__(self, message: str, after_last_chunk: bool = False) -> None:
+        super().__init__(message)
+        self.after_last_chunk = after_last_chunk
+
+
+def send_image(client: "SmpClient", image: bytes, sha: bytes, *, window: int, first_size: int, chunk_size: int,
+               upgrade: bool, progress: Progress) -> int:
+    """Sends the image from the offset the unit reports. Returns the unit's offset after the first chunk.
+
+    That is the first chunk's size for a new transfer, more for one that resumed, and the image's size when the
+    slot held the image already.
+
+    The first chunk goes alone, at offset 0 with the size and the SHA-256 of the whole file: a unit that holds
+    a partial upload with that sha answers with its offset, and one whose slot holds the image already answers
+    with the image's size. The other chunks follow in order, @p window in flight. The unit writes a chunk
+    only at the offset it expects and otherwise answers with that offset, so an answer that does not lead to
+    the next chunk (a lost chunk, a repeated one) makes the client let the window drain and continue from the
+    unit's offset.
+    """
+    total = len(image)
+
+    def chunk_at(offset: int) -> bytes:
+        return image[offset:offset + (first_size if offset == 0 else chunk_size)]
+
+    def body(offset: int) -> dict:
+        request = {"off": offset, "data": chunk_at(offset)}
+        if offset == 0:
+            request |= {"image": 0, "len": total, "sha": sha}
+            if upgrade:
+                request["upgrade"] = True
+        return request
+
+    def check(response: dict) -> int:
+        offset = response.get("off")
+        if not isinstance(offset, int) or not 0 <= offset <= total:
+            raise RuntimeError(f"the unit expects offset {offset!r} of an image of {total} B")
+        if response.get("match") is False:
+            raise RuntimeError("the unit's SHA-256 check of the uploaded slot failed: the image did not arrive intact")
+        return offset
+
+    def send_first() -> int:
+        """The first chunk, alone: the unit may hash the old slot content before it answers."""
+        try:
+            response = client.write(Group.IMG, IMG_UPLOAD, body(0),
+                                    timeout_s=max(client.timeout_s, IMAGE_FIRST_CHUNK_TIMEOUT_S))
+        except TimeoutError:
+            raise UploadLost("no response to the first chunk") from None
+        offset = check(response)
+        progress.update(offset, total)
+        return offset
+
+    start = unit_offset = send_first()
+
+    pipeline = SmpPipeline(client)
+    last_timeout_s = max(client.timeout_s, IMAGE_LAST_CHUNK_TIMEOUT_S)
+    next_offset = unit_offset
+    draining = False
+    rewound_at, stalls = -1, 0
+
+    def submit(offset: int) -> int:
+        end = offset + len(chunk_at(offset))
+        is_last = end >= total
+        # The answer to the last chunk waits for the slot check, and a chunk sent again after it would meet
+        # a transfer that is over, so it is sent once.
+        pipeline.submit(Op.WRITE, Group.IMG, IMG_UPLOAD, body(offset), (offset, end),
+                        timeout_s=last_timeout_s if is_last else client.timeout_s * window,
+                        retries=0 if is_last else None)
+        return end
+
+    while True:
+        while not draining and pipeline.outstanding < window and next_offset < total:
+            next_offset = submit(next_offset)
+
+        if not pipeline.outstanding:
+            if unit_offset >= total:
+                return start
+            # Everything sent was answered and the unit is behind: continue from where it says it is.
+            stalls = stalls + 1 if unit_offset <= rewound_at else 0
+            if stalls > IMAGE_MAX_STALLS:
+                raise RuntimeError(f"the unit keeps answering offset {unit_offset} of {total}: "
+                                   f"the upload makes no progress")
+            rewound_at, draining = unit_offset, False
+            if unit_offset == 0:
+                # The unit has no transfer (it lost it, or finished one): a new one starts with the first chunk
+                # alone, which also lets the unit tell that the slot holds the image already. Pipelined behind
+                # it, the next chunk would meet the state that first chunk resets.
+                unit_offset = send_first()
+            next_offset = unit_offset
+            continue
+
+        completion = pipeline.next_completion()
+        offset, end = completion.tag
+        if isinstance(completion.error, TimeoutError):
+            where = "the last chunk" if end >= total else f"the chunk at offset {offset}"
+            raise UploadLost(f"no response to {where}", after_last_chunk=end >= total)
+        if completion.error is not None:
+            raise completion.error
+
+        unit_offset = check(completion.response)
+        progress.update(unit_offset, total)
+        if unit_offset >= total:
+            # The unit has all of it (its SHA-256 check did not fail, or check() would have raised). Answers to
+            # chunks still in flight come from a transfer that is over, and would say offset 0.
+            return start
+        if unit_offset != end:
+            draining = True
+
+
+def reconnect_link(link, window_s: float) -> None:
+    """Brings a link back up after the unit restarted or the connection dropped, trying for @p window_s."""
+    deadline_s = time.monotonic() + window_s
+    delay_s = IMAGE_POLL_INTERVAL_S
+    while True:
+        try:
+            link.reconnect()
+            return
+        except OSError:
+            if time.monotonic() + delay_s > deadline_s:
+                raise
+            time.sleep(delay_s)
+            delay_s = min(delay_s * 1.5, IMAGE_POLL_MAX_INTERVAL_S)
+
+
+def upload_image(client: "SmpClient", image: bytes, sha: bytes, *, window: int, first_size: int, chunk_size: int,
+                 upgrade: bool, progress: Progress) -> int:
+    """Uploads an image and returns the unit's offset after the first chunk (see send_image).
+
+    A transfer that broke off, or whose link dropped, starts over at offset 0 with the same sha, and the unit
+    answers with the offset it has. The last chunk's answer can be lost after the unit stored the image: the
+    slot list then says whether it did.
+    """
+    for attempt in range(IMAGE_UPLOAD_ATTEMPTS):
+        reconnect = False
+        try:
+            return send_image(client, image, sha, window=window, first_size=first_size, chunk_size=chunk_size,
+                              upgrade=upgrade, progress=progress)
+        except UploadLost as error:
+            problem = str(error)
+            if error.after_last_chunk and slot_holds_image(client, image):
+                progress.finish()
+                print(f"{problem}, but the slot holds the image")
+                return 0
+        except OSError as error:
+            problem, reconnect = f"the link failed: {error}", True
+
+        progress.finish()
+        if attempt + 1 == IMAGE_UPLOAD_ATTEMPTS:
+            raise RuntimeError(f"the upload was lost: {problem}")
+        print(f"{problem}; resuming", file=sys.stderr)
+        if reconnect:
+            reconnect_link(client.link, IMAGE_RECONNECT_WINDOW_S)
+        else:
+            time.sleep(IMAGE_RESUME_PAUSE_S)
+
+    raise AssertionError("unreachable")
+
+
+def slot_holds_image(client: "SmpClient", image: bytes) -> bool:
+    """Whether a slot of the unit holds this image, by the hash TLV of the file."""
+    try:
+        wanted = parse_image(image).hash
+        return wanted is not None and find_by_hash(read_images(client), wanted) is not None
+    except (SmpError, TimeoutError, OSError, ImageError):
+        return False
+
+
+@dataclasses.dataclass(frozen=True)
+class UploadPlan:
+    window: int
+    first_size: int
+    chunk_size: int
+
+
+def plan_upload(client: "SmpClient", in_flight: int | None, upgrade: bool) -> UploadPlan:
+    """Chunk sizes from the unit's packet size, and the window: 1 on CAN and serial and for a BLE route to a unit
+    behind CAN, else the access point's window; either way below the unit's packet count."""
+    params = client.read(Group.OS, 6)
+    link = client.link
+    first, rest = image_chunk_sizes(params["buf_size"], is_serial=isinstance(link, SmpSerialLink),
+                                    max_packet=link.max_packet_size, upgrade=upgrade)
+    requested = in_flight if in_flight is not None else link.image_window
+    window = limit_window(requested, params.get("buf_count"))
+    if window != requested:
+        print(f"warning: the unit has {params.get('buf_count')} packets, shared by requests and responses: "
+              f"{window} in flight instead of {requested}", file=sys.stderr)
+    if in_flight is not None and in_flight > link.image_window:
+        print(f"warning: {in_flight} chunks in flight; the default for this link is {link.image_window}",
+              file=sys.stderr)
+    return UploadPlan(window, first, rest)
+
+
+def poll_device_info(client: "SmpClient", *, deadline_s: float, expect_restart: bool, what: str) -> dict:
+    """Asks for device info until the unit answers, with a growing pause between the tries.
+
+    With @p expect_restart the unit must go silent first: right after the reset command it still answers for a
+    moment. A unit that never goes silent within IMAGE_RESTART_GRACE_S did not restart, and its answer is
+    returned all the same. A link that dropped (Bluetooth, a console that left the USB bus) is brought back up.
+    """
+    started_s = time.monotonic()
+    seen_silence = not expect_restart
+    delay_s = IMAGE_POLL_INTERVAL_S
+    next_note_s = started_s + IMAGE_NOTE_INTERVAL_S
+    while True:
+        now_s = time.monotonic()
+        if now_s > deadline_s:
+            raise TimeoutError(f"the unit did not answer again within the time given ({what})")
+        try:
+            info = client.read(Group.DEVICE, 0, retries=0)
+        except (TimeoutError, SmpError, OSError) as error:
+            seen_silence = True
+            if isinstance(error, OSError) and not isinstance(error, TimeoutError):
+                with contextlib.suppress(OSError):
+                    client.link.reconnect()
+        else:
+            if seen_silence or now_s - started_s > IMAGE_RESTART_GRACE_S:
+                if not seen_silence:
+                    print("warning: the unit never went silent; it may not have restarted", file=sys.stderr)
+                return info
+            delay_s = IMAGE_POLL_INTERVAL_S
+
+        if now_s >= next_note_s:
+            print(f"{what}: {format_duration(now_s - started_s)} so far", file=sys.stderr)
+            next_note_s = now_s + IMAGE_NOTE_INTERVAL_S
+        time.sleep(delay_s)
+        if seen_silence:
+            delay_s = min(delay_s * 1.5, IMAGE_POLL_MAX_INTERVAL_S)
+
+
 @dataclasses.dataclass(frozen=True)
 class ConfigType:
     number: int
@@ -1743,12 +2773,26 @@ def command_devices(client: SmpClient, args: argparse.Namespace) -> None:
 
 def command_reset(client: SmpClient, args: argparse.Namespace) -> None:
     # The unit restarts shortly after it answers; it is not asked twice, and a lost answer is no failure.
+    listens = hasattr(client.link, "wait_for_boot")
+    if listens:
+        client.link.expect_boot()
     try:
         client.write(Group.OS, OS_RESET, {}, retries=0)
     except TimeoutError:
         print("no response; the unit may have restarted")
+    else:
+        print("reset requested")
+    if not listens:
         return
-    print("reset requested")
+
+    # On a console nothing may be written while the unit boots (see SmpSerialLink.expect_boot); a command that
+    # follows this one is safe once it returns.
+    print(f"listening for the boot banner (up to {format_duration(args.timeout_s)}; a swap takes up to ~2.5 min)")
+    if client.link.wait_for_boot(args.timeout_s, what="waiting for the boot banner"):
+        print("the unit is up")
+    else:
+        print(f"warning: no boot banner within {format_duration(args.timeout_s)}; give the unit time before the "
+              f"next command", file=sys.stderr)
 
 
 def command_config_list(client: SmpClient, args: argparse.Namespace) -> None:
@@ -1972,6 +3016,401 @@ def command_logging(client: SmpClient, args: argparse.Namespace) -> None:
     LOGGING_HANDLERS[args.logging_command](client, args)
 
 
+def command_ble_scan(client: None, args: argparse.Namespace) -> None:
+    bleak = require("bleak", "bleak")
+
+    async def scan() -> dict:
+        return await bleak.BleakScanner.discover(timeout=args.time, return_adv=True)
+
+    try:
+        found = asyncio.run(scan())
+    except (OSError, require("bleak.exc", "bleak").BleakError) as error:
+        raise RuntimeError(f"Bluetooth: {error} (is there an adapter, and BlueZ running?)") from None
+    shown = 0
+    for device, advertisement in sorted(found.values(), key=lambda entry: -(entry[1].rssi or -999)):
+        is_unit = BLE_SERVICE_UUID in [uuid.lower() for uuid in advertisement.service_uuids]
+        if not is_unit and not args.all:
+            continue
+        shown += 1
+        manufacturer = " ".join(f"{company:#06x}:{data.hex()}"
+                                for company, data in advertisement.manufacturer_data.items())
+        print(f"{device.address}  {advertisement.local_name or device.name or '-':24}  rssi {advertisement.rssi}"
+              f"  {'access point' if is_unit else '-'}" + (f"  manufacturer {manufacturer}" if manufacturer else ""))
+    if not shown:
+        print("no access point found" + ("" if args.all else "; --all lists every device"))
+
+
+def command_image_info(client: None, args: argparse.Namespace) -> None:
+    info = parse_image(args.file.read_bytes())
+    if not print_image_info(args.file, info):
+        raise ImageError("the image has no hash TLV, or its hash does not match its content")
+
+
+def command_image_list(client: SmpClient, args: argparse.Namespace) -> None:
+    images = read_images(client)
+    for entry in images:
+        print(entry.describe())
+    if not images:
+        print("no images")
+
+
+def upload_with_report(client: SmpClient, image: bytes, in_flight: int | None, upgrade: bool) -> int:
+    """Uploads an image, printing the plan and the result. Returns the unit's offset after the first chunk."""
+    sha = hashlib.sha256(image).digest()
+    plan = plan_upload(client, in_flight, upgrade)
+    print(f"uploading {len(image)} B, sha256 {sha.hex()}, chunks of {plan.chunk_size} B, {plan.window} in flight")
+
+    progress = Progress("image")
+    start_s = time.monotonic()
+    try:
+        began = upload_image(client, image, sha, window=plan.window, first_size=plan.first_size,
+                             chunk_size=plan.chunk_size, upgrade=upgrade, progress=progress)
+    finally:
+        progress.finish()
+    elapsed_s = max(time.monotonic() - start_s, 1e-9)
+
+    if began >= len(image) > plan.first_size:
+        print("the slot holds this image already; nothing was sent")
+        return began
+    resumed_at = began if began > min(plan.first_size, len(image)) else 0
+    sent = len(image) - resumed_at
+    resumed = f", resumed at {resumed_at} B" if resumed_at else ""
+    print(f"uploaded {sent} B in {elapsed_s:.1f} s ({sent / elapsed_s / 1024:.1f} KB/s{resumed})")
+    return began
+
+
+def command_image_upload(client: SmpClient, args: argparse.Namespace) -> None:
+    image = args.file.read_bytes()
+    info = parse_image(image)
+    upload_with_report(client, image, args.in_flight, args.upgrade)
+
+    try:
+        slot = find_by_hash(read_images(client), info.hash) if info.hash else None
+    except (SmpError, TimeoutError):
+        slot = None
+    if slot is not None:
+        print(slot.describe())
+    else:
+        print("warning: the unit does not list an image with the hash of this file", file=sys.stderr)
+
+
+def print_state(response: dict) -> list[ImageSlot]:
+    images = images_from(response)
+    for entry in images:
+        print(entry.describe())
+    return images
+
+
+def command_image_test(client: SmpClient, args: argparse.Namespace) -> None:
+    image_hash = args.hash
+    if image_hash is None:
+        backup = next((entry for entry in read_images(client) if entry.slot == 1), None)
+        if backup is None:
+            raise RuntimeError("slot 1 holds no image; upload one, or give the hash of an image")
+        image_hash = backup.hash
+
+    images = print_state(client.write(Group.IMG, IMG_STATE, {"hash": image_hash, "confirm": False}))
+    entry = find_by_hash(images, image_hash)
+    if entry is None or not entry.pending:
+        print("warning: the image is not pending after the request", file=sys.stderr)
+        return
+    print("marked for test: it boots once after the next reset, and MCUboot reverts to the old image unless it "
+          "is confirmed")
+
+
+def command_image_confirm(client: SmpClient, args: argparse.Namespace) -> None:
+    body: dict = {"confirm": True}
+    if args.hash is not None:
+        body["hash"] = args.hash
+    print_state(client.write(Group.IMG, IMG_STATE, body))
+
+
+# Erasing a slot of 4 MB takes the flash a while.
+IMAGE_ERASE_TIMEOUT_S = 180.0
+
+
+def command_image_erase(client: SmpClient, args: argparse.Namespace) -> None:
+    print("erasing slot 1 (the slot that does not run)")
+    client.write(Group.IMG, IMG_ERASE, {}, retries=0, timeout_s=max(client.timeout_s, IMAGE_ERASE_TIMEOUT_S))
+    print("erased")
+
+
+def command_dfu_status(client: SmpClient, args: argparse.Namespace) -> None:
+    status = read_dfu_status(client)
+    print(f"confirmed: {'yes' if status.get('confirmed') else 'no'}")
+    print(f"state: {format_dfu_state(status.get('state', -1))}")
+    if "confirm_in_ms" in status:
+        print(f"confirm_in_ms: {status['confirm_in_ms']} ({format_duration(status['confirm_in_ms'] / 1000)})")
+    print(f"reset_cause: {format_reset_cause(status.get('reset_cause', 0))}")
+
+
+DFU_HANDLERS = {
+    "status": command_dfu_status,
+}
+
+
+def command_dfu(client: SmpClient, args: argparse.Namespace) -> None:
+    DFU_HANDLERS[args.dfu_command](client, args)
+
+
+def describe_unit(device: dict) -> str:
+    text = f"product {device['product']:#06x}, board {device.get('board', '?')}, sw {unpack_version(device['sw'])}"
+    text += f" build {device['build']}"
+    if "uid" in device:
+        text += f", uid {device['uid']:#010x}"
+    return text
+
+
+def device_version(device: dict) -> tuple[int, int, int, int]:
+    sw = device["sw"]
+    return (sw >> 24, sw >> 16 & 0xFF, sw & 0xFFFF, device["build"])
+
+
+def check_image_fits_unit(info: ImageInfo, device: dict) -> None:
+    """The client's side of D5: the image's identity must be the unit's product and board."""
+    try:
+        identity = info.identity
+    except ImageError as error:
+        raise ImageError(f"the identity TLV of the image is malformed: {error}") from None
+    if identity is None:
+        raise ImageError("the image carries no identity TLV (0x00A0), so the unit would refuse it; "
+                         "was it built with rt_core's signing wrapper?")
+    if device["product"] != identity.product_id:
+        raise RuntimeError(f"the image is for product {identity.product_id:#06x}, the unit is product "
+                           f"{device['product']:#06x}")
+    board = device.get("board")
+    if board is None:
+        print("warning: the unit does not report its board (older firmware); the board check is skipped",
+              file=sys.stderr)
+    elif board != identity.board:
+        raise RuntimeError(f"the image is for board {identity.board}, the unit is {board}")
+
+    unit_version = device_version(device)
+    if info.version < unit_version:
+        print(f"warning: downgrade, {format_image_version(info.version)} is older than the unit's "
+              f"{format_image_version(unit_version)}", file=sys.stderr)
+    elif info.version == unit_version:
+        print(f"note: the unit runs version {format_image_version(unit_version)} already")
+
+
+def check_slot_is_free(images: list[ImageSlot]) -> None:
+    """Refuses what img_mgmt would: a test image runs (slot 1 is its backup), or an update is pending."""
+    running = find_running(images)
+    if running is None:
+        raise RuntimeError("the unit reports no running image")
+    if not running.confirmed:
+        raise RuntimeError(f"the running image ({running.version}) is not confirmed, so slot 1 holds its backup and "
+                           f"the unit refuses an upload: wait until it confirms itself (`dfu status`), or run "
+                           f"`image confirm`")
+    pending = next((entry for entry in images if entry.pending), None)
+    if pending is not None:
+        raise RuntimeError(f"an update is pending (slot {pending.slot}, version {pending.version}): reset the unit "
+                           f"to apply it, or run `image erase`")
+
+
+def request_reset(client: SmpClient) -> None:
+    """Resets the unit. It restarts shortly after it answers, or its link goes away first: neither is a failure."""
+    try:
+        client.write(Group.OS, OS_RESET, {}, retries=0)
+    except OSError:
+        pass
+
+
+def restart_unit(client: SmpClient, timeout_s: float, what: str) -> bool | None:
+    """Resets the unit. On a console it then stops writing and listens until the unit prints its boot banner.
+
+    Returns True when the unit announced its boot, False when the console showed nothing within @p timeout_s,
+    and None on a link with no console to listen to (CAN, Bluetooth), where nothing changes.
+    """
+    link = client.link
+    listens = hasattr(link, "wait_for_boot")
+    if listens:
+        link.expect_boot()
+    request_reset(client)
+    if not listens:
+        return None
+    print("not writing to the console until the unit prints its boot banner")
+    return link.wait_for_boot(timeout_s, what=what)
+
+
+def watch_confirmation(client: SmpClient, *, new_hash: bytes, timeout_s: float) -> bool:
+    """Polls until the running image is the new one and confirmed. Raises when it was reverted or never confirms.
+
+    A new image that fails is reset by its watchdog and MCUboot swaps back, which silences the unit for the
+    swap again: the wait then starts over, and so does the time limit. A unit that answers but not the image
+    and dfu requests does not start it over.
+
+    Returns whether the image is confirmed. A unit without a dfu group never confirms itself, so the new image
+    can be running and not confirmed, and the caller says so.
+    """
+    has_dfu = True
+    last_state = None
+    last_error: Exception | None = None
+    deadline_s = time.monotonic() + timeout_s
+    listens = hasattr(client.link, "wait_for_boot")
+    while True:
+        if time.monotonic() > deadline_s:
+            detail = f" (last error: {last_error})" if last_error else ""
+            raise TimeoutError(f"the new image did not confirm within {format_duration(timeout_s)}{detail}")
+        if listens:
+            client.link.expect_boot()
+        status = None
+        try:
+            images = read_images(client)
+            if has_dfu:
+                try:
+                    status = read_dfu_status(client)
+                except SmpError as error:
+                    if not error.is_missing_group():
+                        raise
+                    has_dfu = False
+                    print("note: the unit has no dfu group, so the image will not confirm itself: run `image confirm`")
+        except (TimeoutError, SmpError, OSError) as error:
+            last_error = error
+            if listens:
+                # Silent: the unit may be rebooting (a failed image is reset by its watchdog, and MCUboot
+                # swaps back). A console must not be written to meanwhile, so listen first.
+                if client.link.wait_for_boot(timeout_s, what="the unit went silent; listening for its boot"):
+                    deadline_s = time.monotonic() + timeout_s
+                    continue
+            try:
+                client.read(Group.DEVICE, 0, retries=0)
+            except (TimeoutError, SmpError, OSError):
+                pass
+            else:
+                # The unit answers, so it did not go away; only these requests fail. Try again after a pause,
+                # under the time limit already running.
+                time.sleep(IMAGE_VERIFY_INTERVAL_S)
+                continue
+            poll_device_info(client, deadline_s=time.monotonic() + timeout_s, expect_restart=False,
+                             what="the unit went silent again; waiting")
+            deadline_s = time.monotonic() + timeout_s
+            continue
+
+        running = find_running(images)
+        if running is None:
+            raise RuntimeError("the unit reports no running image")
+        cause = f"; reset cause of this boot: {format_reset_cause(status['reset_cause'])}" if status else ""
+
+        if running.hash != new_hash:
+            new = find_by_hash(images, new_hash)
+            if new is None:
+                raise RuntimeError(f"the unit runs version {running.version} and slot 1 no longer holds the new "
+                                   f"image: MCUboot refused it (signature, or the key it trusts?){cause}")
+            if new.pending:
+                raise RuntimeError(f"the unit runs version {running.version} and the new image is still pending: "
+                                   f"the unit did not restart into it{cause}")
+            raise RuntimeError(f"the update was reverted: version {running.version} runs again and the new image "
+                               f"({new.version}) sits unconfirmed in slot {new.slot}{cause}")
+
+        if status is None:
+            return running.confirmed
+        if status.get("confirmed") and status.get("state") == DFU_CONFIRMED:
+            return True
+        state = status.get("state")
+        note = format_dfu_state(state)
+        if state == DFU_FAILED:
+            note += ", the unit resets and MCUboot reverts the image"
+        elif "confirm_in_ms" in status:
+            note += f", confirms in {format_duration(status['confirm_in_ms'] / 1000)}"
+        if note != last_state:
+            print(f"the new image runs: {note}")
+            last_state = note
+        if state == DFU_FAILED and listens:
+            # A reset follows: write nothing until the unit is up again. The markers have been forgotten at
+            # the top of this pass, so a banner that came since counts.
+            if client.link.wait_for_boot(timeout_s, what="the new image failed; listening for the unit's boot"):
+                deadline_s = time.monotonic() + timeout_s
+            continue
+        time.sleep(IMAGE_VERIFY_INTERVAL_S)
+
+
+def command_image_update(client: SmpClient, args: argparse.Namespace) -> None:
+    """The client flow of the firmware update plan: check, upload, test, reset, wait, verify."""
+    started_s = time.monotonic()
+    image = args.file.read_bytes()
+    info = parse_image(image)
+    new_hash = info.hash
+    if new_hash is None or new_hash != info.digest:
+        raise ImageError("the image has no hash TLV, or its hash does not match its content; "
+                         f"`image info {args.file}` shows more")
+
+    # 1 and 2: the unit, and whether the file is for it.
+    device = client.read(Group.DEVICE, 0)
+    print(f"unit: {describe_unit(device)}")
+    print(f"image: version {format_image_version(info.version)}, hash {new_hash.hex()}")
+    check_image_fits_unit(info, device)
+    images = read_images(client)
+    for entry in images:
+        print(entry.describe())
+    running = find_running(images)
+    if running is not None and running.hash == new_hash:
+        print("the unit runs this image already; nothing to do")
+        return
+    check_slot_is_free(images)
+
+    # 3 and 4: size the chunks and upload.
+    upload_with_report(client, image, args.in_flight, args.upgrade)
+    images = read_images(client)
+    if find_by_hash(images, new_hash) is None:
+        raise RuntimeError("the unit does not list an image with the hash of this file after the upload")
+
+    # 5: mark it for a test boot.
+    test_response = client.write(Group.IMG, IMG_STATE, {"hash": new_hash, "confirm": False})
+    marked = find_by_hash(images_from(test_response), new_hash)
+    if marked is None or not marked.pending:
+        raise RuntimeError("the unit did not mark the image for test")
+    if args.no_reset:
+        print("marked for test; reset the unit to boot it (`reset`), or run `image erase` to drop it")
+        return
+
+    # 6 and 7: reset, and wait for the swap. The unit has the same UID afterwards, or it is another unit.
+    uid = device.get("uid")
+    print("resetting; the swap keeps the unit silent for up to ~2.5 min")
+    reset_s = time.monotonic()
+    what = "waiting for the swap (up to ~2.5 min on the gauge, ~1.5 min on rt_daq)"
+    booted = restart_unit(client, args.timeout_s, what)
+    now_s = time.monotonic()
+    if booted is None:
+        after = poll_device_info(client, deadline_s=reset_s + args.timeout_s, expect_restart=True, what=what)
+    elif booted:
+        after = poll_device_info(client, deadline_s=max(reset_s + args.timeout_s, now_s + IMAGE_POST_BOOT_POLL_S),
+                                 expect_restart=False, what="the unit booted; asking it")
+    else:
+        print(f"warning: no boot banner within {format_duration(args.timeout_s)}; asking the unit anyway",
+              file=sys.stderr)
+        after = poll_device_info(client, deadline_s=now_s + IMAGE_POLL_FALLBACK_S, expect_restart=False,
+                                 what="no boot banner; asking the unit")
+    print(f"the unit answers again after {format_duration(time.monotonic() - reset_s)}: {describe_unit(after)}")
+    if uid is not None and after.get("uid") != uid:
+        raise RuntimeError(f"another unit answers now (uid {after.get('uid', 0):#010x} instead of {uid:#010x}); "
+                           f"after a restart a unit may claim another CDMP ID")
+    if after["product"] != device["product"] or after.get("board") != device.get("board"):
+        raise RuntimeError("the unit answers with another product or board than before")
+
+    # 8: the new image confirms itself, or the unit reverts.
+    if not watch_confirmation(client, new_hash=new_hash, timeout_s=args.timeout_s):
+        raise RuntimeError(f"the new image ({format_image_version(info.version)}) runs but is not confirmed, and the "
+                           f"unit has no dfu group to confirm it: run `image confirm`, or a reset reverts it")
+    print(f"updated to {format_image_version(info.version)}, confirmed; "
+          f"{format_duration(time.monotonic() - started_s)} in all")
+
+
+IMAGE_HANDLERS = {
+    "info": command_image_info,
+    "list": command_image_list,
+    "upload": command_image_upload,
+    "test": command_image_test,
+    "confirm": command_image_confirm,
+    "erase": command_image_erase,
+    "update": command_image_update,
+}
+
+
+def command_image(client: SmpClient | None, args: argparse.Namespace) -> None:
+    IMAGE_HANDLERS[args.image_command](client, args)
+
+
 def command_shell(client: SmpClient, args: argparse.Namespace) -> None:
     if args.text:
         client.link.send_text(args.text)
@@ -2018,16 +3457,30 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     can.add_argument("--source", type=int, default=DEFAULT_SOURCE, help="CDMP device ID of this client")
     can.add_argument("--share", type=int, default=25, help="bus share in percent for the sent frames")
 
+    ble = parser.add_argument_group("Bluetooth transport")
+    ble.add_argument("--ble", metavar="NAME|ADDRESS",
+                     help="reach the unit through the access point of the unit with this device name or address")
+    ble.add_argument("--route", type=int, metavar="ID",
+                     help="CDMP device ID of the unit to reach through the access point (default: 0, the access "
+                          "point itself)")
+    ble.add_argument("--ble-no-pair", action="store_true", help="do not pair (the host paired the unit already)")
+    ble.add_argument("--scan-timeout", type=float, default=DEFAULT_BLE_SCAN_TIMEOUT_S, metavar="S",
+                     help=f"seconds to look for the unit (default: {DEFAULT_BLE_SCAN_TIMEOUT_S:g})")
+
     parser.add_argument("--timeout", type=float, default=2.0, help="seconds to wait for a response")
     parser.add_argument("--retries", type=int, help=f"resends after a timeout (default: {DEFAULT_CAN_RETRIES} on CAN, "
-                                                   f"{DEFAULT_SERIAL_RETRIES} on serial)")
+                                                   f"{DEFAULT_SERIAL_RETRIES} on serial, {DEFAULT_BLE_RETRIES} on "
+                                                   f"Bluetooth)")
 
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("echo", help="os echo").add_argument("text")
     commands.add_parser("params", help="os mcumgr params: buffer size and count")
     commands.add_parser("info", help="device info")
     commands.add_parser("devices", help="network devices, as the unit sees them")
-    commands.add_parser("reset", help="os reset: restart the unit")
+    reset = commands.add_parser("reset", help="os reset: restart the unit")
+    reset.add_argument("--timeout-s", type=float, default=DEFAULT_UPDATE_TIMEOUT_S, metavar="N",
+                       help=f"serial: seconds to listen for the boot banner before the command returns "
+                            f"(default: {DEFAULT_UPDATE_TIMEOUT_S:g}; a swap takes up to ~2.5 min)")
     commands.add_parser("config-list", help="configuration types and their size caps")
     for name in ("config-crc", "config-read", "config-write"):
         sub = commands.add_parser(name, help=name.replace("-", " ") + " (raw bytes)")
@@ -2083,6 +3536,36 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         sub = logging_commands.add_parser(name, help=f"{name} logging on every unit that can log, or on one")
         sub.add_argument("--uid", type=lambda text: int(text, 0), metavar="N",
                          help="the unit's UID (decimal or 0x hex); default: every unit")
+    image = commands.add_parser("image", help="firmware images: info, list, upload, test, confirm, erase, update")
+    image_commands = image.add_subparsers(dest="image_command", required=True)
+    image_info = image_commands.add_parser("info", help="offline: the header, TLVs, identity and hash of an image file")
+    image_info.add_argument("file", type=Path)
+    image_commands.add_parser("list", help="the image slots: versions, hashes and flags (img_mgmt state)")
+    for name, text in (("upload", "upload an image into slot 1, resuming a transfer the unit holds"),
+                       ("update", "check, upload, test, reset, wait for the swap and for the confirmation")):
+        sub = image_commands.add_parser(name, help=text)
+        sub.add_argument("file", type=Path)
+        sub.add_argument("--in-flight", type=int, metavar="N",
+                         help="chunks outstanding at once (default: 1 on CAN, on serial and for a BLE route to a "
+                              "unit behind CAN; else the access point's window; always below the unit's packet count)")
+        sub.add_argument("--upgrade", action="store_true", help="have the unit refuse an image that is not newer")
+        if name == "update":
+            sub.add_argument("--no-reset", action="store_true", help="stop after marking the image for test")
+            sub.add_argument("--timeout-s", type=float, default=DEFAULT_UPDATE_TIMEOUT_S, metavar="N",
+                             help=f"seconds to wait for the unit after the reset, and for the confirmation "
+                                  f"(default: {DEFAULT_UPDATE_TIMEOUT_S:g})")
+    for name, text in (("test", "mark an image for a test boot at the next reset (default: the image in slot 1)"),
+                       ("confirm", "make an image permanent (default: the running image)")):
+        sub = image_commands.add_parser(name, help=text)
+        sub.add_argument("hash", nargs="?", type=parse_image_hash,
+                         help="image hash, 64 hex digits as `image list` shows")
+    image_commands.add_parser("erase", help="erase slot 1, the slot that does not run")
+    dfu = commands.add_parser("dfu", help="firmware update confirmation state of the unit")
+    dfu_commands = dfu.add_subparsers(dest="dfu_command", required=True)
+    dfu_commands.add_parser("status", help="confirmed or not, the confirmation state and the last reset's cause")
+    ble_scan = commands.add_parser("ble-scan", help="list the access points in range (needs bleak)")
+    ble_scan.add_argument("--time", type=float, default=DEFAULT_BLE_SCAN_TIMEOUT_S, help="scan seconds")
+    ble_scan.add_argument("--all", action="store_true", help="list every device, not only access points")
     shell = commands.add_parser("shell", help="serial only: type a shell command and print the console")
     shell.add_argument("text", help="the command line; empty to only listen")
     shell.add_argument("--wait", type=float, default=1.0, help="seconds to print the console for (default: 1)")
@@ -2091,20 +3574,38 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     bench.add_argument("--count", type=int, default=50)
 
     args = parser.parse_args(argv)
-    if args.command in OFFLINE_COMMANDS:
+    if is_offline(args):
         return args
 
     if args.command == "assets" and args.assets_command == "get" and not 1 <= args.in_flight <= MAX_ASSET_IN_FLIGHT:
         parser.error(f"--in-flight must be 1-{MAX_ASSET_IN_FLIGHT}")
+    if (args.command == "image" and args.image_command in ("upload", "update") and args.in_flight is not None
+            and not 1 <= args.in_flight <= MAX_ASSET_IN_FLIGHT):
+        parser.error(f"--in-flight must be 1-{MAX_ASSET_IN_FLIGHT}")
+    if args.command == "image" and args.image_command == "update" and args.timeout_s <= 0:
+        parser.error("--timeout-s must be positive")
 
-    if args.serial:
+    if args.ble is not None:
+        if args.serial:
+            parser.error("--ble and --serial exclude each other; pick one transport")
+        if args.target is not None:
+            parser.error("--target is for the CAN transport; over Bluetooth, --route names the unit behind the "
+                         "access point")
+        if args.command == "shell":
+            parser.error("shell needs --serial")
+        args.route = 0 if args.route is None else args.route
+        if not 0 <= args.route <= 254:
+            parser.error("--route must be 0 (the access point) or a CDMP device ID, 1-254")
+    elif args.route is not None or args.ble_no_pair:
+        parser.error("--route and --ble-no-pair need --ble")
+    elif args.serial:
         if args.target is not None:
             parser.error("--target is for the CAN transport; the serial transport reaches the unit on the port")
     else:
         if args.command == "shell":
             parser.error("shell needs --serial")
         if args.target is None:
-            parser.error("an SMP command needs --target (CAN) or --serial")
+            parser.error("an SMP command needs --target (CAN), --serial or --ble")
         for name in ("target", "source"):
             if not 1 <= getattr(args, name) <= 254:
                 parser.error(f"--{name} must be a CDMP device ID, 1-254")
@@ -2131,16 +3632,29 @@ HANDLERS = {
     "config-decode": command_config_decode,
     "assets": command_assets,
     "logging": command_logging,
+    "image": command_image,
+    "dfu": command_dfu,
+    "ble-scan": command_ble_scan,
     "shell": command_shell,
     "bench": command_bench,
 }
-OFFLINE_COMMANDS = ("config-encode", "config-decode")
+OFFLINE_COMMANDS = ("config-encode", "config-decode", "ble-scan")
+
+
+def is_offline(args: argparse.Namespace) -> bool:
+    """Whether the command talks to no unit: it then needs no transport."""
+    return args.command in OFFLINE_COMMANDS or (args.command == "image" and args.image_command == "info")
 
 
 @contextlib.contextmanager
-def open_link(args: argparse.Namespace) -> Iterator[SmpCanLink | SmpSerialLink]:
+def open_link(args: argparse.Namespace) -> Iterator[SmpCanLink | SmpSerialLink | SmpBleLink]:
     if args.serial:
         with SmpSerialLink(args.serial, args.baud, args.line_delay, args.show_console) as link:
+            yield link
+        return
+    if args.ble:
+        with SmpBleLink(args.ble, route=args.route, pair=not args.ble_no_pair,
+                        scan_timeout_s=args.scan_timeout) as link:
             yield link
         return
 
@@ -2158,17 +3672,22 @@ def main(argv: list[str]) -> int:
     args = parse_args(argv)
 
     try:
-        if args.command in OFFLINE_COMMANDS:
+        if is_offline(args):
             HANDLERS[args.command](None, args)
             return 0
 
         retries = args.retries
         if retries is None:
-            retries = DEFAULT_SERIAL_RETRIES if args.serial else DEFAULT_CAN_RETRIES
+            retries = (DEFAULT_SERIAL_RETRIES if args.serial else DEFAULT_BLE_RETRIES if args.ble
+                       else DEFAULT_CAN_RETRIES)
         with open_link(args) as link:
             HANDLERS[args.command](SmpClient(link, args.timeout, retries), args)
     except TimeoutError as error:
-        hint = f"; is a bench build (app/bench.conf) running on {args.serial}?" if args.serial else ""
+        hint = ""
+        if args.serial:
+            hint = f"; is a bench build (app/bench.conf) running on {args.serial}?"
+        elif args.ble:
+            hint = f"; can the access point reach route {args.route}?"
         print(f"error: {error}{hint}", file=sys.stderr)
         return 1
     except (SmpError, RuntimeError, ConfigError, OSError) as error:

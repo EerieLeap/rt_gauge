@@ -39,11 +39,13 @@ The board included peripherals:
 - 40-pin GPIO expansion header (Raspberry Pi Pico pinout)
 - Boot (GPIO35) and reset buttons
 
-The 32 MB flash uses a custom partition table with two 15.75 MB application
-slots (``image-0`` / ``image-1``) for MCUboot and two 32 KB slots for the
-LP core images, followed by a 192 KB ``storage`` partition; the
-``image-scratch`` and ``coredump`` partitions are located at the end of the
-flash.
+The 32 MB flash uses the stock Espressif table ``partitions_0x2000_default_32M``
+(``mcuboot`` at 0x2000, two 15.75 MB application slots ``image-0`` /
+``image-1`` for MCUboot, two 32 KB slots for the LP core images, a 192 KB
+``storage`` partition and a 4 KB ``coredump`` partition at the end). There is
+no scratch partition: MCUboot's swap-using-move and swap-using-offset modes
+need none. An application may replace the table; the EerieLeap gauge does,
+with two 4 MB slots and the rest of the chip for its file system.
 
 Four internal LDO regulators are configured as always-on: ``ldo1`` and ``ldo4``
 at 3.3 V, ``ldo2`` at 1.8 V and ``ldo3`` at 2.5 V. ``ldo3`` supplies

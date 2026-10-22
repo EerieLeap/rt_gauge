@@ -3,8 +3,11 @@
  *
  * The board devicetree already describes the panel, touch controller,
  * backlight and the ESP32-C6 coprocessor; what is added here is the storage
- * the application needs and the digital input it reads.
+ * the application needs and the digital input it reads. The flash layout
+ * (two MCUboot slots, LittleFS) lives in partitions/, shared with MCUboot.
  */
+
+#include "partitions/esp32p4_wifi6_touch_lcd_5_esp32p4_hpcore.dtsi"
 
 / {
 	aliases {
@@ -35,24 +38,6 @@
 		di_0: di_0 {
 			gpios = <&gpio0 4 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
 			zephyr,code = <INPUT_BTN_0>;
-		};
-	};
-};
-
-&flash0 {
-	partitions {
-		compatible = "fixed-partitions";
-		#address-cells = <1>;
-		#size-cells = <1>;
-
-		/* Nothing swaps into the second MCUboot slot in this build, so
-		 * its 15.75 MB are reused for the LittleFS volume.
-		 */
-		/delete-node/ partition@fe0000;
-
-		intfs0_partition: partition@fe0000 {
-			label = "intfs0_storage";
-			reg = <0xfe0000 DT_SIZE_M(8)>;
 		};
 	};
 };

@@ -1,6 +1,10 @@
 // ESP32-S3 Reference Manual:
 // https://www.espressif.com/sites/default/files/documentation/esp32-s3_technical_reference_manual_en.pdf
 
+// The flash layout (two MCUboot image slots, LittleFS, NVS, coredump) is shared with MCUboot and lives
+// in partitions/.
+#include "partitions/esp32s3_touch_amoled_1_75_esp32s3_procpu.dtsi"
+
 / {
     aliases {
         intfs0 = &intfs0;
@@ -38,43 +42,6 @@
             zephyr,code = <INPUT_BTN_0>;
 		};
 	};
-};
-
-&flash0 {
-    partitions {
-        compatible = "fixed-partitions";
-        #address-cells = <1>;
-        #size-cells = <1>;
-
-        /* Delete the overlapping partitions */
-        /delete-node/ partition@5f0000;  /* slot1_partition - OVERLAPS with your partition */
-        /delete-node/ partition@bc0000;  /* slot0_appcpu_partition - OVERLAPS */
-        /delete-node/ partition@db0000;  /* slot1_appcpu_partition - OVERLAPS */
-        /delete-node/ partition@fa0000;  /* slot0_lpcore_partition - OVERLAPS */
-        /delete-node/ partition@fa8000;  /* slot1_lpcore_partition - OVERLAPS */
-        // /delete-node/ partition@fff000;  /* stock coredump_partition - only 4KB, too small for a full RAM dump; replaced below */
-
-        /* Your LittleFS partition */
-        intfs0_partition: partition@600000 {
-            label = "intfs0_storage";
-            reg = <0x600000 DT_SIZE_M(8)>; // 8MB at offset 6MB
-        };
-
-        // /* Coredump storage (CONFIG_DEBUG_COREDUMP_BACKEND_FLASH_PARTITION).
-        //  * 1MB, placed right after intfs0 (ends 0xe00000) and well clear of
-        //  * storage_partition (0xfb0000, NVS/BT settings) and scratch_partition
-        //  * (0xfe0000, mcuboot swap) - neither is touched.
-        //  * Node label must stay "coredump_partition": the flash-partition
-        //  * coredump backend binds to that exact DT node label via
-        //  * DT_NODELABEL() (zephyr/subsys/debug/coredump/
-        //  * coredump_backend_flash_partition.c), not a devicetree alias,
-        //  * despite the Kconfig help text wording.
-        //  */
-        // coredump_partition: partition@e00000 {
-        //     label = "coredump-partition";
-        //     reg = <0xe00000 DT_SIZE_M(1)>;
-        // };
-    };
 };
 
 &usb_serial {
