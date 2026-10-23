@@ -52,7 +52,14 @@ enum class WidgetPropertyType : std::uint16_t {
     IS_ANIMATION_ACTIVE = 42,      // bool (requested enablement)
     ANIMATION_DURATION_MS = 43,    // int (milliseconds per complete cycle)
     CHILD_WIDGET_IDS = 44,
-    COUNT = 45 // Sentinel, not a property
+    // A root widget's box, in its screen's grid cells like the record's position and size (y counts up from the
+    // bottom). Binding targets only: the record stays the one place the box is written, so a properties map never
+    // holds them, and a child fills its owner, so it has none.
+    LAYOUT_X = 45,      // int
+    LAYOUT_Y = 46,      // int
+    LAYOUT_WIDTH = 47,  // int
+    LAYOUT_HEIGHT = 48, // int
+    COUNT = 49          // Sentinel, not a property
 };
 
 constexpr bool IsValidWidgetPropertyType(WidgetPropertyType type) {

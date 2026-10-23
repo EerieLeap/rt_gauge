@@ -108,6 +108,10 @@ static std::string GetWidgetPropertyValidationError(WidgetPropertyType type, con
     if(!IsValidWidgetPropertyType(type))
         return "Unknown property ID: " + std::to_string(static_cast<uint16_t>(type)) + ".";
 
+    if(WidgetPropertyValidator::IsLayoutProperty(type))
+        return "Property ID: " + std::to_string(static_cast<uint16_t>(type))
+            + " is set by the widget's position and size, not by a property.";
+
     if(!HoldsPropertyValueKind(value, GetPropertyValueKind(type)))
         return "Invalid value type for property ID: " + std::to_string(static_cast<uint16_t>(type)) + ".";
 
@@ -402,6 +406,7 @@ void UiConfigurationValidator::Validate(
     const auto ownership = std::span(graph.parents).first(definitions.size());
     ValidateWidgetSize(configuration, ownership);
     ValidateWidgetPosition(configuration, ownership);
+    ValidateLayoutBindings(configuration, ownership);
 
     if(validate_children)
         ValidateChildRules(configuration, graph, validate_children);
@@ -542,6 +547,27 @@ void UiConfigurationValidator::ValidateWidgetPosition(
             InvalidWidgetConfiguration(
                 screen_configuration.id, widget_configuration->id, "Widget position Y must be within the screen grid."
             );
+    }
+}
+
+// A root widget's box can be bound; a child fills its owner, so it has none to move.
+void UiConfigurationValidator::ValidateLayoutBindings(
+    const ScreenConfiguration& screen_configuration,
+    std::span<const std::optional<size_t>> parents
+) {
+    for(size_t i = 0; i < screen_configuration.widget_configurations.size(); ++i) {
+        if(!parents[i].has_value())
+            continue;
+
+        const auto& widget_configuration = screen_configuration.widget_configurations[i];
+        for(const auto& binding : widget_configuration->bindings) {
+            if(WidgetPropertyValidator::IsLayoutProperty(binding.target))
+                InvalidWidgetConfiguration(
+                    screen_configuration.id, widget_configuration->id,
+                    "Binding to property ID: " + std::to_string(static_cast<uint16_t>(binding.target))
+                        + " is not allowed on a child widget; a child fills its owner."
+                );
+        }
     }
 }
 

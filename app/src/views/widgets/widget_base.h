@@ -15,6 +15,7 @@
 #include "domain/ui_domain/models/property_binding.h"
 
 #include "views/renderable_base.h"
+#include "views/utilitites/grid_layout.h"
 #include "views/widgets/i_widget.h"
 #include "views/widgets/widget_context.h"
 #include "views/widgets/widget_dispatch_guard.h"
@@ -62,6 +63,11 @@ protected:
     WidgetPosition position_px_{};
     WidgetSize size_px_{};
 
+    // Set for a root widget by AttachGrid(); the grid its LAYOUT_* properties are in cells of.
+    std::optional<eerie_leap::views::utilitites::GridLayout> grid_layout_;
+    // Whether the box was placed once, from the record; the layout properties only move it from then on.
+    bool is_box_placed_ = false;
+
     std::shared_ptr<Frame> parent_;
     // Stable presentation target beneath the public layout/management container.
     std::shared_ptr<Frame> content_frame_;
@@ -104,6 +110,11 @@ protected:
 
     void ApplyProperty(WidgetPropertyType type, const ConfigValue& value);
     void ApplyProperties(const PropertySet& selected);
+    // Registers the box's properties with the record's values as their defaults. A root widget only.
+    void RegisterLayoutProperties(WidgetPropertyStore& store) const;
+    // Moves and sizes the widget to the box the layout properties hold now: a size under one cell is held at
+    // one, and a size and position within the grid. Does nothing before the box was placed.
+    void ApplyLayout();
     void UpdateProcessingState();
     virtual void OnProcessingSuspended();
     // Idempotently synchronize owned work, including after an ancestor changes between refreshes.
@@ -173,6 +184,8 @@ public:
 
     std::vector<WidgetPropertyType> GetSupportedProperties() const override;
     std::shared_ptr<WidgetConfiguration> GetConfiguration() const override;
+
+    void AttachGrid(const eerie_leap::views::utilitites::GridLayout& layout) final;
 
     WidgetPosition GetPositionPx() const override;
     void SetPositionPx(const WidgetPosition& pos) override;

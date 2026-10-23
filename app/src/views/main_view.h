@@ -54,7 +54,13 @@ public:
     void AddScreen(std::shared_ptr<IScreen> screen);
     void PruneEmptyGroups();
 
-    int SetActiveGroup(uint32_t screen_group_id);
+    // Drops every screen group with everything it built, and the active one, so the view can be configured
+    // again. Takes the LVGL lock; the render dispatcher stays.
+    void Clear();
+
+    // @param render_inline Renders a group that was not rendered yet on the calling thread, not on the
+    //        render dispatcher, so it is on screen when this returns and no frame shows without it.
+    int SetActiveGroup(uint32_t screen_group_id, bool render_inline = false);
     std::optional<uint32_t> GetActiveGroupId() const;
 
     std::vector<uint32_t> GetGroupIds() const;

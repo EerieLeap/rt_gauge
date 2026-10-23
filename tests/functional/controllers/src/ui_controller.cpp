@@ -1,13 +1,22 @@
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
+#include <eerie_memory.hpp>
 #include <zephyr/kernel.h>
 #include <zephyr/ztest.h>
+
+#include "configuration/cbor/cbor_ui_config/cbor_ui_config.h"
+#include "configuration/services/cbor_configuration_service.h"
+#include "utilities/memory/memory_resource_manager.h"
 
 #include "subsys/assets/asset_kind.h"
 #include "subsys/assets/asset_provider.h"
@@ -21,22 +30,34 @@
 
 #include "domain/settings_domain/event_bus/settings_event_type.h"
 #include "domain/settings_domain/event_bus/settings_events_channel.h"
+#include "domain/ui_domain/configuration/ui_configuration_manager.h"
 #include "domain/ui_domain/event_bus/navigation_event_channel.h"
+#include "domain/ui_domain/models/screen_configuration.h"
+#include "domain/ui_domain/models/ui_configuration.h"
+#include "domain/ui_domain/models/widget_configuration.h"
 #include "domain/ui_domain/services/navigation_service.h"
 
 #include "controllers/ui_controller.h"
 #include "views/assets/animations/animations_register.h"
 #include "views/assets/images/images_register.h"
 
+using eerie_leap::configuration::services::CborConfigurationService;
 using eerie_leap::controllers::UiController;
 using eerie_leap::domain::settings_domain::event_bus::SettingsEventsChannel;
 using eerie_leap::domain::settings_domain::event_bus::SettingsEventType;
+using eerie_leap::domain::ui_domain::configuration::UiConfigurationManager;
 using eerie_leap::domain::ui_domain::event_bus::NavigationEventChannel;
+using eerie_leap::domain::ui_domain::models::ScreenConfiguration;
+using eerie_leap::domain::ui_domain::models::ScreenType;
+using eerie_leap::domain::ui_domain::models::UiConfiguration;
+using eerie_leap::domain::ui_domain::models::WidgetConfiguration;
+using eerie_leap::domain::ui_domain::models::WidgetType;
 using eerie_leap::domain::ui_domain::services::NavigationService;
 using eerie_leap::subsys::assets::AssetAccess;
 using eerie_leap::subsys::assets::AssetKind;
 using eerie_leap::subsys::assets::AssetProvider;
 using eerie_leap::subsys::assets::AssetsManager;
+using eerie_leap::subsys::assets::AssetStore;
 using eerie_leap::subsys::device_tree::DtDisplay;
 using eerie_leap::subsys::device_tree::DtFs;
 using eerie_leap::subsys::event_bus::AnySubscription;
@@ -45,6 +66,7 @@ using eerie_leap::subsys::event_bus::EventBus;
 using eerie_leap::subsys::fs::services::FsService;
 using eerie_leap::subsys::fs::services::IFsService;
 using eerie_leap::subsys::threading::WorkQueueThread;
+using eerie_leap::utilities::memory::Mrm;
 using eerie_leap::views::assets::animations::UI_LOTTIE_SPINNER_JSON;
 using eerie_leap::views::assets::images::UI_IMG_ARROW_AL88_DATA;
 using eerie_leap::views::assets::images::UI_IMG_NORMA_AL88_DATA;
@@ -88,8 +110,12 @@ struct Fixture {
 
 Fixture fixture;
 
-void* Setup() {
+void EnsureBus() {
     static ControllerBus bus;
+}
+
+void* Setup() {
+    EnsureBus();
 
     // UiRendererService reads the display through DtDisplay, which main() primes.
     DtDisplay::Initialize();
@@ -430,4 +456,359 @@ ZTEST(ui_controller_assets, test_the_demo_assets_move_from_the_ui_assets_root_in
     zassert_equal(controller->Initialize(), 0, "Expected the UI controller to initialize.");
 
     CheckDemoAssets(*assets_manager, *fs_service);
+}
+
+namespace {
+
+// A configuration of one bar on each of the given groups, the first of them the one it starts on, and, when
+// asked for, an overlay of one bar.
+std::shared_ptr<UiConfiguration>
+MakeConfiguration(std::initializer_list<uint32_t> group_ids, std::optional<uint32_t> overlay_screen_id = std::nullopt) {
+    auto configuration = eerie_memory::make_shared_pmr<UiConfiguration>(Mrm::GetExtPmr());
+    configuration->active_screen_group_id = *group_ids.begin();
+
+    uint32_t screen_id = 0;
+    for(const auto group_id : group_ids) {
+        auto screen = eerie_memory::make_shared_pmr<ScreenConfiguration>(Mrm::GetExtPmr());
+        screen->id = screen_id++;
+        screen->screen_group_id = group_id;
+        screen->is_visible = true;
+        screen->type = ScreenType::Gauge;
+        screen->grid = { .snap_enabled = true, .width = 466, .height = 466, .spacing_px = 0 };
+
+        auto widget = eerie_memory::make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
+        widget->type = WidgetType::IndicatorBar;
+        widget->id = 0;
+        widget->position_grid = { 0, 0 };
+        widget->size_grid = { 100, 20 };
+        screen->AddWidget(std::move(widget));
+
+        configuration->screen_configurations.push_back(std::move(screen));
+    }
+
+    if(overlay_screen_id.has_value()) {
+        auto overlay = eerie_memory::make_shared_pmr<ScreenConfiguration>(Mrm::GetExtPmr());
+        overlay->id = *overlay_screen_id;
+        overlay->screen_group_id = 0;
+        overlay->is_visible = true;
+        overlay->is_overlay = true;
+        overlay->type = ScreenType::Settings;
+        overlay->grid = { .snap_enabled = true, .width = 466, .height = 466, .spacing_px = 0 };
+
+        auto widget = eerie_memory::make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
+        widget->type = WidgetType::IndicatorBar;
+        widget->id = 0;
+        widget->position_grid = { 0, 0 };
+        widget->size_grid = { 100, 20 };
+        overlay->AddWidget(std::move(widget));
+
+        configuration->screen_configurations.push_back(std::move(overlay));
+    }
+
+    return configuration;
+}
+
+// The stored bytes of the UI configuration, as a client would read them.
+std::vector<uint8_t> StoredBytes(IFsService& fs_service) {
+    constexpr const char* PATH = "config/ui_config.cbor";
+
+    const auto size = fs_service.GetFileSize(PATH);
+    if(!size.has_value())
+        return {};
+
+    std::vector<uint8_t> bytes(*size);
+    size_t read = 0;
+    zassert_true(fs_service.ReadFile(PATH, bytes.data(), bytes.size(), read));
+    bytes.resize(read);
+
+    return bytes;
+}
+
+} // namespace
+
+// A unit that stores a UI configuration keeps it: the demo is only for one that stores none.
+ZTEST_SUITE(ui_controller_stored, NULL, NULL, NULL, NULL, NULL);
+
+ZTEST(ui_controller_stored, test_a_stored_configuration_survives_initialize) {
+    EnsureBus();
+    auto fs_service = FormatFs();
+    auto config_work_queue = StartConfigWorkQueue();
+
+    // What an earlier boot, or a client, stored.
+    {
+        auto cbor_service = std::make_unique<CborConfigurationService<CborUiConfig>>(
+            "ui_config", fs_service, config_work_queue
+        );
+        UiConfigurationManager manager(std::move(cbor_service));
+        zassert_true(manager.Update(MakeConfiguration({ 7, 8 })));
+    }
+    const auto stored = StoredBytes(*fs_service);
+    zassert_true(!stored.empty(), "Expected the configuration to be stored.");
+
+    auto assets_manager = std::make_shared<AssetsManager>();
+    auto controller = std::make_shared<UiController>(fs_service, config_work_queue, nullptr, assets_manager);
+    zassert_equal(controller->Initialize(), 0, "Expected the UI controller to initialize.");
+
+    zassert_true(StoredBytes(*fs_service) == stored, "Expected the stored bytes to be as they were.");
+
+    const auto configuration = controller->GetConfigurationManager()->Get();
+    zassert_equal(configuration->screen_configurations.size(), 2U);
+    zassert_equal(configuration->active_screen_group_id, 7U);
+
+    // The screens shown are the stored ones, not the demo's.
+    const auto navigation = controller->GetNavigationService();
+    zassert_true(navigation->GetActiveGroupId().has_value());
+    zassert_equal(*navigation->GetActiveGroupId(), 7U);
+    zassert_equal(navigation->GoToGroup(FIRST_GROUP_ID), -ENOENT, "Expected the demo's group to be absent.");
+
+    // Nor are the demo's files put in its place.
+    for(const auto kind : { AssetKind::IMAGES, AssetKind::ANIMATIONS }) {
+        const auto provider = assets_manager->Find(kind);
+        zassert_not_null(provider.get());
+        for(const auto name : DEMO_ASSETS)
+            zassert_false(provider->store->Exists(name), "Expected %s not to be written.", std::string(name).c_str());
+    }
+}
+
+// A unit that stores nothing shows the demo, and what it stored is kept from then on.
+ZTEST(ui_controller_stored, test_the_demo_is_stored_once_and_then_kept) {
+    EnsureBus();
+    auto fs_service = FormatFs();
+    auto config_work_queue = StartConfigWorkQueue();
+
+    zassert_false(fs_service->Exists("config/ui_config.cbor"));
+
+    std::vector<uint8_t> demo;
+    {
+        auto controller = std::make_shared<UiController>(fs_service, config_work_queue, nullptr, nullptr);
+        zassert_equal(controller->Initialize(), 0, "Expected the UI controller to initialize.");
+
+        demo = StoredBytes(*fs_service);
+        zassert_true(!demo.empty(), "Expected the demo to be stored.");
+        zassert_equal(controller->GetConfigurationManager()->Get()->screen_configurations.size(), 4U);
+    }
+
+    // The next boot finds it and installs nothing.
+    auto controller = std::make_shared<UiController>(fs_service, config_work_queue, nullptr, nullptr);
+    zassert_equal(controller->Initialize(), 0, "Expected the UI controller to initialize.");
+    zassert_true(StoredBytes(*fs_service) == demo);
+}
+
+// A file already there under a demo file's name is one a client may have put there.
+ZTEST(ui_controller_stored, test_demo_assets_only_fill_in_missing_files) {
+    EnsureBus();
+    auto fs_service = FormatFs();
+    auto config_work_queue = StartConfigWorkQueue();
+
+    const std::array<uint8_t, 4> client_file{ 1, 2, 3, 4 };
+    {
+        AssetStore animations(fs_service, "ui_assets/animations");
+        zassert_true(animations.Save("ui_lottie_spinner.json", client_file));
+        AssetStore images(fs_service, "ui_assets/images");
+        zassert_true(images.Save("ui_img_arrow_al88.bin", client_file));
+    }
+
+    auto assets_manager = std::make_shared<AssetsManager>();
+    auto controller = std::make_shared<UiController>(fs_service, config_work_queue, nullptr, assets_manager);
+    zassert_equal(controller->Initialize(), 0, "Expected the UI controller to initialize.");
+
+    const auto animations = assets_manager->Find(AssetKind::ANIMATIONS);
+    const auto images = assets_manager->Find(AssetKind::IMAGES);
+    CheckLoads(*animations, "ui_lottie_spinner.json", client_file);
+    CheckLoads(*images, "ui_img_arrow_al88.bin", client_file);
+    // The one that was missing is filled in.
+    CheckLoads(*images, "ui_img_norma_al88.bin", UI_IMG_NORMA_AL88_DATA);
+}
+
+namespace {
+
+constexpr int REBUILD_TIMEOUT_MS = 5000;
+constexpr uint32_t STORED_GROUP_ID = 5;
+constexpr uint32_t SECOND_STORED_GROUP_ID = 6;
+
+// A rebuild is done when the controller has replayed the state to the new screens: the last thing it does.
+struct RebuildFixture {
+    std::shared_ptr<FsService> fs_service;
+    std::shared_ptr<WorkQueueThread> config_work_queue;
+    std::shared_ptr<UiController> controller;
+    std::shared_ptr<UiConfigurationManager> manager;
+    std::shared_ptr<NavigationService> navigation_service;
+
+    k_sem replayed{};
+    std::atomic<int> replay_count = 0;
+    k_sem settings_requested{};
+    AnySubscription settings_subscription;
+};
+
+RebuildFixture rebuild;
+
+void* RebuildSetup() {
+    EnsureBus();
+
+    rebuild.fs_service = FormatFs();
+    rebuild.config_work_queue = StartConfigWorkQueue();
+
+    rebuild.controller = std::make_shared<UiController>(
+        rebuild.fs_service, rebuild.config_work_queue, nullptr, std::make_shared<AssetsManager>()
+    );
+    zassert_equal(rebuild.controller->Initialize(), 0, "Expected the UI controller to initialize.");
+    zassert_equal(rebuild.controller->Start(), 0, "Expected the UI controller to start.");
+
+    rebuild.manager = rebuild.controller->GetConfigurationManager();
+    rebuild.navigation_service = rebuild.controller->GetNavigationService();
+
+    k_sem_init(&rebuild.replayed, 0, K_SEM_MAX_LIMIT);
+    k_sem_init(&rebuild.settings_requested, 0, K_SEM_MAX_LIMIT);
+
+    rebuild.controller->SetStateReplay([] {
+        ++rebuild.replay_count;
+        k_sem_give(&rebuild.replayed);
+    });
+
+    rebuild.settings_subscription = CreateScopedSubscription(
+        SettingsEventsChannel::GetInstance(), SettingsEventType::StateRequested,
+        [](const SettingsEventsChannel::EventMessage&) {
+            k_sem_give(&rebuild.settings_requested);
+        }
+    );
+    zassert_not_null(rebuild.settings_subscription.get(), "Expected to subscribe to settings events.");
+
+    return nullptr;
+}
+
+void RebuildBefore(void*) {
+    if(rebuild.navigation_service->IsOverlayActive())
+        rebuild.navigation_service->CloseOverlay();
+
+    k_msleep(SETTLE_MS);
+
+    k_sem_reset(&rebuild.replayed);
+    k_sem_reset(&rebuild.settings_requested);
+    rebuild.replay_count = 0;
+}
+
+void RebuildTeardown(void*) {
+    rebuild.settings_subscription.reset();
+    rebuild.manager.reset();
+    rebuild.navigation_service.reset();
+    rebuild.controller.reset();
+    rebuild.config_work_queue.reset();
+    rebuild.fs_service.reset();
+}
+
+bool WaitForRebuild() {
+    return k_sem_take(&rebuild.replayed, K_MSEC(REBUILD_TIMEOUT_MS)) == 0;
+}
+
+} // namespace
+
+ZTEST_SUITE(ui_controller_rebuild, NULL, RebuildSetup, RebuildBefore, NULL, RebuildTeardown);
+
+// The point of the handler: a stored configuration reaches the screen, and the owners are asked for what
+// the new widgets' bindings missed.
+ZTEST(ui_controller_rebuild, test_a_stored_configuration_rebuilds_the_screens_and_requests_the_state) {
+    zassert_true(rebuild.manager->Update(MakeConfiguration({ STORED_GROUP_ID, SECOND_STORED_GROUP_ID })));
+
+    zassert_true(WaitForRebuild(), "Expected the stored configuration to be built.");
+    zassert_equal(
+        k_sem_take(&rebuild.settings_requested, K_MSEC(DISPATCH_TIMEOUT_MS)), 0,
+        "Expected the settings to be requested."
+    );
+    zassert_equal(rebuild.replay_count.load(), 1);
+
+    zassert_true(rebuild.navigation_service->GetActiveGroupId().has_value());
+    zassert_equal(*rebuild.navigation_service->GetActiveGroupId(), STORED_GROUP_ID);
+    zassert_equal(rebuild.navigation_service->GoToGroup(FIRST_GROUP_ID), -ENOENT, "Expected the demo's groups gone.");
+    zassert_equal(rebuild.navigation_service->GoToGroup(1), -ENOENT, "Expected the demo's groups gone.");
+
+    // The new groups are navigable, from the new start group.
+    zassert_equal(rebuild.navigation_service->Next(), 0);
+    k_msleep(SETTLE_MS);
+    zassert_equal(*rebuild.navigation_service->GetActiveGroupId(), SECOND_STORED_GROUP_ID);
+}
+
+// An overlay of the old screens would otherwise sit over the new ones, and block navigation.
+ZTEST(ui_controller_rebuild, test_a_rebuild_dismisses_an_open_overlay) {
+    constexpr uint32_t OVERLAY_SCREEN_ID = 40;
+
+    zassert_true(
+        rebuild.manager->Update(MakeConfiguration({ STORED_GROUP_ID, SECOND_STORED_GROUP_ID }, OVERLAY_SCREEN_ID))
+    );
+    zassert_true(WaitForRebuild());
+
+    zassert_equal(rebuild.navigation_service->ShowOverlay(OVERLAY_SCREEN_ID), 0);
+    k_msleep(SETTLE_MS);
+    zassert_true(rebuild.navigation_service->IsOverlayActive(), "Expected the overlay to be up.");
+    zassert_equal(rebuild.navigation_service->Next(), -EBUSY);
+
+    zassert_true(rebuild.manager->Update(MakeConfiguration({ SECOND_STORED_GROUP_ID, STORED_GROUP_ID })));
+    zassert_true(WaitForRebuild());
+
+    zassert_false(rebuild.navigation_service->IsOverlayActive());
+    zassert_equal(*rebuild.navigation_service->GetActiveGroupId(), SECOND_STORED_GROUP_ID);
+    zassert_equal(rebuild.navigation_service->Next(), 0, "Expected navigation to work on the new screens.");
+    k_msleep(SETTLE_MS);
+    zassert_equal(*rebuild.navigation_service->GetActiveGroupId(), STORED_GROUP_ID);
+}
+
+// A configuration a client uploads is stored as the bytes it sent, and shown the same way.
+ZTEST(ui_controller_rebuild, test_a_client_apply_rebuilds_the_screens) {
+    zassert_true(rebuild.manager->Update(MakeConfiguration({ STORED_GROUP_ID })));
+    zassert_true(WaitForRebuild());
+    const auto uploaded = rebuild.manager->GetCborConfiguration();
+    zassert_true(!uploaded.empty());
+
+    zassert_true(rebuild.manager->Update(MakeConfiguration({ SECOND_STORED_GROUP_ID })));
+    zassert_true(WaitForRebuild());
+    zassert_equal(*rebuild.navigation_service->GetActiveGroupId(), SECOND_STORED_GROUP_ID);
+
+    std::array<char, 128> reason{};
+    zassert_true(rebuild.manager->ApplyCborConfiguration(uploaded, reason), "Refused: %s", reason.data());
+
+    zassert_true(WaitForRebuild(), "Expected the applied configuration to be built.");
+    zassert_equal(*rebuild.navigation_service->GetActiveGroupId(), STORED_GROUP_ID);
+    zassert_equal(rebuild.navigation_service->GoToGroup(SECOND_STORED_GROUP_ID), -ENOENT);
+}
+
+// A configuration the unit refuses is stored by no one, so it is shown by no one.
+ZTEST(ui_controller_rebuild, test_a_refused_apply_leaves_the_screens_alone) {
+    zassert_true(rebuild.manager->Update(MakeConfiguration({ STORED_GROUP_ID })));
+    zassert_true(WaitForRebuild());
+
+    std::array<char, 128> reason{};
+    const std::array<uint8_t, 3> garbage{ 0x01, 0x02, 0x03 };
+    zassert_false(rebuild.manager->ApplyCborConfiguration(garbage, reason));
+
+    zassert_not_equal(k_sem_take(&rebuild.replayed, K_MSEC(SETTLE_MS)), 0, "Expected no rebuild.");
+    zassert_equal(*rebuild.navigation_service->GetActiveGroupId(), STORED_GROUP_ID);
+}
+
+// Stores that follow each other leave the last one on screen, however many rebuilds that takes.
+ZTEST(ui_controller_rebuild, test_stores_in_a_row_leave_the_last_one_shown) {
+    constexpr uint32_t LAST_GROUP_ID = 13;
+
+    for(const uint32_t group_id : { 11U, 12U, LAST_GROUP_ID })
+        zassert_true(rebuild.manager->Update(MakeConfiguration({ group_id })));
+
+    zassert_true(WaitForRebuild());
+    k_msleep(SETTLE_MS * 2);
+
+    zassert_equal(*rebuild.navigation_service->GetActiveGroupId(), LAST_GROUP_ID);
+    zassert_true(rebuild.replay_count.load() >= 1);
+}
+
+// A stored configuration with no screens shows nothing, and the next one still builds.
+ZTEST(ui_controller_rebuild, test_a_configuration_without_screens_leaves_no_groups) {
+    auto empty = eerie_memory::make_shared_pmr<UiConfiguration>(Mrm::GetExtPmr());
+
+    zassert_true(rebuild.manager->Update(std::move(empty)));
+    zassert_true(WaitForRebuild());
+
+    zassert_false(rebuild.navigation_service->GetActiveGroupId().has_value());
+    zassert_equal(rebuild.navigation_service->GoToGroup(FIRST_GROUP_ID), -ENOENT);
+
+    // And a configuration after it builds as usual.
+    zassert_true(rebuild.manager->Update(MakeConfiguration({ STORED_GROUP_ID })));
+    zassert_true(WaitForRebuild());
+    zassert_equal(*rebuild.navigation_service->GetActiveGroupId(), STORED_GROUP_ID);
 }

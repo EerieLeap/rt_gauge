@@ -326,6 +326,15 @@ int main() {
         }
     }
 
+    // A UI rebuilt from a configuration a client stored asks the settings owners to publish again by itself.
+    // What only publishes on change is replayed to it from here, since the UI is built before the owners:
+    // the sensors' last values (a slow or indicator sensor would leave a new widget on its default) and the
+    // logging status.
+    ui_controller->SetStateReplay([sensor_events_publisher, logging_controller] {
+        sensor_events_publisher->Replay();
+        logging_controller->RepublishStatus();
+    });
+
     sensors_controller->Start();
 
     // Last of the boot's stores (the UI test configuration, the logging button's sensor and trigger):

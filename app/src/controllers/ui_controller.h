@@ -1,13 +1,19 @@
 #pragma once
 
 #include <array>
+#include <atomic>
+#include <functional>
 #include <memory>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
+#include <zephyr/kernel.h>
+
 #include "subsys/assets/asset_store.h"
 #include "subsys/assets/assets_manager.h"
+#include "subsys/event_bus/dispatch_guard.h"
 #include "subsys/event_bus/i_scoped_subscription.h"
 #include "subsys/fs/services/i_fs_service.h"
 #include "subsys/threading/work_queue_thread.h"
@@ -45,6 +51,7 @@ using eerie_leap::domain::ui_domain::services::NavigationService;
 using eerie_leap::domain::ui_domain::services::UiInputService;
 using eerie_leap::domain::ui_domain::services::UiRendererService;
 using eerie_leap::subsys::event_bus::AnySubscription;
+using eerie_leap::subsys::event_bus::DispatchGuard;
 
 using eerie_leap::views::MainView;
 using eerie_leap::views::OverlayHost;
@@ -102,7 +109,36 @@ private:
     std::optional<uint32_t> default_overlay_screen_id_;
 
     AnySubscription navigation_subscription_;
-    int Configure(std::shared_ptr<UiConfiguration> config);
+
+    // Builds the screens of a configuration into the (empty) main view and shows its start group.
+    // @param render_inline Renders the start group here instead of on the render work queue.
+    int Configure(std::shared_ptr<UiConfiguration> config, bool render_inline = false);
+
+    // Replaces the screens with those of a stored configuration, in place and in one hold of the LVGL lock:
+    // overlays are dismissed, the main view is cleared, the configuration is built with its start group
+    // rendered at once (the last frame stays up meanwhile, with no blank one between), the gestures are armed
+    // again, and then the state the new widgets missed is asked for and replayed. Navigation starts over at
+    // the configuration's start group. Runs on the render work queue.
+    int Reconfigure(std::shared_ptr<UiConfiguration> configuration);
+
+    // The manager's updated handler, on the storing thread: queues one Reconfigure() of the latest stored
+    // configuration, however many stores come before it runs.
+    void OnConfigurationStored();
+
+    // What the new widgets' bindings missed, which no owner publishes again until it changes: the settings
+    // (asked for), and what StateReplay brings.
+    void ReplayState();
+
+    // Set from any thread; read by ReplayState() on the render work queue.
+    mutable k_mutex state_replay_mutex_{};
+    std::shared_ptr<const std::function<void()>> state_replay_;
+
+    // The updated handler and the queued rebuild hold one each instead of this, and the destructor detaches
+    // both first, so neither reaches a destroyed controller. Apart, because the rebuild holds its guard for
+    // all of its run, and the handler, on the thread that stores, must not wait for it.
+    std::shared_ptr<DispatchGuard> dispatch_guard_;
+    std::shared_ptr<DispatchGuard> rebuild_guard_;
+    std::atomic<bool> is_reconfigure_queued_ = false;
 
     // Offers ui_assets/images and ui_assets/animations to clients as the image and animation kinds.
     void RegisterAssets();
@@ -122,9 +158,13 @@ private:
     void CloseOverlay();
     void ConfigureGestures();
 
+#ifdef CONFIG_EERIE_LEAP_UI_DEMO_CONFIGURATION
     // TODO: For test purposes only
+    // The demo screens, stored when the unit stores no UI configuration.
     void SetupTestConfiguration();
+    // The demo files the demo screens show, where they are missing.
     void SetupTestAssets();
+#endif
 
 public:
     /**
@@ -148,6 +188,17 @@ public:
     int Start();
 
     std::shared_ptr<NavigationService> GetNavigationService() const;
+    std::shared_ptr<UiConfigurationManager> GetConfigurationManager() const;
+
+    /**
+     * @brief Sets what Reconfigure() replays once the new screens stand, after it has asked every settings
+     *        owner to publish again: whatever else only publishes on change, such as the sensors' last
+     *        values and the logging status.
+     *
+     * Built after this controller, those owners are handed over here. Callable from any thread; it runs on
+     * the render work queue, and must not block.
+     */
+    void SetStateReplay(std::function<void()> replay);
 };
 
 } // namespace eerie_leap::controllers

@@ -7,6 +7,7 @@
 #include "domain/ui_domain/models/widget_direction.h"
 #include "domain/ui_domain/models/widget_fill_mode.h"
 #include "domain/ui_domain/models/widget_property.h"
+#include "domain/ui_domain/utilities/widget_property_validator.h"
 #include "utilities/type/color.h"
 
 using namespace eerie_leap::domain::ui_domain::models;
@@ -32,7 +33,8 @@ constexpr std::array ALL_TYPES = { WidgetPropertyType::NONE, WidgetPropertyType:
     WidgetPropertyType::COLOR_SECONDARY_ACTIVE, WidgetPropertyType::COLOR_SECONDARY_INACTIVE,
     WidgetPropertyType::COLOR_TERTIARY_ACTIVE, WidgetPropertyType::COLOR_TERTIARY_INACTIVE,
     WidgetPropertyType::ANIMATION_TYPE, WidgetPropertyType::IS_ANIMATION_ACTIVE,
-    WidgetPropertyType::ANIMATION_DURATION_MS, WidgetPropertyType::CHILD_WIDGET_IDS };
+    WidgetPropertyType::ANIMATION_DURATION_MS, WidgetPropertyType::CHILD_WIDGET_IDS, WidgetPropertyType::LAYOUT_X,
+    WidgetPropertyType::LAYOUT_Y, WidgetPropertyType::LAYOUT_WIDTH, WidgetPropertyType::LAYOUT_HEIGHT };
 
 } // namespace
 
@@ -53,11 +55,15 @@ ZTEST(widget_property, test_shape_additions_preserve_persisted_values) {
 
 // Persisted numeric IDs must stay stable when properties are added.
 ZTEST(widget_property, test_property_ids_preserve_persisted_values) {
-    zassert_equal(ALL_TYPES.size(), 45);
+    zassert_equal(ALL_TYPES.size(), 49);
     zassert_equal(static_cast<uint16_t>(WidgetPropertyType::COUNT), ALL_TYPES.size());
     zassert_equal(static_cast<uint16_t>(WidgetPropertyType::ANCHOR_POINT_X), 19);
     zassert_equal(static_cast<uint16_t>(WidgetPropertyType::ANCHOR_POINT_Y), 20);
     zassert_equal(static_cast<uint16_t>(WidgetPropertyType::CHILD_WIDGET_IDS), 44);
+    zassert_equal(static_cast<uint16_t>(WidgetPropertyType::LAYOUT_X), 45);
+    zassert_equal(static_cast<uint16_t>(WidgetPropertyType::LAYOUT_Y), 46);
+    zassert_equal(static_cast<uint16_t>(WidgetPropertyType::LAYOUT_WIDTH), 47);
+    zassert_equal(static_cast<uint16_t>(WidgetPropertyType::LAYOUT_HEIGHT), 48);
     for(size_t index = 0; index < ALL_TYPES.size(); ++index)
         zassert_equal(static_cast<uint16_t>(ALL_TYPES[index]), index);
 }
@@ -122,5 +128,15 @@ ZTEST(widget_property, test_color_parser_reports_invalid_argument_for_malformed_
         const auto parsed = Color::TryParse(text);
         zassert_false(parsed.has_value(), "Accepted malformed color: %.*s", static_cast<int>(text.size()), text.data());
         zassert_true(parsed.error() == std::errc::invalid_argument);
+    }
+}
+
+// The box's four properties are exactly 45 to 48; no other property is one.
+ZTEST(widget_property, test_only_the_box_properties_are_layout_properties) {
+    using eerie_leap::domain::ui_domain::utilities::WidgetPropertyValidator;
+
+    for(auto type : ALL_TYPES) {
+        const auto id = static_cast<uint16_t>(type);
+        zassert_equal(WidgetPropertyValidator::IsLayoutProperty(type), id >= 45 && id <= 48, "property %u", id);
     }
 }

@@ -46,6 +46,9 @@ WidgetAssembly::Roots WidgetAssembly::Assemble(
 
     try {
         construct(composition.roots, container);
+        // Before configuring, which registers the box's properties on a root.
+        for(const auto i : composition.roots)
+            instances[i]->AttachGrid(layout);
         // Reverse postorder visits every owner before its descendants.
         for(auto it = composition.postorder.rbegin(); it != composition.postorder.rend(); ++it) {
             const auto children = composition.GetChildren(*it);

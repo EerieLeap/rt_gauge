@@ -1111,3 +1111,94 @@ ZTEST(ui_configuration_validator, test_composition_size_limits_are_checked_befor
     );
     ExpectCompositionError(*screen, { "Widget ID: 0", "Child index 31, ID 1", "31 edges" });
 }
+
+namespace {
+
+constexpr std::array LAYOUT_PROPERTIES = { WidgetPropertyType::LAYOUT_X, WidgetPropertyType::LAYOUT_Y,
+    WidgetPropertyType::LAYOUT_WIDTH, WidgetPropertyType::LAYOUT_HEIGHT };
+
+constexpr std::array ALL_DIRECTIONS = { PropertyBindingDirection::In, PropertyBindingDirection::Out,
+    PropertyBindingDirection::InOut };
+
+std::string ValidationError(const UiConfiguration& configuration) {
+    try {
+        UiConfigurationValidator::Validate(configuration);
+    } catch(const std::invalid_argument& error) {
+        return error.what();
+    }
+
+    return {};
+}
+
+} // namespace
+
+// The record's position and size are the one place the box is written.
+ZTEST(ui_configuration_validator, test_the_box_properties_are_refused_in_a_properties_map) {
+    for(auto type : LAYOUT_PROPERTIES) {
+        auto configuration = MakeConfiguration();
+        configuration->screen_configurations[0]->widget_configurations[0]->properties[type] = 1;
+
+        const auto message = ValidationError(*configuration);
+        zassert_true(
+            message.contains("is set by the widget's position and size"), "Property %u: '%s'",
+            static_cast<unsigned>(type), message.c_str()
+        );
+        zassert_true(message.contains("Widget ID: 0"), "%s", message.c_str());
+    }
+}
+
+ZTEST(ui_configuration_validator, test_a_root_widget_accepts_a_binding_to_its_box_in_every_direction) {
+    for(auto type : LAYOUT_PROPERTIES) {
+        for(auto direction : ALL_DIRECTIONS) {
+            auto configuration = MakeConfiguration();
+            auto binding = MakeSensorBinding();
+            binding.target = type;
+            binding.direction = direction;
+            AddBinding(*configuration, binding);
+
+            zassert_true(Validates(*configuration), "Refused a binding to %u.", static_cast<unsigned>(type));
+        }
+    }
+}
+
+// A child fills its owner's box, so it has no box of its own to move.
+ZTEST(ui_configuration_validator, test_a_child_widget_refuses_a_binding_to_a_box_property) {
+    for(auto type : LAYOUT_PROPERTIES) {
+        for(auto direction : ALL_DIRECTIONS) {
+            auto screen = MakeCompositionScreen({ 9, 12 });
+            SetChildren(*screen->widget_configurations[0], { 12 });
+            auto binding = MakeSensorBinding();
+            binding.target = type;
+            binding.direction = direction;
+            screen->widget_configurations[1]->bindings = { binding };
+
+            ExpectCompositionError(*screen, { "Widget ID: 12", "a child fills its owner" });
+
+            // The owner is a root, and may have it.
+            screen->widget_configurations[1]->bindings.clear();
+            screen->widget_configurations[0]->bindings = { binding };
+            UiConfigurationValidator::Validate(*screen);
+        }
+    }
+}
+
+// Other targets on a child stay as they were.
+ZTEST(ui_configuration_validator, test_a_child_widget_still_takes_its_other_bindings) {
+    auto screen = MakeCompositionScreen({ 9, 12 });
+    SetChildren(*screen->widget_configurations[0], { 12 });
+    screen->widget_configurations[1]->bindings = { MakeSensorBinding() };
+
+    UiConfigurationValidator::Validate(*screen);
+}
+
+// The box has no value kind of its own to get wrong: a binding is checked as any other.
+ZTEST(ui_configuration_validator, test_a_box_binding_is_checked_like_any_other_binding) {
+    auto configuration = MakeConfiguration();
+    auto binding = MakeSensorBinding();
+    binding.target = WidgetPropertyType::LAYOUT_X;
+    binding.event.selector_key = 0;
+    binding.event.selector_value = ConfigValue{};
+    AddBinding(*configuration, binding);
+
+    zassert_false(Validates(*configuration), "A Sensors binding that selects no sensor must be refused.");
+}

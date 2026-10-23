@@ -28,6 +28,7 @@ using eerie_leap::subsys::event_bus::EventChannelRegistry;
 using eerie_leap::subsys::event_bus::SubscribeEventBinding;
 using eerie_leap::subsys::event_bus::ToSelectorValue;
 using eerie_leap::utilities::reflection::GetCallerName;
+using eerie_leap::views::utilitites::GridLayout;
 
 LOG_MODULE_REGISTER(widget_base_logger);
 
@@ -324,6 +325,10 @@ void WidgetBase::ApplyProperty(WidgetPropertyType type, const ConfigValue& value
     if(WidgetPropertyValidator::IsManagementProperty(type)) {
         WidgetBase::OnPropertyChanged(type, value);
         UpdateProcessingState();
+    } else if(WidgetPropertyValidator::IsLayoutProperty(type)) {
+        // The box is the widget's own, not a derived class's to react to.
+        ApplyLayout();
+        transform_.UpdateAnchor();
     } else if(!transform_.ApplyProperty(type, value)) {
         properties_->ApplyColor(type);
         OnPropertyChanged(type, value);
@@ -364,7 +369,69 @@ std::vector<WidgetPropertyType> WidgetBase::GetSupportedProperties() const {
 
     RegisterProperties(declared);
 
-    return declared.GetRegisteredTypes();
+    auto supported = declared.GetRegisteredTypes();
+
+    // A root widget answers for its box; an owned child fills its owner.
+    if(grid_layout_.has_value())
+        supported.insert(
+            supported.end(),
+            { WidgetPropertyType::LAYOUT_X, WidgetPropertyType::LAYOUT_Y, WidgetPropertyType::LAYOUT_WIDTH,
+                WidgetPropertyType::LAYOUT_HEIGHT }
+        );
+
+    return supported;
+}
+
+void WidgetBase::RegisterLayoutProperties(WidgetPropertyStore& store) const {
+    store.Register(
+        WidgetPropertyType::LAYOUT_X, ConfigValue{ configuration_->position_grid.x }, PropertyChangeEffect::Relayout
+    );
+    store.Register(
+        WidgetPropertyType::LAYOUT_Y, ConfigValue{ configuration_->position_grid.y }, PropertyChangeEffect::Relayout
+    );
+    store.Register(
+        WidgetPropertyType::LAYOUT_WIDTH, ConfigValue{ static_cast<int>(configuration_->size_grid.width) },
+        PropertyChangeEffect::Relayout
+    );
+    store.Register(
+        WidgetPropertyType::LAYOUT_HEIGHT, ConfigValue{ static_cast<int>(configuration_->size_grid.height) },
+        PropertyChangeEffect::Relayout
+    );
+}
+
+void WidgetBase::AttachGrid(const GridLayout& layout) {
+    ScopedLvglLock lvgl_guard;
+
+    if(detached_ || configuration_ != nullptr || is_owned_)
+        throw std::logic_error("The grid is attached once, to a root widget, before it is configured.");
+
+    grid_layout_ = layout;
+}
+
+void WidgetBase::ApplyLayout() {
+    if(!grid_layout_.has_value() || !is_box_placed_)
+        return;
+
+    const auto& layout = *grid_layout_;
+    const auto& grid = layout.GetGrid();
+    const auto cells = [this](WidgetPropertyType type, int fallback) {
+        return properties_->GetAs<int>(type, fallback);
+    };
+
+    // The validator holds a record to the grid; a bound value is held to it here, a size at one cell at least.
+    const auto width = static_cast<uint32_t>(
+        std::clamp(cells(WidgetPropertyType::LAYOUT_WIDTH, 1), 1, static_cast<int>(grid.width))
+    );
+    const auto height = static_cast<uint32_t>(
+        std::clamp(cells(WidgetPropertyType::LAYOUT_HEIGHT, 1), 1, static_cast<int>(grid.height))
+    );
+    const int x = std::clamp(cells(WidgetPropertyType::LAYOUT_X, 0), 0, static_cast<int>(grid.width) - 1);
+    const int y = std::clamp(cells(WidgetPropertyType::LAYOUT_Y, 0), 0, static_cast<int>(grid.height) - 1);
+
+    const auto size_px = layout.ToPx(WidgetSize{ .width = width, .height = height });
+
+    SetSizePx(size_px);
+    SetPositionPx(layout.ToPx(WidgetPosition{ .x = x, .y = y }, size_px));
 }
 
 void WidgetBase::RunEffect(PropertyChangeEffect effect) {
@@ -569,8 +636,12 @@ void WidgetBase::Configure(std::shared_ptr<WidgetConfiguration> configuration) {
 
     const auto supported = GetSupportedProperties();
 
+    if(grid_layout_.has_value())
+        RegisterLayoutProperties(*properties_);
+
     for(const auto& [type, value] : configuration_->properties) {
-        if(WidgetPropertyValidator::IsStructuralProperty(type))
+        // The box is the record's position and size, never a property.
+        if(WidgetPropertyValidator::IsStructuralProperty(type) || WidgetPropertyValidator::IsLayoutProperty(type))
             continue;
 
         if(!properties_->Set(type, value) && std::ranges::find(supported, type) == supported.end())
@@ -608,6 +679,7 @@ WidgetPosition WidgetBase::GetPositionPx() const {
 
 void WidgetBase::SetPositionPx(const WidgetPosition& position_px) {
     position_px_ = position_px;
+    is_box_placed_ = true;
 
     container_->SetXOffset(position_px.x, true).SetYOffset(position_px.y, true);
 }

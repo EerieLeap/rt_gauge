@@ -14,6 +14,16 @@ source "Kconfig.zephyr"
 		int "UI render work queue stack size"
 		default 8192
 
+	config EERIE_LEAP_UI_DEMO_CONFIGURATION
+		bool "Install the demo UI configuration and assets"
+		default y
+		help
+		  Installs the built-in demo screens, and the images and the animation they
+		  show, when the unit stores no UI configuration. A stored configuration is
+		  never replaced, and the demo assets only fill in files that are missing.
+		  Turn it off in a release, where a unit without a configuration shows
+		  nothing until a client stores one.
+
 	config EERIE_LEAP_UI_IMAGE_MAX_SIZE
 		int "Largest image upload"
 		default 4194304

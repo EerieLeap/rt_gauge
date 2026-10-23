@@ -38,6 +38,17 @@ NavigationService::NavigationService() {
     k_mutex_init(&lock_);
 }
 
+void NavigationService::Reset() {
+    k_mutex_lock(&lock_, K_FOREVER);
+
+    screen_group_ids_.clear();
+    active_screen_group_id_.reset();
+    active_overlay_screen_id_.reset();
+    history_count_ = 0;
+
+    k_mutex_unlock(&lock_);
+}
+
 void NavigationService::SetGroupIds(std::vector<uint32_t> screen_group_ids) {
     k_mutex_lock(&lock_, K_FOREVER);
 

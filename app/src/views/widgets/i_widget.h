@@ -13,6 +13,7 @@
 #include "domain/ui_domain/models/widget_size.h"
 #include "domain/ui_domain/models/widget_type.h"
 #include "views/i_renderable.h"
+#include "views/utilitites/grid_layout.h"
 
 namespace eerie_leap::views::widgets {
 
@@ -61,6 +62,11 @@ public:
     // Owned children expose their own keys independently; composites additionally
     // report CHILD_WIDGET_IDS as structural metadata.
     virtual std::vector<WidgetPropertyType> GetSupportedProperties() const = 0;
+
+    // Makes this a root widget placed by the grid of its screen, before it is configured: it then answers
+    // for LAYOUT_X, LAYOUT_Y, LAYOUT_WIDTH and LAYOUT_HEIGHT (the box in grid cells, defaulting to the
+    // record's), and a change of one moves or sizes it in place. An owned child never has it.
+    virtual void AttachGrid(const eerie_leap::views::utilitites::GridLayout& layout) = 0;
 
     // Layout
     virtual WidgetPosition GetPositionPx() const = 0;

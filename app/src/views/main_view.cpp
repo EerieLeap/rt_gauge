@@ -67,7 +67,18 @@ void MainView::PruneEmptyGroups() {
     }
 }
 
-int MainView::SetActiveGroup(uint32_t screen_group_id) {
+void MainView::Clear() {
+    ScopedLvglLock lvgl_guard;
+
+    // A group tells its widgets they stop, then its objects go with it.
+    for(const auto& [screen_group_id, screen_group] : screen_groups_)
+        screen_group->Deactivate();
+
+    screen_groups_.clear();
+    active_screen_group_id_.reset();
+}
+
+int MainView::SetActiveGroup(uint32_t screen_group_id, bool render_inline) {
     const auto it = screen_groups_.find(screen_group_id);
     if(it == screen_groups_.end()) {
         LOG_WRN("Screen group %u is not configured.", screen_group_id);
@@ -102,12 +113,18 @@ int MainView::SetActiveGroup(uint32_t screen_group_id) {
     if(screen_group->IsRendered())
         return 0;
 
-    if(render_dispatcher_ != nullptr) {
+    if(render_dispatcher_ != nullptr && !render_inline) {
         // Capturing `this` is safe because the dispatcher's work queue is drained
         // and stopped before this view is destroyed.
         const auto deferred_screen_group = screen_group;
         render_dispatcher_([this, deferred_screen_group, previous_screen_group] {
             ScopedLvglLock lvgl_guard;
+
+            // Clear() may have dropped the group while this waited; rendering it would draw a group that
+            // is no longer part of the view.
+            const auto current = screen_groups_.find(deferred_screen_group->GetGroupId());
+            if(current == screen_groups_.end() || current->second != deferred_screen_group)
+                return;
 
             RenderGroupOrRollBack(deferred_screen_group, previous_screen_group);
         });

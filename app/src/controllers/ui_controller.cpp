@@ -38,6 +38,7 @@
 #include "subsys/assets/asset_provider.h"
 #include "subsys/event_bus/event_binding_subscription.h"
 #include "subsys/event_bus/event_channel_id.h"
+#include "subsys/threading/scoped_mutex.h"
 
 #include "views/assets/animations/animations_register.h"
 #include "views/assets/images/images_register.h"
@@ -63,6 +64,7 @@ using namespace eerie_leap::views::assets::animations;
 namespace config_services = eerie_leap::configuration::services;
 
 using eerie_leap::domain::settings_domain::event_bus::SettingsEventsChannel;
+using eerie_leap::domain::settings_domain::event_bus::SettingsEventType;
 using eerie_leap::domain::settings_domain::models::SettingId;
 using eerie_leap::domain::ui_domain::ScopedLvglLock;
 using eerie_leap::domain::ui_domain::event_bus::NavigationEventType;
@@ -73,6 +75,7 @@ using eerie_leap::subsys::assets::AssetKind;
 using eerie_leap::subsys::assets::AssetProvider;
 using eerie_leap::subsys::event_bus::CreateScopedSubscription;
 using eerie_leap::subsys::event_bus::GetEventBindingError;
+using eerie_leap::subsys::threading::ScopedMutex;
 using eerie_leap::utilities::reflection::GetCallerName;
 using eerie_leap::views::widgets::WidgetFactory;
 
@@ -93,6 +96,7 @@ std::optional<uint32_t> GetPayloadId(const NavigationEventChannel::EventMessage&
 
 } // namespace
 
+#ifdef CONFIG_EERIE_LEAP_UI_DEMO_CONFIGURATION
 // TODO: For test purposes only
 namespace {
 
@@ -164,6 +168,16 @@ void AddSettingBindings(WidgetConfiguration& widget, const char* setting_id, Pro
 }
 
 } // namespace
+#endif
+
+namespace {
+
+// Where CborConfigurationService keeps a configuration: its directory and the name with an extension.
+std::string StoredConfigurationPath(std::string_view name) {
+    return "config/" + std::string(name) + ".cbor";
+}
+
+} // namespace
 
 UiController::UiController(
     std::shared_ptr<IFsService> fs_service,
@@ -174,13 +188,21 @@ UiController::UiController(
     fs_service_(std::move(fs_service)),
     config_work_queue_thread_(std::move(config_work_queue_thread)),
     configuration_service_(std::move(configuration_service)),
-    assets_manager_(std::move(assets_manager)) {
+    assets_manager_(std::move(assets_manager)),
+    dispatch_guard_(std::make_shared<DispatchGuard>(this)),
+    rebuild_guard_(std::make_shared<DispatchGuard>(this)) {
+
+    k_mutex_init(&state_replay_mutex_);
 
     if(assets_manager_ == nullptr)
         assets_manager_ = std::make_shared<AssetsManager>();
 }
 
 UiController::~UiController() {
+    // Waits for a rebuild in progress, and turns every later one into nothing.
+    rebuild_guard_->Detach();
+    dispatch_guard_->Detach();
+
     navigation_subscription_.reset();
 
     // The dispatcher holds a raw pointer to a work queue destroyed before main_view_.
@@ -206,6 +228,11 @@ int UiController::Initialize() {
 
     ui_renderer_service_->Start();
 
+    // Asked before the manager exists: it stores a default configuration as soon as it finds none.
+    [[maybe_unused]] const bool has_stored_configuration = fs_service_->Exists(
+        StoredConfigurationPath(UI_CONFIGURATION_NAME)
+    );
+
     auto cbor_ui_config_service = std::make_unique<config_services::CborConfigurationService<CborUiConfig>>(
         UI_CONFIGURATION_NAME, fs_service_, config_work_queue_thread_
     );
@@ -224,9 +251,14 @@ int UiController::Initialize() {
 
     RegisterAssets();
 
+#ifdef CONFIG_EERIE_LEAP_UI_DEMO_CONFIGURATION
     // TODO: For test purposes only
-    SetupTestConfiguration();
-    SetupTestAssets();
+    // Only for a unit that stores nothing: a configuration a client stored is never replaced.
+    if(!has_stored_configuration) {
+        SetupTestConfiguration();
+        SetupTestAssets();
+    }
+#endif
 
     ScopedLvglLock lvgl_guard;
 
@@ -274,6 +306,13 @@ int UiController::Initialize() {
 
     ConfigureGestures();
 
+    // Last, once there is a view to rebuild: a configuration stored from now on replaces the screens.
+    ui_configuration_manager_->RegisterConfigurationUpdatedHandler([this, guard = dispatch_guard_] {
+        guard->Dispatch([this] {
+            OnConfigurationStored();
+        });
+    });
+
     return 0;
 }
 
@@ -316,8 +355,11 @@ void UiController::ConfigureGestures() {
 
     ui_input_service_->SetGestureMapping(LV_DIR_BOTTOM, NavigationIntent::CloseOverlay);
 
+    // A rebuilt configuration may have no overlay left for the swipe to open.
     if(default_overlay_screen_id_.has_value())
         ui_input_service_->SetGestureMapping(LV_DIR_TOP, NavigationIntent::ShowOverlay, *default_overlay_screen_id_);
+    else
+        ui_input_service_->SetGestureMapping(LV_DIR_TOP, NavigationIntent::None);
 }
 
 int UiController::Start() {
@@ -335,12 +377,14 @@ int UiController::Start() {
     return res;
 }
 
-int UiController::Configure(std::shared_ptr<UiConfiguration> config) {
+int UiController::Configure(std::shared_ptr<UiConfiguration> config, bool render_inline) {
     configuration_ = std::move(config);
 
     // Screen and widget construction creates LVGL objects while the renderer
     // thread is already running.
     ScopedLvglLock lvgl_guard;
+
+    default_overlay_screen_id_.reset();
 
     for(const auto& screen_config : configuration_->screen_configurations) {
         // An overlay is built on demand by OverlayHost; it belongs to no group.
@@ -365,10 +409,10 @@ int UiController::Configure(std::shared_ptr<UiConfiguration> config) {
         return -ENOENT;
     }
 
-    int res = main_view_->SetActiveGroup(configuration_->active_screen_group_id);
+    int res = main_view_->SetActiveGroup(configuration_->active_screen_group_id, render_inline);
     if(res != 0) {
         LOG_WRN("Falling back to screen group %u.", screen_group_ids.front());
-        res = main_view_->SetActiveGroup(screen_group_ids.front());
+        res = main_view_->SetActiveGroup(screen_group_ids.front(), render_inline);
     }
 
     navigation_service_->SetGroupIds(std::move(screen_group_ids));
@@ -388,6 +432,96 @@ void UiController::RequestSettingsState() {
     SettingsEventsChannel::GetInstance().PublishAsync(
         { .source_id = CALLER.hash, .type = SettingsEventType::StateRequested }
     );
+}
+
+int UiController::Reconfigure(std::shared_ptr<UiConfiguration> configuration) {
+    int res = 0;
+
+    {
+        // One hold from the first teardown to the last frame of the new start group: the renderer thread
+        // cannot flush a half-built tree, and the display keeps its last frame meanwhile. The lock order is
+        // the usual one: this, then a widget's dispatch guard in its destructor.
+        ScopedLvglLock lvgl_guard;
+
+        if(overlay_host_ != nullptr)
+            overlay_host_->DismissAll();
+
+        // The overlays are gone with the groups they covered, and so is the way back to a group.
+        navigation_service_->Reset();
+        main_view_->Clear();
+
+        res = Configure(std::move(configuration), true);
+        ConfigureGestures();
+    }
+
+    if(res != 0)
+        LOG_ERR("Failed to show the stored UI configuration. Error: %d.", res);
+
+    ReplayState();
+
+    return res;
+}
+
+void UiController::OnConfigurationStored() {
+    // A rebuild already queued reads the latest configuration when it runs.
+    if(is_reconfigure_queued_.exchange(true))
+        return;
+
+    const auto rebuild = [this, guard = rebuild_guard_] {
+        guard->Dispatch([this] {
+            is_reconfigure_queued_ = false;
+
+            try {
+                Reconfigure(ui_configuration_manager_->Get());
+            } catch(const std::exception& e) {
+                LOG_ERR("Failed to rebuild the UI from the stored configuration. %s", e.what());
+            } catch(...) {
+                LOG_ERR("Failed to rebuild the UI from the stored configuration.");
+            }
+        });
+    };
+
+    if(ui_render_work_queue_thread_ == nullptr) {
+        // No queue to rebuild on; the storing thread has to.
+        rebuild();
+
+        return;
+    }
+
+    try {
+        ui_render_work_queue_thread_->Run(rebuild);
+    } catch(const std::exception& e) {
+        is_reconfigure_queued_ = false;
+        LOG_ERR("Failed to queue a rebuild of the UI. %s", e.what());
+    }
+}
+
+void UiController::SetStateReplay(std::function<void()> replay) {
+    std::shared_ptr<const std::function<void()>> slot;
+    if(replay)
+        slot = std::make_shared<const std::function<void()>>(std::move(replay));
+
+    const ScopedMutex guard(state_replay_mutex_);
+    state_replay_.swap(slot);
+}
+
+void UiController::ReplayState() {
+    std::shared_ptr<const std::function<void()>> replay;
+    {
+        const ScopedMutex guard(state_replay_mutex_);
+        replay = state_replay_;
+    }
+
+    if(replay == nullptr)
+        return;
+
+    try {
+        (*replay)();
+    } catch(const std::exception& e) {
+        LOG_ERR("Failed to replay the state to the rebuilt UI. %s", e.what());
+    } catch(...) {
+        LOG_ERR("Failed to replay the state to the rebuilt UI.");
+    }
 }
 
 void UiController::SubscribeToNavigation() {
@@ -500,6 +634,10 @@ std::shared_ptr<NavigationService> UiController::GetNavigationService() const {
     return navigation_service_;
 }
 
+std::shared_ptr<UiConfigurationManager> UiController::GetConfigurationManager() const {
+    return ui_configuration_manager_;
+}
+
 std::shared_ptr<IScreen>
 UiController::CreateScreen(const std::shared_ptr<ScreenConfiguration>& configuration, std::shared_ptr<Frame> parent) {
 
@@ -522,6 +660,7 @@ std::shared_ptr<ScreenConfiguration> UiController::FindOverlayConfiguration(uint
     return nullptr;
 }
 
+#ifdef CONFIG_EERIE_LEAP_UI_DEMO_CONFIGURATION
 void UiController::SetupTestConfiguration() {
     auto ui_configuration = make_shared_pmr<UiConfiguration>(Mrm::GetExtPmr());
     ui_configuration->active_screen_group_id = 0;
@@ -941,22 +1080,21 @@ void UiController::SetupTestAssets() {
             LOG_WRN("Failed to delete the old asset %s.", legacy_path.c_str());
     }
 
-    const auto save_if_stale = [this](std::string_view name, std::string_view json) {
-        if(const auto size = animations_store_->GetSize(name); size.has_value() && *size == json.size())
-            return;
-
-        // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): the embedded JSON text is stored as raw bytes
-        animations_store_->Save(name, std::span(reinterpret_cast<const uint8_t*>(json.data()), json.size()));
+    // A file already there is left as it is: it may be one a client uploaded under the same name.
+    const auto save_if_missing = [](AssetStore& store, std::string_view name, std::span<const uint8_t> data) {
+        if(!store.Exists(name))
+            store.Save(name, data);
     };
 
-    save_if_stale("ui_lottie_spinner.json", UI_LOTTIE_SPINNER_JSON);
+    // The embedded JSON text is stored as the raw bytes it is.
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    const auto* const json_data = reinterpret_cast<const uint8_t*>(UI_LOTTIE_SPINNER_JSON.data());
+    const std::span json_bytes(json_data, UI_LOTTIE_SPINNER_JSON.size());
 
-    if(images_store_->Exists("ui_img_norma_al88.bin"))
-        return;
-
-    images_store_->Save("ui_img_norma_al88.bin", UI_IMG_NORMA_AL88_DATA);
-
-    images_store_->Save("ui_img_arrow_al88.bin", UI_IMG_ARROW_AL88_DATA);
+    save_if_missing(*animations_store_, "ui_lottie_spinner.json", json_bytes);
+    save_if_missing(*images_store_, "ui_img_norma_al88.bin", UI_IMG_NORMA_AL88_DATA);
+    save_if_missing(*images_store_, "ui_img_arrow_al88.bin", UI_IMG_ARROW_AL88_DATA);
 }
+#endif
 
 } // namespace eerie_leap::controllers
