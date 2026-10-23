@@ -200,7 +200,8 @@ int main() {
     const auto time_service = std::make_shared<TimeService>(rtc_provider, boot_elapsed_time_provider);
     eerie_leap::subsys::time::TimeService::Initialize();
 
-    const int config_work_queue_stack_size = 6144;
+    // A refused upload unwinds an exception from the validators on this stack, on top of the decode of up to 64 KiB.
+    const int config_work_queue_stack_size = 8192;
     const int config_work_queue_priority = 5;
     const auto config_work_queue_thread = std::make_shared<WorkQueueThread>(
         "config_work_queue", config_work_queue_stack_size, config_work_queue_priority

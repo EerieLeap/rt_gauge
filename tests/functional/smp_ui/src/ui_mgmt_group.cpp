@@ -26,6 +26,7 @@
 #include "subsys/threading/work_queue_thread.h"
 
 #include "domain/configuration_domain/services/configuration_service.h"
+#include "domain/configuration_domain/smp/config_mgmt_group.h"
 #include "domain/settings_domain/event_bus/settings_events_channel.h"
 #include "domain/ui_domain/configuration/parsers/ui_configuration_cbor_parser.h"
 #include "domain/ui_domain/event_bus/navigation_event_channel.h"
@@ -41,6 +42,7 @@
 using eerie_leap::configuration::cbor::CborSerializer;
 using eerie_leap::controllers::UiController;
 using eerie_leap::domain::configuration_domain::services::ConfigurationService;
+using eerie_leap::domain::configuration_domain::smp::ConfigMgmtGroup;
 using eerie_leap::domain::settings_domain::event_bus::SettingsEventsChannel;
 using eerie_leap::domain::ui_domain::configuration::parsers::UiConfigurationCborParser;
 using eerie_leap::domain::ui_domain::event_bus::NavigationEventChannel;
@@ -69,6 +71,7 @@ using eerie_leap::domain::ui_preview_domain::smp::UiMgmtGroup;
 namespace {
 
 constexpr int BUS_STACK_SIZE = 4096;
+// The stack main() gives the unit's configuration work queue.
 constexpr int CONFIG_WORK_QUEUE_STACK_SIZE = 8192;
 constexpr int CONFIG_WORK_QUEUE_PRIORITY = 10;
 
@@ -124,6 +127,8 @@ struct Fixture {
 #ifdef CONFIG_EERIE_LEAP_UI_PREVIEW
     std::unique_ptr<UiMgmtGroup> group;
 #endif
+    // The `config` group, which a client uploads a UI configuration through.
+    std::unique_ptr<ConfigMgmtGroup> config_group;
     std::unique_ptr<smp_test::SmpTestClient> client;
 };
 
@@ -286,6 +291,9 @@ void* Setup() {
     fixture.group = std::make_unique<UiMgmtGroup>(preview);
     fixture.group->Register();
 #endif
+    fixture.config_group = std::make_unique<ConfigMgmtGroup>(fixture.configuration_service, fixture.config_work_queue);
+    zassert_true(fixture.config_group->Initialize());
+    fixture.config_group->Register();
     fixture.client = std::make_unique<smp_test::SmpTestClient>();
 
     return nullptr;
@@ -293,6 +301,7 @@ void* Setup() {
 
 void Teardown(void*) {
     fixture.client.reset();
+    fixture.config_group.reset();
 #ifdef CONFIG_EERIE_LEAP_UI_PREVIEW
     fixture.group.reset();
 #endif
@@ -325,6 +334,122 @@ void Before(void*) {
 } // namespace
 
 ZTEST_SUITE(smp_ui, NULL, Setup, Before, After, Teardown);
+
+// ======== A UI configuration uploaded through the `config` group ========
+
+namespace {
+
+constexpr uint32_t UI_CONFIG_TYPE = 6;
+constexpr uint32_t CONFIG_APPLY_FAILED = 8;
+constexpr uint32_t CONFIG_CRC_MISMATCH = 7;
+
+// The config group's WRITE in chunks, as a client sends it; the response to the last, or to the first that failed.
+Response ConfigWriteAll(uint32_t type, std::span<const uint8_t> bytes, std::optional<uint32_t> crc = std::nullopt) {
+    Response response;
+    uint32_t token = 0;
+    for(size_t offset = 0; offset < bytes.size(); offset += CHUNK_SIZE) {
+        const size_t size = std::min(CHUNK_SIZE, bytes.size() - offset);
+        CborMap body;
+        body.Put("type", type).Put("off", static_cast<uint32_t>(offset)).Put("data", bytes.subspan(offset, size));
+        if(offset == 0)
+            body.Put("len", static_cast<uint32_t>(bytes.size())).Put("crc", crc.value_or(Crc(bytes)));
+        else
+            body.Put("tok", token);
+
+        response = fixture.client->Write(
+            SmpGroupId::CONFIG, std::to_underlying(ConfigMgmtGroup::Command::WRITE), body.Build()
+        );
+        if(response.error.has_value() || response.values.contains("rc"))
+            return response;
+
+        if(offset == 0)
+            token = response.Value("tok");
+    }
+
+    return response;
+}
+
+void AssertConfigError(const Response& response, uint32_t error, const char* message) {
+    zassert_true(response.error.has_value(), "Expected the config group's error %u", error);
+    zassert_equal(response.error_group.value_or(0), static_cast<uint32_t>(SmpGroupId::CONFIG));
+    zassert_equal(*response.error, error, "Expected config error %u, got %u", error, *response.error);
+    if(message != nullptr) {
+        zassert_true(response.texts.contains("msg"), "Expected a reason");
+        zassert_equal(response.texts.at("msg"), message, "'%s'", response.texts.at("msg").c_str());
+    }
+}
+
+// The bytes of a configuration that carries more widgets in a screen than the model takes.
+std::vector<uint8_t> EncodeWithWidgets(uint32_t widget_count) {
+    const auto configuration = MakeConfiguration({ GROUP_ID }, std::nullopt, 1);
+    const auto cbor_configuration = UiConfigurationCborParser().Serialize(*configuration);
+
+    // Past the model, which refuses it: copies of the first widget under other IDs.
+    auto& widgets = cbor_configuration->CborScreenConfig_m.front().CborWidgetConfig_m;
+    for(uint32_t id = 1; id < widget_count; ++id) {
+        CborWidgetConfig widget(std::allocator_arg, Mrm::GetExtPmr());
+        widget.id = id;
+        widget.type = widgets.front().type;
+        widget.position = widgets.front().position;
+        widget.size = widgets.front().size;
+        widget.z_index = 0;
+        widget.properties_present = false;
+        widgets.push_back(std::move(widget));
+    }
+
+    const auto bytes = CborSerializer<CborUiConfig>().Serialize(*cbor_configuration);
+
+    return { bytes.begin(), bytes.end() };
+}
+
+} // namespace
+
+ZTEST(smp_ui, test_a_refused_ui_upload_answers_apply_failed_with_the_reason_and_the_next_one_is_not_busy) {
+    const auto stored_info = fixture.manager->GetCborConfigurationInfo();
+    const int stored_count = fixture.stored_count.load();
+
+    // The second screen takes the first one's ID.
+    auto duplicate = Encode(MakeConfiguration({ GROUP_ID, SECOND_GROUP_ID }));
+    constexpr std::array<uint8_t, 7> SECOND_SCREEN = { 0x9f, 0x01, SECOND_GROUP_ID, 0x02, 0x00, 0xf5, 0xf4 };
+    const auto second_screen = std::ranges::search(duplicate, SECOND_SCREEN);
+    zassert_false(second_screen.empty());
+    *(second_screen.begin() + 1) = 0x00;
+
+    AssertConfigError(
+        ConfigWriteAll(UI_CONFIG_TYPE, duplicate), CONFIG_APPLY_FAILED,
+        "Invalid UI Screen configuration. Screen ID: 0. Configuration cannot contain duplicate screen IDs."
+    );
+    // The same again, straight after: the refused one left no session open.
+    AssertConfigError(
+        ConfigWriteAll(UI_CONFIG_TYPE, duplicate), CONFIG_APPLY_FAILED,
+        "Invalid UI Screen configuration. Screen ID: 0. Configuration cannot contain duplicate screen IDs."
+    );
+
+    // More widgets than a screen takes.
+    AssertConfigError(
+        ConfigWriteAll(UI_CONFIG_TYPE, EncodeWithWidgets(33)), CONFIG_APPLY_FAILED,
+        "Invalid UI Screen configuration. Screen ID: 0. Composition exceeds the limit of 32 nodes."
+    );
+
+    // Bytes that are no configuration, and a CRC that is not theirs.
+    AssertConfigError(
+        ConfigWriteAll(UI_CONFIG_TYPE, std::vector<uint8_t>(40, 0xFF)), CONFIG_APPLY_FAILED, "Malformed CBOR"
+    );
+    const auto good = Encode(MakeConfiguration({ GROUP_ID }));
+    AssertConfigError(ConfigWriteAll(UI_CONFIG_TYPE, good, Crc(good) ^ 1U), CONFIG_CRC_MISMATCH, nullptr);
+
+    // Nothing was stored or reported, and a good one is taken.
+    zassert_equal(fixture.manager->GetCborConfigurationInfo().crc, stored_info.crc);
+    zassert_equal(fixture.stored_count.load(), stored_count);
+    const auto taken = ConfigWriteAll(UI_CONFIG_TYPE, good);
+    zassert_true(taken.IsOk(), "Refused: %u", taken.error.value_or(0));
+    zassert_equal(fixture.stored_count.load(), stored_count + 1);
+    zassert_true(WaitUntilGroupIs(GROUP_ID));
+
+    // Back to what the other tests expect.
+    zassert_true(fixture.manager->Update(MakeConfiguration({ STORED_GROUP_ID, 6 })));
+    zassert_true(WaitUntilGroupIs(STORED_GROUP_ID));
+}
 
 ZTEST(smp_ui, test_begin_opens_a_session_and_says_what_the_unit_has) {
     const auto stored_crc = fixture.manager->GetCborConfigurationInfo().crc;
