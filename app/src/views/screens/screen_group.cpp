@@ -50,6 +50,10 @@ std::shared_ptr<IScreen> ScreenGroup::GetScreen(uint32_t screen_id) const {
     return nullptr;
 }
 
+std::vector<std::shared_ptr<IScreen>> ScreenGroup::GetScreens() const {
+    return screens_;
+}
+
 bool ScreenGroup::IsEmpty() const {
     return screens_.empty();
 }

@@ -34,6 +34,7 @@ public:
 
     void AddScreen(std::shared_ptr<IScreen> screen);
     std::shared_ptr<IScreen> GetScreen(uint32_t screen_id) const;
+    std::vector<std::shared_ptr<IScreen>> GetScreens() const;
     bool IsEmpty() const;
 
     int EnsureRendered();

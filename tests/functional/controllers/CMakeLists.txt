@@ -50,6 +50,9 @@ file(GLOB_RECURSE APP_SRC_CONTROLLERS
   ${APP_SRC_DIR}/controllers/ui_controller.cpp
 )
 
+# The UI preview a controller serves: its service. The SMP group is tested in functional/smp_ui.
+set(APP_SRC_UI_PREVIEW ${APP_SRC_DIR}/domain/ui_preview_domain/ui_preview_service.cpp)
+
 file(GLOB_RECURSE TEST_SOURCES src/*.c src/*.cpp)
 
 # Add all source files to the app target
@@ -58,6 +61,7 @@ target_sources(app PRIVATE
   ${APP_SRC_CONTROLLERS}
   ${APP_SRC_DISPLAY_DOMAIN}
   ${APP_SRC_UI_DOMAIN}
+  ${APP_SRC_UI_PREVIEW}
   ${APP_SRC_UTILITIES}
   ${APP_SRC_VIEWS}
   ${TEST_SOURCES}

@@ -196,6 +196,12 @@ std::shared_ptr<IScreen> MainView::GetScreen(uint32_t screen_id) const {
     return nullptr;
 }
 
+std::vector<std::shared_ptr<IScreen>> MainView::GetGroupScreens(uint32_t screen_group_id) const {
+    const auto it = screen_groups_.find(screen_group_id);
+
+    return it != screen_groups_.end() ? it->second->GetScreens() : std::vector<std::shared_ptr<IScreen>>{};
+}
+
 [[maybe_unused]] static void RenderCenterCrossHelperGuides(lv_obj_t* screen) {
     lv_obj_t* panel1 = lv_obj_create(screen);
     lv_obj_set_width(panel1, 2);

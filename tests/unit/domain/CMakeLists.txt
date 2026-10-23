@@ -20,6 +20,7 @@ set(APP_SRC_UI_DOMAIN_DIR ${APP_SRC_DIR}/domain/ui_domain)
 file(GLOB_RECURSE APP_SRC_UI_DOMAIN
   ${APP_SRC_UI_DOMAIN_DIR}/models/*.cpp
   ${APP_SRC_UI_DOMAIN_DIR}/configuration/parsers/*.cpp
+  ${APP_SRC_UI_DOMAIN_DIR}/preview/*.cpp
 )
 
 file(GLOB_RECURSE TEST_SOURCES src/*.c src/*.cpp)

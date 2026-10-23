@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cerrno>
 #include <span>
 #include <stdexcept>
@@ -42,9 +43,11 @@
 
 #include "views/assets/animations/animations_register.h"
 #include "views/assets/images/images_register.h"
+#include "views/screens/i_screen.h"
 #include "views/screens/screen_factory.h"
 #include "views/themes/dark_bw_theme.h"
 #include "views/themes/theme_manager.h"
+#include "views/utilitites/frame.h"
 #include "views/widgets/indicators/horizontal_chart_indicator/horizontal_chart_indicator.h"
 #include "views/widgets/widget_factory.h"
 
@@ -80,6 +83,25 @@ using eerie_leap::utilities::reflection::GetCallerName;
 using eerie_leap::views::widgets::WidgetFactory;
 
 LOG_MODULE_REGISTER(ui_controller_logger);
+
+namespace {
+
+// The object of the widget with this ID among a screen's widgets and, owned, theirs; null if there is none.
+// Recursive to the depth of the composition, which the validator holds to 8 levels.
+// NOLINTNEXTLINE(misc-no-recursion)
+lv_obj_t* FindWidgetObject(std::span<const std::unique_ptr<eerie_leap::views::widgets::IWidget>> widgets, uint32_t id) {
+    for(const auto& widget : widgets) {
+        if(widget->GetId() == id)
+            return widget->GetContainer()->GetObject();
+
+        if(auto* owned = FindWidgetObject(widget->GetChildren(), id))
+            return owned;
+    }
+
+    return nullptr;
+}
+
+} // namespace
 
 namespace {
 
@@ -203,6 +225,12 @@ UiController::~UiController() {
     rebuild_guard_->Detach();
     dispatch_guard_->Detach();
 
+    // A preview in progress is waited for here; the stored screens it would put back are gone with the view.
+#ifdef CONFIG_EERIE_LEAP_UI_PREVIEW
+    preview_service_.reset();
+#endif
+    highlight_.reset();
+
     navigation_subscription_.reset();
 
     // The dispatcher holds a raw pointer to a work queue destroyed before main_view_.
@@ -305,6 +333,20 @@ int UiController::Initialize() {
         LOG_ERR("Failed to initialize the UI input service.");
 
     ConfigureGestures();
+
+#ifdef CONFIG_EERIE_LEAP_UI_PREVIEW
+    if(ui_render_work_queue_thread_ != nullptr && config_work_queue_thread_ != nullptr) {
+        auto preview_service = std::make_shared<UiPreviewService>(
+            *this, *ui_render_work_queue_thread_, *config_work_queue_thread_
+        );
+        if(preview_service->Initialize())
+            preview_service_ = std::move(preview_service);
+        else
+            LOG_ERR("Failed to initialize the UI preview.");
+    } else {
+        LOG_WRN("No UI render or configuration work queue, so no UI preview.");
+    }
+#endif
 
     // Last, once there is a view to rebuild: a configuration stored from now on replaces the screens.
     ui_configuration_manager_->RegisterConfigurationUpdatedHandler([this, guard = dispatch_guard_] {
@@ -470,6 +512,12 @@ int UiController::Reconfigure(std::shared_ptr<UiConfiguration> configuration) {
 }
 
 void UiController::OnConfigurationStored() {
+#ifdef CONFIG_EERIE_LEAP_UI_PREVIEW
+    // The store's own rebuild shows what it stored, so a preview has nothing to put back.
+    if(preview_service_ != nullptr)
+        preview_service_->OnConfigurationStored();
+#endif
+
     // A rebuild already queued reads the latest configuration when it runs.
     if(is_reconfigure_queued_.exchange(true))
         return;
@@ -644,6 +692,139 @@ void UiController::CloseOverlay() {
 
 std::shared_ptr<NavigationService> UiController::GetNavigationService() const {
     return navigation_service_;
+}
+
+bool UiController::IsNavigationEnabled() const {
+    return ui_input_service_ == nullptr || ui_input_service_->IsNavigationEnabled();
+}
+
+std::shared_ptr<UiPreviewService> UiController::GetPreviewService() const {
+    return preview_service_;
+}
+
+std::shared_ptr<UiConfiguration>
+UiController::ParseConfiguration(std::span<const uint8_t> cbor_data, std::span<char> reason) {
+    return ui_configuration_manager_->ParseCborConfiguration(cbor_data, reason);
+}
+
+int UiController::ShowConfiguration(std::shared_ptr<UiConfiguration> configuration) {
+    return Reconfigure(std::move(configuration));
+}
+
+int UiController::ShowStoredConfiguration() {
+    return Reconfigure(ui_configuration_manager_->Get());
+}
+
+void UiController::SetNavigationPinned(bool is_pinned) {
+    if(ui_input_service_ != nullptr)
+        ui_input_service_->SetNavigationEnabled(!is_pinned);
+}
+
+uint32_t UiController::GetStoredCrc() const {
+    return ui_configuration_manager_->GetCborConfigurationInfo().crc;
+}
+
+std::optional<uint32_t> UiController::GetActiveGroupId() const {
+    return navigation_service_ != nullptr ? navigation_service_->GetActiveGroupId() : std::nullopt;
+}
+
+UiPreviewError UiController::ShowTarget(const UiPreviewTarget& target, UiPreviewShown& shown) {
+    ScopedLvglLock lvgl_guard;
+
+    if(configuration_ == nullptr)
+        return UiPreviewError::NOT_FOUND;
+
+    if(target.is_overlay) {
+        if(FindOverlayConfiguration(target.id) == nullptr)
+            return UiPreviewError::NOT_FOUND;
+
+        // One overlay at a time: the one up is closed first. The events are delivered in order.
+        if(navigation_service_->IsOverlayActive())
+            navigation_service_->CloseOverlay();
+
+        if(navigation_service_->ShowOverlay(target.id) != 0)
+            return UiPreviewError::UNKNOWN;
+
+        shown.group = navigation_service_->GetActiveGroupId().value_or(configuration_->active_screen_group_id);
+        shown.overlay = target.id;
+
+        return UiPreviewError::OK;
+    }
+
+    const auto group_ids = main_view_->GetGroupIds();
+    if(std::ranges::find(group_ids, target.id) == group_ids.end())
+        return UiPreviewError::NOT_FOUND;
+
+    if(navigation_service_->IsOverlayActive())
+        navigation_service_->CloseOverlay();
+
+    if(navigation_service_->GoToGroup(target.id) != 0)
+        return UiPreviewError::UNKNOWN;
+
+    shown.group = target.id;
+    shown.overlay.reset();
+
+    return UiPreviewError::OK;
+}
+
+lv_obj_t* UiController::ResolveHighlightTarget(std::optional<uint32_t> screen, std::optional<uint32_t> widget) const {
+    std::vector<std::shared_ptr<IScreen>> candidates;
+
+    const auto* overlay_group = overlay_host_ != nullptr ? overlay_host_->GetTopGroup() : nullptr;
+    if(screen.has_value()) {
+        if(auto found = main_view_->GetScreen(*screen))
+            candidates.push_back(std::move(found));
+        else if(overlay_group != nullptr)
+            if(auto in_overlay = overlay_group->GetScreen(*screen))
+                candidates.push_back(std::move(in_overlay));
+    } else {
+        // A widget alone: the overlay that is up, then the group that is shown.
+        if(overlay_group != nullptr)
+            candidates = overlay_group->GetScreens();
+
+        if(const auto active = main_view_->GetActiveGroupId()) {
+            const auto group_screens = main_view_->GetGroupScreens(*active);
+            candidates.insert(candidates.end(), group_screens.begin(), group_screens.end());
+        }
+    }
+
+    for(const auto& candidate : candidates) {
+        if(!widget.has_value())
+            return candidate->GetContainer()->GetObject();
+
+        if(auto* found = FindWidgetObject(*candidate->GetWidgets(), *widget))
+            return found;
+    }
+
+    return nullptr;
+}
+
+UiPreviewError UiController::Highlight(std::optional<uint32_t> screen, std::optional<uint32_t> widget) {
+    ScopedLvglLock lvgl_guard;
+
+    if(!screen.has_value() && !widget.has_value()) {
+        if(highlight_ != nullptr)
+            highlight_->Clear();
+
+        return UiPreviewError::OK;
+    }
+
+    if(ResolveHighlightTarget(screen, widget) == nullptr)
+        return UiPreviewError::NOT_FOUND;
+
+    if(highlight_ == nullptr) {
+        // Resolved again at every tick: the screens may have been rebuilt, or the widget moved. A widget on a group that
+        // is not shown has nothing to outline.
+        highlight_ = std::make_unique<UiHighlight>([this](std::optional<uint32_t> s, std::optional<uint32_t> w) {
+            auto* object = ResolveHighlightTarget(s, w);
+
+            return object != nullptr && Frame::IsVisibleInHierarchy(object) ? object : nullptr;
+        });
+    }
+
+    highlight_->Set(screen, widget);
+
+    return UiPreviewError::OK;
 }
 
 bool UiController::IsShowingScreens() const {

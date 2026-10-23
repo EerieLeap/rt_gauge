@@ -49,6 +49,10 @@
 
 #include "event_bus/event_channels.h"
 
+#ifdef CONFIG_EERIE_LEAP_UI_PREVIEW
+    #include "domain/ui_preview_domain/smp/ui_mgmt_group.h"
+#endif
+
 #include "controllers/ble_controller.h"
 #include "controllers/canbus_controller.h"
 #include "controllers/display_controller.h"
@@ -60,6 +64,8 @@
 #include "controllers/sensors_controller.h"
 #include "controllers/system_controller.h"
 #include "controllers/ui_controller.h"
+
+#include "subsys/bluetooth/ble.h"
 
 using namespace eerie_memory;
 using namespace eerie_leap::utilities::memory;
@@ -357,6 +363,28 @@ int main() {
     const bool is_management_ready = management_controller->Initialize() == 0;
     if(!is_management_ready)
         LOG_ERR("Failed to initialize the management controller.");
+
+#ifdef CONFIG_EERIE_LEAP_UI_PREVIEW
+    // After the management controller, which serves the config groups: the UI preview group, so a client can stage a
+    // UI configuration the unit shows without storing it. Without the preview service (its work queues did not start)
+    // the group is not registered and MCUmgr answers rc 8.
+    std::shared_ptr<eerie_leap::domain::ui_preview_domain::smp::UiMgmtGroup> ui_mgmt_group;
+    if(const auto ui_preview_service = ui_controller->GetPreviewService()) {
+        ui_mgmt_group = std::make_shared<eerie_leap::domain::ui_preview_domain::smp::UiMgmtGroup>(ui_preview_service);
+
+        try {
+            ui_mgmt_group->Register();
+        } catch(const std::exception& e) {
+            LOG_ERR("Failed to register the UI preview group. %s", e.what());
+        }
+
+        // A client reached over this unit's own Bluetooth link relies on it to end its preview; one routed through
+        // another unit relies on the lease. Registered before the BLE controller starts, which calls the handlers.
+        eerie_leap::subsys::bluetooth::Ble::RegisterDisconnectedHandler([ui_preview_service](bt_conn* /*conn*/) {
+            ui_preview_service->OnLinkDropped();
+        });
+    }
+#endif
 
     const auto ble_controller = std::make_shared<BleController>(
         sensors_controller->GetProcessingService(), sensor_readings_frame, canbus_com_service

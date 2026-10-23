@@ -77,9 +77,20 @@ void UiInputService::GestureCb(lv_event_t* e) {
     }
 }
 
+void UiInputService::SetNavigationEnabled(bool is_enabled) {
+    is_navigation_enabled_.store(is_enabled, std::memory_order_relaxed);
+}
+
+bool UiInputService::IsNavigationEnabled() const {
+    return is_navigation_enabled_.load(std::memory_order_relaxed);
+}
+
 void UiInputService::HandleGesture() {
     lv_indev_t* indev = lv_indev_active();
     if(indev == nullptr)
+        return;
+
+    if(!is_navigation_enabled_.load(std::memory_order_relaxed))
         return;
 
     auto index = ToIndex(lv_indev_get_gesture_dir(indev));

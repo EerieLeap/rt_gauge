@@ -65,6 +65,8 @@ public:
 
     std::vector<uint32_t> GetGroupIds() const;
     std::shared_ptr<IScreen> GetScreen(uint32_t screen_id) const;
+    // The screens of a group, in drawing order; none for a group that is not there.
+    std::vector<std::shared_ptr<IScreen>> GetGroupScreens(uint32_t screen_group_id) const;
 };
 
 } // namespace eerie_leap::views

@@ -44,6 +44,18 @@ config EERIE_LEAP_UI_DEMO_CONFIGURATION
 	bool "Install the demo UI configuration and assets"
 	default y
 
+config EERIE_LEAP_UI_PREVIEW
+	bool "UI preview"
+	default y
+
+config EERIE_LEAP_UI_PREVIEW_LEASE_MS
+	int "UI preview lease"
+	default 600
+
+config EERIE_LEAP_UI_PREVIEW_MAX_STAGE_SIZE
+	int "Largest staged UI configuration"
+	default 65536
+
 config EERIE_LEAP_UI_IMAGE_MAX_SIZE
 	int "Largest image upload"
 	default 4194304

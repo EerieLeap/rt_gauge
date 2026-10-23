@@ -5,6 +5,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -28,9 +29,13 @@
 #include "domain/ui_domain/services/ui_input_service.h"
 #include "domain/ui_domain/services/ui_renderer_service.h"
 
+#include "domain/ui_preview_domain/i_ui_preview_host.h"
+#include "domain/ui_preview_domain/ui_preview_service.h"
+
 #include "views/main_view.h"
 #include "views/overlay_host.h"
 #include "views/screens/i_screen.h"
+#include "views/ui_highlight.h"
 #include "views/utilitites/frame.h"
 #include "views/widgets/widget_context.h"
 
@@ -53,13 +58,19 @@ using eerie_leap::domain::ui_domain::services::UiRendererService;
 using eerie_leap::subsys::event_bus::AnySubscription;
 using eerie_leap::subsys::event_bus::DispatchGuard;
 
+using eerie_leap::domain::ui_domain::preview::UiPreviewError;
+using eerie_leap::domain::ui_preview_domain::IUiPreviewHost;
+using eerie_leap::domain::ui_preview_domain::UiPreviewService;
+using eerie_leap::domain::ui_preview_domain::UiPreviewShown;
+using eerie_leap::domain::ui_preview_domain::UiPreviewTarget;
 using eerie_leap::views::MainView;
 using eerie_leap::views::OverlayHost;
+using eerie_leap::views::UiHighlight;
 using eerie_leap::views::screens::IScreen;
 using eerie_leap::views::utilitites::Frame;
 using eerie_leap::views::widgets::WidgetContext;
 
-class UiController {
+class UiController final : public IUiPreviewHost {
 private:
     static constexpr const char* UI_CONFIGURATION_NAME = "ui_config";
     // The directory every asset used to share, which SetupTestAssets() still clears, and the one of each kind.
@@ -140,6 +151,14 @@ private:
     std::shared_ptr<DispatchGuard> rebuild_guard_;
     std::atomic<bool> is_reconfigure_queued_ = false;
 
+    // The outline a preview puts over a widget; made when the first one is asked for.
+    std::unique_ptr<UiHighlight> highlight_;
+    // The preview of a staged configuration. Declared after the work queues it runs on, so it goes first.
+    std::shared_ptr<UiPreviewService> preview_service_;
+
+    // The object a highlight outlines; the LVGL lock is held. Null if the screens have no such widget or screen.
+    lv_obj_t* ResolveHighlightTarget(std::optional<uint32_t> screen, std::optional<uint32_t> widget) const;
+
     // Offers ui_assets/images and ui_assets/animations to clients as the image and animation kinds.
     void RegisterAssets();
 
@@ -178,7 +197,7 @@ public:
         std::shared_ptr<AssetsManager> assets_manager = nullptr
     );
     // Not under the LVGL lock: it waits for a rebuild in progress, which holds its guard and then takes that lock.
-    ~UiController();
+    ~UiController() override;
     // The subscriptions, the render dispatcher and the registered asset kinds refer to it.
     UiController(const UiController&) = delete;
     UiController& operator=(const UiController&) = delete;
@@ -192,6 +211,23 @@ public:
     std::shared_ptr<UiConfigurationManager> GetConfigurationManager() const;
     // Whether a screen group is on the display: false for a unit that stores no screens and runs no demo.
     bool IsShowingScreens() const;
+
+    // The UI preview (IUiPreviewHost): the screens a staged configuration is shown on.
+    std::shared_ptr<UiConfiguration>
+    ParseConfiguration(std::span<const uint8_t> cbor_data, std::span<char> reason) override;
+    int ShowConfiguration(std::shared_ptr<UiConfiguration> configuration) override;
+    int ShowStoredConfiguration() override;
+    void SetNavigationPinned(bool is_pinned) override;
+    UiPreviewError ShowTarget(const UiPreviewTarget& target, UiPreviewShown& shown) override;
+    UiPreviewError Highlight(std::optional<uint32_t> screen, std::optional<uint32_t> widget) override;
+    [[nodiscard]] uint32_t GetStoredCrc() const override;
+    [[nodiscard]] std::optional<uint32_t> GetActiveGroupId() const override;
+
+    /** @brief Whether the swipes navigate: not while a preview pins the screen. */
+    bool IsNavigationEnabled() const;
+
+    /** @brief The preview of staged configurations; null when the build has none or its work queues did not start. */
+    std::shared_ptr<UiPreviewService> GetPreviewService() const;
 
     /**
      * @brief Sets what Reconfigure() replays once the new screens stand, after it has asked every settings

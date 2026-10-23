@@ -1,0 +1,51 @@
+; The `ui` SMP group (73): the preview of a UI configuration on the unit that shows it. A client stages a whole
+; CborUiConfig (ui_config.cddl), which the unit checks as an upload is and shows without storing it, so a preview
+; never stops logging. The stored configuration comes back when the session ends.
+;
+; Every request that carries `tok` renews the session's lease (EERIE_LEAP_UI_PREVIEW_LEASE_MS, `lease_ms` in the
+; answer to BEGIN). The session ends on END, when the lease runs out, when the local BLE link drops (a client
+; routed through another unit relies on the lease), and when a UI configuration is stored (that store's own rebuild
+; shows what it stored). It then reverts to the stored configuration, clears the highlight and lets the swipes
+; navigate again.
+;
+; Commands: BEGIN write 0, STAGE write 1, PATCH write 2 (FW-2, not served yet: MCUmgr answers rc 8),
+; SHOW write 3, HIGHLIGHT write 4, END write 5, STATUS read 6.
+;
+; Errors are SMP v2 group errors, {err: {group: 73, rc}}, beside which a few answer a key of the top-level map:
+;   INVALID    msg: tstr   the validator's message, as the `config` group's APPLY_FAILED has it
+;   BAD_OFFSET off: uint   where the transfer resumes
+;   STALE      rev: uint   the revision applied
+
+; UiError: OK 0, UNKNOWN 1, NO_SESSION 2, BAD_TOKEN 3, BUSY 4, STALE 5, BASE_MISMATCH 6 (FW-2), TOO_LARGE 7,
+;          BAD_OFFSET 8, CRC_MISMATCH 9, INVALID 10, NOT_FOUND 11, NO_MEMORY 12
+
+; BEGIN: opens a session, or renews one with its tok. A BEGIN sent again because its answer got lost, before any
+; request carried the tok, gets the same tok; any other BEGIN without the tok is BUSY, with another tok BAD_TOKEN.
+ui-begin-req  = { ? tok: uint, ? pin: bool }            ; pin (default true): the swipes do not navigate
+ui-begin-rsp  = { tok: uint, lease_ms: uint, rev: uint, stored_crc: uint, max_patch: uint, max_stage: uint }
+                                                        ; rev 0 and max_patch 0 until a configuration is staged / FW-2
+
+; STAGE: a whole CborUiConfig in chunks, in order, shown when the last arrives. Checked as an upload is, never
+; stored. len, crc and rev at off 0 only; rev, if given, must be past the applied one (else STALE), else the unit
+; counts on. An earlier unfinished transfer is dropped by an off 0.
+ui-stage-req  = { tok: uint, off: uint, data: bstr, ? len: uint, ? crc: uint, ? rev: uint }
+ui-stage-rsp  = { off: uint, ? rev: uint }              ; off: bytes received; rev once the configuration is shown
+
+; SHOW: asks navigation for a group of the configuration shown, or an overlay (closing the one up first).
+ui-target     = { group: uint } / { overlay: uint }
+ui-show-req   = { tok: uint, target: ui-target }
+ui-show-rsp   = { group: uint, ? overlay: uint }
+
+; HIGHLIGHT: an outline over a widget, following it (it moves, resizes, is rebuilt). screen and widget outline
+; the widget; screen alone, the screen; widget alone, the first widget of that ID on the overlay that is up, else
+; on the group shown. Neither clears the outline. NOT_FOUND if there is no such screen or widget.
+ui-highlight-req = { tok: uint, ? screen: uint, ? widget: uint }
+ui-highlight-rsp = {}
+
+; END: back to what the unit stores. reverted: whether a staged configuration was showing and had to be replaced.
+ui-end-req    = { tok: uint }
+ui-end-rsp    = { reverted: bool }
+
+; STATUS: needs no tok.
+ui-status-rsp = { active: bool, ? rev: uint, ? lease_left_ms: uint, stored_crc: uint, ? group: uint }
+                                                        ; rev, lease_left_ms while active; group once navigation knows it

@@ -1,0 +1,60 @@
+/*
+ * UiRendererService needs a ready display device, so LVGL is bound to Zephyr's
+ * dummy display controller rather than to sdl_dc, which would drag SDL into the
+ * twister build.
+ */
+
+/ {
+	chosen {
+		zephyr,display = &dummy_dc;
+	};
+
+	dummy_dc: dummy_dc {
+		compatible = "zephyr,dummy-dc";
+		height = <466>;
+		width = <466>;
+	};
+
+	aliases {
+		intfs0 = &intfs0;
+	};
+
+	fstab {
+		compatible = "zephyr,fstab";
+		intfs0: intfs0 {
+			compatible = "zephyr,fstab,littlefs";
+			read-size = <16>;
+			prog-size = <16>;
+			cache-size = <64>;
+			lookahead-size = <32>;
+			block-cycles = <512>;
+			partition = <&intfs0_partition>;
+			mount-point = "/intfs0";
+			automount;
+		};
+	};
+};
+
+&sdl_dc {
+	status = "disabled";
+};
+
+&flashcontroller0 {
+	reg = <0x00000000 DT_SIZE_M(4)>;
+};
+
+&flash0 {
+	reg = <0x00000000 DT_SIZE_M(4)>;
+
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		/* The demo assets are ~870 KB of pixel data, so 1 MB is not enough. */
+		intfs0_partition: partition@1000 {
+			label = "intfs0_storage";
+			reg = <0x00001000 DT_SIZE_M(2)>;
+		};
+	};
+};

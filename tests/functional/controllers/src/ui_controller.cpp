@@ -11,9 +11,12 @@
 #include <vector>
 
 #include <eerie_memory.hpp>
+#include <lvgl.h>
 #include <zephyr/kernel.h>
+#include <zephyr/sys/crc.h>
 #include <zephyr/ztest.h>
 
+#include "configuration/cbor/cbor_serializer.h"
 #include "configuration/cbor/cbor_ui_config/cbor_ui_config.h"
 #include "configuration/services/cbor_configuration_service.h"
 #include "utilities/memory/memory_resource_manager.h"
@@ -30,8 +33,10 @@
 
 #include "domain/settings_domain/event_bus/settings_event_type.h"
 #include "domain/settings_domain/event_bus/settings_events_channel.h"
+#include "domain/ui_domain/configuration/parsers/ui_configuration_cbor_parser.h"
 #include "domain/ui_domain/configuration/ui_configuration_manager.h"
 #include "domain/ui_domain/event_bus/navigation_event_channel.h"
+#include "domain/ui_domain/lvgl_lock.h"
 #include "domain/ui_domain/models/navigation_intent.h"
 #include "domain/ui_domain/models/screen_configuration.h"
 #include "domain/ui_domain/models/ui_configuration.h"
@@ -42,11 +47,15 @@
 #include "views/assets/animations/animations_register.h"
 #include "views/assets/images/images_register.h"
 
+using eerie_leap::configuration::cbor::CborSerializer;
 using eerie_leap::configuration::services::CborConfigurationService;
 using eerie_leap::controllers::UiController;
+using eerie_leap::domain::configuration_domain::services::ConfigurationService;
 using eerie_leap::domain::settings_domain::event_bus::SettingsEventsChannel;
 using eerie_leap::domain::settings_domain::event_bus::SettingsEventType;
+using eerie_leap::domain::ui_domain::ScopedLvglLock;
 using eerie_leap::domain::ui_domain::configuration::UiConfigurationManager;
+using eerie_leap::domain::ui_domain::configuration::parsers::UiConfigurationCborParser;
 using eerie_leap::domain::ui_domain::event_bus::NavigationEventChannel;
 using eerie_leap::domain::ui_domain::event_bus::NavigationEventType;
 using eerie_leap::domain::ui_domain::event_bus::NavigationPayloadType;
@@ -56,7 +65,11 @@ using eerie_leap::domain::ui_domain::models::ScreenType;
 using eerie_leap::domain::ui_domain::models::UiConfiguration;
 using eerie_leap::domain::ui_domain::models::WidgetConfiguration;
 using eerie_leap::domain::ui_domain::models::WidgetType;
+using eerie_leap::domain::ui_domain::preview::UiPreviewError;
 using eerie_leap::domain::ui_domain::services::NavigationService;
+using eerie_leap::domain::ui_preview_domain::UiPreviewService;
+using eerie_leap::domain::ui_preview_domain::UiPreviewShown;
+using eerie_leap::domain::ui_preview_domain::UiPreviewTarget;
 using eerie_leap::subsys::assets::AssetAccess;
 using eerie_leap::subsys::assets::AssetKind;
 using eerie_leap::subsys::assets::AssetProvider;
@@ -674,6 +687,9 @@ struct RebuildFixture {
     std::shared_ptr<UiController> controller;
     std::shared_ptr<UiConfigurationManager> manager;
     std::shared_ptr<NavigationService> navigation_service;
+    // What logging's stop hangs on: it is told of every stored configuration, and must not be told of a preview.
+    std::shared_ptr<ConfigurationService> configuration_service;
+    std::atomic<int> stored_count = 0;
 
     k_sem replayed{};
     std::atomic<int> replay_count = 0;
@@ -689,8 +705,12 @@ void* RebuildSetup() {
     rebuild.fs_service = FormatFs();
     rebuild.config_work_queue = StartConfigWorkQueue();
 
+    rebuild.configuration_service = std::make_shared<ConfigurationService>();
+    rebuild.configuration_service->RegisterConfigurationStoredHandler([](ConfigurationService::Type) {
+        ++rebuild.stored_count;
+    });
     rebuild.controller = std::make_shared<UiController>(
-        rebuild.fs_service, rebuild.config_work_queue, nullptr, std::make_shared<AssetsManager>()
+        rebuild.fs_service, rebuild.config_work_queue, rebuild.configuration_service, std::make_shared<AssetsManager>()
     );
     zassert_equal(rebuild.controller->Initialize(), 0, "Expected the UI controller to initialize.");
     // Without the demo there is nothing to show yet, and Start() says so; the first stored configuration must
@@ -736,6 +756,7 @@ void RebuildBefore(void*) {
 }
 
 void RebuildTeardown(void*) {
+    rebuild.configuration_service->RegisterConfigurationStoredHandler(nullptr);
     rebuild.settings_subscription.reset();
     rebuild.manager.reset();
     rebuild.navigation_service.reset();
@@ -911,4 +932,471 @@ ZTEST(ui_controller_rebuild, test_a_stale_navigation_event_is_dropped) {
     zassert_equal(rebuild.navigation_service->ShowOverlay(OVERLAY_SCREEN_ID), 0);
     zassert_equal(k_sem_take(&rebuild.settings_requested, K_MSEC(DISPATCH_TIMEOUT_MS)), 0);
     zassert_true(rebuild.navigation_service->IsOverlayActive());
+}
+
+// ======== The UI preview ========
+
+namespace {
+
+// How long the tests give a lease of CONFIG_EERIE_LEAP_UI_PREVIEW_LEASE_MS to run out.
+constexpr int LEASE_MS = CONFIG_EERIE_LEAP_UI_PREVIEW_LEASE_MS;
+constexpr int OVERLAY_SCREEN_ID = 40;
+constexpr uint32_t PREVIEW_GROUP_ID = 11;
+constexpr uint32_t SECOND_PREVIEW_GROUP_ID = 12;
+constexpr size_t STAGE_CHUNK_SIZE = 400;
+
+UiPreviewService& Preview() {
+    const auto service = rebuild.controller->GetPreviewService();
+    zassert_not_null(service.get(), "Expected the controller to serve a preview.");
+
+    return *service;
+}
+
+std::vector<uint8_t> Encode(const std::shared_ptr<UiConfiguration>& configuration) {
+    const auto cbor_configuration = UiConfigurationCborParser().Serialize(*configuration);
+    const auto bytes = CborSerializer<CborUiConfig>().Serialize(*cbor_configuration);
+
+    return { bytes.begin(), bytes.end() };
+}
+
+uint32_t Crc(std::span<const uint8_t> bytes) {
+    return crc32_ieee(bytes.data(), bytes.size());
+}
+
+UiPreviewError StageBytes(
+    uint32_t token,
+    std::span<const uint8_t> bytes,
+    UiPreviewService::StageInfo& info,
+    std::optional<uint32_t> rev = std::nullopt,
+    std::optional<uint32_t> crc = std::nullopt
+) {
+
+    for(size_t offset = 0; offset < bytes.size(); offset += STAGE_CHUNK_SIZE) {
+        const size_t size = std::min(STAGE_CHUNK_SIZE, bytes.size() - offset);
+        const bool is_first = offset == 0;
+
+        const UiPreviewService::StageRequest request{ .token = token,
+            .offset = static_cast<uint32_t>(offset),
+            .data = bytes.subspan(offset, size),
+            .length = is_first ? std::optional<uint32_t>(bytes.size()) : std::nullopt,
+            .crc = is_first ? std::optional<uint32_t>(crc.value_or(Crc(bytes))) : std::nullopt,
+            .rev = is_first ? rev : std::nullopt };
+
+        if(const auto error = Preview().Stage(request, info); error != UiPreviewError::OK)
+            return error;
+    }
+
+    return UiPreviewError::OK;
+}
+
+UiPreviewError Stage(uint32_t token, const std::shared_ptr<UiConfiguration>& configuration) {
+    UiPreviewService::StageInfo info;
+
+    return StageBytes(token, Encode(configuration), info);
+}
+
+uint32_t BeginPreview(bool is_pinned = true) {
+    UiPreviewService::BeginInfo info;
+    zassert_equal(Preview().Begin(std::nullopt, is_pinned, info), UiPreviewError::OK);
+    zassert_not_equal(info.token, 0U);
+
+    return info.token;
+}
+
+bool WaitUntilGroupIs(uint32_t group_id) {
+    const int64_t deadline = k_uptime_get() + REBUILD_TIMEOUT_MS;
+    while(rebuild.navigation_service->GetActiveGroupId() != group_id && k_uptime_get() < deadline)
+        k_msleep(POLL_MS);
+
+    return rebuild.navigation_service->GetActiveGroupId() == group_id;
+}
+
+bool WaitUntilPreviewEnds() {
+    const int64_t deadline = k_uptime_get() + LEASE_MS + REBUILD_TIMEOUT_MS;
+    while(Preview().IsActive() && k_uptime_get() < deadline)
+        k_msleep(POLL_MS);
+
+    return !Preview().IsActive();
+}
+
+// A test that fails with a session open must not leave it for the next.
+void PreviewAfter(void*) {
+    const auto service = rebuild.controller->GetPreviewService();
+    if(service != nullptr && service->IsActive()) {
+        service->OnLinkDropped();
+        zassert_true(WaitUntilPreviewEnds());
+    }
+}
+
+// The outline over the screens: the last object of the top layer, if shown.
+lv_obj_t* ShownOutline() {
+    ScopedLvglLock lvgl_guard;
+
+    lv_obj_t* layer = lv_layer_top();
+    const auto count = lv_obj_get_child_count(layer);
+    if(count == 0)
+        return nullptr;
+
+    lv_obj_t* outline = lv_obj_get_child(layer, static_cast<int32_t>(count) - 1);
+
+    return lv_obj_is_hidden(outline) ? nullptr : outline;
+}
+
+void StoreAndShow(std::initializer_list<uint32_t> group_ids, std::optional<uint32_t> overlay = std::nullopt) {
+    zassert_true(rebuild.manager->Update(MakeConfiguration(group_ids, overlay)));
+    zassert_true(WaitForRebuild());
+    zassert_equal(*rebuild.navigation_service->GetActiveGroupId(), *group_ids.begin());
+}
+
+} // namespace
+
+ZTEST_SUITE(ui_controller_preview, NULL, RebuildSetup, RebuildBefore, PreviewAfter, RebuildTeardown);
+
+// The point of the preview: the screens change, the unit stores nothing and tells nothing that stores, and
+// the end puts the stored screens back.
+ZTEST(ui_controller_preview, test_a_staged_configuration_is_shown_and_the_end_puts_the_stored_screens_back) {
+    StoreAndShow({ STORED_GROUP_ID, SECOND_STORED_GROUP_ID });
+    const auto stored_bytes = rebuild.manager->GetCborConfiguration();
+    const auto stored_info = rebuild.manager->GetCborConfigurationInfo();
+    const int stored_count = rebuild.stored_count.load();
+
+    UiPreviewService::BeginInfo begin;
+    zassert_equal(Preview().Begin(std::nullopt, true, begin), UiPreviewError::OK);
+    zassert_not_equal(begin.token, 0U);
+    zassert_equal(begin.lease_ms, static_cast<uint32_t>(LEASE_MS));
+    zassert_equal(begin.rev, 0U);
+    zassert_equal(begin.stored_crc, stored_info.crc, "BEGIN says what the unit stores");
+    zassert_equal(begin.max_stage, static_cast<uint32_t>(CONFIG_EERIE_LEAP_UI_PREVIEW_MAX_STAGE_SIZE));
+    zassert_equal(begin.max_patch, 0U, "The unit takes no patch yet");
+    zassert_true(Preview().IsActive());
+
+    const auto staged = MakeConfiguration({ PREVIEW_GROUP_ID, SECOND_PREVIEW_GROUP_ID });
+    UiPreviewService::StageInfo stage;
+    zassert_equal(StageBytes(begin.token, Encode(staged), stage), UiPreviewError::OK);
+    zassert_true(stage.rev.has_value());
+    zassert_equal(*stage.rev, 1U);
+
+    zassert_equal(*rebuild.navigation_service->GetActiveGroupId(), PREVIEW_GROUP_ID);
+    zassert_equal(rebuild.navigation_service->GoToGroup(STORED_GROUP_ID), -ENOENT, "The stored groups are not shown");
+    zassert_true(rebuild.controller->IsShowingScreens());
+
+    // Nothing was stored, and nothing that reacts to a store was told.
+    zassert_true(rebuild.manager->GetCborConfiguration() == stored_bytes);
+    zassert_equal(rebuild.manager->GetCborConfigurationInfo().crc, stored_info.crc);
+    zassert_equal(rebuild.stored_count.load(), stored_count, "No stored handler is called by a preview");
+
+    bool is_reverted = false;
+    zassert_equal(Preview().End(begin.token, is_reverted), UiPreviewError::OK);
+    zassert_true(is_reverted);
+    zassert_false(Preview().IsActive());
+
+    zassert_equal(*rebuild.navigation_service->GetActiveGroupId(), STORED_GROUP_ID);
+    zassert_equal(rebuild.navigation_service->GoToGroup(PREVIEW_GROUP_ID), -ENOENT, "The preview's groups are gone");
+    zassert_true(rebuild.manager->GetCborConfiguration() == stored_bytes);
+    zassert_equal(rebuild.stored_count.load(), stored_count);
+}
+
+ZTEST(ui_controller_preview, test_ending_a_preview_that_showed_nothing_reverts_nothing) {
+    StoreAndShow({ STORED_GROUP_ID });
+    const auto token = BeginPreview();
+    k_sem_reset(&rebuild.replayed);
+
+    bool is_reverted = true;
+    zassert_equal(Preview().End(token, is_reverted), UiPreviewError::OK);
+
+    zassert_false(is_reverted);
+    zassert_not_equal(k_sem_take(&rebuild.replayed, K_MSEC(SETTLE_MS)), 0, "The screens were not rebuilt");
+}
+
+// The client that goes away without ending must not leave the unit on a screen nobody stores.
+ZTEST(ui_controller_preview, test_the_lease_running_out_puts_the_stored_screens_back) {
+    StoreAndShow({ STORED_GROUP_ID });
+    const int stored_count = rebuild.stored_count.load();
+    const auto token = BeginPreview();
+    zassert_equal(Stage(token, MakeConfiguration({ PREVIEW_GROUP_ID })), UiPreviewError::OK);
+    zassert_equal(*rebuild.navigation_service->GetActiveGroupId(), PREVIEW_GROUP_ID);
+
+    zassert_true(WaitUntilPreviewEnds(), "Expected the lease to end the session.");
+
+    zassert_true(WaitUntilGroupIs(STORED_GROUP_ID));
+    zassert_equal(rebuild.stored_count.load(), stored_count);
+    zassert_true(rebuild.controller->IsNavigationEnabled(), "and the pin is released");
+
+    // The token is of no use any more.
+    bool is_reverted = false;
+    zassert_equal(Preview().End(token, is_reverted), UiPreviewError::NO_SESSION);
+}
+
+ZTEST(ui_controller_preview, test_a_request_that_carries_the_token_renews_the_lease) {
+    StoreAndShow({ STORED_GROUP_ID });
+    const auto token = BeginPreview();
+
+    // Together longer than the lease.
+    for(int i = 0; i < 6; ++i) {
+        k_msleep(LEASE_MS / 3);
+        zassert_equal(Preview().Highlight(token, std::nullopt, std::nullopt), UiPreviewError::OK);
+        zassert_true(Preview().IsActive(), "Round %d", i);
+    }
+
+    const auto status = Preview().GetStatus();
+    zassert_true(status.is_active);
+    zassert_true(status.lease_left_ms > 0 && status.lease_left_ms <= static_cast<uint32_t>(LEASE_MS));
+}
+
+// What the client uploads is stored, and it is what shows; the preview has nothing left to put back.
+ZTEST(ui_controller_preview, test_a_stored_configuration_ends_the_preview_and_shows_what_it_stored) {
+    StoreAndShow({ STORED_GROUP_ID });
+    const auto token = BeginPreview();
+    zassert_equal(Stage(token, MakeConfiguration({ PREVIEW_GROUP_ID })), UiPreviewError::OK);
+
+    constexpr uint32_t UPLOADED_GROUP_ID = 20;
+    zassert_true(rebuild.manager->Update(MakeConfiguration({ UPLOADED_GROUP_ID })));
+
+    zassert_true(WaitUntilPreviewEnds());
+    zassert_true(WaitUntilGroupIs(UPLOADED_GROUP_ID));
+    k_msleep(SETTLE_MS);
+    zassert_equal(*rebuild.navigation_service->GetActiveGroupId(), UPLOADED_GROUP_ID, "The store is what shows");
+    zassert_equal(rebuild.navigation_service->GoToGroup(STORED_GROUP_ID), -ENOENT);
+    zassert_true(rebuild.controller->IsNavigationEnabled());
+
+    bool is_reverted = false;
+    zassert_equal(Preview().End(token, is_reverted), UiPreviewError::NO_SESSION);
+}
+
+ZTEST(ui_controller_preview, test_the_local_link_dropping_ends_the_preview_and_puts_the_stored_screens_back) {
+    StoreAndShow({ STORED_GROUP_ID });
+    const auto token = BeginPreview();
+    zassert_equal(Stage(token, MakeConfiguration({ PREVIEW_GROUP_ID })), UiPreviewError::OK);
+
+    Preview().OnLinkDropped();
+
+    zassert_true(WaitUntilPreviewEnds());
+    zassert_true(WaitUntilGroupIs(STORED_GROUP_ID));
+}
+
+ZTEST(ui_controller_preview, test_the_pin_keeps_the_swipes_from_navigating_while_the_preview_lives) {
+    StoreAndShow({ STORED_GROUP_ID });
+    zassert_true(rebuild.controller->IsNavigationEnabled());
+
+    auto token = BeginPreview(true);
+    zassert_false(rebuild.controller->IsNavigationEnabled());
+
+    bool is_reverted = false;
+    zassert_equal(Preview().End(token, is_reverted), UiPreviewError::OK);
+    zassert_true(rebuild.controller->IsNavigationEnabled());
+
+    BeginPreview(false);
+    zassert_true(rebuild.controller->IsNavigationEnabled(), "A preview that does not pin leaves the swipes alone");
+}
+
+ZTEST(ui_controller_preview, test_a_second_client_is_refused_and_a_repeated_begin_gets_the_same_token) {
+    StoreAndShow({ STORED_GROUP_ID });
+    UiPreviewService::BeginInfo first;
+    zassert_equal(Preview().Begin(std::nullopt, true, first), UiPreviewError::OK);
+
+    // The answer got lost, and the client asks again.
+    UiPreviewService::BeginInfo repeated;
+    zassert_equal(Preview().Begin(std::nullopt, true, repeated), UiPreviewError::OK);
+    zassert_equal(repeated.token, first.token);
+
+    // With the token it renews.
+    UiPreviewService::BeginInfo renewed;
+    zassert_equal(Preview().Begin(first.token, true, renewed), UiPreviewError::OK);
+    zassert_equal(renewed.token, first.token);
+
+    // Someone else, or the client after its token was used: busy.
+    UiPreviewService::BeginInfo other;
+    zassert_equal(Preview().Begin(std::nullopt, true, other), UiPreviewError::BUSY);
+    zassert_equal(Preview().Begin(first.token + 1, true, other), UiPreviewError::BAD_TOKEN);
+}
+
+ZTEST(ui_controller_preview, test_requests_without_the_session_are_refused) {
+    StoreAndShow({ STORED_GROUP_ID });
+    const UiPreviewTarget group{ .is_overlay = false, .id = STORED_GROUP_ID };
+    UiPreviewShown shown;
+    bool is_reverted = false;
+    UiPreviewService::StageInfo info;
+
+    zassert_equal(Preview().Show(1, group, shown), UiPreviewError::NO_SESSION);
+    zassert_equal(Preview().Highlight(1, std::nullopt, std::nullopt), UiPreviewError::NO_SESSION);
+    zassert_equal(Preview().End(1, is_reverted), UiPreviewError::NO_SESSION);
+    zassert_equal(StageBytes(1, Encode(MakeConfiguration({ PREVIEW_GROUP_ID })), info), UiPreviewError::NO_SESSION);
+
+    const auto token = BeginPreview();
+    zassert_equal(Preview().Show(token + 1, group, shown), UiPreviewError::BAD_TOKEN);
+    zassert_equal(Preview().Highlight(token + 1, std::nullopt, std::nullopt), UiPreviewError::BAD_TOKEN);
+    zassert_equal(Preview().End(token + 1, is_reverted), UiPreviewError::BAD_TOKEN);
+    zassert_true(Preview().IsActive(), "A wrong token ends nothing");
+}
+
+ZTEST(ui_controller_preview, test_a_staged_configuration_is_checked_as_an_upload_is) {
+    StoreAndShow({ STORED_GROUP_ID });
+    const auto token = BeginPreview();
+    const auto good = Encode(MakeConfiguration({ PREVIEW_GROUP_ID }));
+    UiPreviewService::StageInfo info;
+
+    // A CRC the bytes do not have.
+    zassert_equal(StageBytes(token, good, info, std::nullopt, Crc(good) ^ 1U), UiPreviewError::CRC_MISMATCH);
+
+    // Not CBOR of a configuration.
+    const std::vector<uint8_t> garbage(40, 0xFF);
+    zassert_equal(StageBytes(token, garbage, info), UiPreviewError::INVALID);
+    zassert_true(Preview().GetReason() == "Malformed CBOR");
+
+    // CBOR the validator refuses: two screens with one ID (the second screen's [id 1, group 12, Gauge, z 0, ...]).
+    auto invalid = Encode(MakeConfiguration({ PREVIEW_GROUP_ID, SECOND_PREVIEW_GROUP_ID }));
+    constexpr std::array<uint8_t, 7> SECOND_SCREEN = { 0x9f, 0x01, SECOND_PREVIEW_GROUP_ID, 0x02, 0x00, 0xf5, 0xf4 };
+    const auto second_screen = std::ranges::search(invalid, SECOND_SCREEN);
+    zassert_false(second_screen.empty(), "Expected the second screen's record in the bytes.");
+    *(second_screen.begin() + 1) = 0x00;
+    zassert_equal(StageBytes(token, invalid, info), UiPreviewError::INVALID);
+    zassert_true(
+        Preview().GetReason().contains("duplicate screen IDs"), "'%s'", std::string(Preview().GetReason()).c_str()
+    );
+
+    // Too large for the stage buffer.
+    const UiPreviewService::StageRequest too_large{ .token = token,
+        .offset = 0,
+        .data = std::span(good).first(1),
+        .length = static_cast<uint32_t>(CONFIG_EERIE_LEAP_UI_PREVIEW_MAX_STAGE_SIZE) + 1,
+        .crc = 0 };
+    zassert_equal(Preview().Stage(too_large, info), UiPreviewError::TOO_LARGE);
+
+    // Out of order.
+    const UiPreviewService::StageRequest skipping{ .token = token, .offset = 100, .data = std::span(good).first(1) };
+    zassert_equal(Preview().Stage(skipping, info), UiPreviewError::BAD_OFFSET);
+    zassert_equal(info.received, 0U);
+
+    // None of it showed: the stored screens are still on, and the session lives to try again.
+    zassert_equal(*rebuild.navigation_service->GetActiveGroupId(), STORED_GROUP_ID);
+    zassert_true(Preview().IsActive());
+    zassert_equal(StageBytes(token, good, info), UiPreviewError::OK);
+    zassert_equal(*rebuild.navigation_service->GetActiveGroupId(), PREVIEW_GROUP_ID);
+}
+
+// A revision the client gives must go forward, else its older staging would replace a newer.
+ZTEST(ui_controller_preview, test_the_revision_goes_forward) {
+    StoreAndShow({ STORED_GROUP_ID });
+    const auto token = BeginPreview();
+    const auto bytes = Encode(MakeConfiguration({ PREVIEW_GROUP_ID }));
+    UiPreviewService::StageInfo info;
+
+    zassert_equal(StageBytes(token, bytes, info, 5), UiPreviewError::OK);
+    zassert_equal(*info.rev, 5U);
+
+    zassert_equal(StageBytes(token, bytes, info, 5), UiPreviewError::STALE);
+    zassert_equal(info.current_rev, 5U);
+    zassert_equal(StageBytes(token, bytes, info, 3), UiPreviewError::STALE);
+
+    zassert_equal(StageBytes(token, bytes, info), UiPreviewError::OK);
+    zassert_equal(*info.rev, 6U, "Without one the unit counts on");
+
+    const auto status = Preview().GetStatus();
+    zassert_true(status.is_active);
+    zassert_equal(status.rev, 6U);
+}
+
+ZTEST(ui_controller_preview, test_show_asks_navigation_for_a_group_or_an_overlay) {
+    StoreAndShow({ STORED_GROUP_ID });
+    const auto token = BeginPreview();
+    zassert_equal(
+        Stage(token, MakeConfiguration({ PREVIEW_GROUP_ID, SECOND_PREVIEW_GROUP_ID }, OVERLAY_SCREEN_ID)),
+        UiPreviewError::OK
+    );
+
+    UiPreviewShown shown;
+    zassert_equal(
+        Preview().Show(token, { .is_overlay = false, .id = SECOND_PREVIEW_GROUP_ID }, shown), UiPreviewError::OK
+    );
+    zassert_equal(shown.group, SECOND_PREVIEW_GROUP_ID);
+    zassert_false(shown.overlay.has_value());
+    zassert_true(WaitUntilGroupIs(SECOND_PREVIEW_GROUP_ID));
+
+    // An overlay over the group shown.
+    zassert_equal(Preview().Show(token, { .is_overlay = true, .id = OVERLAY_SCREEN_ID }, shown), UiPreviewError::OK);
+    zassert_equal(shown.group, SECOND_PREVIEW_GROUP_ID);
+    zassert_true(shown.overlay.has_value());
+    zassert_equal(*shown.overlay, static_cast<uint32_t>(OVERLAY_SCREEN_ID));
+    k_msleep(SETTLE_MS);
+    zassert_true(rebuild.navigation_service->IsOverlayActive());
+    zassert_true(rebuild.navigation_service->GetActiveOverlayId() == OVERLAY_SCREEN_ID);
+
+    // A group closes the overlay first.
+    zassert_equal(Preview().Show(token, { .is_overlay = false, .id = PREVIEW_GROUP_ID }, shown), UiPreviewError::OK);
+    zassert_true(WaitUntilGroupIs(PREVIEW_GROUP_ID));
+    k_msleep(SETTLE_MS);
+    zassert_false(rebuild.navigation_service->IsOverlayActive());
+
+    // What the configuration shown does not have.
+    zassert_equal(Preview().Show(token, { .is_overlay = false, .id = 99 }, shown), UiPreviewError::NOT_FOUND);
+    zassert_equal(Preview().Show(token, { .is_overlay = true, .id = 99 }, shown), UiPreviewError::NOT_FOUND);
+    zassert_equal(
+        Preview().Show(token, { .is_overlay = true, .id = 0 }, shown), UiPreviewError::NOT_FOUND,
+        "A screen is no overlay"
+    );
+}
+
+ZTEST(ui_controller_preview, test_highlight_outlines_a_widget_and_follows_it) {
+    StoreAndShow({ STORED_GROUP_ID });
+    const auto token = BeginPreview();
+    zassert_equal(Stage(token, MakeConfiguration({ PREVIEW_GROUP_ID })), UiPreviewError::OK);
+    zassert_is_null(ShownOutline(), "Nothing is outlined to begin with");
+
+    // Screen 0 holds the bar, 100 by 20 at the bottom left.
+    zassert_equal(Preview().Highlight(token, 0, 0), UiPreviewError::OK);
+    lv_obj_t* outline = ShownOutline();
+    zassert_not_null(outline, "Expected an outline.");
+    {
+        ScopedLvglLock lvgl_guard;
+        lv_obj_update_layout(outline);
+        zassert_equal(lv_obj_get_width(outline), 100 + 2 * 2);
+        zassert_equal(lv_obj_get_height(outline), 20 + 2 * 2);
+        zassert_equal(lv_obj_get_x(outline), -2);
+        zassert_false(lv_obj_is_clickable(outline), "A touch goes through it");
+    }
+
+    // The widget alone is found among the screens shown.
+    zassert_equal(Preview().Highlight(token, std::nullopt, 0), UiPreviewError::OK);
+    zassert_not_null(ShownOutline());
+
+    // It follows the screens through a rebuild, as the widget comes back under its IDs.
+    zassert_equal(Stage(token, MakeConfiguration({ PREVIEW_GROUP_ID })), UiPreviewError::OK);
+    k_msleep(SETTLE_MS);
+    zassert_not_null(ShownOutline(), "Expected the outline to follow the new widget.");
+
+    zassert_equal(Preview().Highlight(token, 0, 99), UiPreviewError::NOT_FOUND);
+    zassert_equal(Preview().Highlight(token, 99, std::nullopt), UiPreviewError::NOT_FOUND);
+
+    // Neither clears it, and so does the end.
+    zassert_equal(Preview().Highlight(token, std::nullopt, std::nullopt), UiPreviewError::OK);
+    zassert_is_null(ShownOutline());
+
+    zassert_equal(Preview().Highlight(token, 0, 0), UiPreviewError::OK);
+    zassert_not_null(ShownOutline());
+    bool is_reverted = false;
+    zassert_equal(Preview().End(token, is_reverted), UiPreviewError::OK);
+    zassert_is_null(ShownOutline());
+}
+
+// Every command of a preview, and none of them stored a thing.
+ZTEST(ui_controller_preview, test_no_command_of_a_preview_stores_or_reports_a_store) {
+    StoreAndShow({ STORED_GROUP_ID });
+    const int stored_count = rebuild.stored_count.load();
+    const auto stored_info = rebuild.manager->GetCborConfigurationInfo();
+
+    const auto token = BeginPreview();
+    zassert_equal(Stage(token, MakeConfiguration({ PREVIEW_GROUP_ID }, OVERLAY_SCREEN_ID)), UiPreviewError::OK);
+    UiPreviewShown shown;
+    zassert_equal(Preview().Show(token, { .is_overlay = true, .id = OVERLAY_SCREEN_ID }, shown), UiPreviewError::OK);
+    zassert_equal(Preview().Highlight(token, 0, 0), UiPreviewError::OK);
+    bool is_reverted = false;
+    zassert_equal(Preview().End(token, is_reverted), UiPreviewError::OK);
+
+    zassert_equal(rebuild.stored_count.load(), stored_count);
+    zassert_equal(rebuild.manager->GetCborConfigurationInfo().crc, stored_info.crc);
+    zassert_equal(rebuild.manager->GetCborConfigurationInfo().size, stored_info.size);
+
+    // The spy hears of a real store.
+    zassert_true(rebuild.manager->Update(MakeConfiguration({ STORED_GROUP_ID })));
+    zassert_equal(rebuild.stored_count.load(), stored_count + 1);
 }

@@ -1,0 +1,82 @@
+menu "Zephyr"
+source "Kconfig.zephyr"
+endmenu
+
+config EERIE_LEAP_HW_VERSION_MAJOR
+	int "Hardware version major"
+	range 0 255
+	default 0
+
+config EERIE_LEAP_HW_VERSION_MINOR
+	int "Hardware version minor"
+	range 0 255
+	default 0
+
+config EERIE_LEAP_HW_VERSION_PATCH
+	int "Hardware version patch"
+	range 0 65535
+	default 0
+
+config EERIE_LEAP_SW_VERSION_MAJOR
+	int "Software version major"
+	range 0 255
+	default 0
+
+config EERIE_LEAP_SW_VERSION_MINOR
+	int "Software version minor"
+	range 0 255
+	default 0
+
+config EERIE_LEAP_SW_VERSION_PATCH
+	int "Software version patch"
+	range 0 65535
+	default 0
+
+config EERIE_LEAP_UI_RENDERER_THREAD_STACK_SIZE
+	int "UI renderer thread stack size"
+	default 8192
+
+config EERIE_LEAP_UI_RENDER_WORK_QUEUE_STACK_SIZE
+	int "UI render work queue stack size"
+	default 8192
+
+config EERIE_LEAP_UI_DEMO_CONFIGURATION
+	bool "Install the demo UI configuration and assets"
+	default y
+
+config EERIE_LEAP_UI_PREVIEW
+	bool "UI preview"
+	default y
+	select MCUMGR_SMP_CBOR_MIN_DECODING_LEVEL_3
+
+config EERIE_LEAP_UI_PREVIEW_LEASE_MS
+	int "UI preview lease"
+	default 600
+
+config EERIE_LEAP_UI_PREVIEW_MAX_STAGE_SIZE
+	int "Largest staged UI configuration"
+	default 65536
+
+config EERIE_LEAP_UI_IMAGE_MAX_SIZE
+	int "Largest image upload"
+	default 4194304
+
+config EERIE_LEAP_UI_ANIMATION_MAX_SIZE
+	int "Largest animation upload"
+	default 524288
+
+config EERIE_LEAP_UI_ROTATION
+	int
+	default 0
+
+config EERIE_LEAP_FLOAT_SIGNIFICANT_DIGITS
+	int "Floating point significant digits"
+	default 4
+
+config EERIE_LEAP_FS_SD_THREAD_STACK_SIZE
+	int "SD thread stack size"
+	default 2048
+
+config EERIE_LEAP_SD_CHECK_INTERVAL_MS
+	int "SD check interval ms"
+	default 1000
