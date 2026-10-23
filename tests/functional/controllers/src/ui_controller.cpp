@@ -5,6 +5,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -505,7 +506,8 @@ MakeConfiguration(std::initializer_list<uint32_t> group_ids, std::optional<uint3
 
         auto widget = eerie_memory::make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
         widget->type = WidgetType::IndicatorBar;
-        widget->id = 0;
+        // Each group's widget has its own ID, the first group's being 0.
+        widget->id = screen->id;
         widget->position_grid = { 0, 0 };
         widget->size_grid = { 100, 20 };
         screen->AddWidget(std::move(widget));
@@ -1399,4 +1401,555 @@ ZTEST(ui_controller_preview, test_no_command_of_a_preview_stores_or_reports_a_st
     // The spy hears of a real store.
     zassert_true(rebuild.manager->Update(MakeConfiguration({ STORED_GROUP_ID })));
     zassert_equal(rebuild.stored_count.load(), stored_count + 1);
+}
+
+// What a client sees of where the gauge stands, and what it can do right after a SHOW.
+ZTEST(ui_controller_preview, test_a_stage_keeps_the_group_and_the_overlay_shown_and_says_where_the_gauge_stands) {
+    StoreAndShow({ STORED_GROUP_ID });
+    const auto token = BeginPreview();
+    const auto both_groups = Encode(
+        MakeConfiguration({ PREVIEW_GROUP_ID, SECOND_PREVIEW_GROUP_ID }, OVERLAY_SCREEN_ID)
+    );
+    UiPreviewService::StageInfo info;
+
+    // Nothing shown yet is the start group of what is staged, and no overlay.
+    zassert_equal(StageBytes(token, both_groups, info), UiPreviewError::OK);
+    zassert_true(info.applied.has_value());
+    zassert_true(info.applied->group == PREVIEW_GROUP_ID);
+    zassert_false(info.applied->overlay.has_value());
+
+    UiPreviewShown shown;
+    zassert_equal(
+        Preview().Show(token, { .is_overlay = false, .id = SECOND_PREVIEW_GROUP_ID }, shown), UiPreviewError::OK
+    );
+    zassert_true(WaitUntilGroupIs(SECOND_PREVIEW_GROUP_ID));
+    zassert_equal(Preview().Show(token, { .is_overlay = true, .id = OVERLAY_SCREEN_ID }, shown), UiPreviewError::OK);
+    k_msleep(SETTLE_MS);
+    zassert_true(rebuild.navigation_service->IsOverlayActive());
+
+    // The editor changes a screen, not the one the user is looking at: the same group and the overlay stay up.
+    info = {};
+    zassert_equal(StageBytes(token, both_groups, info), UiPreviewError::OK);
+    zassert_true(info.applied.has_value());
+    zassert_true(info.applied->group == SECOND_PREVIEW_GROUP_ID);
+    zassert_true(info.applied->overlay == OVERLAY_SCREEN_ID);
+    zassert_equal(*rebuild.navigation_service->GetActiveGroupId(), SECOND_PREVIEW_GROUP_ID);
+    zassert_true(rebuild.navigation_service->GetActiveOverlayId() == OVERLAY_SCREEN_ID);
+    k_msleep(SETTLE_MS);
+    zassert_true(rebuild.navigation_service->IsOverlayActive(), "The overlay was built again");
+
+    // A configuration without that overlay, or that group: the start group, no overlay.
+    info = {};
+    zassert_equal(Stage(token, MakeConfiguration({ PREVIEW_GROUP_ID, SECOND_PREVIEW_GROUP_ID })), UiPreviewError::OK);
+    k_msleep(SETTLE_MS);
+    zassert_false(rebuild.navigation_service->IsOverlayActive());
+    zassert_equal(*rebuild.navigation_service->GetActiveGroupId(), SECOND_PREVIEW_GROUP_ID);
+
+    info = {};
+    zassert_equal(StageBytes(token, Encode(MakeConfiguration({ PREVIEW_GROUP_ID })), info), UiPreviewError::OK);
+    zassert_true(info.applied.has_value());
+    zassert_true(info.applied->group == PREVIEW_GROUP_ID);
+    zassert_false(info.applied->overlay.has_value());
+}
+
+// The ids are judged against the configuration shown, not the objects built from it: an overlay is built when
+// navigation gets to it.
+ZTEST(ui_controller_preview, test_an_overlay_just_shown_can_be_highlighted_and_the_outline_comes_once_it_is_built) {
+    StoreAndShow({ STORED_GROUP_ID });
+    const auto token = BeginPreview();
+    zassert_equal(Stage(token, MakeConfiguration({ PREVIEW_GROUP_ID }, OVERLAY_SCREEN_ID)), UiPreviewError::OK);
+
+    UiPreviewShown shown;
+    zassert_equal(Preview().Show(token, { .is_overlay = true, .id = OVERLAY_SCREEN_ID }, shown), UiPreviewError::OK);
+
+    zassert_equal(Preview().Highlight(token, OVERLAY_SCREEN_ID, 0), UiPreviewError::OK);
+
+    const int64_t deadline = k_uptime_get() + REBUILD_TIMEOUT_MS;
+    while(ShownOutline() == nullptr && k_uptime_get() < deadline)
+        k_msleep(POLL_MS);
+    zassert_not_null(ShownOutline(), "Expected the outline once the overlay is built.");
+    zassert_true(rebuild.navigation_service->IsOverlayActive());
+
+    // The widget alone is on the overlay that is up, too.
+    zassert_equal(Preview().Highlight(token, std::nullopt, 0), UiPreviewError::OK);
+    zassert_not_null(ShownOutline());
+}
+
+ZTEST(ui_controller_preview, test_a_widget_alone_is_looked_for_on_the_group_that_was_just_asked_for) {
+    StoreAndShow({ STORED_GROUP_ID });
+    const auto token = BeginPreview();
+    // Widget 1 is on the second group's screen alone.
+    zassert_equal(Stage(token, MakeConfiguration({ PREVIEW_GROUP_ID, SECOND_PREVIEW_GROUP_ID })), UiPreviewError::OK);
+    zassert_equal(Preview().Highlight(token, std::nullopt, 1), UiPreviewError::NOT_FOUND, "Not on the group shown");
+
+    UiPreviewShown shown;
+    zassert_equal(
+        Preview().Show(token, { .is_overlay = false, .id = SECOND_PREVIEW_GROUP_ID }, shown), UiPreviewError::OK
+    );
+    zassert_equal(Preview().Highlight(token, std::nullopt, 1), UiPreviewError::OK, "On the group asked for");
+
+    zassert_true(WaitUntilGroupIs(SECOND_PREVIEW_GROUP_ID));
+    const int64_t deadline = k_uptime_get() + REBUILD_TIMEOUT_MS;
+    while(ShownOutline() == nullptr && k_uptime_get() < deadline)
+        k_msleep(POLL_MS);
+    zassert_not_null(ShownOutline(), "Expected the outline on the new group.");
+}
+
+// A SHOW moves navigation: a session that never staged anything leaves the gauge where it found it.
+ZTEST(ui_controller_preview, test_a_show_alone_is_taken_back_when_the_session_ends) {
+    StoreAndShow({ STORED_GROUP_ID, SECOND_STORED_GROUP_ID });
+    const int stored_count = rebuild.stored_count.load();
+    const auto token = BeginPreview();
+
+    UiPreviewShown shown;
+    zassert_equal(
+        Preview().Show(token, { .is_overlay = false, .id = SECOND_STORED_GROUP_ID }, shown), UiPreviewError::OK
+    );
+    zassert_true(WaitUntilGroupIs(SECOND_STORED_GROUP_ID));
+
+    bool is_reverted = true;
+    zassert_equal(Preview().End(token, is_reverted), UiPreviewError::OK);
+    zassert_false(is_reverted, "No staged screens were showing");
+    zassert_true(WaitUntilGroupIs(STORED_GROUP_ID));
+    zassert_false(rebuild.navigation_service->IsOverlayActive());
+    zassert_equal(rebuild.stored_count.load(), stored_count);
+}
+
+ZTEST(ui_controller_preview, test_a_show_alone_is_taken_back_when_the_lease_runs_out) {
+    StoreAndShow({ STORED_GROUP_ID, SECOND_STORED_GROUP_ID });
+    const auto token = BeginPreview();
+
+    UiPreviewShown shown;
+    zassert_equal(
+        Preview().Show(token, { .is_overlay = false, .id = SECOND_STORED_GROUP_ID }, shown), UiPreviewError::OK
+    );
+    zassert_true(WaitUntilGroupIs(SECOND_STORED_GROUP_ID));
+
+    zassert_true(WaitUntilPreviewEnds());
+    zassert_true(WaitUntilGroupIs(STORED_GROUP_ID));
+}
+
+// ======== The UI preview service on a host that can be made to fail ========
+
+using eerie_leap::domain::ui_preview_domain::IUiPreviewHost;
+using eerie_leap::domain::ui_preview_domain::UiPreviewApplied;
+
+namespace {
+
+constexpr int HOST_QUEUE_STACK_SIZE = 8192;
+constexpr int HOST_QUEUE_PRIORITY = 10;
+constexpr uint32_t HOST_BEGIN_GROUP = 7;
+constexpr uint32_t HOST_STAGED_GROUP = 9;
+constexpr size_t HOST_BYTES_SIZE = 1000;
+constexpr uint8_t HOST_BYTE = 0x5A;
+constexpr int HOST_APPLY_MS = 300;
+
+// A host that shows what it is given, or fails to, and takes as long as it is told to.
+class FakeHost final : public IUiPreviewHost {
+public:
+    enum class ShowMode : uint8_t {
+        OK,
+        FAIL,
+        THROW,
+    };
+
+    std::atomic<ShowMode> show_mode = ShowMode::OK;
+    std::atomic<int> apply_ms = 0;
+    std::atomic<int> shown_count = 0;
+    std::atomic<int> stored_shown_count = 0;
+    std::atomic<int> target_count = 0;
+    std::atomic<uint32_t> group = HOST_BEGIN_GROUP;
+    k_sem show_started{};
+
+    FakeHost() {
+        k_sem_init(&show_started, 0, K_SEM_MAX_LIMIT);
+    }
+
+    std::shared_ptr<UiConfiguration>
+    ParseConfiguration(std::span<const uint8_t> /*cbor_data*/, std::span<char> /*reason*/) override {
+        return MakeConfiguration({ HOST_STAGED_GROUP });
+    }
+
+    int ShowConfiguration(std::shared_ptr<UiConfiguration> /*configuration*/, UiPreviewApplied& applied) override {
+        ++shown_count;
+        k_sem_give(&show_started);
+
+        if(apply_ms > 0)
+            k_msleep(apply_ms);
+
+        switch(show_mode.load()) {
+            case ShowMode::FAIL:
+                // The screens are gone and the new ones are half built.
+                group = 0;
+
+                return -EIO;
+            case ShowMode::THROW:
+                group = 0;
+                throw std::runtime_error("The screens could not be built.");
+            case ShowMode::OK:
+            default:
+                break;
+        }
+
+        group = HOST_STAGED_GROUP;
+        applied.group = HOST_STAGED_GROUP;
+
+        return 0;
+    }
+
+    int ShowStoredConfiguration() override {
+        ++stored_shown_count;
+        group = HOST_BEGIN_GROUP;
+
+        return 0;
+    }
+
+    void SetNavigationPinned(bool /*is_pinned*/) override {}
+
+    UiPreviewError ShowTarget(const UiPreviewTarget& target, UiPreviewShown& shown) override {
+        ++target_count;
+        if(!target.is_overlay)
+            group = target.id;
+
+        shown.group = group;
+
+        return UiPreviewError::OK;
+    }
+
+    UiPreviewError Highlight(std::optional<uint32_t> /*screen*/, std::optional<uint32_t> /*widget*/) override {
+        return UiPreviewError::OK;
+    }
+
+    [[nodiscard]] uint32_t GetStoredCrc() const override {
+        return 0;
+    }
+
+    [[nodiscard]] std::optional<uint32_t> GetActiveGroupId() const override {
+        return group.load();
+    }
+};
+
+struct HostedFixture {
+    std::unique_ptr<WorkQueueThread> render_queue;
+    std::unique_ptr<WorkQueueThread> config_queue;
+    // Where a request runs that the test does not wait for on its own thread.
+    std::unique_ptr<WorkQueueThread> caller_queue;
+    std::unique_ptr<FakeHost> host;
+    std::unique_ptr<UiPreviewService> service;
+};
+
+HostedFixture hosted;
+
+std::unique_ptr<WorkQueueThread> StartHostedQueue(const char* name) {
+    auto queue = std::make_unique<WorkQueueThread>(name, HOST_QUEUE_STACK_SIZE, HOST_QUEUE_PRIORITY);
+    zassert_true(queue->Initialize(), "Expected the %s work queue to start.", name);
+
+    return queue;
+}
+
+void* HostedSetup() {
+    hosted.render_queue = StartHostedQueue("pv_render");
+    hosted.config_queue = StartHostedQueue("pv_config");
+    hosted.caller_queue = StartHostedQueue("pv_caller");
+
+    return nullptr;
+}
+
+void HostedBefore(void*) {
+    hosted.host = std::make_unique<FakeHost>();
+    hosted.service = std::make_unique<UiPreviewService>(*hosted.host, *hosted.render_queue, *hosted.config_queue);
+    zassert_true(hosted.service->Initialize());
+}
+
+bool WaitUntilHostedEnds() {
+    const int64_t deadline = k_uptime_get() + LEASE_MS + REBUILD_TIMEOUT_MS;
+    while(hosted.service->IsActive() && k_uptime_get() < deadline)
+        k_msleep(POLL_MS);
+
+    return !hosted.service->IsActive();
+}
+
+void HostedAfter(void*) {
+    if(hosted.service != nullptr && hosted.service->IsActive()) {
+        hosted.service->OnLinkDropped();
+        zassert_true(WaitUntilHostedEnds());
+    }
+
+    hosted.service.reset();
+    hosted.host.reset();
+}
+
+void HostedTeardown(void*) {
+    hosted.caller_queue.reset();
+    hosted.config_queue.reset();
+    hosted.render_queue.reset();
+}
+
+std::vector<uint8_t> HostBytes() {
+    return std::vector<uint8_t>(HOST_BYTES_SIZE, HOST_BYTE);
+}
+
+UiPreviewError HostedChunk(
+    uint32_t token,
+    std::span<const uint8_t> bytes,
+    size_t offset,
+    std::optional<uint32_t> rev,
+    UiPreviewService::StageInfo& info
+) {
+
+    const size_t size = std::min(STAGE_CHUNK_SIZE, bytes.size() - offset);
+    const bool is_first = offset == 0;
+
+    const UiPreviewService::StageRequest request{ .token = token,
+        .offset = static_cast<uint32_t>(offset),
+        .data = bytes.subspan(offset, size),
+        .length = is_first ? std::optional<uint32_t>(bytes.size()) : std::nullopt,
+        .crc = is_first ? std::optional<uint32_t>(Crc(bytes)) : std::nullopt,
+        .rev = is_first ? rev : std::nullopt };
+
+    return hosted.service->Stage(request, info);
+}
+
+UiPreviewError HostedStage(
+    uint32_t token,
+    std::span<const uint8_t> bytes,
+    std::optional<uint32_t> rev,
+    UiPreviewService::StageInfo& info
+) {
+
+    for(size_t offset = 0; offset < bytes.size(); offset += STAGE_CHUNK_SIZE) {
+        if(const auto error = HostedChunk(token, bytes, offset, rev, info); error != UiPreviewError::OK)
+            return error;
+    }
+
+    return UiPreviewError::OK;
+}
+
+uint32_t HostedBegin() {
+    UiPreviewService::BeginInfo info;
+    zassert_equal(hosted.service->Begin(std::nullopt, true, info), UiPreviewError::OK);
+
+    return info.token;
+}
+
+// A STAGE the test does not wait for: the apply it ends in is what the test works around.
+struct BackgroundStage {
+    std::vector<uint8_t> bytes = HostBytes();
+    UiPreviewService::StageInfo info;
+    UiPreviewError result = UiPreviewError::UNKNOWN;
+    k_sem done{};
+};
+
+void StartBackgroundStage(BackgroundStage& stage, uint32_t token) {
+    k_sem_init(&stage.done, 0, 1);
+    hosted.caller_queue->Run([&stage, token] {
+        stage.result = HostedStage(token, stage.bytes, std::nullopt, stage.info);
+        k_sem_give(&stage.done);
+    });
+}
+
+void WaitForBackgroundStage(BackgroundStage& stage) {
+    zassert_equal(k_sem_take(&stage.done, K_MSEC(REBUILD_TIMEOUT_MS)), 0, "Expected the STAGE to finish.");
+}
+
+void WaitForApplyToStart() {
+    zassert_equal(
+        k_sem_take(&hosted.host->show_started, K_MSEC(REBUILD_TIMEOUT_MS)), 0, "Expected the apply to begin."
+    );
+}
+
+} // namespace
+
+ZTEST_SUITE(ui_preview_service, NULL, HostedSetup, HostedBefore, HostedAfter, HostedTeardown);
+
+// The screens are gone before a show can fail, so the stored ones have to come back at once.
+ZTEST(ui_preview_service, test_a_configuration_that_fails_to_render_puts_the_stored_screens_back) {
+    const auto token = HostedBegin();
+    hosted.host->show_mode = FakeHost::ShowMode::FAIL;
+    UiPreviewService::StageInfo info;
+
+    zassert_equal(HostedStage(token, HostBytes(), std::nullopt, info), UiPreviewError::UNKNOWN);
+
+    zassert_equal(hosted.host->shown_count.load(), 1);
+    zassert_equal(hosted.host->stored_shown_count.load(), 1, "Expected the stored screens back at once.");
+    zassert_equal(hosted.host->group.load(), HOST_BEGIN_GROUP);
+    zassert_false(info.rev.has_value());
+    zassert_true(hosted.service->IsActive(), "The session lives to try again");
+
+    // Nothing is left to put back: the end reverts nothing, and shows nothing again.
+    bool is_reverted = true;
+    zassert_equal(hosted.service->End(token, is_reverted), UiPreviewError::OK);
+    zassert_false(is_reverted);
+    zassert_equal(hosted.host->stored_shown_count.load(), 1);
+
+    // And a later one that renders is shown, and reverted by the end.
+    const auto second = HostedBegin();
+    hosted.host->show_mode = FakeHost::ShowMode::OK;
+    zassert_equal(HostedStage(second, HostBytes(), std::nullopt, info), UiPreviewError::OK);
+    zassert_true(info.rev.has_value());
+    zassert_equal(hosted.service->End(second, is_reverted), UiPreviewError::OK);
+    zassert_true(is_reverted);
+    zassert_equal(hosted.host->stored_shown_count.load(), 2);
+}
+
+ZTEST(ui_preview_service, test_a_show_that_throws_puts_the_stored_screens_back) {
+    const auto token = HostedBegin();
+    hosted.host->show_mode = FakeHost::ShowMode::THROW;
+    UiPreviewService::StageInfo info;
+
+    zassert_equal(HostedStage(token, HostBytes(), std::nullopt, info), UiPreviewError::UNKNOWN);
+
+    zassert_equal(hosted.host->stored_shown_count.load(), 1);
+    zassert_true(hosted.service->IsActive());
+
+    bool is_reverted = true;
+    zassert_equal(hosted.service->End(token, is_reverted), UiPreviewError::OK);
+    zassert_false(is_reverted);
+    zassert_equal(hosted.host->stored_shown_count.load(), 1);
+}
+
+// The screens replaced by a configuration that did show come back on every kind of end.
+ZTEST(ui_preview_service, test_every_end_of_an_applied_session_puts_the_stored_screens_back) {
+    UiPreviewService::StageInfo info;
+
+    auto token = HostedBegin();
+    zassert_equal(HostedStage(token, HostBytes(), std::nullopt, info), UiPreviewError::OK);
+    zassert_true(info.applied.has_value() && info.applied->group == HOST_STAGED_GROUP);
+    bool is_reverted = false;
+    zassert_equal(hosted.service->End(token, is_reverted), UiPreviewError::OK);
+    zassert_true(is_reverted);
+    zassert_equal(hosted.host->stored_shown_count.load(), 1);
+    zassert_equal(hosted.host->group.load(), HOST_BEGIN_GROUP);
+
+    token = HostedBegin();
+    zassert_equal(HostedStage(token, HostBytes(), std::nullopt, info), UiPreviewError::OK);
+    hosted.service->OnLinkDropped();
+    zassert_true(WaitUntilHostedEnds());
+    zassert_equal(hosted.host->stored_shown_count.load(), 2);
+
+    // A store shows what it stored itself.
+    token = HostedBegin();
+    zassert_equal(HostedStage(token, HostBytes(), std::nullopt, info), UiPreviewError::OK);
+    hosted.service->OnConfigurationStored();
+    zassert_true(WaitUntilHostedEnds());
+    zassert_equal(hosted.host->stored_shown_count.load(), 2);
+}
+
+ZTEST(ui_preview_service, test_a_show_alone_returns_navigation_to_the_group_shown_at_the_start) {
+    auto token = HostedBegin();
+    UiPreviewShown shown;
+    zassert_equal(hosted.service->Show(token, { .is_overlay = false, .id = 3 }, shown), UiPreviewError::OK);
+    zassert_equal(hosted.host->group.load(), 3U);
+    const int targets = hosted.host->target_count.load();
+
+    bool is_reverted = true;
+    zassert_equal(hosted.service->End(token, is_reverted), UiPreviewError::OK);
+
+    zassert_false(is_reverted);
+    zassert_equal(hosted.host->stored_shown_count.load(), 0, "The stored screens were never replaced");
+    zassert_equal(hosted.host->target_count.load(), targets + 1);
+    zassert_equal(hosted.host->group.load(), HOST_BEGIN_GROUP);
+
+    // A session that moved nothing leaves navigation alone.
+    token = HostedBegin();
+    const int untouched = hosted.host->target_count.load();
+    zassert_equal(hosted.service->End(token, is_reverted), UiPreviewError::OK);
+    zassert_equal(hosted.host->target_count.load(), untouched);
+}
+
+ZTEST(ui_preview_service, test_a_begin_with_a_token_when_no_session_is_open_says_so) {
+    UiPreviewService::BeginInfo info;
+
+    zassert_equal(hosted.service->Begin(12345U, true, info), UiPreviewError::NO_SESSION);
+    zassert_false(hosted.service->IsActive(), "No session was quietly opened");
+
+    const auto token = HostedBegin();
+    bool is_reverted = false;
+    zassert_equal(hosted.service->End(token, is_reverted), UiPreviewError::OK);
+
+    zassert_equal(hosted.service->Begin(token, true, info), UiPreviewError::NO_SESSION);
+    zassert_false(hosted.service->IsActive());
+    zassert_equal(
+        hosted.service->Begin(std::nullopt, true, info), UiPreviewError::OK, "A new one is asked for without"
+    );
+}
+
+// The lease runs from the last chunk's arrival, and an apply can take longer than the lease itself.
+ZTEST(ui_preview_service, test_an_apply_longer_than_the_lease_does_not_end_the_session) {
+    const auto token = HostedBegin();
+    hosted.host->apply_ms = LEASE_MS + HOST_APPLY_MS;
+    UiPreviewService::StageInfo info;
+
+    zassert_equal(HostedStage(token, HostBytes(), std::nullopt, info), UiPreviewError::OK);
+
+    zassert_true(hosted.service->IsActive(), "The lease ran out during the apply");
+    zassert_equal(hosted.host->stored_shown_count.load(), 0);
+    const auto status = hosted.service->GetStatus();
+    zassert_true(status.lease_left_ms > static_cast<uint32_t>(LEASE_MS) / 2, "Left %u", status.lease_left_ms);
+    zassert_equal(hosted.service->Highlight(token, std::nullopt, std::nullopt), UiPreviewError::OK);
+
+    k_msleep(LEASE_MS / 3);
+    zassert_true(hosted.service->IsActive());
+}
+
+ZTEST(ui_preview_service, test_a_stage_while_the_last_chunk_is_applied_is_busy) {
+    const auto token = HostedBegin();
+    hosted.host->apply_ms = HOST_APPLY_MS;
+    BackgroundStage stage;
+    StartBackgroundStage(stage, token);
+    WaitForApplyToStart();
+
+    UiPreviewService::StageInfo info;
+    const auto bytes = HostBytes();
+    zassert_equal(HostedChunk(token, bytes, 0, std::nullopt, info), UiPreviewError::BUSY);
+
+    WaitForBackgroundStage(stage);
+    zassert_equal(stage.result, UiPreviewError::OK);
+    zassert_true(stage.info.rev.has_value());
+}
+
+// The end waits for the apply that reads the buffer, and then reverts what it showed.
+ZTEST(ui_preview_service, test_the_link_dropping_during_an_apply_waits_for_it_and_then_reverts) {
+    const auto token = HostedBegin();
+    hosted.host->apply_ms = HOST_APPLY_MS;
+    BackgroundStage stage;
+    StartBackgroundStage(stage, token);
+    WaitForApplyToStart();
+
+    hosted.service->OnLinkDropped();
+
+    WaitForBackgroundStage(stage);
+    zassert_equal(stage.result, UiPreviewError::OK, "The apply was not torn down");
+    zassert_true(stage.info.rev.has_value());
+
+    zassert_true(WaitUntilHostedEnds());
+    zassert_equal(hosted.host->stored_shown_count.load(), 1, "Expected what was shown to be reverted");
+    zassert_equal(hosted.host->group.load(), HOST_BEGIN_GROUP);
+}
+
+// A client whose answer to the last chunk got lost.
+ZTEST(ui_preview_service, test_a_lost_answer_to_the_last_chunk_is_recovered_from) {
+    const auto token = HostedBegin();
+    const auto bytes = HostBytes();
+    UiPreviewService::StageInfo info;
+
+    zassert_equal(HostedStage(token, bytes, std::nullopt, info), UiPreviewError::OK);
+    zassert_equal(*info.rev, 1U);
+
+    // It sends the last chunk again: the transfer is over, so the unit says to start from the top.
+    const size_t last_offset = (bytes.size() - 1) / STAGE_CHUNK_SIZE * STAGE_CHUNK_SIZE;
+    zassert_equal(HostedChunk(token, bytes, last_offset, std::nullopt, info), UiPreviewError::BAD_OFFSET);
+    zassert_equal(info.received, 0U);
+    zassert_equal(hosted.host->shown_count.load(), 1, "and showed nothing again");
+
+    // From the top without a revision it is shown again, one revision on.
+    zassert_equal(HostedStage(token, bytes, std::nullopt, info), UiPreviewError::OK);
+    zassert_equal(*info.rev, 2U);
+    zassert_equal(hosted.host->shown_count.load(), 2);
+
+    // With the revision the client already has, the unit says it is there.
+    zassert_equal(HostedStage(token, bytes, 2, info), UiPreviewError::STALE);
+    zassert_equal(info.current_rev, 2U);
+    zassert_equal(hosted.host->shown_count.load(), 2);
+    zassert_true(hosted.service->IsActive());
 }

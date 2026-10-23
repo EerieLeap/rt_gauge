@@ -380,9 +380,12 @@ int main() {
 
         // A client reached over this unit's own Bluetooth link relies on it to end its preview; one routed through
         // another unit relies on the lease. Registered before the BLE controller starts, which calls the handlers.
-        eerie_leap::subsys::bluetooth::Ble::RegisterDisconnectedHandler([ui_preview_service](bt_conn* /*conn*/) {
-            ui_preview_service->OnLinkDropped();
-        });
+        eerie_leap::subsys::bluetooth::Ble::RegisterDisconnectedHandler(
+            [weak_preview = std::weak_ptr(ui_preview_service)](bt_conn* /*conn*/) {
+                if(const auto preview = weak_preview.lock())
+                    preview->OnLinkDropped();
+            }
+        );
     }
 #endif
 

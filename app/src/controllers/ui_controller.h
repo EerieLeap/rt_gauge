@@ -60,6 +60,7 @@ using eerie_leap::subsys::event_bus::DispatchGuard;
 
 using eerie_leap::domain::ui_domain::preview::UiPreviewError;
 using eerie_leap::domain::ui_preview_domain::IUiPreviewHost;
+using eerie_leap::domain::ui_preview_domain::UiPreviewApplied;
 using eerie_leap::domain::ui_preview_domain::UiPreviewService;
 using eerie_leap::domain::ui_preview_domain::UiPreviewShown;
 using eerie_leap::domain::ui_preview_domain::UiPreviewTarget;
@@ -123,14 +124,20 @@ private:
 
     // Builds the screens of a configuration into the (empty) main view and shows its start group.
     // @param render_inline Renders the start group here instead of on the render work queue.
-    int Configure(std::shared_ptr<UiConfiguration> config, bool render_inline = false);
+    // @param preferred_group The group to start on when the configuration has it, instead of its own start group.
+    int Configure(
+        std::shared_ptr<UiConfiguration> config,
+        bool render_inline = false,
+        std::optional<uint32_t> preferred_group = std::nullopt
+    );
 
     // Replaces the screens with those of a stored configuration, in place and in one hold of the LVGL lock:
     // overlays are dismissed, the main view is cleared, the configuration is built with its start group
     // rendered at once (the last frame stays up meanwhile, with no blank one between), the gestures are armed
     // again, and then the state the new widgets missed is asked for and replayed. Navigation starts over at
     // the configuration's start group. Runs on the render work queue.
-    int Reconfigure(std::shared_ptr<UiConfiguration> configuration);
+    int
+    Reconfigure(std::shared_ptr<UiConfiguration> configuration, std::optional<uint32_t> preferred_group = std::nullopt);
 
     // The manager's updated handler, on the storing thread: queues one Reconfigure() of the latest stored
     // configuration, however many stores come before it runs.
@@ -158,6 +165,9 @@ private:
 
     // The object a highlight outlines; the LVGL lock is held. Null if the screens have no such widget or screen.
     lv_obj_t* ResolveHighlightTarget(std::optional<uint32_t> screen, std::optional<uint32_t> widget) const;
+    // The screen of the configuration shown that a highlight names, built or not yet: the screen itself, or, for a
+    // widget alone, the first screen of the overlay up and then of the group navigation stands on that has it.
+    std::optional<uint32_t> FindHighlightScreen(std::optional<uint32_t> screen, std::optional<uint32_t> widget) const;
 
     // Offers ui_assets/images and ui_assets/animations to clients as the image and animation kinds.
     void RegisterAssets();
@@ -215,7 +225,7 @@ public:
     // The UI preview (IUiPreviewHost): the screens a staged configuration is shown on.
     std::shared_ptr<UiConfiguration>
     ParseConfiguration(std::span<const uint8_t> cbor_data, std::span<char> reason) override;
-    int ShowConfiguration(std::shared_ptr<UiConfiguration> configuration) override;
+    int ShowConfiguration(std::shared_ptr<UiConfiguration> configuration, UiPreviewApplied& applied) override;
     int ShowStoredConfiguration() override;
     void SetNavigationPinned(bool is_pinned) override;
     UiPreviewError ShowTarget(const UiPreviewTarget& target, UiPreviewShown& shown) override;

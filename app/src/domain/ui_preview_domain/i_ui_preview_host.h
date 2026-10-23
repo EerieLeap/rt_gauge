@@ -25,6 +25,12 @@ struct UiPreviewShown {
     std::optional<uint32_t> overlay;
 };
 
+/** @brief Where the gauge stands once a staged configuration is shown: its group, and the overlay over it, if any. */
+struct UiPreviewApplied {
+    std::optional<uint32_t> group;
+    std::optional<uint32_t> overlay;
+};
+
 /**
  * @brief What a UI preview needs of the UI it previews on: UiController is the one implementation.
  *
@@ -44,8 +50,15 @@ public:
     virtual std::shared_ptr<UiConfiguration>
     ParseConfiguration(std::span<const uint8_t> cbor_data, std::span<char> reason) = 0;
 
-    /** @brief Shows a configuration in place of the screens, as a store would, but stored nowhere. */
-    virtual int ShowConfiguration(std::shared_ptr<UiConfiguration> configuration) = 0;
+    /**
+     * @brief Shows a configuration in place of the screens, as a store would, but stored nowhere. The group and
+     *        the overlay shown stay, where the configuration still has them; otherwise the start group, and no
+     *        overlay.
+     * @param applied Receives where the gauge stands afterwards.
+     * @return 0, or -ENOENT for a configuration with no screen to show; anything else is a failure, after which
+     *         the screens may be half built.
+     */
+    virtual int ShowConfiguration(std::shared_ptr<UiConfiguration> configuration, UiPreviewApplied& applied) = 0;
 
     /** @brief Shows what the unit stores again. */
     virtual int ShowStoredConfiguration() = 0;

@@ -419,7 +419,11 @@ int UiController::Start() {
     return res;
 }
 
-int UiController::Configure(std::shared_ptr<UiConfiguration> config, bool render_inline) {
+int UiController::Configure(
+    std::shared_ptr<UiConfiguration> config,
+    bool render_inline,
+    std::optional<uint32_t> preferred_group
+) {
     configuration_ = std::move(config);
 
     // Screen and widget construction creates LVGL objects while the renderer
@@ -454,7 +458,11 @@ int UiController::Configure(std::shared_ptr<UiConfiguration> config, bool render
     // Before the start group renders, which can throw: navigation then still knows the groups there are.
     navigation_service_->SetGroupIds(screen_group_ids);
 
-    int res = main_view_->SetActiveGroup(configuration_->active_screen_group_id, render_inline);
+    const bool keeps_preferred_group = preferred_group.has_value()
+        && std::ranges::find(screen_group_ids, *preferred_group) != screen_group_ids.end();
+    int res = main_view_->SetActiveGroup(
+        keeps_preferred_group ? *preferred_group : configuration_->active_screen_group_id, render_inline
+    );
     if(res != 0) {
         LOG_WRN("Falling back to screen group %u.", screen_group_ids.front());
         res = main_view_->SetActiveGroup(screen_group_ids.front(), render_inline);
@@ -478,7 +486,7 @@ void UiController::RequestSettingsState() {
     );
 }
 
-int UiController::Reconfigure(std::shared_ptr<UiConfiguration> configuration) {
+int UiController::Reconfigure(std::shared_ptr<UiConfiguration> configuration, std::optional<uint32_t> preferred_group) {
     int res = 0;
 
     {
@@ -494,7 +502,7 @@ int UiController::Reconfigure(std::shared_ptr<UiConfiguration> configuration) {
         navigation_service_->Reset();
         main_view_->Clear();
 
-        res = Configure(std::move(configuration), true);
+        res = Configure(std::move(configuration), true, preferred_group);
         ConfigureGestures();
 
         // A unit that showed nothing when it started (no screens stored, no demo) never rendered its view, and
@@ -707,8 +715,32 @@ UiController::ParseConfiguration(std::span<const uint8_t> cbor_data, std::span<c
     return ui_configuration_manager_->ParseCborConfiguration(cbor_data, reason);
 }
 
-int UiController::ShowConfiguration(std::shared_ptr<UiConfiguration> configuration) {
-    return Reconfigure(std::move(configuration));
+int UiController::ShowConfiguration(std::shared_ptr<UiConfiguration> configuration, UiPreviewApplied& applied) {
+    // Where the gauge stands is where it stays, as far as the new screens go on: the editor changes a screen, not
+    // the one the user is looking at. Navigation knows at once what was asked for last.
+    const auto group = navigation_service_->GetActiveGroupId();
+    const auto overlay = navigation_service_->GetActiveOverlayId();
+
+    bool has_overlay = false;
+    if(overlay.has_value()) {
+        has_overlay = std::ranges::any_of(configuration->screen_configurations, [&overlay](const auto& screen) {
+            return screen->is_overlay && screen->id == *overlay;
+        });
+    }
+
+    const int res = Reconfigure(std::move(configuration), group);
+
+    applied = {};
+    if(res != 0)
+        return res;
+
+    applied.group = navigation_service_->GetActiveGroupId();
+
+    // The rebuild closed the overlay; it comes back through navigation, like any other.
+    if(has_overlay && navigation_service_->ShowOverlay(*overlay) == 0)
+        applied.overlay = overlay;
+
+    return res;
 }
 
 int UiController::ShowStoredConfiguration() {
@@ -799,6 +831,44 @@ lv_obj_t* UiController::ResolveHighlightTarget(std::optional<uint32_t> screen, s
     return nullptr;
 }
 
+std::optional<uint32_t>
+UiController::FindHighlightScreen(std::optional<uint32_t> screen, std::optional<uint32_t> widget) const {
+    if(configuration_ == nullptr)
+        return std::nullopt;
+
+    const auto has_widget = [&widget](const ScreenConfiguration& configuration) {
+        return !widget.has_value()
+            || std::ranges::any_of(configuration.widget_configurations, [&widget](const auto& definition) {
+                   return definition->id == *widget;
+               });
+    };
+
+    if(screen.has_value()) {
+        for(const auto& candidate : configuration_->screen_configurations) {
+            if(candidate->id == *screen)
+                return has_widget(*candidate) ? screen : std::nullopt;
+        }
+
+        return std::nullopt;
+    }
+
+    // A widget alone: the overlay navigation holds up, then the group it stands on. What it has been asked for is
+    // what counts, whether or not the screens have caught up with it.
+    if(const auto overlay_id = navigation_service_->GetActiveOverlayId()) {
+        if(const auto overlay = FindOverlayConfiguration(*overlay_id); overlay != nullptr && has_widget(*overlay))
+            return overlay->id;
+    }
+
+    if(const auto group_id = navigation_service_->GetActiveGroupId()) {
+        for(const auto& candidate : configuration_->screen_configurations) {
+            if(!candidate->is_overlay && candidate->screen_group_id == *group_id && has_widget(*candidate))
+                return candidate->id;
+        }
+    }
+
+    return std::nullopt;
+}
+
 UiPreviewError UiController::Highlight(std::optional<uint32_t> screen, std::optional<uint32_t> widget) {
     ScopedLvglLock lvgl_guard;
 
@@ -809,7 +879,10 @@ UiPreviewError UiController::Highlight(std::optional<uint32_t> screen, std::opti
         return UiPreviewError::OK;
     }
 
-    if(ResolveHighlightTarget(screen, widget) == nullptr)
+    // Judged against the configuration, not the objects built from it: an overlay is built when navigation gets
+    // to it, and the outline waits for it.
+    const auto screen_id = FindHighlightScreen(screen, widget);
+    if(!screen_id.has_value())
         return UiPreviewError::NOT_FOUND;
 
     if(highlight_ == nullptr) {
@@ -822,7 +895,7 @@ UiPreviewError UiController::Highlight(std::optional<uint32_t> screen, std::opti
         });
     }
 
-    highlight_->Set(screen, widget);
+    highlight_->Set(screen_id, widget);
 
     return UiPreviewError::OK;
 }

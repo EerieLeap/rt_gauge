@@ -2,7 +2,6 @@
 #include <array>
 #include <cstdint>
 #include <memory_resource>
-#include <numeric>
 #include <optional>
 #include <vector>
 
@@ -22,7 +21,8 @@ constexpr uint32_t CRC = 0x1234;
 
 std::vector<uint8_t> Bytes(size_t size) {
     std::vector<uint8_t> bytes(size);
-    std::iota(bytes.begin(), bytes.end(), uint8_t{ 1 });
+    for(size_t i = 0; i < size; ++i)
+        bytes[i] = static_cast<uint8_t>(i + 1);
 
     return bytes;
 }
@@ -176,7 +176,9 @@ ZTEST(ui_preview_session, test_a_chunk_out_of_order_says_where_to_resume) {
 
     zassert_equal(open.session.Stage(TOKEN, 0, std::span(bytes).first(100), 200, CRC, std::nullopt, 0).received, 100U);
 
-    const auto skipped = open.session.Stage(TOKEN, 150, std::span(bytes).first(50), std::nullopt, std::nullopt, std::nullopt, 0);
+    const auto skipped = open.session.Stage(
+        TOKEN, 150, std::span(bytes).first(50), std::nullopt, std::nullopt, std::nullopt, 0
+    );
     zassert_equal(skipped.error, UiPreviewError::BAD_OFFSET);
     zassert_equal(skipped.received, 100U);
 
@@ -194,8 +196,7 @@ ZTEST(ui_preview_session, test_data_past_the_length_is_refused_and_ends_the_tran
     zassert_equal(open.session.Stage(TOKEN, 0, bytes, 50, CRC, std::nullopt, 0).error, UiPreviewError::TOO_LARGE);
     zassert_equal(
         open.session.Stage(TOKEN, 0, std::span(bytes).first(50), std::nullopt, std::nullopt, std::nullopt, 0).error,
-        UiPreviewError::UNKNOWN,
-        "The first chunk restarts the transfer, and says what it is"
+        UiPreviewError::UNKNOWN, "The first chunk restarts the transfer, and says what it is"
     );
 }
 
@@ -227,15 +228,18 @@ ZTEST(ui_preview_session, test_a_commit_counts_the_revision_or_takes_the_clients
 
     zassert_equal(open.session.Stage(TOKEN, 0, bytes, 10, CRC, std::nullopt, 0).error, UiPreviewError::OK);
     zassert_equal(open.session.CommitStage(), 1U);
-    zassert_true(open.session.HasApplied());
+    open.session.FinishApply();
+    zassert_false(open.session.HasApplied(), "Only the screens being replaced say so, before they are");
     zassert_true(open.session.Staged().empty(), "The transfer is over");
 
     zassert_equal(open.session.Stage(TOKEN, 0, bytes, 10, CRC, 7, 0).error, UiPreviewError::OK);
     zassert_equal(open.session.CommitStage(), 7U);
+    open.session.FinishApply();
     zassert_equal(open.session.GetRev(), 7U);
 
     zassert_equal(open.session.Stage(TOKEN, 0, bytes, 10, CRC, std::nullopt, 0).error, UiPreviewError::OK);
     zassert_equal(open.session.CommitStage(), 8U);
+    open.session.FinishApply();
 }
 
 // A revision the client gives must be past the applied one, and tells the applied one when it is not.
@@ -245,6 +249,7 @@ ZTEST(ui_preview_session, test_a_revision_that_does_not_go_forward_is_stale) {
 
     zassert_equal(open.session.Stage(TOKEN, 0, bytes, 10, CRC, 4, 0).error, UiPreviewError::OK);
     open.session.CommitStage();
+    open.session.FinishApply();
 
     for(const uint32_t rev : { 0U, 3U, 4U }) {
         const auto stale = open.session.Stage(TOKEN, 0, bytes, 10, CRC, rev, 0);
@@ -261,6 +266,7 @@ ZTEST(ui_preview_session, test_a_dropped_transfer_is_gone) {
 
     zassert_true(open.session.Stage(TOKEN, 0, bytes, 10, CRC, std::nullopt, 0).is_complete);
     open.session.DropStage();
+    open.session.FinishApply();
 
     zassert_true(open.session.Staged().empty());
     zassert_equal(
@@ -273,15 +279,20 @@ ZTEST(ui_preview_session, test_the_end_frees_the_session_and_says_whether_a_conf
     Open open;
     const auto bytes = Bytes(10);
     zassert_equal(open.session.Stage(TOKEN, 0, bytes, 10, CRC, std::nullopt, 0).error, UiPreviewError::OK);
+    open.session.MarkScreensReplaced();
     open.session.CommitStage();
+    open.session.FinishApply();
 
-    zassert_true(open.session.End());
+    const auto ended = open.session.End();
+    zassert_true(ended.is_ended);
+    zassert_true(ended.had_replaced_screens);
+    zassert_false(ended.had_navigated);
 
     zassert_false(open.session.IsActive());
     zassert_false(open.session.HasApplied());
     zassert_equal(open.session.GetRev(), 0U);
     zassert_equal(open.session.Touch(TOKEN, 0), UiPreviewError::NO_SESSION);
-    zassert_false(open.session.End(), "Nothing to end twice");
+    zassert_false(open.session.End().had_replaced_screens, "Nothing to end twice");
 
     // A new session is a new one, with its own token and revision.
     const auto next = open.session.Begin(std::nullopt, true, TOKEN + 9, 100);
@@ -301,4 +312,82 @@ ZTEST(ui_preview_session, test_the_snapshot_says_what_a_status_needs) {
     zassert_equal(snapshot.lease_left_ms, LEASE_MS - 2000);
     zassert_equal(snapshot.rev, 0U);
     zassert_false(snapshot.has_applied);
+}
+
+// The client that holds a token holds a session that ended: it must learn that, not be given another.
+ZTEST(ui_preview_session, test_a_begin_with_a_token_and_no_session_open_is_refused) {
+    UiPreviewSession session(LEASE_MS, std::pmr::get_default_resource());
+
+    zassert_equal(session.Begin(TOKEN, true, TOKEN + 1, 0).error, UiPreviewError::NO_SESSION);
+    zassert_false(session.IsActive());
+
+    zassert_equal(session.Begin(std::nullopt, true, TOKEN, 0).error, UiPreviewError::OK);
+    zassert_true(session.End().is_ended);
+    zassert_equal(session.Begin(TOKEN, true, TOKEN + 1, 10).error, UiPreviewError::NO_SESSION);
+    zassert_false(session.IsActive());
+}
+
+// The last chunk starts the apply under the lock that ends a session, so no end takes the buffer meanwhile.
+ZTEST(ui_preview_session, test_a_session_does_not_end_while_the_last_chunk_is_applied) {
+    Open open;
+    const auto bytes = Bytes(10);
+
+    zassert_false(open.session.IsApplying());
+    zassert_true(open.session.Stage(TOKEN, 0, bytes, 10, CRC, std::nullopt, 0).is_complete);
+    zassert_true(open.session.IsApplying());
+
+    const auto refused = open.session.End();
+    zassert_false(refused.is_ended);
+    zassert_true(open.session.IsActive());
+    zassert_equal(open.session.Staged().size(), 10U, "The buffer is still there to be read");
+
+    // And nothing writes it.
+    zassert_equal(open.session.Stage(TOKEN, 0, bytes, 10, CRC, std::nullopt, 0).error, UiPreviewError::BUSY);
+
+    open.session.FinishApply();
+    zassert_false(open.session.IsApplying());
+    zassert_true(open.session.End().is_ended);
+    zassert_false(open.session.IsActive());
+}
+
+ZTEST(ui_preview_session, test_a_chunk_that_is_not_the_last_does_not_start_an_apply) {
+    Open open;
+    const auto bytes = Bytes(10);
+
+    zassert_false(open.session.Stage(TOKEN, 0, std::span(bytes).first(5), 10, CRC, std::nullopt, 0).is_complete);
+
+    zassert_false(open.session.IsApplying());
+    zassert_true(open.session.End().is_ended);
+}
+
+// What an end has to undo: the screens a staged configuration replaced, even one that failed half way, and a SHOW.
+ZTEST(ui_preview_session, test_the_end_says_what_it_has_to_undo) {
+    Open open;
+    zassert_false(open.session.End().had_replaced_screens);
+
+    Open replaced;
+    replaced.session.MarkScreensReplaced();
+    zassert_true(replaced.session.HasApplied());
+    const auto after_replace = replaced.session.End();
+    zassert_true(after_replace.had_replaced_screens);
+    zassert_false(after_replace.had_navigated);
+
+    Open restored;
+    restored.session.MarkScreensReplaced();
+    restored.session.MarkScreensRestored();
+    zassert_false(restored.session.HasApplied());
+    zassert_false(restored.session.End().had_replaced_screens);
+
+    Open navigated;
+    navigated.session.MarkNavigated();
+    const auto after_navigation = navigated.session.End();
+    zassert_true(after_navigation.had_navigated);
+    zassert_false(after_navigation.had_replaced_screens);
+
+    // Nothing carries over to the next session.
+    const auto next = navigated.session.Begin(std::nullopt, true, TOKEN + 3, 0);
+    zassert_equal(next.error, UiPreviewError::OK);
+    const auto fresh = navigated.session.End();
+    zassert_false(fresh.had_navigated);
+    zassert_false(fresh.had_replaced_screens);
 }

@@ -2,21 +2,21 @@
 
 #ifdef CONFIG_EERIE_LEAP_UI_PREVIEW
 
-#include <algorithm>
-#include <cerrno>
-#include <cstring>
-#include <exception>
-#include <new>
-#include <utility>
+    #include <algorithm>
+    #include <cerrno>
+    #include <cstring>
+    #include <exception>
+    #include <new>
+    #include <utility>
 
-#include <zephyr/logging/log.h>
-#include <zephyr/sys/crc.h>
+    #include <zephyr/logging/log.h>
+    #include <zephyr/sys/crc.h>
 
-#include "subsys/random/rng.h"
-#include "subsys/threading/scoped_mutex.h"
-#include "utilities/memory/memory_resource_manager.h"
+    #include "subsys/random/rng.h"
+    #include "subsys/threading/scoped_mutex.h"
+    #include "utilities/memory/memory_resource_manager.h"
 
-#include "ui_preview_service.h"
+    #include "ui_preview_service.h"
 
 LOG_MODULE_REGISTER(ui_preview_service, LOG_LEVEL_INF);
 
@@ -114,7 +114,14 @@ UiPreviewError UiPreviewService::RunJob(std::optional<WorkQueueTask<UiPreviewSer
     const ScopedMutex serialize(job_lock_);
 
     job_ = &job;
-    task->Schedule();
+    // A queue that took nothing runs nothing, and there would be no one to give the semaphore.
+    if(task->Schedule() <= 0) {
+        job_ = nullptr;
+        LOG_ERR("Failed to queue a UI preview job.");
+
+        return UiPreviewError::UNKNOWN;
+    }
+
     k_sem_take(&job_done_, K_FOREVER);
     job_ = nullptr;
 
@@ -155,7 +162,11 @@ UiPreviewError UiPreviewService::ExecuteJob(Job& job) {
             if(const auto error = session_.Touch(job.required_token, k_uptime_get()); error != UiPreviewError::OK)
                 return error;
 
-            return host_.ShowTarget(job.target, job.shown);
+            const auto error = host_.ShowTarget(job.target, job.shown);
+            if(error == UiPreviewError::OK)
+                session_.MarkNavigated();
+
+            return error;
         }
 
         case JobKind::HIGHLIGHT: {
@@ -169,7 +180,13 @@ UiPreviewError UiPreviewService::ExecuteJob(Job& job) {
             if(const auto error = session_.Touch(job.required_token, k_uptime_get()); error != UiPreviewError::OK)
                 return error;
 
-            job.is_reverted = EndSession(true);
+            const auto is_reverted = EndSession(true);
+
+            // The client's own request cannot find a configuration being applied: it is the one applying it.
+            if(!is_reverted.has_value())
+                return UiPreviewError::BUSY;
+
+            job.is_reverted = *is_reverted;
 
             return UiPreviewError::OK;
         }
@@ -192,8 +209,11 @@ UiPreviewError UiPreviewService::ExecuteBegin(Job& job) {
             return error;
         }
 
+        begin_group_ = host_.GetActiveGroupId();
         host_.SetNavigationPinned(job.is_pinned);
-        lease_task_->Reschedule(K_MSEC(LEASE_MS));
+        if(lease_task_.has_value())
+            lease_task_->Reschedule(K_MSEC(LEASE_MS));
+
         LOG_INF("UI preview opened.");
     }
 
@@ -234,9 +254,23 @@ UiPreviewError UiPreviewService::ExecuteApply(Job& job) {
     if(!session_.IsActive() || configuration == nullptr)
         return UiPreviewError::NO_SESSION;
 
+    // Marked before the screens go: a show that fails half way has dropped the stored ones all the same, and
+    // whatever ends the session then has to put them back.
+    session_.MarkScreensReplaced();
+
+    int res = 0;
+    try {
+        res = host_.ShowConfiguration(std::move(configuration), job.applied);
+    } catch(...) {
+        RestoreStoredScreens();
+
+        throw;
+    }
+
     // An empty configuration has no screen to show and is still a configuration: the screens it replaces are gone.
-    if(const int res = host_.ShowConfiguration(std::move(configuration)); res != 0 && res != -ENOENT) {
+    if(res != 0 && res != -ENOENT) {
         LOG_ERR("Failed to show the staged UI configuration. Error: %d.", res);
+        RestoreStoredScreens();
 
         return UiPreviewError::UNKNOWN;
     }
@@ -246,23 +280,61 @@ UiPreviewError UiPreviewService::ExecuteApply(Job& job) {
     return UiPreviewError::OK;
 }
 
-bool UiPreviewService::EndSession(bool is_revert) {
-    // Not synchronously: this can be the lease task itself.
+void UiPreviewService::RestoreStoredScreens() {
+    try {
+        const int res = host_.ShowStoredConfiguration();
+        if(res != 0 && res != -ENOENT) {
+            LOG_ERR("Failed to show the stored UI configuration again. Error: %d.", res);
+
+            return;
+        }
+
+        session_.MarkScreensRestored();
+    } catch(const std::exception& e) {
+        LOG_ERR("Failed to show the stored UI configuration again. %s", e.what());
+    } catch(...) {
+        LOG_ERR("Failed to show the stored UI configuration again.");
+    }
+}
+
+void UiPreviewService::RestoreNavigation() {
+    if(!begin_group_.has_value())
+        return;
+
+    UiPreviewShown shown;
+    // The group may be gone from the stored configuration: then it stays where it is.
+    host_.ShowTarget({ .is_overlay = false, .id = *begin_group_ }, shown);
+}
+
+std::optional<bool> UiPreviewService::EndSession(bool is_revert) {
+    const auto ended = session_.End();
+    if(!ended.is_ended)
+        return std::nullopt;
+
+    // Not synchronously: this can be the lease task itself. Only once the session is over, as a deferred end leaves the
+    // lease to look again.
     if(lease_task_.has_value())
         k_work_cancel_delayable(&lease_task_->work);
 
-    const bool had_applied = session_.End();
+    // Whatever asked for an end is answered by this one.
+    pending_end_ = 0;
 
     host_.SetNavigationPinned(false);
     host_.Highlight(std::nullopt, std::nullopt);
 
-    if(is_revert && had_applied) {
-        const int res = host_.ShowStoredConfiguration();
-        if(res != 0 && res != -ENOENT)
-            LOG_ERR("Failed to show the stored UI configuration again. Error: %d.", res);
+    bool is_reverted = false;
+    if(is_revert) {
+        if(ended.had_replaced_screens) {
+            RestoreStoredScreens();
+            is_reverted = true;
+        }
+
+        // The stored screens start on their start group, and a SHOW alone left the gauge elsewhere.
+        if(ended.had_replaced_screens || ended.had_navigated)
+            RestoreNavigation();
     }
 
-    return is_revert && had_applied;
+    return is_reverted;
 }
 
 WorkQueueTaskResult UiPreviewService::ProcessLease() {
@@ -270,11 +342,10 @@ WorkQueueTaskResult UiPreviewService::ProcessLease() {
         return {};
 
     const int64_t now_ms = k_uptime_get();
-    if(session_.IsLeaseExpired(now_ms) && !is_applying_) {
+    if(session_.IsLeaseExpired(now_ms) && !session_.IsApplying()) {
         LOG_INF("UI preview lease ran out.");
-        EndSession(true);
-
-        return {};
+        if(EndSession(true).has_value())
+            return {};
     }
 
     // Requests renewed it, or a configuration is being applied: look again when it would end.
@@ -290,17 +361,19 @@ WorkQueueTaskResult UiPreviewService::ProcessEnd() {
         return {};
     }
 
-    if(is_applying_)
+    if(session_.IsApplying())
         return { .reschedule = true, .delay = K_MSEC(END_RETRY_MS) };
 
-    const uint8_t reasons = pending_end_.exchange(0);
+    const uint8_t reasons = pending_end_.load();
     if(reasons == 0)
         return {};
 
     // A store's own rebuild shows what it stored; the link going away leaves the stored screens to come back.
     const bool is_stored = (reasons & END_STORED) != 0;
+    if(!EndSession(!is_stored).has_value())
+        return { .reschedule = true, .delay = K_MSEC(END_RETRY_MS) };
+
     LOG_INF("UI preview ended: %s.", is_stored ? "a configuration was stored" : "the link dropped");
-    EndSession(!is_stored);
 
     return {};
 }
@@ -327,23 +400,27 @@ UiPreviewError UiPreviewService::Stage(const StageRequest& request, StageInfo& i
     if(!staged.is_complete)
         return UiPreviewError::OK;
 
-    // The last chunk: decode and check what was staged, as an upload is, then show it.
-    is_applying_ = true;
-
+    // The last chunk: decode and check what was staged, as an upload is, then show it. The session is applying
+    // from the chunk on, so no end takes the buffer meanwhile.
     Job parse{ .kind = JobKind::PARSE, .required_token = request.token };
     auto error = RunJob(config_job_task_, parse);
     if(error == UiPreviewError::OK) {
         Job apply{ .kind = JobKind::APPLY, .required_token = request.token };
         error = RunJob(render_job_task_, apply);
-        if(error == UiPreviewError::OK)
+        if(error == UiPreviewError::OK) {
             info.rev = apply.rev;
+            info.applied = apply.applied;
+        }
     }
 
     parsed_.reset();
-    is_applying_ = false;
 
     // The transfer is over, whatever came of it.
     session_.DropStage();
+    session_.FinishApply();
+
+    // The lease runs from the end of the apply, which can take longer than the lease itself.
+    session_.Touch(request.token, k_uptime_get());
 
     return error;
 }
@@ -376,9 +453,9 @@ UiPreviewError UiPreviewService::End(uint32_t token, bool& is_reverted) {
 UiPreviewService::Status UiPreviewService::GetStatus() const {
     const auto snapshot = session_.GetSnapshot(k_uptime_get());
 
-    Status status{ .is_active = snapshot.is_active,
-        .stored_crc = host_.GetStoredCrc(),
-        .group = host_.GetActiveGroupId() };
+    Status status{
+        .is_active = snapshot.is_active, .stored_crc = host_.GetStoredCrc(), .group = host_.GetActiveGroupId()
+    };
     if(snapshot.is_active) {
         status.rev = snapshot.rev;
         status.lease_left_ms = Clamp32(snapshot.lease_left_ms);

@@ -2,13 +2,13 @@
 
 #ifdef CONFIG_EERIE_LEAP_UI_PREVIEW
 
-#include <array>
-#include <cstring>
-#include <utility>
+    #include <array>
+    #include <cstring>
+    #include <utility>
 
-#include <zephyr/logging/log.h>
+    #include <zephyr/logging/log.h>
 
-#include "ui_mgmt_group.h"
+    #include "ui_mgmt_group.h"
 
 LOG_MODULE_REGISTER(ui_mgmt_group, LOG_LEVEL_INF);
 
@@ -153,6 +153,13 @@ int UiMgmtGroup::HandleStage(smp_streamer* ctxt) {
     if(ok && info.rev.has_value())
         ok = zcbor_tstr_put_lit(zse, "rev") && zcbor_uint32_put(zse, *info.rev);
 
+    // Where the gauge stands now that the configuration is shown.
+    if(ok && info.applied.has_value() && info.applied->group.has_value())
+        ok = zcbor_tstr_put_lit(zse, "group") && zcbor_uint32_put(zse, *info.applied->group);
+
+    if(ok && info.applied.has_value() && info.applied->overlay.has_value())
+        ok = zcbor_tstr_put_lit(zse, "overlay") && zcbor_uint32_put(zse, *info.applied->overlay);
+
     return MGMT_RETURN_CHECK(ok);
 }
 
@@ -258,7 +265,9 @@ int UiMgmtGroup::FailInvalid(smp_streamer* ctxt) const {
         return Fail(ctxt, UiPreviewError::INVALID);
 
     zcbor_state_t* zse = ctxt->writer->zs;
-    const bool ok = smp_add_cmd_err(zse, std::to_underlying(SmpGroupId::UI), std::to_underlying(UiPreviewError::INVALID))
+    const bool ok = smp_add_cmd_err(
+                        zse, std::to_underlying(SmpGroupId::UI), std::to_underlying(UiPreviewError::INVALID)
+                    )
         && zcbor_tstr_put_lit(zse, "msg")
         && zcbor_tstr_encode_ptr(zse, reason.data(), reason.size());
 

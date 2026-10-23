@@ -22,12 +22,18 @@ UiPreviewSession::Begin(std::optional<uint32_t> token, bool is_pinned, uint32_t 
     const ScopedMutex guard(lock_);
 
     if(token_ == 0) {
+        // A client that holds a token holds a session that ended: it learns that, and does not get another.
+        if(token.has_value())
+            return { .error = UiPreviewError::NO_SESSION };
+
         token_ = new_token;
         is_pinned_ = is_pinned;
         is_fresh_ = true;
         last_activity_ms_ = now_ms;
         rev_ = 0;
         has_applied_ = false;
+        has_navigated_ = false;
+        is_applying_ = false;
         is_staging_ = false;
 
         return { .token = token_, .is_created = true };
@@ -104,6 +110,10 @@ UiPreviewSession::StageResult UiPreviewSession::Stage(
     if(const auto error = TouchLocked(token, now_ms); error != UiPreviewError::OK)
         return { .error = error };
 
+    // The buffer is being read by the apply of the last chunk: nothing may write it until that is over.
+    if(is_applying_)
+        return { .error = UiPreviewError::BUSY };
+
     if(offset == 0) {
         if(!length.has_value() || !crc.has_value())
             return { .error = UiPreviewError::UNKNOWN };
@@ -132,10 +142,15 @@ UiPreviewSession::StageResult UiPreviewSession::Stage(
         return { .error = UiPreviewError::TOO_LARGE };
     }
 
-    std::copy(data.begin(), data.end(), buffer_.begin() + received_);
+    std::ranges::copy(data, buffer_.begin() + static_cast<std::ptrdiff_t>(received_));
     received_ += static_cast<uint32_t>(data.size());
 
-    return { .received = received_, .is_complete = received_ == length_ };
+    const bool is_complete = received_ == length_;
+    // Under the same lock as the last copy, so an end cannot slip in before the apply has begun.
+    if(is_complete)
+        is_applying_ = true;
+
+    return { .received = received_, .is_complete = is_complete };
 }
 
 std::span<const uint8_t> UiPreviewSession::Staged() const {
@@ -164,16 +179,47 @@ uint32_t UiPreviewSession::CommitStage() {
     const ScopedMutex guard(lock_);
 
     rev_ = requested_rev_.value_or(rev_ + 1);
-    has_applied_ = true;
     is_staging_ = false;
     received_ = 0;
 
     return rev_;
 }
 
+void UiPreviewSession::MarkScreensReplaced() {
+    const ScopedMutex guard(lock_);
+
+    has_applied_ = true;
+}
+
+void UiPreviewSession::MarkScreensRestored() {
+    const ScopedMutex guard(lock_);
+
+    has_applied_ = false;
+}
+
+void UiPreviewSession::MarkNavigated() {
+    const ScopedMutex guard(lock_);
+
+    has_navigated_ = true;
+}
+
+void UiPreviewSession::FinishApply() {
+    const ScopedMutex guard(lock_);
+
+    is_applying_ = false;
+}
+
+bool UiPreviewSession::IsApplying() const {
+    const ScopedMutex guard(lock_);
+
+    return is_applying_;
+}
+
 void UiPreviewSession::CloseLocked() {
     token_ = 0;
     has_applied_ = false;
+    has_navigated_ = false;
+    is_applying_ = false;
     is_staging_ = false;
     received_ = 0;
     rev_ = 0;
@@ -183,13 +229,16 @@ void UiPreviewSession::CloseLocked() {
     buffer_.swap(empty);
 }
 
-bool UiPreviewSession::End() {
+UiPreviewSession::EndResult UiPreviewSession::End() {
     const ScopedMutex guard(lock_);
 
-    const bool had_applied = has_applied_;
+    if(is_applying_)
+        return {};
+
+    const EndResult result{ .is_ended = true, .had_replaced_screens = has_applied_, .had_navigated = has_navigated_ };
     CloseLocked();
 
-    return had_applied;
+    return result;
 }
 
 bool UiPreviewSession::IsActive() const {

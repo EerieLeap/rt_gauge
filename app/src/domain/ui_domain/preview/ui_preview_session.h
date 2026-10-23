@@ -68,6 +68,17 @@ public:
         bool has_applied = false;
     };
 
+    /** @brief What closing a session found. */
+    struct EndResult {
+        /// False while a staged configuration is being applied: the session stays, and the end is asked again.
+        bool is_ended = false;
+        /// The screens were replaced by a staged configuration (even one that failed half way), so the stored ones
+        /// have to come back.
+        bool had_replaced_screens = false;
+        /// SHOW moved navigation.
+        bool had_navigated = false;
+    };
+
 private:
     mutable k_mutex lock_{};
     std::pmr::memory_resource* resource_;
@@ -79,7 +90,12 @@ private:
     bool is_fresh_ = false;
     int64_t last_activity_ms_ = 0;
     uint32_t rev_ = 0;
+    // The screens are not the stored ones: set before a staged configuration is shown, cleared once the stored
+    // ones are back. A rev only counts a configuration that was shown whole.
     bool has_applied_ = false;
+    bool has_navigated_ = false;
+    // From the last chunk to the end of the apply: the buffer is read meanwhile, so the session cannot end.
+    bool is_applying_ = false;
 
     std::pmr::vector<uint8_t> buffer_;
     size_t capacity_ = 0;
@@ -110,9 +126,10 @@ public:
     /**
      * @brief Opens a session, or renews one.
      *
-     * @param token The session's, to renew it; a different one is BAD_TOKEN. Without one, a session that is
-     *        open is BUSY, unless this repeats the BEGIN that opened it (no request has carried the token
-     *        since, and @p is_pinned is the same): the client's answer got lost, and it gets the same token.
+     * @param token The session's, to renew it; a different one is BAD_TOKEN, and with no session open it is
+     *        NO_SESSION (it ended: the client must not be given a new one without knowing). Without one, a
+     *        session that is open is BUSY, unless this repeats the BEGIN that opened it (no request has carried the
+     *        token since, and @p is_pinned is the same): the client's answer got lost, and it gets the same token.
      * @param new_token What a new session is given; not 0.
      */
     BeginResult Begin(std::optional<uint32_t> token, bool is_pinned, uint32_t new_token, int64_t now_ms);
@@ -151,8 +168,22 @@ public:
     /** @brief The staged configuration is showing: its revision is the client's, else the next. Returns it. */
     uint32_t CommitStage();
 
-    /** @brief Closes the session and frees the buffer; whether a staged configuration was showing. */
-    bool End();
+    /** @brief The screens are about to be replaced by a staged configuration, and may not be the stored ones from now on. */
+    void MarkScreensReplaced();
+    /** @brief The stored screens are showing again. */
+    void MarkScreensRestored();
+    /** @brief SHOW moved navigation. */
+    void MarkNavigated();
+
+    /** @brief The last chunk's apply is over, whatever came of it. */
+    void FinishApply();
+    [[nodiscard]] bool IsApplying() const;
+
+    /**
+     * @brief Closes the session and frees the buffer, unless a staged configuration is being applied, which reads
+     *        the buffer: then nothing changes and `is_ended` is false.
+     */
+    EndResult End();
 
     [[nodiscard]] bool IsActive() const;
     [[nodiscard]] bool IsPinned() const;

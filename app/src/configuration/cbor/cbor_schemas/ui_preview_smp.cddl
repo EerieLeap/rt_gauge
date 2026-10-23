@@ -5,8 +5,11 @@
 ; Every request that carries `tok` renews the session's lease (EERIE_LEAP_UI_PREVIEW_LEASE_MS, `lease_ms` in the
 ; answer to BEGIN). The session ends on END, when the lease runs out, when the local BLE link drops (a client
 ; routed through another unit relies on the lease), and when a UI configuration is stored (that store's own rebuild
-; shows what it stored). It then reverts to the stored configuration, clears the highlight and lets the swipes
-; navigate again.
+; shows what it stored). It then reverts to the stored configuration (on its start group, or, for a session that
+; only used SHOW, on the group that was shown at BEGIN, with no overlay), clears the highlight and lets the swipes
+; navigate again. The lease of a session runs from the arrival of a request, and of a STAGE's last chunk from the end
+; of its apply, which can take longer than the lease. A configuration that cannot be shown (it passed the checks and
+; failed to render) puts the stored screens back at once: the answer is UNKNOWN and END then answers reverted: false.
 ;
 ; Commands: BEGIN write 0, STAGE write 1, PATCH write 2 (FW-2, not served yet: MCUmgr answers rc 8),
 ; SHOW write 3, HIGHLIGHT write 4, END write 5, STATUS read 6.
@@ -21,15 +24,21 @@
 
 ; BEGIN: opens a session, or renews one with its tok. A BEGIN sent again because its answer got lost, before any
 ; request carried the tok, gets the same tok; any other BEGIN without the tok is BUSY, with another tok BAD_TOKEN.
+; A BEGIN with a tok when no session is open is NO_SESSION: the session ended (END, lease, link, a store), and the
+; client learns that instead of being given a new one.
 ui-begin-req  = { ? tok: uint, ? pin: bool }            ; pin (default true): the swipes do not navigate
 ui-begin-rsp  = { tok: uint, lease_ms: uint, rev: uint, stored_crc: uint, max_patch: uint, max_stage: uint }
                                                         ; rev 0 and max_patch 0 until a configuration is staged / FW-2
 
 ; STAGE: a whole CborUiConfig in chunks, in order, shown when the last arrives. Checked as an upload is, never
 ; stored. len, crc and rev at off 0 only; rev, if given, must be past the applied one (else STALE), else the unit
-; counts on. An earlier unfinished transfer is dropped by an off 0.
+; counts on. An earlier unfinished transfer is dropped by an off 0. While the last chunk is being applied a STAGE
+; is BUSY. The gauge stays on the group and the overlay it shows when the new configuration still has them (else the
+; start group, and no overlay); the answer to the last chunk says where it stands.
 ui-stage-req  = { tok: uint, off: uint, data: bstr, ? len: uint, ? crc: uint, ? rev: uint }
-ui-stage-rsp  = { off: uint, ? rev: uint }              ; off: bytes received; rev once the configuration is shown
+ui-stage-rsp  = { off: uint, ? rev: uint, ? group: uint, ? overlay: uint }
+                                                        ; off: bytes received; rev, group and overlay once the
+                                                        ; configuration is shown (overlay only while one is up)
 
 ; SHOW: asks navigation for a group of the configuration shown, or an overlay (closing the one up first).
 ui-target     = { group: uint } / { overlay: uint }

@@ -127,6 +127,8 @@ struct Fixture {
     std::unique_ptr<smp_test::SmpTestClient> client;
 };
 
+// The suite's one fixture lives as long as the process; the constructor allocates nothing that a failure could leak.
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization)
 Fixture fixture;
 
 std::shared_ptr<UiConfiguration> MakeConfiguration(
@@ -192,7 +194,9 @@ uint32_t ErrorOf(const Response& response) {
     if(!response.error.has_value())
         return 0;
 
-    zassert_equal(response.error_group.value_or(0), static_cast<uint32_t>(SmpGroupId::UI), "The error is the ui group's");
+    zassert_equal(
+        response.error_group.value_or(0), static_cast<uint32_t>(SmpGroupId::UI), "The error is the ui group's"
+    );
 
     return *response.error;
 }
@@ -204,7 +208,8 @@ uint32_t Begin() {
     return response.Value("tok");
 }
 
-Response StageChunk(uint32_t token, std::span<const uint8_t> bytes, size_t offset, std::optional<uint32_t> rev = std::nullopt) {
+Response
+StageChunk(uint32_t token, std::span<const uint8_t> bytes, size_t offset, std::optional<uint32_t> rev = std::nullopt) {
     const size_t size = std::min(CHUNK_SIZE, bytes.size() - offset);
     CborMap body;
     body.Put("tok", token).Put("off", static_cast<uint32_t>(offset)).Put("data", bytes.subspan(offset, size));
@@ -360,6 +365,20 @@ ZTEST(smp_ui, test_a_begin_sent_again_gets_the_same_token_and_another_client_is_
     zassert_equal(ErrorOf(wrong), BAD_TOKEN);
 }
 
+// The client that holds a token holds a session that ended: it learns that, and is not given another.
+ZTEST(smp_ui, test_a_begin_with_a_token_when_no_session_is_open_is_refused) {
+    const auto refused = Write(Command::BEGIN, CborMap().Put("tok", 7).Build());
+    zassert_false(refused.IsOk());
+    zassert_equal(ErrorOf(refused), NO_SESSION);
+    zassert_false(Read(Command::STATUS).Flag("active"), "No session was quietly opened");
+
+    const auto token = Begin();
+    zassert_true(Write(Command::END, CborMap().Put("tok", token).Build()).IsOk());
+
+    zassert_equal(ErrorOf(Write(Command::BEGIN, CborMap().Put("tok", token).Build())), NO_SESSION);
+    zassert_false(Read(Command::STATUS).Flag("active"));
+}
+
 ZTEST(smp_ui, test_requests_need_the_session_and_its_token) {
     const auto show = CborMap().Put("tok", 1).PutMap("target", "group", GROUP_ID).Build();
     const auto highlight = CborMap().Put("tok", 1).Build();
@@ -372,7 +391,10 @@ ZTEST(smp_ui, test_requests_need_the_session_and_its_token) {
     zassert_equal(ErrorOf(StageChunk(1, bytes, 0)), NO_SESSION);
 
     const auto token = Begin();
-    zassert_equal(ErrorOf(Write(Command::SHOW, CborMap().Put("tok", token + 1).PutMap("target", "group", GROUP_ID).Build())), BAD_TOKEN);
+    zassert_equal(
+        ErrorOf(Write(Command::SHOW, CborMap().Put("tok", token + 1).PutMap("target", "group", GROUP_ID).Build())),
+        BAD_TOKEN
+    );
     zassert_equal(ErrorOf(Write(Command::HIGHLIGHT, CborMap().Put("tok", token + 1).Build())), BAD_TOKEN);
     zassert_equal(ErrorOf(Write(Command::END, CborMap().Put("tok", token + 1).Build())), BAD_TOKEN);
     zassert_equal(ErrorOf(StageChunk(token + 1, bytes, 0)), BAD_TOKEN);
@@ -394,8 +416,7 @@ ZTEST(smp_ui, test_a_request_missing_a_key_is_refused_as_malformed) {
     zassert_equal(Write(Command::END, CborMap().Build()).Value("rc"), static_cast<uint32_t>(MGMT_ERR_EINVAL));
     zassert_equal(
         Write(Command::SHOW, CborMap().Put("tok", token).Put("target", 3).Build()).Value("rc"),
-        static_cast<uint32_t>(MGMT_ERR_EINVAL),
-        "A target is a map of a group or an overlay"
+        static_cast<uint32_t>(MGMT_ERR_EINVAL), "A target is a map of a group or an overlay"
     );
 }
 
@@ -406,13 +427,18 @@ ZTEST(smp_ui, test_stage_in_chunks_shows_the_configuration_and_stores_nothing) {
     const auto token = Begin();
     constexpr uint32_t MANY_WIDGETS = 30;
     const auto bytes = Encode(MakeConfiguration({ GROUP_ID, SECOND_GROUP_ID }, OVERLAY_SCREEN_ID, MANY_WIDGETS));
-    zassert_true(bytes.size() > 2 * CHUNK_SIZE, "Expected the transfer to take chunks (%u bytes)", static_cast<unsigned>(bytes.size()));
+    zassert_true(
+        bytes.size() > 2 * CHUNK_SIZE, "Expected the transfer to take chunks (%u bytes)",
+        static_cast<unsigned>(bytes.size())
+    );
 
     const auto response = StageAll(token, bytes);
 
     zassert_true(response.IsOk());
     zassert_equal(response.Value("off"), bytes.size());
     zassert_equal(response.Value("rev"), 1U);
+    zassert_equal(response.Value("group"), GROUP_ID, "Where the gauge stands: the start group of what is staged");
+    zassert_false(response.Has("overlay"));
     zassert_equal(*fixture.navigation->GetActiveGroupId(), GROUP_ID);
     zassert_equal(fixture.navigation->GoToGroup(STORED_GROUP_ID), -ENOENT, "The stored groups are replaced");
 
@@ -425,13 +451,98 @@ ZTEST(smp_ui, test_stage_in_chunks_shows_the_configuration_and_stores_nothing) {
     zassert_equal(status.Value("rev"), 1U);
 }
 
+// The editor changes a screen, not the one the user is looking at.
+ZTEST(smp_ui, test_stage_keeps_the_group_and_the_overlay_shown_and_answers_where_the_gauge_stands) {
+    const auto token = Begin();
+    const auto bytes = Encode(MakeConfiguration({ GROUP_ID, SECOND_GROUP_ID }, OVERLAY_SCREEN_ID));
+    zassert_true(StageAll(token, bytes).IsOk());
+
+    zassert_true(
+        Write(Command::SHOW, CborMap().Put("tok", token).PutMap("target", "group", SECOND_GROUP_ID).Build()).IsOk()
+    );
+    zassert_true(WaitUntilGroupIs(SECOND_GROUP_ID));
+    zassert_true(
+        Write(Command::SHOW, CborMap().Put("tok", token).PutMap("target", "overlay", OVERLAY_SCREEN_ID).Build()).IsOk()
+    );
+    k_msleep(SETTLE_MS);
+    zassert_true(fixture.navigation->IsOverlayActive());
+
+    const auto again = StageAll(token, bytes);
+    zassert_true(again.IsOk());
+    zassert_equal(again.Value("rev"), 2U);
+    zassert_equal(again.Value("group"), SECOND_GROUP_ID);
+    zassert_true(again.Has("overlay"));
+    zassert_equal(again.Value("overlay"), OVERLAY_SCREEN_ID);
+    k_msleep(SETTLE_MS);
+    zassert_equal(*fixture.navigation->GetActiveGroupId(), SECOND_GROUP_ID);
+    zassert_true(fixture.navigation->IsOverlayActive());
+
+    // A configuration without them: the start group and no overlay.
+    const auto other = StageAll(token, Encode(MakeConfiguration({ SECOND_GROUP_ID + 1 })));
+    zassert_true(other.IsOk());
+    zassert_equal(other.Value("group"), SECOND_GROUP_ID + 1);
+    zassert_false(other.Has("overlay"));
+}
+
+// The answer to the last chunk got lost, and the client sends it again.
+ZTEST(smp_ui, test_a_lost_answer_to_the_last_chunk_is_recovered_from) {
+    const auto token = Begin();
+    constexpr uint32_t MANY_WIDGETS = 30;
+    const auto bytes = Encode(MakeConfiguration({ GROUP_ID }, std::nullopt, MANY_WIDGETS));
+    zassert_true(bytes.size() > CHUNK_SIZE);
+    zassert_equal(StageAll(token, bytes).Value("rev"), 1U);
+
+    const size_t last_offset = (bytes.size() - 1) / CHUNK_SIZE * CHUNK_SIZE;
+    const auto repeated = StageChunk(token, bytes, last_offset);
+    zassert_equal(ErrorOf(repeated), BAD_OFFSET);
+    zassert_equal(repeated.Value("off"), 0U, "The transfer is over: start from the top");
+
+    // From the top, it is shown again; with the revision the client already has, the unit says it is there.
+    zassert_equal(StageAll(token, bytes).Value("rev"), 2U);
+    const auto stale = StageAll(token, bytes, 2);
+    zassert_equal(ErrorOf(stale), STALE);
+    zassert_equal(stale.Value("rev"), 2U);
+}
+
+// Judged against the configuration, not against what is built yet.
+ZTEST(smp_ui, test_highlight_names_an_overlay_just_shown) {
+    const auto token = Begin();
+    zassert_true(StageAll(token, Encode(MakeConfiguration({ GROUP_ID }, OVERLAY_SCREEN_ID))).IsOk());
+    zassert_true(
+        Write(Command::SHOW, CborMap().Put("tok", token).PutMap("target", "overlay", OVERLAY_SCREEN_ID).Build()).IsOk()
+    );
+
+    zassert_true(
+        Write(Command::HIGHLIGHT, CborMap().Put("tok", token).Put("screen", OVERLAY_SCREEN_ID).Put("widget", 0).Build())
+            .IsOk()
+    );
+    zassert_true(Write(Command::HIGHLIGHT, CborMap().Put("tok", token).Put("widget", 0).Build()).IsOk());
+}
+
+// A SHOW moves navigation: with nothing staged, the end takes it back.
+ZTEST(smp_ui, test_a_show_alone_is_taken_back_by_the_end) {
+    const auto token = Begin();
+
+    zassert_true(Write(Command::SHOW, CborMap().Put("tok", token).PutMap("target", "group", 6).Build()).IsOk());
+    zassert_true(WaitUntilGroupIs(6));
+
+    const auto ended = Write(Command::END, CborMap().Put("tok", token).Build());
+    zassert_true(ended.IsOk());
+    zassert_false(ended.Flag("reverted"));
+    zassert_true(WaitUntilGroupIs(STORED_GROUP_ID));
+}
+
 ZTEST(smp_ui, test_stage_is_checked_as_an_upload_is) {
     const auto token = Begin();
     const auto good = Encode(MakeConfiguration({ GROUP_ID }));
 
     // A CRC the bytes do not have.
     CborMap bad_crc;
-    bad_crc.Put("tok", token).Put("off", 0).Put("data", good).Put("len", static_cast<uint32_t>(good.size())).Put("crc", Crc(good) ^ 1U);
+    bad_crc.Put("tok", token)
+        .Put("off", 0)
+        .Put("data", good)
+        .Put("len", static_cast<uint32_t>(good.size()))
+        .Put("crc", Crc(good) ^ 1U);
     zassert_equal(ErrorOf(Write(Command::STAGE, bad_crc.Build())), CRC_MISMATCH);
 
     // Bytes that are no configuration: INVALID, with the validator's own message.
@@ -449,7 +560,7 @@ ZTEST(smp_ui, test_stage_is_checked_as_an_upload_is) {
     *(second_screen.begin() + 1) = 0x00;
     const auto refused = StageAll(token, invalid);
     zassert_equal(ErrorOf(refused), INVALID);
-    zassert_true(refused.texts.at("msg").find("duplicate screen IDs") != std::string::npos);
+    zassert_true(refused.texts.at("msg").contains("duplicate screen IDs"));
 
     // More than the buffer holds.
     CborMap too_large;
@@ -489,13 +600,17 @@ ZTEST(smp_ui, test_show_names_a_group_or_an_overlay) {
     const auto token = Begin();
     zassert_true(StageAll(token, Encode(MakeConfiguration({ GROUP_ID, SECOND_GROUP_ID }, OVERLAY_SCREEN_ID))).IsOk());
 
-    const auto group = Write(Command::SHOW, CborMap().Put("tok", token).PutMap("target", "group", SECOND_GROUP_ID).Build());
+    const auto group = Write(
+        Command::SHOW, CborMap().Put("tok", token).PutMap("target", "group", SECOND_GROUP_ID).Build()
+    );
     zassert_true(group.IsOk());
     zassert_equal(group.Value("group"), SECOND_GROUP_ID);
     zassert_false(group.Has("overlay"));
     zassert_true(WaitUntilGroupIs(SECOND_GROUP_ID));
 
-    const auto overlay = Write(Command::SHOW, CborMap().Put("tok", token).PutMap("target", "overlay", OVERLAY_SCREEN_ID).Build());
+    const auto overlay = Write(
+        Command::SHOW, CborMap().Put("tok", token).PutMap("target", "overlay", OVERLAY_SCREEN_ID).Build()
+    );
     zassert_true(overlay.IsOk());
     zassert_equal(overlay.Value("group"), SECOND_GROUP_ID);
     zassert_equal(overlay.Value("overlay"), OVERLAY_SCREEN_ID);
@@ -514,7 +629,9 @@ ZTEST(smp_ui, test_highlight_outlines_a_widget_and_neither_clears_it) {
     const auto token = Begin();
     zassert_true(StageAll(token, Encode(MakeConfiguration({ GROUP_ID }))).IsOk());
 
-    zassert_true(Write(Command::HIGHLIGHT, CborMap().Put("tok", token).Put("screen", 0).Put("widget", 0).Build()).IsOk());
+    zassert_true(
+        Write(Command::HIGHLIGHT, CborMap().Put("tok", token).Put("screen", 0).Put("widget", 0).Build()).IsOk()
+    );
     zassert_true(Write(Command::HIGHLIGHT, CborMap().Put("tok", token).Put("widget", 0).Build()).IsOk());
     zassert_equal(
         ErrorOf(Write(Command::HIGHLIGHT, CborMap().Put("tok", token).Put("screen", 0).Put("widget", 99).Build())),

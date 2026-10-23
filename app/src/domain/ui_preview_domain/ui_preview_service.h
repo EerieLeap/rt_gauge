@@ -66,10 +66,11 @@ public:
         std::optional<uint32_t> rev;
     };
 
-    /** @brief What STAGE answers; @p rev is there once the configuration was applied. */
+    /** @brief What STAGE answers; @p rev and @p applied are there once the configuration was applied. */
     struct StageInfo {
         uint32_t received = 0;
         std::optional<uint32_t> rev;
+        std::optional<UiPreviewApplied> applied;
         /// For STALE, the revision applied.
         uint32_t current_rev = 0;
     };
@@ -104,6 +105,7 @@ private:
         UiPreviewError result = UiPreviewError::UNKNOWN;
         BeginInfo begin;
         UiPreviewShown shown;
+        UiPreviewApplied applied;
         bool is_reverted = false;
         uint32_t rev = 0;
     };
@@ -128,9 +130,9 @@ private:
     k_sem job_done_{};
     Job* job_ = nullptr;
 
-    // Set from STAGE's last chunk until its configuration is shown, so no end tears the buffer down meanwhile.
-    std::atomic<bool> is_applying_ = false;
     std::atomic<uint8_t> pending_end_ = 0;
+    // The group shown at BEGIN (render work queue only), where a session that only navigated leaves the gauge.
+    std::optional<uint32_t> begin_group_;
 
     std::shared_ptr<UiConfiguration> parsed_;
     std::array<char, MAX_REASON_LENGTH + 1> reason_{};
@@ -145,8 +147,16 @@ private:
     WorkQueueTaskResult ProcessLease();
     WorkQueueTaskResult ProcessEnd();
 
-    /** @brief Ends the session on the render work queue; whether the stored screens had to come back. */
-    bool EndSession(bool is_revert);
+    /**
+     * @brief Ends the session on the render work queue.
+     * @return Whether the stored screens had to come back (null while a staged configuration is being applied: the
+     *         session stays, and the end is asked again).
+     */
+    std::optional<bool> EndSession(bool is_revert);
+    /** @brief Shows the stored screens again after a show that failed, or half did. Never throws. */
+    void RestoreStoredScreens();
+    /** @brief Puts navigation back on the group shown at BEGIN, with no overlay. */
+    void RestoreNavigation();
 
 public:
     /**
