@@ -116,17 +116,25 @@ int MainView::SetActiveGroup(uint32_t screen_group_id, bool render_inline) {
     if(render_dispatcher_ != nullptr && !render_inline) {
         // Capturing `this` is safe because the dispatcher's work queue is drained
         // and stopped before this view is destroyed.
-        const auto deferred_screen_group = screen_group;
-        render_dispatcher_([this, deferred_screen_group, previous_screen_group] {
+        //
+        // The groups are held weakly: the work queue keeps a finished task, and so its captures, until it
+        // prunes it on a later Run() without the LVGL lock, and a group that outlived Clear() that way would be
+        // destroyed there, taking the LVGL lock under the queue's own.
+        render_dispatcher_([this, deferred_screen_group = std::weak_ptr<ScreenGroup>(screen_group),
+                               deferred_previous_screen_group = std::weak_ptr<ScreenGroup>(previous_screen_group)] {
             ScopedLvglLock lvgl_guard;
 
-            // Clear() may have dropped the group while this waited; rendering it would draw a group that
-            // is no longer part of the view.
-            const auto current = screen_groups_.find(deferred_screen_group->GetGroupId());
-            if(current == screen_groups_.end() || current->second != deferred_screen_group)
+            // Taken under the lock, and released before it: a group dropped by Clear() while this waited is
+            // gone, and rendering it would draw a group that is no longer part of the view.
+            const auto group = deferred_screen_group.lock();
+            if(group == nullptr)
                 return;
 
-            RenderGroupOrRollBack(deferred_screen_group, previous_screen_group);
+            const auto current = screen_groups_.find(group->GetGroupId());
+            if(current == screen_groups_.end() || current->second != group)
+                return;
+
+            RenderGroupOrRollBack(group, deferred_previous_screen_group.lock());
         });
 
         return 0;

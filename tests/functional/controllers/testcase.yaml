@@ -9,3 +9,7 @@ common:
 
 tests:
   functional.controllers: {}
+  # A release build: no demo screens, so a unit with nothing stored shows nothing until a client stores a UI.
+  functional.controllers.no_demo:
+    extra_configs:
+      - CONFIG_EERIE_LEAP_UI_DEMO_CONFIGURATION=n

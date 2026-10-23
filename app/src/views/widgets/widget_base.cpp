@@ -418,20 +418,38 @@ void WidgetBase::ApplyLayout() {
         return properties_->GetAs<int>(type, fallback);
     };
 
-    // The validator holds a record to the grid; a bound value is held to it here, a size at one cell at least.
-    const auto width = static_cast<uint32_t>(
-        std::clamp(cells(WidgetPropertyType::LAYOUT_WIDTH, 1), 1, static_cast<int>(grid.width))
-    );
-    const auto height = static_cast<uint32_t>(
-        std::clamp(cells(WidgetPropertyType::LAYOUT_HEIGHT, 1), 1, static_cast<int>(grid.height))
-    );
-    const int x = std::clamp(cells(WidgetPropertyType::LAYOUT_X, 0), 0, static_cast<int>(grid.width) - 1);
-    const int y = std::clamp(cells(WidgetPropertyType::LAYOUT_Y, 0), 0, static_cast<int>(grid.height) - 1);
+    // A bound value is held inside the grid: the size first, at one cell at least, then the position that keeps
+    // the box in it. Past the grid's edge the box would mirror (y counts from the bottom and the layout takes the
+    // absolute value), and so it jumps. A record that overhangs the grid itself, which the validator allows, keeps
+    // its position as the record has it.
+    const auto width_cells = std::clamp(cells(WidgetPropertyType::LAYOUT_WIDTH, 1), 1, static_cast<int>(grid.width));
+    const auto height_cells = std::clamp(cells(WidgetPropertyType::LAYOUT_HEIGHT, 1), 1, static_cast<int>(grid.height));
+    const auto& record = *configuration_;
+    int max_x = static_cast<int>(grid.width) - width_cells;
+    if(record.position_grid.x + static_cast<int>(record.size_grid.width) > static_cast<int>(grid.width))
+        max_x = std::max(max_x, record.position_grid.x);
 
-    const auto size_px = layout.ToPx(WidgetSize{ .width = width, .height = height });
+    int max_y = static_cast<int>(grid.height) - height_cells;
+    if(record.position_grid.y + static_cast<int>(record.size_grid.height) > static_cast<int>(grid.height))
+        max_y = std::max(max_y, record.position_grid.y);
+    const int x = std::clamp(cells(WidgetPropertyType::LAYOUT_X, 0), 0, max_x);
+    const int y = std::clamp(cells(WidgetPropertyType::LAYOUT_Y, 0), 0, max_y);
+
+    const auto size_px = layout.ToPx(
+        WidgetSize{ .width = static_cast<uint32_t>(width_cells), .height = static_cast<uint32_t>(height_cells) }
+    );
+    const bool is_resized = size_px.width != size_px_.width || size_px.height != size_px_.height;
 
     SetSizePx(size_px);
     SetPositionPx(layout.ToPx(WidgetPosition{ .x = x, .y = y }, size_px));
+
+    // What the widget computed from its size, such as a canvas or a radius, is not the box's to follow by itself.
+    if(is_resized && IsReady())
+        OnBoxResized();
+}
+
+void WidgetBase::OnBoxResized() {
+    ApplyTheme(ThemeManager::GetInstance().GetCurrentTheme());
 }
 
 void WidgetBase::RunEffect(PropertyChangeEffect effect) {

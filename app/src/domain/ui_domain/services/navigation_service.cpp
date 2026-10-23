@@ -252,6 +252,14 @@ int NavigationService::Handle(NavigationIntent intent, uint32_t argument) {
     }
 }
 
+std::optional<uint32_t> NavigationService::GetActiveOverlayId() const {
+    k_mutex_lock(&lock_, K_FOREVER);
+    auto active_overlay_screen_id = active_overlay_screen_id_;
+    k_mutex_unlock(&lock_);
+
+    return active_overlay_screen_id;
+}
+
 std::optional<uint32_t> NavigationService::GetActiveGroupId() const {
     k_mutex_lock(&lock_, K_FOREVER);
     auto active_screen_group_id = active_screen_group_id_;

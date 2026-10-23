@@ -550,22 +550,29 @@ void UiConfigurationValidator::ValidateWidgetPosition(
     }
 }
 
-// A root widget's box can be bound; a child fills its owner, so it has none to move.
+// A root widget's box can be bound inbound; a child fills its owner, so it has none to move, and a box never
+// sends: nothing on a widget changes it but the configuration and an inbound binding.
 void UiConfigurationValidator::ValidateLayoutBindings(
     const ScreenConfiguration& screen_configuration,
     std::span<const std::optional<size_t>> parents
 ) {
     for(size_t i = 0; i < screen_configuration.widget_configurations.size(); ++i) {
-        if(!parents[i].has_value())
-            continue;
-
         const auto& widget_configuration = screen_configuration.widget_configurations[i];
         for(const auto& binding : widget_configuration->bindings) {
-            if(WidgetPropertyValidator::IsLayoutProperty(binding.target))
+            if(!WidgetPropertyValidator::IsLayoutProperty(binding.target))
+                continue;
+
+            const auto target = std::to_string(static_cast<uint16_t>(binding.target));
+            if(parents[i].has_value())
                 InvalidWidgetConfiguration(
                     screen_configuration.id, widget_configuration->id,
-                    "Binding to property ID: " + std::to_string(static_cast<uint16_t>(binding.target))
-                        + " is not allowed on a child widget; a child fills its owner."
+                    "Binding to property ID: " + target + " is not allowed on a child widget; a child fills its owner."
+                );
+
+            if(binding.direction != PropertyBindingDirection::In)
+                InvalidWidgetConfiguration(
+                    screen_configuration.id, widget_configuration->id,
+                    "Binding to property ID: " + target + " must be inbound; a widget's box never sends."
                 );
         }
     }

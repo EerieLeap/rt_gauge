@@ -82,6 +82,11 @@ int LottieWidget::DoRender() {
     return 0;
 }
 
+void LottieWidget::OnBoxResized() {
+    if(Render() != 0)
+        LOG_ERR("Widget %u failed to load Lottie animation '%s' at its new size.", id_, file_path_.c_str());
+}
+
 lv_obj_t* LottieWidget::Create() {
     if(file_path_.empty() || context_.assets_manager == nullptr)
         return nullptr;

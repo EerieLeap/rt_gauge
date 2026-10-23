@@ -409,13 +409,15 @@ int UiController::Configure(std::shared_ptr<UiConfiguration> config, bool render
         return -ENOENT;
     }
 
+    // Before the start group renders, which can throw: navigation then still knows the groups there are.
+    navigation_service_->SetGroupIds(screen_group_ids);
+
     int res = main_view_->SetActiveGroup(configuration_->active_screen_group_id, render_inline);
     if(res != 0) {
         LOG_WRN("Falling back to screen group %u.", screen_group_ids.front());
         res = main_view_->SetActiveGroup(screen_group_ids.front(), render_inline);
     }
 
-    navigation_service_->SetGroupIds(std::move(screen_group_ids));
     if(auto active_screen_group_id = main_view_->GetActiveGroupId())
         navigation_service_->SetActiveGroupId(*active_screen_group_id);
 
@@ -452,6 +454,11 @@ int UiController::Reconfigure(std::shared_ptr<UiConfiguration> configuration) {
 
         res = Configure(std::move(configuration), true);
         ConfigureGestures();
+
+        // A unit that showed nothing when it started (no screens stored, no demo) never rendered its view, and
+        // a group is then only recorded as the active one. The first configuration it is given renders it.
+        if(res == 0 && !main_view_->IsReady())
+            res = main_view_->Render();
     }
 
     if(res != 0)
@@ -546,14 +553,19 @@ void UiController::OnNavigationChanged(const NavigationEventChannel::EventMessag
             return;
 
         switch(static_cast<NavigationAction>(*action)) {
+            // An event is delivered some time after it was published, possibly after the UI was rebuilt and the
+            // navigation started over (NavigationService::Reset()). The service holds what was asked for last,
+            // so an event for anything else is stale: another request or a rebuild came after it.
             case NavigationAction::ShowGroup:
-                if(auto screen_group_id = GetPayloadId(event, NavigationPayloadType::TargetGroupId))
+                if(auto screen_group_id = GetPayloadId(event, NavigationPayloadType::TargetGroupId);
+                    screen_group_id.has_value() && navigation_service_->GetActiveGroupId() == screen_group_id)
                     ShowGroup(*screen_group_id);
 
                 break;
 
             case NavigationAction::ShowOverlay:
-                if(auto screen_id = GetPayloadId(event, NavigationPayloadType::TargetScreenId))
+                if(auto screen_id = GetPayloadId(event, NavigationPayloadType::TargetScreenId);
+                    screen_id.has_value() && navigation_service_->GetActiveOverlayId() == screen_id)
                     ShowOverlay(*screen_id);
 
                 break;
@@ -632,6 +644,12 @@ void UiController::CloseOverlay() {
 
 std::shared_ptr<NavigationService> UiController::GetNavigationService() const {
     return navigation_service_;
+}
+
+bool UiController::IsShowingScreens() const {
+    ScopedLvglLock lvgl_guard;
+
+    return main_view_ != nullptr && main_view_->IsReady() && main_view_->GetActiveGroupId().has_value();
 }
 
 std::shared_ptr<UiConfigurationManager> UiController::GetConfigurationManager() const {

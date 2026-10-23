@@ -61,6 +61,8 @@ public:
 
     std::optional<uint32_t> GetActiveGroupId() const;
     bool IsOverlayActive() const;
+    // The overlay a request was taken for and not closed since; what the view layer checks an event against.
+    std::optional<uint32_t> GetActiveOverlayId() const;
 };
 
 } // namespace eerie_leap::domain::ui_domain::services

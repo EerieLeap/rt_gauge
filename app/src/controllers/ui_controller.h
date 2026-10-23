@@ -177,6 +177,7 @@ public:
         std::shared_ptr<ConfigurationService> configuration_service,
         std::shared_ptr<AssetsManager> assets_manager = nullptr
     );
+    // Not under the LVGL lock: it waits for a rebuild in progress, which holds its guard and then takes that lock.
     ~UiController();
     // The subscriptions, the render dispatcher and the registered asset kinds refer to it.
     UiController(const UiController&) = delete;
@@ -189,6 +190,8 @@ public:
 
     std::shared_ptr<NavigationService> GetNavigationService() const;
     std::shared_ptr<UiConfigurationManager> GetConfigurationManager() const;
+    // Whether a screen group is on the display: false for a unit that stores no screens and runs no demo.
+    bool IsShowingScreens() const;
 
     /**
      * @brief Sets what Reconfigure() replays once the new screens stand, after it has asked every settings

@@ -32,6 +32,7 @@
 #include "domain/settings_domain/event_bus/settings_events_channel.h"
 #include "domain/ui_domain/configuration/ui_configuration_manager.h"
 #include "domain/ui_domain/event_bus/navigation_event_channel.h"
+#include "domain/ui_domain/models/navigation_intent.h"
 #include "domain/ui_domain/models/screen_configuration.h"
 #include "domain/ui_domain/models/ui_configuration.h"
 #include "domain/ui_domain/models/widget_configuration.h"
@@ -47,6 +48,9 @@ using eerie_leap::domain::settings_domain::event_bus::SettingsEventsChannel;
 using eerie_leap::domain::settings_domain::event_bus::SettingsEventType;
 using eerie_leap::domain::ui_domain::configuration::UiConfigurationManager;
 using eerie_leap::domain::ui_domain::event_bus::NavigationEventChannel;
+using eerie_leap::domain::ui_domain::event_bus::NavigationEventType;
+using eerie_leap::domain::ui_domain::event_bus::NavigationPayloadType;
+using eerie_leap::domain::ui_domain::models::NavigationAction;
 using eerie_leap::domain::ui_domain::models::ScreenConfiguration;
 using eerie_leap::domain::ui_domain::models::ScreenType;
 using eerie_leap::domain::ui_domain::models::UiConfiguration;
@@ -98,6 +102,7 @@ public:
     }
 };
 
+#ifdef CONFIG_EERIE_LEAP_UI_DEMO_CONFIGURATION
 // One controller for the whole suite: Initialize() builds every screen in the demo
 // configuration and writes ~870 KB of assets, and its LVGL objects are process-wide.
 struct Fixture {
@@ -110,10 +115,12 @@ struct Fixture {
 
 Fixture fixture;
 
+#endif
 void EnsureBus() {
     static ControllerBus bus;
 }
 
+#ifdef CONFIG_EERIE_LEAP_UI_DEMO_CONFIGURATION
 void* Setup() {
     EnsureBus();
 
@@ -176,10 +183,12 @@ AssetsManager& Assets() {
 constexpr uint8_t UI_ASSETS_ACCESS = ToMask(AssetAccess::READ) | ToMask(AssetAccess::WRITE)
     | ToMask(AssetAccess::DELETE);
 
+#endif
 // The demo files, which the kinds keep in directories of their own.
 constexpr std::array<std::string_view, 3> DEMO_ASSETS{ "ui_img_norma_al88.bin", "ui_img_arrow_al88.bin",
     "ui_lottie_spinner.json" };
 
+#ifdef CONFIG_EERIE_LEAP_UI_DEMO_CONFIGURATION
 void CheckProvider(
     const AssetsManager& assets,
     AssetKind kind,
@@ -236,8 +245,10 @@ void CheckDemoAssets(const AssetsManager& assets, const IFsService& fs_service) 
     }
 }
 
+#endif
 } // namespace
 
+#ifdef CONFIG_EERIE_LEAP_UI_DEMO_CONFIGURATION
 ZTEST_SUITE(ui_controller, NULL, Setup, Reset, Reset, Teardown);
 
 // What a client sees of the gauge's UI assets (the SMP assets group) is these two kinds.
@@ -388,6 +399,7 @@ ZTEST(ui_controller, test_closing_with_no_overlay_open_is_refused) {
 // The kinds go with the controller, which the suite above keeps to its end, so this one builds its own.
 ZTEST_SUITE(ui_controller_assets, NULL, NULL, NULL, NULL, NULL);
 
+#endif
 namespace {
 
 // A freshly formatted volume.
@@ -412,6 +424,7 @@ std::shared_ptr<WorkQueueThread> StartConfigWorkQueue() {
 
 } // namespace
 
+#ifdef CONFIG_EERIE_LEAP_UI_DEMO_CONFIGURATION
 ZTEST(ui_controller_assets, test_destroying_the_controller_unregisters_its_asset_kinds) {
     auto fs_service = FormatFs();
     auto config_work_queue = StartConfigWorkQueue();
@@ -458,6 +471,7 @@ ZTEST(ui_controller_assets, test_the_demo_assets_move_from_the_ui_assets_root_in
     CheckDemoAssets(*assets_manager, *fs_service);
 }
 
+#endif
 namespace {
 
 // A configuration of one bar on each of the given groups, the first of them the one it starts on, and, when
@@ -570,6 +584,7 @@ ZTEST(ui_controller_stored, test_a_stored_configuration_survives_initialize) {
     }
 }
 
+#ifdef CONFIG_EERIE_LEAP_UI_DEMO_CONFIGURATION
 // A unit that stores nothing shows the demo, and what it stored is kept from then on.
 ZTEST(ui_controller_stored, test_the_demo_is_stored_once_and_then_kept) {
     EnsureBus();
@@ -620,9 +635,35 @@ ZTEST(ui_controller_stored, test_demo_assets_only_fill_in_missing_files) {
     CheckLoads(*images, "ui_img_norma_al88.bin", UI_IMG_NORMA_AL88_DATA);
 }
 
+#endif
+#ifndef CONFIG_EERIE_LEAP_UI_DEMO_CONFIGURATION
+// Without the demo a unit that stores nothing shows nothing and writes nothing.
+ZTEST(ui_controller_stored, test_without_the_demo_a_unit_with_nothing_stored_shows_nothing) {
+    EnsureBus();
+    auto fs_service = FormatFs();
+    auto config_work_queue = StartConfigWorkQueue();
+
+    auto assets_manager = std::make_shared<AssetsManager>();
+    auto controller = std::make_shared<UiController>(fs_service, config_work_queue, nullptr, assets_manager);
+    zassert_equal(controller->Initialize(), 0, "Expected the UI controller to initialize.");
+
+    zassert_true(controller->GetConfigurationManager()->Get()->screen_configurations.empty());
+    zassert_false(controller->GetNavigationService()->GetActiveGroupId().has_value());
+    zassert_false(controller->IsShowingScreens());
+
+    for(const auto kind : { AssetKind::IMAGES, AssetKind::ANIMATIONS }) {
+        const auto provider = assets_manager->Find(kind);
+        zassert_not_null(provider.get());
+        for(const auto name : DEMO_ASSETS)
+            zassert_false(provider->store->Exists(name), "Expected %s not to be written.", std::string(name).c_str());
+    }
+}
+#endif
+
 namespace {
 
 constexpr int REBUILD_TIMEOUT_MS = 5000;
+constexpr int POLL_MS = 20;
 constexpr uint32_t STORED_GROUP_ID = 5;
 constexpr uint32_t SECOND_STORED_GROUP_ID = 6;
 
@@ -652,7 +693,14 @@ void* RebuildSetup() {
         rebuild.fs_service, rebuild.config_work_queue, nullptr, std::make_shared<AssetsManager>()
     );
     zassert_equal(rebuild.controller->Initialize(), 0, "Expected the UI controller to initialize.");
-    zassert_equal(rebuild.controller->Start(), 0, "Expected the UI controller to start.");
+    // Without the demo there is nothing to show yet, and Start() says so; the first stored configuration must
+    // still be shown.
+    const int started = rebuild.controller->Start();
+#ifdef CONFIG_EERIE_LEAP_UI_DEMO_CONFIGURATION
+    zassert_equal(started, 0, "Expected the UI controller to start.");
+#else
+    zassert_not_equal(started, 0, "Expected nothing to show without the demo.");
+#endif
 
     rebuild.manager = rebuild.controller->GetConfigurationManager();
     rebuild.navigation_service = rebuild.controller->GetNavigationService();
@@ -680,9 +728,9 @@ void RebuildBefore(void*) {
     if(rebuild.navigation_service->IsOverlayActive())
         rebuild.navigation_service->CloseOverlay();
 
-    k_msleep(SETTLE_MS);
-
-    k_sem_reset(&rebuild.replayed);
+    // Whatever a rebuild of the test before still sends has been sent once nothing arrives for a while.
+    while(k_sem_take(&rebuild.replayed, K_MSEC(SETTLE_MS)) == 0) {
+    }
     k_sem_reset(&rebuild.settings_requested);
     rebuild.replay_count = 0;
 }
@@ -790,10 +838,13 @@ ZTEST(ui_controller_rebuild, test_stores_in_a_row_leave_the_last_one_shown) {
     for(const uint32_t group_id : { 11U, 12U, LAST_GROUP_ID })
         zassert_true(rebuild.manager->Update(MakeConfiguration({ group_id })));
 
-    zassert_true(WaitForRebuild());
-    k_msleep(SETTLE_MS * 2);
+    // However many rebuilds the stores made, the last one is the group shown once they are done.
+    const int64_t deadline = k_uptime_get() + REBUILD_TIMEOUT_MS;
+    while(rebuild.navigation_service->GetActiveGroupId() != LAST_GROUP_ID && k_uptime_get() < deadline)
+        k_msleep(POLL_MS);
 
-    zassert_equal(*rebuild.navigation_service->GetActiveGroupId(), LAST_GROUP_ID);
+    zassert_true(rebuild.navigation_service->GetActiveGroupId() == LAST_GROUP_ID, "Expected the last store shown.");
+    zassert_true(WaitForRebuild());
     zassert_true(rebuild.replay_count.load() >= 1);
 }
 
@@ -811,4 +862,53 @@ ZTEST(ui_controller_rebuild, test_a_configuration_without_screens_leaves_no_grou
     zassert_true(rebuild.manager->Update(MakeConfiguration({ STORED_GROUP_ID })));
     zassert_true(WaitForRebuild());
     zassert_equal(*rebuild.navigation_service->GetActiveGroupId(), STORED_GROUP_ID);
+}
+
+// The first thing stored on a unit that showed nothing (a release build, without the demo) must reach the screen too:
+// the view was never rendered, so it renders now.
+ZTEST(ui_controller_rebuild, test_the_first_stored_configuration_is_shown) {
+    zassert_true(rebuild.manager->Update(MakeConfiguration({ STORED_GROUP_ID })));
+    zassert_true(WaitForRebuild());
+
+    zassert_true(rebuild.controller->IsShowingScreens());
+    zassert_equal(*rebuild.navigation_service->GetActiveGroupId(), STORED_GROUP_ID);
+}
+
+// An event is delivered some time after it was published. One for the screens of a configuration that has since
+// been replaced would show an overlay that navigation no longer holds, or a group that was not asked for.
+ZTEST(ui_controller_rebuild, test_a_stale_navigation_event_is_dropped) {
+    constexpr uint32_t OVERLAY_SCREEN_ID = 40;
+
+    zassert_true(
+        rebuild.manager->Update(MakeConfiguration({ STORED_GROUP_ID, SECOND_STORED_GROUP_ID }, OVERLAY_SCREEN_ID))
+    );
+    zassert_true(WaitForRebuild());
+    k_sem_reset(&rebuild.settings_requested);
+
+    // The navigation holds no overlay, so an event to show one is from before the rebuild.
+    NavigationEventChannel::GetInstance().Publish(
+        { .source_id = 0,
+            .type = NavigationEventType::Changed,
+            .payload = { { NavigationPayloadType::Action, static_cast<uint32_t>(NavigationAction::ShowOverlay) },
+                { NavigationPayloadType::TargetScreenId, OVERLAY_SCREEN_ID } } }
+    );
+    zassert_not_equal(
+        k_sem_take(&rebuild.settings_requested, K_MSEC(SETTLE_MS)), 0, "Expected the stale overlay not to be built."
+    );
+    zassert_false(rebuild.navigation_service->IsOverlayActive());
+
+    // And a group that is not the one asked for last.
+    NavigationEventChannel::GetInstance().Publish(
+        { .source_id = 0,
+            .type = NavigationEventType::Changed,
+            .payload = { { NavigationPayloadType::Action, static_cast<uint32_t>(NavigationAction::ShowGroup) },
+                { NavigationPayloadType::TargetGroupId, SECOND_STORED_GROUP_ID } } }
+    );
+    k_msleep(SETTLE_MS);
+    zassert_equal(*rebuild.navigation_service->GetActiveGroupId(), STORED_GROUP_ID);
+
+    // The ones navigation asked for are still shown.
+    zassert_equal(rebuild.navigation_service->ShowOverlay(OVERLAY_SCREEN_ID), 0);
+    zassert_equal(k_sem_take(&rebuild.settings_requested, K_MSEC(DISPATCH_TIMEOUT_MS)), 0);
+    zassert_true(rebuild.navigation_service->IsOverlayActive());
 }

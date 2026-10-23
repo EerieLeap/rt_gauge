@@ -115,6 +115,9 @@ protected:
     // Moves and sizes the widget to the box the layout properties hold now: a size under one cell is held at
     // one, and a size and position within the grid. Does nothing before the box was placed.
     void ApplyLayout();
+    // After the box of a rendered widget changed size. The default applies the theme again, which is where
+    // most widgets place what depends on their size; one that builds from its size renders again.
+    virtual void OnBoxResized();
     void UpdateProcessingState();
     virtual void OnProcessingSuspended();
     // Idempotently synchronize owned work, including after an ancestor changes between refreshes.

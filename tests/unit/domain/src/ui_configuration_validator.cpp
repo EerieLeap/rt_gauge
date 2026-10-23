@@ -1147,16 +1147,34 @@ ZTEST(ui_configuration_validator, test_the_box_properties_are_refused_in_a_prope
     }
 }
 
-ZTEST(ui_configuration_validator, test_a_root_widget_accepts_a_binding_to_its_box_in_every_direction) {
+ZTEST(ui_configuration_validator, test_a_root_widget_accepts_an_inbound_binding_to_its_box) {
     for(auto type : LAYOUT_PROPERTIES) {
-        for(auto direction : ALL_DIRECTIONS) {
+        auto configuration = MakeConfiguration();
+        auto binding = MakeSensorBinding();
+        binding.target = type;
+        binding.direction = PropertyBindingDirection::In;
+        AddBinding(*configuration, binding);
+
+        zassert_true(Validates(*configuration), "Refused a binding to %u.", static_cast<unsigned>(type));
+    }
+}
+
+// Nothing a widget does changes its box, so there is nothing for an outbound binding to send.
+ZTEST(ui_configuration_validator, test_a_widgets_box_never_sends) {
+    for(auto type : LAYOUT_PROPERTIES) {
+        for(auto direction : { PropertyBindingDirection::Out, PropertyBindingDirection::InOut }) {
             auto configuration = MakeConfiguration();
             auto binding = MakeSensorBinding();
             binding.target = type;
             binding.direction = direction;
             AddBinding(*configuration, binding);
 
-            zassert_true(Validates(*configuration), "Refused a binding to %u.", static_cast<unsigned>(type));
+            const auto message = ValidationError(*configuration);
+            zassert_true(
+                message.contains("a widget's box never sends"), "Property %u: '%s'", static_cast<unsigned>(type),
+                message.c_str()
+            );
+            zassert_true(message.contains("Widget ID: 0"), "%s", message.c_str());
         }
     }
 }
@@ -1174,8 +1192,9 @@ ZTEST(ui_configuration_validator, test_a_child_widget_refuses_a_binding_to_a_box
 
             ExpectCompositionError(*screen, { "Widget ID: 12", "a child fills its owner" });
 
-            // The owner is a root, and may have it.
+            // The owner is a root, and may have it inbound.
             screen->widget_configurations[1]->bindings.clear();
+            binding.direction = PropertyBindingDirection::In;
             screen->widget_configurations[0]->bindings = { binding };
             UiConfigurationValidator::Validate(*screen);
         }
