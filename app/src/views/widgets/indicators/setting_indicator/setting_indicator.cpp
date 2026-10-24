@@ -22,9 +22,9 @@ void SettingIndicator::RegisterProperties(WidgetPropertyStore& store) const {
 
     store.RegisterColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE);
 
-    store.Register(WidgetPropertyType::LABEL, ConfigValue{ std::pmr::string{} }, PropertyChangeEffect::Repaint);
-    store.Register(WidgetPropertyType::UNIT, ConfigValue{ std::pmr::string{} }, PropertyChangeEffect::Repaint);
-    store.Register(WidgetPropertyType::VALUE_PRECISION, ConfigValue{ 0 }, PropertyChangeEffect::Repaint);
+    store.Register(WidgetPropertyType::LABEL, ConfigValue{ std::pmr::string{} }, PropertyChangeEffect::Rebuild);
+    store.Register(WidgetPropertyType::UNIT, ConfigValue{ std::pmr::string{} }, PropertyChangeEffect::Rebuild);
+    store.Register(WidgetPropertyType::VALUE_PRECISION, ConfigValue{ 0 }, PropertyChangeEffect::Rebuild);
 }
 
 int SettingIndicator::ApplyTheme(const ITheme& theme) {

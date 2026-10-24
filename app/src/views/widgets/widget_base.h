@@ -141,6 +141,11 @@ protected:
     // once. Callers are already on the UI thread, so this skips the dispatch guard.
     void ReplayProperties();
     void ReplayPendingProperties();
+
+    // The parts of ApplyEditorConfiguration(), all on the UI thread with the new record already in place.
+    bool IsDrivenByInboundBinding(WidgetPropertyType type) const;
+    void ApplyEditorProperty(const WidgetConfiguration& previous, WidgetPropertyType type);
+    void ApplyEditorBox(const WidgetConfiguration& previous);
     static void RefreshCallback(lv_event_t* event);
 
     void RunEffect(PropertyChangeEffect effect);

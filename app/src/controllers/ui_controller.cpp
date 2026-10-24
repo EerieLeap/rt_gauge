@@ -736,7 +736,15 @@ bool UiController::ValidateConfiguration(const UiConfiguration& configuration, s
 
 // The view cannot add or drop a screen group, or an overlay, nor move a screen between groups, in place: those
 // are left to a whole show, which keeps the place.
-int UiController::PatchScreen(const ScreenPatch& patch, std::vector<uint32_t>& overlays_to_reshow) {
+size_t UiController::GetEncodedSize(const UiConfiguration& configuration) {
+    return ui_configuration_manager_->GetEncodedSize(configuration);
+}
+
+int UiController::PatchScreen(
+    const ScreenPatch& patch,
+    std::vector<uint32_t>& overlays_to_reshow,
+    bool& has_bound_update
+) {
     const auto& old_screen = patch.old_screen;
     const auto& new_screen = patch.new_screen;
     const bool is_overlay = (old_screen != nullptr && old_screen->is_overlay)
@@ -760,7 +768,23 @@ int UiController::PatchScreen(const ScreenPatch& patch, std::vector<uint32_t>& o
         if(screen == nullptr)
             return PATCH_NEEDS_REBUILD;
 
+#ifdef CONFIG_ZTEST
+        if(patch_faults_after_ == 0)
+            throw std::runtime_error("A patch of a screen failed (injected).");
+
+        if(patch_faults_after_ != SIZE_MAX)
+            --patch_faults_after_;
+#endif
+
         screen->ApplyWidgetPatches(new_screen, patch.widgets);
+
+        // A property an event drives keeps its value, and gets the event again only if it is asked to publish.
+        for(const auto& widget_patch : patch.widgets) {
+            if(widget_patch.action == WidgetAction::Update
+                && widget_patch.widget != nullptr
+                && !widget_patch.widget->bindings.empty())
+                has_bound_update = true;
+        }
 
         return 0;
     }
@@ -782,13 +806,17 @@ int UiController::PatchScreen(const ScreenPatch& patch, std::vector<uint32_t>& o
 }
 
 // The screens of a group are drawn by z-index, and equal ones in the order the configuration lists them, which is
-// what a whole stage of this configuration would give: a screen that was put again is where the list has it.
-void UiController::OrderPatchedGroups(const PatchPlan& plan, const UiConfiguration& patched) {
-    for(const auto& patch : plan.screens) {
-        if(patch.new_screen == nullptr || patch.new_screen->is_overlay || patch.action == ScreenAction::Widgets)
-            continue;
+// what a whole stage of this configuration would give: a screen that was put again is where the list has it. Every
+// group is put in order, not only those a patch names: a screen removed and put again in one request changes the
+// order of the list and nothing else.
+void UiController::OrderPatchedGroups(const UiConfiguration& patched) {
+    std::vector<uint32_t> group_ids;
+    for(const auto& screen : patched.screen_configurations) {
+        if(!screen->is_overlay && std::ranges::find(group_ids, screen->screen_group_id) == group_ids.end())
+            group_ids.push_back(screen->screen_group_id);
+    }
 
-        const auto group_id = patch.new_screen->screen_group_id;
+    for(const auto group_id : group_ids) {
         std::vector<std::shared_ptr<ScreenConfiguration>> members;
         for(const auto& screen : patched.screen_configurations) {
             if(!screen->is_overlay && screen->screen_group_id == group_id)
@@ -808,7 +836,24 @@ void UiController::OrderPatchedGroups(const PatchPlan& plan, const UiConfigurati
 }
 
 int UiController::ApplyPatch(std::shared_ptr<UiConfiguration> patched, PatchPlan& plan) {
-    ScopedLvglLock lvgl_guard;
+    bool is_replay_needed = false;
+    int res = 0;
+    {
+        ScopedLvglLock lvgl_guard;
+        res = ApplyPatchLocked(std::move(patched), plan, is_replay_needed);
+    }
+
+    // As after a rebuild: what the new widgets bind to publishes only on change, so they are told once the screens
+    // stand, outside the LVGL lock like Reconfigure() does it.
+    if(res == 0 && is_replay_needed) {
+        RequestSettingsState();
+        ReplayState();
+    }
+
+    return res;
+}
+
+int UiController::ApplyPatchLocked(std::shared_ptr<UiConfiguration> patched, PatchPlan& plan, bool& is_replay_needed) {
 
     if(configuration_ == nullptr || main_view_ == nullptr || patched == nullptr)
         return -EINVAL;
@@ -816,9 +861,10 @@ int UiController::ApplyPatch(std::shared_ptr<UiConfiguration> patched, PatchPlan
     // Every overlay a change was made on, whether it is up now or not.
     std::vector<uint32_t> overlays_to_reshow;
     int outcome = 0;
+    bool has_bound_update = false;
     try {
         for(const auto& patch : plan.screens) {
-            outcome = PatchScreen(patch, overlays_to_reshow);
+            outcome = PatchScreen(patch, overlays_to_reshow, has_bound_update);
             if(outcome != 0)
                 break;
         }
@@ -843,15 +889,15 @@ int UiController::ApplyPatch(std::shared_ptr<UiConfiguration> patched, PatchPlan
         return res == -ENOENT ? 0 : res;
     }
 
-    OrderPatchedGroups(plan, *patched);
+    OrderPatchedGroups(*patched);
+
+    // Widgets built again have not been told what they bind to, and neither have bound ones put in place.
+    is_replay_needed = has_bound_update || std::ranges::any_of(plan.effects, [](PatchEffect effect) {
+        return effect == PatchEffect::WidgetRebuilt || effect == PatchEffect::GroupRebuilt;
+    });
 
     // Overlays are built from the configuration when they are shown.
     const auto active_overlay = navigation_service_->GetActiveOverlayId();
-    std::vector<uint32_t> overlay_ids = overlays_to_reshow;
-    for(const auto& screen : configuration_->screen_configurations) {
-        if(screen->is_overlay)
-            overlay_ids.push_back(screen->id);
-    }
     configuration_ = patched;
 
     if(active_overlay.has_value()
@@ -860,10 +906,10 @@ int UiController::ApplyPatch(std::shared_ptr<UiConfiguration> patched, PatchPlan
         navigation_service_->ShowOverlay(*active_overlay);
     }
 
-    // A change on an overlay shows only where the overlay is up.
+    // A change on an overlay shows only where the overlay is up; an operation that changed nothing on it is 0.
     for(size_t i = 0; i < plan.effects.size() && i < plan.op_screen_ids.size(); ++i) {
         const auto screen_id = plan.op_screen_ids[i];
-        if(std::ranges::find(overlay_ids, screen_id) != overlay_ids.end())
+        if(std::ranges::find(overlays_to_reshow, screen_id) != overlays_to_reshow.end())
             plan.effects[i] = active_overlay == screen_id ? PatchEffect::GroupRebuilt : PatchEffect::NotShown;
     }
 

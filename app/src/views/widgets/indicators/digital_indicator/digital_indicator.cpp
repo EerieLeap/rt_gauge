@@ -27,7 +27,7 @@ void DigitalIndicator::RegisterProperties(WidgetPropertyStore& store) const {
 
     store.RegisterColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE);
 
-    store.Register(WidgetPropertyType::VALUE_PRECISION, ConfigValue{ 0 }, PropertyChangeEffect::Repaint);
+    store.Register(WidgetPropertyType::VALUE_PRECISION, ConfigValue{ 0 }, PropertyChangeEffect::Rebuild);
 }
 
 int DigitalIndicator::ApplyTheme(const ITheme& theme) {

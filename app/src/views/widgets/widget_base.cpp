@@ -689,47 +689,76 @@ void WidgetBase::ApplyEditorConfiguration(std::shared_ptr<WidgetConfiguration> c
     transform_.Configure(*configuration_);
 
     dispatch_guard_->Dispatch([&] {
-        const auto apply = [&](WidgetPropertyType type) {
-            const auto before = previous->properties.find(type);
-            const auto after = configuration_->properties.find(type);
-            const bool had_before = before != previous->properties.end();
-            const bool has_after = after != configuration_->properties.end();
-            if(!had_before && !has_after)
-                return;
-
-            if(had_before && has_after && before->second == after->second)
-                return;
-
-            const bool is_set = has_after ? properties_->Set(type, after->second) : properties_->Reset(type);
-            if(!is_set) {
-                LOG_WRN(
-                    "Widget %u kept property %u: the editor's value was refused.", id_, static_cast<unsigned>(type)
-                );
-                return;
-            }
-
-            NotifyPropertyChanged(type, properties_->Get(type), properties_->GetEffect(type));
-        };
-
         // VALUE consumes what the others set, as a replay applies it last.
         const auto registered = properties_->GetRegisteredTypes();
         for(const auto type : registered) {
             if(type != WidgetPropertyType::VALUE && !WidgetPropertyValidator::IsLayoutProperty(type))
-                apply(type);
+                ApplyEditorProperty(*previous, type);
         }
-        apply(WidgetPropertyType::VALUE);
+        ApplyEditorProperty(*previous, WidgetPropertyType::VALUE);
 
-        if(grid_layout_.has_value()
-            && (previous->position_grid.x != configuration_->position_grid.x
-                || previous->position_grid.y != configuration_->position_grid.y
-                || previous->size_grid.width != configuration_->size_grid.width
-                || previous->size_grid.height != configuration_->size_grid.height)) {
-            // The record's box is the default the layout properties start from.
-            RegisterLayoutProperties(*properties_);
-            ApplyLayout();
-            transform_.UpdateAnchor();
-        }
+        ApplyEditorBox(*previous);
     });
+}
+
+// A property an inbound binding drives holds what the last event said, which the record's value does not replace:
+// a widget built from the record would show the record's value until the next event, and this one does not even
+// that. (The caller asks the state to be published again, so the event comes.)
+bool WidgetBase::IsDrivenByInboundBinding(WidgetPropertyType type) const {
+    return std::ranges::any_of(configuration_->bindings, [type](const PropertyBinding& binding) {
+        return binding.target == type && binding.direction != PropertyBindingDirection::Out;
+    });
+}
+
+void WidgetBase::ApplyEditorProperty(const WidgetConfiguration& previous, WidgetPropertyType type) {
+    if(IsDrivenByInboundBinding(type))
+        return;
+
+    const auto before = previous.properties.find(type);
+    const auto after = configuration_->properties.find(type);
+    const bool had_before = before != previous.properties.end();
+    const bool has_after = after != configuration_->properties.end();
+    if(!had_before && !has_after)
+        return;
+
+    if(had_before && has_after && before->second == after->second)
+        return;
+
+    bool is_set = has_after ? properties_->Set(type, after->second) : properties_->Reset(type);
+    if(!is_set) {
+        // As a widget built from the record would have it: the property it does not accept is left out.
+        LOG_WRN("Widget %u: the value of property %u was refused.", id_, static_cast<unsigned>(type));
+        is_set = properties_->Reset(type);
+    }
+
+    if(!is_set)
+        return;
+
+    NotifyPropertyChanged(type, properties_->Get(type), properties_->GetEffect(type));
+}
+
+void WidgetBase::ApplyEditorBox(const WidgetConfiguration& previous) {
+    if(!grid_layout_.has_value()
+        || (previous.position_grid.x == configuration_->position_grid.x
+            && previous.position_grid.y == configuration_->position_grid.y
+            && previous.size_grid.width == configuration_->size_grid.width
+            && previous.size_grid.height == configuration_->size_grid.height))
+        return;
+
+    // The record's box is the default the layout properties start from; one that is bound keeps its value.
+    std::vector<std::pair<WidgetPropertyType, ConfigValue>> bound_layout;
+    for(const auto type : { WidgetPropertyType::LAYOUT_X, WidgetPropertyType::LAYOUT_Y,
+            WidgetPropertyType::LAYOUT_WIDTH, WidgetPropertyType::LAYOUT_HEIGHT }) {
+        if(IsDrivenByInboundBinding(type))
+            bound_layout.emplace_back(type, properties_->Get(type));
+    }
+
+    RegisterLayoutProperties(*properties_);
+    for(const auto& [type, value] : bound_layout)
+        properties_->Set(type, value);
+
+    ApplyLayout();
+    transform_.UpdateAnchor();
 }
 
 std::shared_ptr<WidgetConfiguration> WidgetBase::GetConfiguration() const {

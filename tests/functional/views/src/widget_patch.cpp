@@ -13,11 +13,15 @@
 
 #include "utilities/memory/memory_resource_manager.h"
 
+#include "domain/sensor_domain/event_bus/sensor_events_channel.h"
 #include "domain/ui_domain/configuration/parsers/ui_configuration_validator.h"
 #include "domain/ui_domain/models/icon_type.h"
 #include "domain/ui_domain/models/ui_configuration.h"
 #include "domain/ui_domain/preview/ui_patch.h"
 #include "domain/ui_domain/utilities/widget_property_validator.h"
+#include "event_bus/event_channels.h"
+#include "subsys/event_bus/event_channel_id.h"
+#include "utilities/string/string_helpers.h"
 #include "views/main_view.h"
 #include "views/screens/screen.h"
 #include "views/screens/screen_group.h"
@@ -35,9 +39,13 @@ using namespace eerie_leap::domain::ui_domain::models;
 using namespace eerie_leap::domain::ui_domain::preview;
 using namespace eerie_leap::views::widgets;
 
+using namespace eerie_leap::domain::sensor_domain::event_bus;
 using eerie_leap::domain::ui_domain::configuration::parsers::UiConfigurationValidator;
 using eerie_leap::domain::ui_domain::utilities::WidgetPropertyValidator;
+using eerie_leap::event_bus::InitializeEventChannels;
+using eerie_leap::subsys::event_bus::EventChannelId;
 using eerie_leap::utilities::memory::Mrm;
+using eerie_leap::utilities::string::StringHelpers;
 using eerie_leap::views::MainView;
 using eerie_leap::views::screens::Screen;
 using eerie_leap::views::screens::ScreenGroup;
@@ -167,6 +175,7 @@ PatchOp Remove(uint32_t widget_id) {
 
 void* SetUp() {
     EnsureTestDisplay();
+    InitializeEventChannels();
 
     return nullptr;
 }
@@ -196,7 +205,6 @@ ZTEST(widget_patch, test_an_in_place_change_keeps_the_objects_and_orders_the_roo
     auto recolored = Copy(*first);
     recolored->properties[WidgetPropertyType::COLOR_PRIMARY_ACTIVE] = std::pmr::string("#FF0000FF");
     recolored->properties[WidgetPropertyType::OPACITY] = 128;
-    recolored->properties[WidgetPropertyType::MAX_VALUE] = 200.0;
     recolored->position_grid = { 5, 3 };
     recolored->size_grid = { 3, 3 };
     recolored->z_index = 3;
@@ -289,7 +297,9 @@ ZTEST(widget_patch, test_a_change_that_needs_a_rebuild_replaces_the_widget_in_it
     zassert_true(new_widget->IsReady(), "Built, rendered");
     zassert_true(new_widget->IsSmoothed());
     zassert_equal(new_widget->GetConfiguration(), smoothed);
-    zassert_equal(lv_obj_get_child_count(scene.screen.GetContainer()->GetObject()), child_count, "and the old one gone");
+    zassert_equal(
+        lv_obj_get_child_count(scene.screen.GetContainer()->GetObject()), child_count, "and the old one gone"
+    );
 
     // Between its neighbours, as before, in the vector and in LVGL.
     zassert_true((Ids(scene.screen) == std::vector<uint32_t>{ 1, 2, 3 }));
@@ -319,7 +329,10 @@ ZTEST(widget_patch, test_widgets_are_added_and_removed_and_the_rest_stays) {
     zassert_equal(kept->GetContainer()->GetObject(), kept_container);
     zassert_equal(lv_obj_get_child_count(scene.screen.GetContainer()->GetObject()), 3U);
     for(uint32_t index = 0; index < 3; ++index)
-        zassert_equal(lv_obj_get_index((*scene.screen.GetWidgets())[index]->GetContainer()->GetObject()), index);
+        zassert_equal(
+            lv_obj_get_index((*scene.screen.GetWidgets())[index]->GetContainer()->GetObject()),
+            static_cast<int32_t>(index)
+        );
 
     zassert_true(Find(scene.screen, 3)->IsReady());
     zassert_true(Find(scene.screen, 4)->IsReady());
@@ -512,16 +525,19 @@ ZTEST(widget_patch, test_the_classifier_never_applies_in_place_what_a_widget_reg
         std::unique_ptr<IWidget> widget;
         if(type == WidgetType::IndicatorDial) {
             widget = factory.CreateWidget(type, 1, container, context);
-            views_test::InjectChildren(*widget, *configuration, { views_test::NeedleConfiguration(2, IconType::Label) }, context);
+            views_test::InjectChildren(
+                *widget, *configuration, { views_test::NeedleConfiguration(2, IconType::Label) }, context
+            );
             widget->Configure(configuration);
         } else {
             widget = factory.CreateWidget(configuration, container, context);
         }
 
-        const auto& base = static_cast<const WidgetBase&>(*widget);
+        const auto& base = dynamic_cast<const WidgetBase&>(*widget);
         size_t compared = 0;
         for(const auto property : widget->GetSupportedProperties()) {
-            if(WidgetPropertyValidator::IsLayoutProperty(property) || WidgetPropertyValidator::IsStructuralProperty(property))
+            if(WidgetPropertyValidator::IsLayoutProperty(property)
+                || WidgetPropertyValidator::IsStructuralProperty(property))
                 continue;
 
             auto changed = Copy(*configuration);
@@ -583,8 +599,8 @@ ZTEST(widget_patch, test_screens_are_put_back_in_the_order_a_whole_stage_would_g
 }
 
 // What the three kinds of change cost on this host, printed for the record (the unit's CPU is slower by a factor the
-// report estimates). The numbers are not asserted; the ordering is.
-ZTEST(widget_patch, test_an_in_place_change_costs_less_than_a_widget_rebuild_and_a_widget_less_than_a_screen) {
+// report estimates). A clock is no proof of anything, so nothing here is asserted.
+ZTEST(widget_patch, test_what_an_in_place_change_a_widget_rebuild_and_a_screen_rebuild_cost) {
     constexpr int ROUNDS = 20;
     constexpr uint32_t WIDGETS = 12;
 
@@ -622,7 +638,323 @@ ZTEST(widget_patch, test_an_in_place_change_costs_less_than_a_widget_rebuild_and
         (void)rebuilt_screen.Render();
     });
 
-    printk("PATCH COST (host, %u widgets on the screen): in place %u us, one widget rebuilt %u us, a screen built again %u us\n", WIDGETS, static_cast<unsigned>(in_place), static_cast<unsigned>(rebuilt), static_cast<unsigned>(screen));
-    zassert_true(in_place < rebuilt, "in place %u us, rebuilt %u us", static_cast<unsigned>(in_place), static_cast<unsigned>(rebuilt));
-    zassert_true(rebuilt < screen, "rebuilt %u us, screen %u us", static_cast<unsigned>(rebuilt), static_cast<unsigned>(screen));
+    printk(
+        "PATCH COST (host, %u widgets on the screen): in place %u us, one widget rebuilt %u us, a screen built again "
+        "%u us\n",
+        WIDGETS, static_cast<unsigned>(in_place), static_cast<unsigned>(rebuilt), static_cast<unsigned>(screen)
+    );
+}
+
+// ======== A widget patched in place looks as one built from the new record ========
+
+namespace {
+
+struct LookCase {
+    WidgetType type;
+    IconType icon;
+};
+
+// A test table of a few cases; the build has no use for a way to catch its construction failing.
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization)
+const std::vector<LookCase> LOOK_CASES{
+    { WidgetType::IndicatorArcFill, IconType::None },
+    { WidgetType::IndicatorSegmentArc, IconType::None },
+    { WidgetType::IndicatorDigital, IconType::None },
+    { WidgetType::IndicatorHorizontalChart, IconType::None },
+    { WidgetType::IndicatorDial, IconType::None },
+    { WidgetType::IndicatorBar, IconType::None },
+    { WidgetType::IndicatorSetting, IconType::None },
+    { WidgetType::ControlSlider, IconType::None },
+    { WidgetType::ControlToggle, IconType::None },
+    { WidgetType::ControlButton, IconType::None },
+    // (No lottie: it cannot be built without an asset, and the table lists nothing of its own for it.)
+    { WidgetType::BasicIcon, IconType::Label },
+    { WidgetType::BasicIcon, IconType::Image },
+    { WidgetType::BasicIcon, IconType::Rectangle },
+    { WidgetType::BasicIcon, IconType::TriangleIsosceles },
+    { WidgetType::BasicIcon, IconType::TriangleRight },
+    { WidgetType::BasicIcon, IconType::Oval },
+    { WidgetType::BasicIcon, IconType::Line },
+    { WidgetType::BasicArcIcon, IconType::Rectangle },
+};
+
+// The records of a widget under test, the widget first: a dial has a needle.
+std::vector<std::shared_ptr<WidgetConfiguration>> LookRecords(const LookCase& look) {
+    auto root = make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
+    root->type = look.type;
+    root->id = 1;
+    root->position_grid = { 1, 2 };
+    root->size_grid = { 2, 2 };
+    if(look.icon != IconType::None)
+        root->properties[WidgetPropertyType::ICON_TYPE] = static_cast<int>(look.icon);
+
+    if(look.icon == IconType::Label)
+        root->properties[WidgetPropertyType::LABEL] = std::pmr::string("Ab");
+
+    std::vector<std::shared_ptr<WidgetConfiguration>> records{ root };
+    if(look.type == WidgetType::IndicatorDial) {
+        root->properties[WidgetPropertyType::CHILD_WIDGET_IDS] = std::pmr::vector<int>({ 2 }, Mrm::GetExtPmr());
+        records.push_back(views_test::NeedleConfiguration(2, IconType::Rectangle));
+    }
+
+    return records;
+}
+
+std::shared_ptr<ScreenConfiguration> LookScreen(const std::vector<std::shared_ptr<WidgetConfiguration>>& records) {
+    auto screen = MakeScreen();
+    for(const auto& record : records)
+        screen->AddWidget(record);
+
+    return screen;
+}
+
+void ExpectSameLook(const IWidget& patched, const IWidget& fresh, const std::string& label, bool is_drawn = true) {
+    lv_obj_t* const a = patched.GetContainer()->GetObject();
+    lv_obj_t* const b = fresh.GetContainer()->GetObject();
+    lv_obj_update_layout(a);
+    lv_obj_update_layout(b);
+
+    zassert_equal(lv_obj_get_x(a), lv_obj_get_x(b), "%s: x", label.c_str());
+    zassert_equal(lv_obj_get_y(a), lv_obj_get_y(b), "%s: y", label.c_str());
+    zassert_equal(lv_obj_get_width(a), lv_obj_get_width(b), "%s: width", label.c_str());
+    zassert_equal(lv_obj_get_height(a), lv_obj_get_height(b), "%s: height", label.c_str());
+    zassert_equal(lv_obj_is_hidden(a), lv_obj_is_hidden(b), "%s: hidden", label.c_str());
+    zassert_equal(
+        lv_obj_get_style_opa_layered(a, LV_PART_MAIN), lv_obj_get_style_opa_layered(b, LV_PART_MAIN), "%s: opacity",
+        label.c_str()
+    );
+
+    // How far it is turned. (The pivot stays where the anchor put it while a widget does not rotate, as
+    // widget_animations pins: it shows only when the rotation comes back, and then it is computed again.)
+    zassert_equal(
+        lv_obj_get_style_transform_rotation(WidgetContent(patched), LV_PART_MAIN),
+        lv_obj_get_style_transform_rotation(WidgetContent(fresh), LV_PART_MAIN), "%s: rotation", label.c_str()
+    );
+
+    // And the pixels, of a widget that shows.
+    // Nothing of a widget that is hidden, or has no size, shows to compare.
+    if(!is_drawn || lv_obj_is_hidden(a) || lv_obj_get_width(a) == 0 || lv_obj_get_height(a) == 0)
+        return;
+
+    // One snapshot at a time, the first kept as plain pixels: LVGL's memory is not for two of them.
+    std::vector<lv_color32_t> pixels_a;
+    uint32_t width = 0;
+    uint32_t height = 0;
+    {
+        std::unique_ptr<lv_draw_buf_t, decltype(&lv_draw_buf_destroy)> snapshot(
+            lv_snapshot_take(a, LV_COLOR_FORMAT_ARGB8888), lv_draw_buf_destroy
+        );
+        zassert_not_null(snapshot.get(), "%s: snapshot of the patched widget", label.c_str());
+        width = snapshot->header.w;
+        height = snapshot->header.h;
+        for(uint32_t row = 0; row < height; ++row) {
+            const auto* pixels = views_test::PixelRow(*snapshot, row);
+            pixels_a.insert(pixels_a.end(), pixels, pixels + width);
+        }
+    }
+
+    std::unique_ptr<lv_draw_buf_t, decltype(&lv_draw_buf_destroy)> snapshot_b(
+        lv_snapshot_take(b, LV_COLOR_FORMAT_ARGB8888), lv_draw_buf_destroy
+    );
+    zassert_not_null(snapshot_b.get(), "%s: snapshot of the built widget", label.c_str());
+    zassert_equal(width, snapshot_b->header.w, "%s: snapshot width", label.c_str());
+    zassert_equal(height, snapshot_b->header.h, "%s: snapshot height", label.c_str());
+    size_t differing = 0;
+    for(uint32_t row = 0; row < height; ++row) {
+        const auto* pixels = views_test::PixelRow(*snapshot_b, row);
+        for(uint32_t column = 0; column < width; ++column) {
+            const auto& expected = pixels_a[row * width + column];
+            if(pixels[column].red != expected.red
+                || pixels[column].green != expected.green
+                || pixels[column].blue != expected.blue
+                || pixels[column].alpha != expected.alpha)
+                ++differing;
+        }
+    }
+    zassert_equal(differing, 0U, "%s: %u pixels differ", label.c_str(), static_cast<unsigned>(differing));
+}
+
+// One record changed to another: the screen of the old one patched, against the screen of the new one built.
+void ExpectPatchedLooksBuilt(
+    const std::vector<std::shared_ptr<WidgetConfiguration>>& old_records,
+    const std::shared_ptr<WidgetConfiguration>& new_root,
+    const std::string& label,
+    bool is_drawn = true
+) {
+
+    auto new_records = old_records;
+    new_records.front() = new_root;
+
+    zassert_equal(
+        ClassifyWidgetChange(*old_records.front(), *new_root), WidgetChange::InPlace, "%s: classified", label.c_str()
+    );
+
+    Scene patched(LookScreen(old_records));
+    const auto plan = patched.Patch({ Put(new_root) });
+    zassert_true(plan.effects[0] == PatchEffect::InPlace, "%s: planned", label.c_str());
+    Scene fresh(LookScreen(new_records));
+
+    ExpectSameLook(*Find(patched.screen, 1), *Find(fresh.screen, 1), label, is_drawn);
+}
+
+std::string LookLabel(const LookCase& look, WidgetPropertyType property, const char* direction) {
+    return "widget " + std::to_string(static_cast<unsigned>(look.type)) + ", icon "
+        + std::to_string(static_cast<unsigned>(look.icon)) + ", property "
+        + std::to_string(static_cast<unsigned>(property)) + ", " + direction;
+}
+
+} // namespace
+
+// The classifier says what is in place; this says it is true: for each type and each property it lists, the widget
+// that took the change looks, to the pixel and to the position, as one built from the new record.
+ZTEST(widget_patch, test_a_widget_patched_in_place_looks_as_one_built_from_the_new_record) {
+    using P = WidgetPropertyType;
+    size_t compared = 0;
+
+    for(const auto& look : LOOK_CASES) {
+        std::vector<std::pair<P, ConfigValue>> changes{
+            { P::IS_VISIBLE, ConfigValue{ false } },
+            { P::OPACITY, ConfigValue{ 100 } },
+            { P::ANCHOR_POINT_X, ConfigValue{ 10 } },
+            { P::ANCHOR_POINT_Y, ConfigValue{ 10 } },
+            { P::COLOR_PRIMARY_ACTIVE, ConfigValue{ std::pmr::string("#E08020C0") } },
+            { P::COLOR_PRIMARY_INACTIVE, ConfigValue{ std::pmr::string("#2080E0C0") } },
+            { P::COLOR_SECONDARY_ACTIVE, ConfigValue{ std::pmr::string("#20E080C0") } },
+            { P::COLOR_SECONDARY_INACTIVE, ConfigValue{ std::pmr::string("#E02080C0") } },
+            { P::COLOR_TERTIARY_ACTIVE, ConfigValue{ std::pmr::string("#8020E0C0") } },
+            { P::COLOR_TERTIARY_INACTIVE, ConfigValue{ std::pmr::string("#80E020C0") } },
+        };
+        if(look.type == WidgetType::BasicIcon && look.icon != IconType::Image && look.icon != IconType::Label) {
+            changes.insert(
+                changes.end(),
+                { { P::POSITION_X, ConfigValue{ 6 } }, { P::POSITION_Y, ConfigValue{ 7 } },
+                    { P::WIDTH_PX, ConfigValue{ 21 } }, { P::HEIGHT_PX, ConfigValue{ 17 } },
+                    { P::STROKE_PX, ConfigValue{ 5 } }, { P::CORNER_RAD_PX, ConfigValue{ 4 } },
+                    { P::FILL_MODE, ConfigValue{ 1 } }, { P::DIRECTION, ConfigValue{ 3 } } }
+            );
+        }
+
+        for(const auto& [property, value] : changes) {
+            // Not there to there.
+            auto old_records = LookRecords(look);
+            auto new_root = Copy(*old_records.front());
+            new_root->properties[property] = value;
+            ExpectPatchedLooksBuilt(old_records, new_root, LookLabel(look, property, "set"));
+
+            // There to not there: back to the widget's own default.
+            old_records.front()->properties[property] = value;
+            ExpectPatchedLooksBuilt(
+                old_records, Copy(*LookRecords(look).front()), LookLabel(look, property, "dropped")
+            );
+            compared += 2;
+        }
+
+        // The box.
+        auto old_records = LookRecords(look);
+        auto moved = Copy(*old_records.front());
+        moved->position_grid = { 3, 1 };
+        moved->size_grid = { 3, 2 };
+        ExpectPatchedLooksBuilt(old_records, moved, LookLabel(look, P::LAYOUT_X, "moved"));
+        ++compared;
+    }
+
+    zassert_true(compared > 300, "Compared %u", static_cast<unsigned>(compared));
+}
+
+// A rotation that is taken away leaves the widget as straight as one that never rotated.
+ZTEST(widget_patch, test_a_widget_that_stops_rotating_is_not_left_turned) {
+    using P = WidgetPropertyType;
+    for(const auto& look : { LookCase{ WidgetType::BasicIcon, IconType::Rectangle },
+            LookCase{ WidgetType::IndicatorBar, IconType::None } }) {
+        auto old_records = LookRecords(look);
+        old_records.front()->properties[P::ANCHOR_POINT_X] = 5;
+        old_records.front()->properties[P::ANCHOR_POINT_Y] = 7;
+        old_records.front()->properties[P::ANIMATION_TYPE] = 2;
+        old_records.front()->properties[P::ANIMATION_DURATION_MS] = 1000;
+        old_records.front()->properties[P::IS_ANIMATION_ACTIVE] = true;
+
+        auto new_root = Copy(*old_records.front());
+        new_root->properties[P::ANIMATION_TYPE] = 0;
+        new_root->properties.erase(P::ANIMATION_DURATION_MS);
+        new_root->properties.erase(P::IS_ANIMATION_ACTIVE);
+        // (A turned widget is too large for the snapshot; how far it is turned is compared.)
+        ExpectPatchedLooksBuilt(old_records, new_root, LookLabel(look, P::ANIMATION_TYPE, "rotation stopped"), false);
+    }
+}
+
+ZTEST(widget_patch, test_a_property_an_event_drives_keeps_the_value_the_event_gave_through_a_patch) {
+    constexpr const char* OPACITY_SENSOR = "patch_opacity";
+    constexpr const char* X_SENSOR = "patch_x";
+
+    const auto bind = [](WidgetPropertyType target, const char* sensor_id) {
+        return PropertyBinding{ .target = target,
+            .event = { .channel = EventChannelId::Sensors,
+                .event_type = std::to_underlying(SensorEventType::DataUpdated),
+                .payload_key = std::to_underlying(SensorPayloadType::Value),
+                .selector_key = std::to_underlying(SensorPayloadType::SensorId),
+                .selector_value = std::pmr::string(sensor_id, Mrm::GetExtPmr()) } };
+    };
+    const auto publish = [](const char* sensor_id, int value) {
+        SensorEventsChannel::GetInstance().Publish(
+            { .source_id = 0,
+                .type = SensorEventType::DataUpdated,
+                .payload = { { SensorPayloadType::SensorId, StringHelpers::GetHash(sensor_id) },
+                    { SensorPayloadType::Value, value } } }
+        );
+    };
+
+    auto bar = Bar(1, 0, 2);
+    bar->properties[WidgetPropertyType::OPACITY] = 255;
+    bar->bindings.push_back(bind(WidgetPropertyType::OPACITY, OPACITY_SENSOR));
+    bar->bindings.push_back(bind(WidgetPropertyType::LAYOUT_X, X_SENSOR));
+    auto screen_configuration = MakeScreen();
+    screen_configuration->AddWidget(bar);
+    Scene scene(screen_configuration);
+    auto* widget = Find(scene.screen, 1);
+    lv_obj_t* const container = widget->GetContainer()->GetObject();
+
+    publish(OPACITY_SENSOR, 128);
+    publish(X_SENSOR, 5);
+    const auto layout = GridLayout::FromActiveScreen(scene.configuration->grid);
+    zassert_equal(lv_obj_get_style_opa_layered(container, LV_PART_MAIN), 128);
+    zassert_equal(widget->GetPositionPx().x, layout.ToPx(WidgetPosition{ 5, 0 }, widget->GetSizePx()).x);
+
+    // The record changes what the events drive, and the box it is the default of.
+    auto edited = Copy(*bar);
+    edited->bindings.assign(bar->bindings.begin(), bar->bindings.end());
+    edited->properties[WidgetPropertyType::OPACITY] = 60;
+    edited->position_grid = { 3, 4 };
+    edited->size_grid = { 3, 2 };
+    scene.Patch({ Put(edited) });
+
+    zassert_equal(Find(scene.screen, 1), widget);
+    zassert_equal(lv_obj_get_style_opa_layered(container, LV_PART_MAIN), 128, "The bound opacity is the event's");
+    zassert_equal(
+        widget->GetPositionPx().x, layout.ToPx(WidgetPosition{ 5, 4 }, widget->GetSizePx()).x, "The bound x too"
+    );
+    zassert_equal(
+        widget->GetSizePx().width, layout.ToPx(edited->size_grid).width, "and the unbound size is the record's"
+    );
+
+    // The next event is the live value again.
+    publish(OPACITY_SENSOR, 200);
+    zassert_equal(lv_obj_get_style_opa_layered(container, LV_PART_MAIN), 200);
+}
+
+ZTEST(widget_patch, test_a_value_the_widget_refuses_is_left_out_as_a_built_widget_leaves_it_out) {
+    auto bar = Bar(1, 0, 0);
+    bar->properties[WidgetPropertyType::COLOR_PRIMARY_ACTIVE] = std::pmr::string("#33CC99FF");
+    auto screen_configuration = MakeScreen();
+    screen_configuration->AddWidget(bar);
+    Scene scene(screen_configuration);
+    auto* widget = Find(scene.screen, 1);
+
+    // A color that is no color: the validator keeps it out of a patch, but the widget does not depend on that.
+    auto refused = Copy(*bar);
+    refused->properties[WidgetPropertyType::COLOR_PRIMARY_ACTIVE] = std::pmr::string("not a color");
+    widget->ApplyEditorConfiguration(refused);
+
+    CheckBackground(
+        Inner(*widget), LV_PART_INDICATOR, ThemeManager::GetInstance().GetCurrentTheme().GetSecondaryColor()
+    );
 }

@@ -69,6 +69,9 @@ public:
      */
     virtual bool ValidateConfiguration(const UiConfiguration& configuration, std::span<char> reason) = 0;
 
+    /** @return The size of the configuration encoded as an upload would be, or 0 when it cannot be encoded. */
+    virtual size_t GetEncodedSize(const UiConfiguration& configuration) = 0;
+
     /**
      * @brief Brings the screens from the configuration shown to @p patched, which @p plan says how to reach: widgets
      *        updated in place, rebuilt, added or removed, screens replaced; or, when the plan needs more than the

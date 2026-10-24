@@ -58,34 +58,48 @@ ui-stage-rsp  = { off: uint, ? rev: uint, ? group: uint, ? overlay: uint }
 ; and nothing changes. The answer's rev is the request's.
 ; Order of the list, which a whole stage of the resulting configuration reproduces: a screen's widgets are listed by z-index
 ; and, among equal ones, in the order of the list; a put of a widget that is there with the same z-index keeps its place; a put
-; with another z-index, and a widget that is new, go after the widgets of their z-index. The screens of a screen group are
-; drawn by z-index, equal ones in the order the configuration lists its screens; a put of a screen that is there keeps its
-; place in that list, a new one goes last. (A put of a screen replaces its widgets with the ones it carries, in its order.)
-; Errors, in the order they are judged: NO_SESSION or BAD_TOKEN (the token), TOO_LARGE (more than max_ops operations, or a body
-; past max_patch), BUSY (a stage or another patch is being applied), STALE, BASE_MISMATCH (nothing staged; an operation names a
-; screen or a widget the configuration it patches does not have at that point, earlier operations of the request counted),
-; INVALID with msg (a record that is not a widget or screen record: "Malformed CBOR" or the decoder's own message; then the
-; validator's message for the patched configuration). A request that is not shaped like this (no ops, an operation of a kind
-; there is none of, a missing key) is an SMP error (rc 3, EINVAL), as for the other commands. A patch the screens could not
-; show (UNKNOWN) leaves the screens as they were, the revision too.
+; with another z-index, and a widget that is new, go after the widgets of their z-index; a widget removed and put again in one
+; request is last of its z-index. The screens of a screen group are drawn by z-index, equal ones in the order the configuration
+; lists its screens; a put of a screen that is there keeps its place in that list, a new one, and one removed and put again in
+; one request, goes last. (A put of a screen replaces its widgets with the ones it carries, in its order.) The view follows
+; the list for every screen group and every screen the patch leaves, also where the patch changes nothing but the order.
+; Errors, in the order they are judged: NO_SESSION or BAD_TOKEN (the token, which renews the lease), TOO_LARGE (more than max_ops
+; operations, or a body past max_patch), BUSY (a stage is being sent or applied, between its chunks too, or another patch is
+; being applied), STALE, then, in the jobs: BASE_MISMATCH when nothing is staged (nothing staged in this session, a stage that
+; failed to show, a session reopened), INVALID with msg for a widget or screen record that is none ("Malformed CBOR" or the
+; decoder's own message; records are decoded before anything is looked up, so a malformed record is INVALID even where
+; another operation names a screen the configuration lacks), BASE_MISMATCH when an operation names a screen or a widget the
+; configuration it patches does not have at that point (earlier operations of the request counted), INVALID with the
+; validator's msg for the patched configuration, TOO_LARGE once more when the patched configuration would encode to more
+; than a stage takes (max_stage; it is measured only when it may be close, so a patch that fits costs nothing). A request
+; that is not shaped like this (no ops, an operation of a kind there is none of, a missing key) is an SMP error (rc 3,
+; EINVAL), as for the other commands. A patch the screens could not show (UNKNOWN) leaves the screens as they were, the
+; revision too.
 ui-patch-req  = { tok: uint, rev: uint, ops: [+ ui-op] }
 ui-op         = [0, screen_id: uint, widget: bstr .cbor CborWidgetConfig]
               / [1, screen_id: uint, widget_id: uint]
               / [2, screen: bstr .cbor CborScreenConfig]
               / [3, screen_id: uint]
 ui-patch-rsp  = { rev: uint, effects: [+ ui-effect] }
-ui-effect     = 0   ; applied in place: the widget stays and takes the new values (a root widget's position, size and
-                    ; z-index, visibility, opacity, activity, colors, range, value, precision, unit, a setting indicator's or
-                    ; button's label, arc angles, anchors, animation, a shape icon's offsets, sizes, stroke, corner, fill and
-                    ; direction)
-              / 1   ; a widget was built again, added or removed (the type, bindings, an icon's type, a file or image size, a
-                    ; label icon's label, a chart's points and type, the structure, anything of a widget a dial or other owner
-                    ; holds, which rebuilds the owner, and any property not listed above)
+ui-effect     = 0   ; applied in place: the widget and its objects stay and take the new value, and look as one built from the
+                    ; new record: a root widget's position, size and z-index; IS_VISIBLE, IS_ACTIVE, OPACITY; the six colors;
+                    ; the anchor and the animation; a shape icon's (rectangle, triangles, oval, line) offsets, WIDTH_PX,
+                    ; HEIGHT_PX, STROKE_PX, CORNER_RAD_PX, FILL_MODE and DIRECTION. A property an inbound binding drives keeps
+                    ; the last event's value (also the box, when LAYOUT_X/Y/WIDTH/HEIGHT are bound); the unit asks the
+                    ; settings and the state to be published again, so the event comes. A property the record drops is back
+                    ; at the widget's default.
+              / 1   ; a widget was built again, added or removed: everything else of a widget: the type, the bindings, the
+                    ; value (VALUE), the range (MIN_VALUE, MAX_VALUE), the arc angles, the precision, the unit, the label
+                    ; (a button's, a setting indicator's, a label icon's), STEP, the icon type, a file and an image's size,
+                    ; a chart's points and type, IS_SMOOTHED, the structure, an arc icon's whole box and placement, and
+                    ; anything of a widget a dial or other owner holds (which rebuilds the owner); and any property the
+                    ; table above does not list. The settings and state are published again.
               / 2   ; a screen was built again or added or removed (its grid, type, visibility, z-index, screen group or overlay
                     ; flag), or, for an operation on an overlay that is up, the overlay was shown again; a screen group that
-                    ; appears or goes shows all of it again. The screen group and the overlay shown stay.
+                    ; appears or goes, or a screen that changes screen group, shows all of it again. The screen group and the
+                    ; overlay shown stay. The settings and state are published again.
               / 3   ; not shown: an operation on an overlay that is not up (it is built from the configuration when shown)
-; One effect per operation, in order; an operation that changes nothing is 0.
+; One effect per operation, in order; an operation that changes nothing, on an overlay too, is 0.
 
 ; SHOW: asks navigation for a group of the configuration shown, or an overlay (closing the one up first).
 ui-target     = { group: uint } / { overlay: uint }

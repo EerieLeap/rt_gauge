@@ -80,7 +80,8 @@ std::shared_ptr<ScreenConfiguration> MakeScreen(uint32_t id, uint32_t group_id) 
     return screen;
 }
 
-std::shared_ptr<UiConfiguration> MakeConfiguration(std::initializer_list<std::shared_ptr<ScreenConfiguration>> screens) {
+std::shared_ptr<UiConfiguration>
+MakeConfiguration(std::initializer_list<std::shared_ptr<ScreenConfiguration>> screens) {
     auto configuration = make_shared_pmr<UiConfiguration>(Mr());
     configuration->active_screen_group_id = 1;
     for(const auto& screen : screens)
@@ -117,60 +118,69 @@ WidgetChange ClassifyProperty(
 
 ZTEST_SUITE(ui_patch, NULL, NULL, NULL, NULL, NULL);
 
-// The table of plan `gauge-ui-editor.md`, Appendix B ("What applies in place" and "What needs the widget rebuilt").
+// What a widget applies as it changes is short: management, colors, the anchor and the animation for every widget,
+// and a shape icon's geometry. What a widget reads as it is rendered is a rebuild (functional.views checks the first
+// list against widgets built from the new record).
 ZTEST(ui_patch, test_the_classifier_applies_in_place_what_a_widget_takes_as_it_changes) {
     using P = WidgetPropertyType;
     using T = WidgetType;
     const ConfigValue none;
 
-    // Every widget: management, colors, anchors and the animation.
-    for(const auto type : { T::IndicatorBar, T::IndicatorDigital, T::BasicLottie, T::ControlButton, T::BasicIcon }) {
+    // Every widget: visibility and opacity, colors, anchors and the animation (not activity).
+    for(const auto type : { T::IndicatorBar, T::IndicatorDigital, T::BasicLottie, T::ControlButton, T::BasicIcon,
+            T::IndicatorDial, T::IndicatorSetting, T::ControlSlider }) {
         zassert_equal(ClassifyProperty(type, P::IS_VISIBLE, true, false), WidgetChange::InPlace);
-        zassert_equal(ClassifyProperty(type, P::IS_ACTIVE, none, false), WidgetChange::InPlace);
+        zassert_equal(ClassifyProperty(type, P::IS_ACTIVE, none, false), WidgetChange::RebuildWidget);
         zassert_equal(ClassifyProperty(type, P::OPACITY, 255, 128), WidgetChange::InPlace);
-        zassert_equal(ClassifyProperty(type, P::COLOR_PRIMARY_ACTIVE, Text("#FF0000FF"), Text("#00FF00FF")), WidgetChange::InPlace);
-        zassert_equal(ClassifyProperty(type, P::COLOR_TERTIARY_INACTIVE, Text("#FF0000FF"), none), WidgetChange::InPlace);
+        zassert_equal(
+            ClassifyProperty(type, P::COLOR_PRIMARY_ACTIVE, Text("#FF0000FF"), Text("#00FF00FF")), WidgetChange::InPlace
+        );
+        zassert_equal(
+            ClassifyProperty(type, P::COLOR_TERTIARY_INACTIVE, Text("#FF0000FF"), none), WidgetChange::InPlace
+        );
         zassert_equal(ClassifyProperty(type, P::ANCHOR_POINT_X, -1, 10), WidgetChange::InPlace);
         zassert_equal(ClassifyProperty(type, P::ANIMATION_TYPE, 0, 1), WidgetChange::InPlace);
         zassert_equal(ClassifyProperty(type, P::IS_ANIMATION_ACTIVE, none, true), WidgetChange::InPlace);
         zassert_equal(ClassifyProperty(type, P::ANIMATION_DURATION_MS, 500, 800), WidgetChange::InPlace);
     }
 
-    // Indicators: range, value, precision, unit, label, angles.
-    zassert_equal(ClassifyProperty(T::IndicatorBar, P::MAX_VALUE, 100.0, 200.0), WidgetChange::InPlace);
-    zassert_equal(ClassifyProperty(T::IndicatorBar, P::MIN_VALUE, none, 5.0), WidgetChange::InPlace);
-    zassert_equal(ClassifyProperty(T::IndicatorBar, P::VALUE, 1.0, none), WidgetChange::InPlace);
-    zassert_equal(ClassifyProperty(T::IndicatorDigital, P::VALUE_PRECISION, 1, 2), WidgetChange::InPlace);
-    zassert_equal(ClassifyProperty(T::IndicatorBar, P::VALUE_PRECISION, 1, 2), WidgetChange::RebuildWidget, "A bar has none");
-    zassert_equal(ClassifyProperty(T::IndicatorSetting, P::UNIT, Text("a"), Text("b")), WidgetChange::InPlace);
-    zassert_equal(ClassifyProperty(T::IndicatorSetting, P::LABEL, none, Text("b")), WidgetChange::InPlace);
-    zassert_equal(ClassifyProperty(T::IndicatorSetting, P::VALUE_PRECISION, 0, 1), WidgetChange::InPlace);
-    zassert_equal(ClassifyProperty(T::IndicatorSetting, P::SETTING_ID, Text("a"), Text("b")), WidgetChange::RebuildWidget);
-    zassert_equal(ClassifyProperty(T::IndicatorDigital, P::UNIT, Text("a"), Text("b")), WidgetChange::RebuildWidget);
-    for(const auto type : { T::IndicatorDial, T::IndicatorSegmentArc, T::IndicatorArcFill }) {
-        zassert_equal(ClassifyProperty(type, P::START_ANGLE, 45, 90), WidgetChange::InPlace);
-        zassert_equal(ClassifyProperty(type, P::END_ANGLE, none, 300), WidgetChange::InPlace);
-        zassert_equal(ClassifyProperty(type, P::MAX_VALUE, 1.0, 2.0), WidgetChange::InPlace);
+    // What an indicator or a control reads as it renders: the range, the angles, the precision, the unit, the label
+    // and the value (whose display is an animation, and whose history a chart keeps) rebuild the widget.
+    for(const auto type :
+        { T::IndicatorBar, T::IndicatorArcFill, T::IndicatorSegmentArc, T::IndicatorDial, T::IndicatorDigital,
+            T::IndicatorHorizontalChart, T::IndicatorSetting, T::ControlSlider, T::ControlToggle }) {
+        zassert_equal(ClassifyProperty(type, P::MIN_VALUE, 0.0, 1.0), WidgetChange::RebuildWidget);
+        zassert_equal(ClassifyProperty(type, P::MAX_VALUE, 100.0, 200.0), WidgetChange::RebuildWidget);
+        zassert_equal(ClassifyProperty(type, P::MAX_VALUE, none, 5.0), WidgetChange::RebuildWidget);
+        zassert_equal(ClassifyProperty(type, P::VALUE, 1.0, 2.0), WidgetChange::RebuildWidget);
+        zassert_equal(ClassifyProperty(type, P::VALUE, 1.0, none), WidgetChange::RebuildWidget);
+        zassert_equal(ClassifyProperty(type, P::START_ANGLE, 45, 90), WidgetChange::RebuildWidget);
+        zassert_equal(ClassifyProperty(type, P::END_ANGLE, none, 300), WidgetChange::RebuildWidget);
+        zassert_equal(ClassifyProperty(type, P::VALUE_PRECISION, 1, 2), WidgetChange::RebuildWidget);
+        zassert_equal(ClassifyProperty(type, P::UNIT, Text("a"), Text("b")), WidgetChange::RebuildWidget);
+        zassert_equal(ClassifyProperty(type, P::LABEL, Text("a"), Text("b")), WidgetChange::RebuildWidget);
+        zassert_equal(ClassifyProperty(type, P::STEP, 1.0, 2.0), WidgetChange::RebuildWidget);
+        zassert_equal(ClassifyProperty(type, P::SETTING_ID, Text("a"), Text("b")), WidgetChange::RebuildWidget);
     }
 
-    // Controls.
-    zassert_equal(ClassifyProperty(T::ControlButton, P::LABEL, Text("a"), Text("b")), WidgetChange::InPlace);
+    zassert_equal(ClassifyProperty(T::ControlButton, P::LABEL, Text("a"), Text("b")), WidgetChange::RebuildWidget);
     zassert_equal(ClassifyProperty(T::ControlButton, P::NAVIGATION_INTENT, 1, 2), WidgetChange::RebuildWidget);
     zassert_equal(ClassifyProperty(T::ControlButton, P::TARGET_SCREEN_GROUP, 1, 2), WidgetChange::RebuildWidget);
-    zassert_equal(ClassifyProperty(T::ControlToggle, P::VALUE, false, true), WidgetChange::InPlace);
-    zassert_equal(ClassifyProperty(T::ControlSlider, P::MIN_VALUE, 0.0, 1.0), WidgetChange::InPlace);
-    zassert_equal(ClassifyProperty(T::ControlSlider, P::STEP, 1.0, 2.0), WidgetChange::RebuildWidget);
-
-    // The chart's points and type, a file and the animation's size rebuild the widget.
-    zassert_equal(ClassifyProperty(T::IndicatorHorizontalChart, P::CHART_POINT_COUNT, 30, 40), WidgetChange::RebuildWidget);
+    zassert_equal(
+        ClassifyProperty(T::IndicatorHorizontalChart, P::CHART_POINT_COUNT, 30, 40), WidgetChange::RebuildWidget
+    );
     zassert_equal(ClassifyProperty(T::IndicatorHorizontalChart, P::CHART_TYPE, 0, 1), WidgetChange::RebuildWidget);
-    zassert_equal(ClassifyProperty(T::IndicatorHorizontalChart, P::MAX_VALUE, 1.0, 2.0), WidgetChange::InPlace);
-    zassert_equal(ClassifyProperty(T::BasicLottie, P::FILE_PATH, Text("a.json"), Text("b.json")), WidgetChange::RebuildWidget);
+    zassert_equal(
+        ClassifyProperty(T::BasicLottie, P::FILE_PATH, Text("a.json"), Text("b.json")), WidgetChange::RebuildWidget
+    );
     zassert_equal(ClassifyProperty(T::BasicLottie, P::WIDTH_PX, 10, 20), WidgetChange::RebuildWidget);
 
     // What the classifier does not know is a rebuild, which is always right.
     zassert_equal(ClassifyProperty(T::IndicatorBar, P::IS_SMOOTHED, false, true), WidgetChange::RebuildWidget);
-    zassert_equal(ClassifyProperty(T::IndicatorDial, P::CHILD_WIDGET_IDS, Ints({ 1 }), Ints({ 1, 2 })), WidgetChange::RebuildWidget);
+    zassert_equal(
+        ClassifyProperty(T::IndicatorDial, P::CHILD_WIDGET_IDS, Ints({ 1 }), Ints({ 1, 2 })),
+        WidgetChange::RebuildWidget
+    );
     zassert_equal(ClassifyProperty(T::IndicatorBar, P::FILE_PATH, none, Text("x")), WidgetChange::RebuildWidget);
     zassert_equal(ClassifyProperty(T::IndicatorBar, P::FILE_PATH, Text("x"), none), WidgetChange::RebuildWidget);
 }
@@ -180,31 +190,43 @@ ZTEST(ui_patch, test_the_classifier_reads_the_icon_type_for_an_icon) {
     using T = WidgetType;
     const ConfigValue none;
 
-    for(const auto icon : { IconType::Rectangle, IconType::Oval, IconType::TriangleIsosceles, IconType::TriangleRight, IconType::Line }) {
-        for(const auto type : { T::BasicIcon, T::BasicArcIcon }) {
-            zassert_equal(ClassifyProperty(type, P::WIDTH_PX, 10, 20, icon), WidgetChange::InPlace);
-            zassert_equal(ClassifyProperty(type, P::HEIGHT_PX, none, 20, icon), WidgetChange::InPlace);
-            zassert_equal(ClassifyProperty(type, P::STROKE_PX, 2, 4, icon), WidgetChange::InPlace);
-            zassert_equal(ClassifyProperty(type, P::CORNER_RAD_PX, 2, 4, icon), WidgetChange::InPlace);
-            zassert_equal(ClassifyProperty(type, P::FILL_MODE, 0, 1, icon), WidgetChange::InPlace);
-            zassert_equal(ClassifyProperty(type, P::DIRECTION, 1, 2, icon), WidgetChange::InPlace);
-            zassert_equal(ClassifyProperty(type, P::POSITION_X, 0, 5, icon), WidgetChange::InPlace);
-            zassert_equal(ClassifyProperty(type, P::POSITION_Y, 0, 5, icon), WidgetChange::InPlace);
+    for(const auto icon :
+        { IconType::Rectangle, IconType::Oval, IconType::TriangleIsosceles, IconType::TriangleRight, IconType::Line }) {
+        zassert_equal(ClassifyProperty(T::BasicIcon, P::WIDTH_PX, 10, 20, icon), WidgetChange::InPlace);
+        zassert_equal(ClassifyProperty(T::BasicIcon, P::HEIGHT_PX, none, 20, icon), WidgetChange::InPlace);
+        zassert_equal(ClassifyProperty(T::BasicIcon, P::STROKE_PX, 2, 4, icon), WidgetChange::InPlace);
+        zassert_equal(ClassifyProperty(T::BasicIcon, P::CORNER_RAD_PX, 2, 4, icon), WidgetChange::InPlace);
+        zassert_equal(ClassifyProperty(T::BasicIcon, P::FILL_MODE, 0, 1, icon), WidgetChange::InPlace);
+        zassert_equal(ClassifyProperty(T::BasicIcon, P::DIRECTION, 1, 2, icon), WidgetChange::InPlace);
+        zassert_equal(ClassifyProperty(T::BasicIcon, P::POSITION_X, 0, 5, icon), WidgetChange::InPlace);
+        zassert_equal(ClassifyProperty(T::BasicIcon, P::POSITION_Y, 0, 5, icon), WidgetChange::InPlace);
+
+        // An arc icon places its icon on a circle as it renders, so what moves or sizes the icon rebuilds it.
+        for(const auto property : { P::WIDTH_PX, P::HEIGHT_PX, P::STROKE_PX, P::POSITION_X, P::POSITION_Y,
+                P::POSITION_ANGLE, P::EDGE_OFFSET }) {
+            zassert_equal(ClassifyProperty(T::BasicArcIcon, property, 0, 5, icon), WidgetChange::RebuildWidget);
         }
     }
 
     for(const auto icon : { IconType::Image, IconType::Label }) {
-        zassert_equal(ClassifyProperty(T::BasicIcon, P::POSITION_X, 0, 5, icon), WidgetChange::InPlace);
-        zassert_equal(ClassifyProperty(T::BasicIcon, P::COLOR_PRIMARY_ACTIVE, none, Text("#FF0000FF"), icon), WidgetChange::InPlace);
+        zassert_equal(
+            ClassifyProperty(T::BasicIcon, P::COLOR_PRIMARY_ACTIVE, none, Text("#FF0000FF"), icon),
+            WidgetChange::InPlace
+        );
+        zassert_equal(ClassifyProperty(T::BasicIcon, P::POSITION_X, 0, 5, icon), WidgetChange::RebuildWidget);
         zassert_equal(ClassifyProperty(T::BasicIcon, P::WIDTH_PX, 10, 20, icon), WidgetChange::RebuildWidget);
         zassert_equal(ClassifyProperty(T::BasicIcon, P::FILL_MODE, 0, 1, icon), WidgetChange::RebuildWidget);
     }
 
-    zassert_equal(ClassifyProperty(T::BasicIcon, P::FILE_PATH, Text("a.bin"), Text("b.bin"), IconType::Image), WidgetChange::RebuildWidget);
+    zassert_equal(
+        ClassifyProperty(T::BasicIcon, P::FILE_PATH, Text("a.bin"), Text("b.bin"), IconType::Image),
+        WidgetChange::RebuildWidget
+    );
     zassert_equal(ClassifyProperty(T::BasicIcon, P::IMG_WIDTH, 10, 20, IconType::Image), WidgetChange::RebuildWidget);
-    zassert_equal(ClassifyProperty(T::BasicIcon, P::LABEL, Text("a"), Text("b"), IconType::Label), WidgetChange::RebuildWidget, "A label icon's label");
-    zassert_equal(ClassifyProperty(T::BasicArcIcon, P::POSITION_ANGLE, -90.0, 0.0, IconType::Rectangle), WidgetChange::RebuildWidget);
-    zassert_equal(ClassifyProperty(T::BasicArcIcon, P::EDGE_OFFSET, 0, 4, IconType::Rectangle), WidgetChange::RebuildWidget);
+    zassert_equal(
+        ClassifyProperty(T::BasicIcon, P::LABEL, Text("a"), Text("b"), IconType::Label), WidgetChange::RebuildWidget,
+        "A label icon's label"
+    );
 
     // The icon type itself.
     auto before = MakeWidget(T::BasicIcon, 1);
@@ -258,19 +280,37 @@ ZTEST(ui_patch, test_a_screen_changes_in_place_but_for_its_own_record) {
 
     auto widgets = MakeScreen(1, 5);
     widgets->AddWidget(MakeWidget(WidgetType::IndicatorBar, 1));
-    zassert_equal(ClassifyScreenChange(*before, *widgets), WidgetChange::InPlace, "Widgets are not the screen's record");
+    zassert_equal(
+        ClassifyScreenChange(*before, *widgets), WidgetChange::InPlace, "Widgets are not the screen's record"
+    );
 
     for(int field = 0; field < 8; ++field) {
         auto changed = MakeScreen(1, 5);
         switch(field) {
-            case 0: changed->screen_group_id = 6; break;
-            case 1: changed->type = ScreenType::Settings; break;
-            case 2: changed->z_index = 3; break;
-            case 3: changed->is_visible = false; break;
-            case 4: changed->is_overlay = true; break;
-            case 5: changed->grid.width = 11; break;
-            case 6: changed->grid.snap_enabled = false; break;
-            default: changed->grid.spacing_px = 2; break;
+            case 0:
+                changed->screen_group_id = 6;
+                break;
+            case 1:
+                changed->type = ScreenType::Settings;
+                break;
+            case 2:
+                changed->z_index = 3;
+                break;
+            case 3:
+                changed->is_visible = false;
+                break;
+            case 4:
+                changed->is_overlay = true;
+                break;
+            case 5:
+                changed->grid.width = 11;
+                break;
+            case 6:
+                changed->grid.snap_enabled = false;
+                break;
+            default:
+                changed->grid.spacing_px = 2;
+                break;
         }
 
         zassert_equal(ClassifyScreenChange(*before, *changed), WidgetChange::RebuildGroup, "Field %d", field);
@@ -295,7 +335,9 @@ ZTEST(ui_patch, test_patch_operations_apply_in_order_onto_a_copy_and_share_what_
     lifted->z_index = 5;
     PatchOp lift{ .kind = PatchOpKind::PutWidget, .screen_id = 1, .widget = lifted };
 
-    PatchOp add{ .kind = PatchOpKind::PutWidget, .screen_id = 1, .widget = MakeWidget(WidgetType::IndicatorBar, 13, 1) };
+    PatchOp add{
+        .kind = PatchOpKind::PutWidget, .screen_id = 1, .widget = MakeWidget(WidgetType::IndicatorBar, 13, 1)
+    };
     const std::array ops{ replace, lift, add };
 
     const auto patched = ApplyPatchOps(*base, ops, Mr());
@@ -385,7 +427,9 @@ ZTEST(ui_patch, test_an_operation_on_what_the_base_lacks_is_a_mismatch_and_chang
 
     const auto mismatches = [&base](PatchOp op) {
         // Behind a good operation, which an all-or-nothing patch does not keep.
-        const std::array ops{ PatchOp{ .kind = PatchOpKind::PutWidget, .screen_id = 1, .widget = MakeWidget(WidgetType::IndicatorBar, 11) },
+        const std::array ops{ PatchOp{ .kind = PatchOpKind::PutWidget,
+                                  .screen_id = 1,
+                                  .widget = MakeWidget(WidgetType::IndicatorBar, 11) },
             std::move(op) };
         try {
             (void)ApplyPatchOps(*base, ops, Mr());
@@ -396,7 +440,9 @@ ZTEST(ui_patch, test_an_operation_on_what_the_base_lacks_is_a_mismatch_and_chang
         return false;
     };
 
-    zassert_true(mismatches({ .kind = PatchOpKind::PutWidget, .screen_id = 9, .widget = MakeWidget(WidgetType::IndicatorBar, 1) }));
+    zassert_true(mismatches(
+        { .kind = PatchOpKind::PutWidget, .screen_id = 9, .widget = MakeWidget(WidgetType::IndicatorBar, 1) }
+    ));
     zassert_true(mismatches({ .kind = PatchOpKind::RemoveWidget, .screen_id = 9, .widget_id = 10 }));
     zassert_true(mismatches({ .kind = PatchOpKind::RemoveWidget, .screen_id = 1, .widget_id = 99 }));
     zassert_true(mismatches({ .kind = PatchOpKind::RemoveScreen, .screen_id = 9 }));
@@ -487,7 +533,8 @@ ZTEST(ui_patch, test_what_a_child_changes_rebuilds_its_owner_and_a_patch_that_ch
     zassert_true(plan.effects[0] == PatchEffect::WidgetRebuilt);
 
     // The same record again.
-    const std::array same{ PatchOp{ .kind = PatchOpKind::PutWidget, .screen_id = 1, .widget = Copy(*fixture.screen->widget_configurations[0]) } };
+    const std::array same{ PatchOp{
+        .kind = PatchOpKind::PutWidget, .screen_id = 1, .widget = Copy(*fixture.screen->widget_configurations[0]) } };
     const auto nothing = fixture.Plan(same);
     zassert_true(nothing.screens.empty());
     zassert_true(nothing.effects[0] == PatchEffect::InPlace);
@@ -497,7 +544,8 @@ ZTEST(ui_patch, test_widgets_are_added_and_removed_and_each_operation_has_its_ef
     PlanFixture fixture;
 
     const std::array ops{
-        PatchOp{ .kind = PatchOpKind::PutWidget, .screen_id = 1, .widget = MakeWidget(WidgetType::IndicatorBar, 11, 3) },
+        PatchOp{
+            .kind = PatchOpKind::PutWidget, .screen_id = 1, .widget = MakeWidget(WidgetType::IndicatorBar, 11, 3) },
         PatchOp{ .kind = PatchOpKind::RemoveWidget, .screen_id = 1, .widget_id = 10 },
         PatchOp{ .kind = PatchOpKind::RemoveWidget, .screen_id = 1, .widget_id = 20 },
     };
@@ -596,7 +644,9 @@ ZTEST(ui_patch, test_a_widget_record_decodes_to_the_widget_it_was_written_from) 
 
     // A widget without properties omits the map.
     const auto bare = MakeWidget(WidgetType::IndicatorBar, 1);
-    zassert_true(IsSameWidget(*bare, *UiConfigurationCborParser::DecodeWidget(Mr(), ui_patch_records::EncodeWidget(*bare))));
+    zassert_true(
+        IsSameWidget(*bare, *UiConfigurationCborParser::DecodeWidget(Mr(), ui_patch_records::EncodeWidget(*bare)))
+    );
 
     // Indefinite-length arrays, as zcbor writes them, read the same.
     auto indefinite = ui_patch_records::EncodeWidget(*bare);
@@ -691,4 +741,33 @@ ZTEST(ui_patch, test_bytes_that_are_not_exactly_one_record_are_refused) {
         message = e.what();
     }
     zassert_true(message.contains("Unknown property ID: 60"), "'%s'", message.c_str());
+}
+
+// A widget or a screen taken out and put again in one request is where the list now has it, and it is the same widget:
+// nothing is built, and the drawing order changes.
+ZTEST(ui_patch, test_a_widget_removed_and_put_again_is_only_a_new_order) {
+    auto screen = MakeScreen(1, 5);
+    screen->AddWidget(MakeWidget(WidgetType::IndicatorBar, 10));
+    screen->AddWidget(MakeWidget(WidgetType::IndicatorBar, 11));
+    screen->AddWidget(MakeWidget(WidgetType::IndicatorBar, 12, 3));
+    const auto base = MakeConfiguration({ screen });
+
+    const std::array ops{ PatchOp{ .kind = PatchOpKind::RemoveWidget, .screen_id = 1, .widget_id = 10 },
+        PatchOp{ .kind = PatchOpKind::PutWidget, .screen_id = 1, .widget = Copy(*screen->widget_configurations[0]) } };
+    const auto patched = ApplyPatchOps(*base, ops, Mr());
+    const auto plan = PlanPatch(*base, *patched, ops);
+
+    zassert_equal(
+        patched->screen_configurations[0]->widget_configurations[1]->id, 10U, "After the widget of its z-index"
+    );
+    zassert_equal(plan.screens.size(), 1U);
+    zassert_true(plan.screens[0].action == ScreenAction::Widgets);
+    zassert_true(plan.screens[0].widgets.empty());
+    zassert_true(plan.screens[0].reorders);
+    zassert_true(plan.effects[0] == PatchEffect::WidgetRebuilt || plan.effects[0] == PatchEffect::InPlace);
+
+    // Put again where it was: nothing to do.
+    const std::array same{ PatchOp{
+        .kind = PatchOpKind::PutWidget, .screen_id = 1, .widget = Copy(*screen->widget_configurations[0]) } };
+    zassert_true(PlanPatch(*base, *ApplyPatchOps(*base, same, Mr()), same).screens.empty());
 }

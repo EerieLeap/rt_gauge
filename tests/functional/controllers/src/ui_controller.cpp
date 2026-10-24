@@ -46,6 +46,9 @@
 #include "domain/ui_domain/services/navigation_service.h"
 
 #include "controllers/ui_controller.h"
+#include "domain/sensor_domain/event_bus/sensor_event_type.h"
+#include "domain/sensor_domain/event_bus/sensor_payload_type.h"
+#include "event_bus/event_channels.h"
 #include "ui_patch_records.h"
 #include "views/assets/animations/animations_register.h"
 #include "views/assets/images/images_register.h"
@@ -54,6 +57,8 @@ using eerie_leap::configuration::cbor::CborSerializer;
 using eerie_leap::configuration::services::CborConfigurationService;
 using eerie_leap::controllers::UiController;
 using eerie_leap::domain::configuration_domain::services::ConfigurationService;
+using eerie_leap::domain::sensor_domain::event_bus::SensorEventType;
+using eerie_leap::domain::sensor_domain::event_bus::SensorPayloadType;
 using eerie_leap::domain::settings_domain::event_bus::SettingsEventsChannel;
 using eerie_leap::domain::settings_domain::event_bus::SettingsEventType;
 using eerie_leap::domain::ui_domain::ScopedLvglLock;
@@ -63,6 +68,7 @@ using eerie_leap::domain::ui_domain::event_bus::NavigationEventChannel;
 using eerie_leap::domain::ui_domain::event_bus::NavigationEventType;
 using eerie_leap::domain::ui_domain::event_bus::NavigationPayloadType;
 using eerie_leap::domain::ui_domain::models::NavigationAction;
+using eerie_leap::domain::ui_domain::models::PropertyBinding;
 using eerie_leap::domain::ui_domain::models::ScreenConfiguration;
 using eerie_leap::domain::ui_domain::models::ScreenType;
 using eerie_leap::domain::ui_domain::models::UiConfiguration;
@@ -77,6 +83,7 @@ using eerie_leap::domain::ui_domain::services::NavigationService;
 using eerie_leap::domain::ui_preview_domain::UiPreviewService;
 using eerie_leap::domain::ui_preview_domain::UiPreviewShown;
 using eerie_leap::domain::ui_preview_domain::UiPreviewTarget;
+using eerie_leap::event_bus::InitializeEventChannels;
 using eerie_leap::subsys::assets::AssetAccess;
 using eerie_leap::subsys::assets::AssetKind;
 using eerie_leap::subsys::assets::AssetProvider;
@@ -87,6 +94,7 @@ using eerie_leap::subsys::device_tree::DtFs;
 using eerie_leap::subsys::event_bus::AnySubscription;
 using eerie_leap::subsys::event_bus::CreateScopedSubscription;
 using eerie_leap::subsys::event_bus::EventBus;
+using eerie_leap::subsys::event_bus::EventChannelId;
 using eerie_leap::subsys::fs::services::FsService;
 using eerie_leap::subsys::fs::services::IFsService;
 using eerie_leap::subsys::threading::WorkQueueThread;
@@ -1573,6 +1581,8 @@ public:
     std::atomic<int> patch_result = 0;
     std::atomic<int> patch_ms = 0;
     std::atomic<int> patch_count = 0;
+    std::atomic<size_t> encoded_size = 100;
+    std::atomic<int> encode_count = 0;
     k_sem patch_started{};
 
     FakeHost() {
@@ -1595,6 +1605,12 @@ public:
         reason[length] = '\0';
 
         return false;
+    }
+
+    size_t GetEncodedSize(const UiConfiguration& /*configuration*/) override {
+        ++encode_count;
+
+        return encoded_size;
     }
 
     int ApplyPatch(std::shared_ptr<UiConfiguration> /*patched*/, PatchPlan& /*plan*/) override {
@@ -2014,6 +2030,17 @@ public:
         return *this;
     }
 
+    // A widget record that is whatever bytes were given.
+    PatchBuilder& PutRaw(uint32_t screen_id, const Bytes& bytes) {
+        records_.push_back(bytes);
+        ops_.push_back(
+            { .kind = PatchOpKind::PutWidget, .screen_id = screen_id, .widget_id = 0, .bytes = records_.back() }
+        );
+        size_ += bytes.size() + 5;
+
+        return *this;
+    }
+
     PatchBuilder& Remove(uint32_t screen_id, uint32_t widget_id) {
         ops_.push_back({ .kind = PatchOpKind::RemoveWidget, .screen_id = screen_id, .widget_id = widget_id });
         size_ += 12;
@@ -2040,7 +2067,7 @@ public:
     Request(UiPreviewService& service, uint32_t token, uint32_t rev) const {
         (void)service;
 
-        return { .token = token, .rev = rev, .ops = ops_, .body_size = size_ };
+        return { .token = token, .rev = rev, .ops = ops_, .op_count = ops_.size(), .body_size = size_ };
     }
 };
 
@@ -2299,7 +2326,18 @@ ZTEST(ui_controller_preview, test_a_patch_is_checked_as_an_upload_is_and_nothing
     dial->type = WidgetType::IndicatorDial;
     zassert_equal(Patch(token, 2, PatchBuilder().Put(0, *dial), info), UiPreviewError::INVALID);
 
-    // A binding to a channel this unit has not got is refused by the check an upload makes.
+    // A binding is checked against the channels this unit carries, as an upload's is: this suite has registered none.
+    auto bound = CopyWidget(*widget);
+    bound->bindings.push_back(
+        PropertyBinding{ .target = WidgetPropertyType::OPACITY,
+            .event = { .channel = EventChannelId::Logging, .event_type = 1, .payload_key = 2 } }
+    );
+    zassert_equal(Patch(token, 2, PatchBuilder().Put(0, *bound), info), UiPreviewError::INVALID);
+    zassert_true(
+        Preview().GetReason().contains("names an event channel this unit does not carry"), "'%s'",
+        std::string(Preview().GetReason()).c_str()
+    );
+
     // (A name that is no screen, a widget that is no widget.)
     zassert_equal(Patch(token, 2, PatchBuilder().Remove(0, 99), info), UiPreviewError::BASE_MISMATCH);
     zassert_equal(Patch(token, 2, PatchBuilder().Remove(9, 10), info), UiPreviewError::BASE_MISMATCH);
@@ -2533,4 +2571,356 @@ ZTEST(ui_preview_service, test_a_patch_has_limits_that_come_before_anything_else
         hosted.service->Patch(PatchBuilder().Remove(99, 99).Request(*hosted.service, token + 1, 2), info),
         UiPreviewError::BAD_TOKEN, "and the token before all of it"
     );
+}
+
+ZTEST(ui_preview_service, test_the_token_is_judged_before_the_number_of_operations) {
+    const auto token = HostStaged();
+    PatchBuilder many;
+    for(size_t i = 0; i <= UiPreviewService::MAX_PATCH_OPS; ++i)
+        many.Remove(99, 99);
+
+    UiPreviewService::PatchInfo info;
+    zassert_equal(hosted.service->Patch(many.Request(*hosted.service, token + 1, 2), info), UiPreviewError::BAD_TOKEN);
+    zassert_equal(hosted.service->Patch(many.Request(*hosted.service, token, 2), info), UiPreviewError::TOO_LARGE);
+    // (A request that carries the right token renews the lease, a refused one too.)
+    hosted.host->patch_ms = 0;
+    k_msleep(LEASE_MS / 2);
+    zassert_equal(hosted.service->Patch(many.Request(*hosted.service, token, 2), info), UiPreviewError::TOO_LARGE);
+    k_msleep(LEASE_MS / 2);
+    zassert_true(hosted.service->IsActive());
+}
+
+ZTEST(ui_preview_service, test_a_patch_is_judged_in_a_fixed_order_malformed_records_before_missing_targets) {
+    const auto token = HostedBegin();
+    UiPreviewService::PatchInfo info;
+    const Bytes noise(12, 0xFF);
+
+    // Nothing staged: there is no base, whatever the records are.
+    PatchBuilder malformed;
+    malformed.PutRaw(0, noise);
+    zassert_equal(
+        hosted.service->Patch(malformed.Request(*hosted.service, token, 1), info), UiPreviewError::BASE_MISMATCH
+    );
+
+    UiPreviewService::StageInfo stage;
+    zassert_equal(HostedStage(token, HostBytes(), std::nullopt, stage), UiPreviewError::OK);
+
+    // A record that is none is INVALID even where it names a screen the configuration lacks.
+    PatchBuilder both;
+    both.PutRaw(77, noise);
+    zassert_equal(hosted.service->Patch(both.Request(*hosted.service, token, 2), info), UiPreviewError::INVALID);
+    zassert_equal(std::string(hosted.service->GetReason()), "Malformed CBOR");
+
+    // A good record on a screen that is not there is BASE_MISMATCH, and is not asked of the validator.
+    hosted.host->is_valid = false;
+    zassert_equal(
+        hosted.service->Patch(PatchBuilder().Put(77, *HostWidget()).Request(*hosted.service, token, 2), info),
+        UiPreviewError::BASE_MISMATCH
+    );
+
+    // Then what the validator says.
+    zassert_equal(
+        hosted.service->Patch(PatchBuilder().Put(0, *HostWidget()).Request(*hosted.service, token, 2), info),
+        UiPreviewError::INVALID
+    );
+}
+
+ZTEST(ui_preview_service, test_a_patch_that_makes_the_configuration_larger_than_a_stage_takes_is_too_large) {
+    const auto token = HostedBegin();
+    UiPreviewService::StageInfo stage;
+    const std::vector<uint8_t> full(static_cast<size_t>(CONFIG_EERIE_LEAP_UI_PREVIEW_MAX_STAGE_SIZE), 0x5A);
+    zassert_equal(HostedStage(token, full, std::nullopt, stage), UiPreviewError::OK);
+
+    // The stage was as large as a stage goes, so the patch's records may push it over: it is measured.
+    hosted.host->encoded_size = static_cast<size_t>(CONFIG_EERIE_LEAP_UI_PREVIEW_MAX_STAGE_SIZE) + 1;
+    UiPreviewService::PatchInfo info;
+    zassert_equal(
+        hosted.service->Patch(PatchBuilder().Put(0, *HostWidget()).Request(*hosted.service, token, 2), info),
+        UiPreviewError::TOO_LARGE
+    );
+    zassert_equal(hosted.host->encode_count.load(), 1);
+    zassert_equal(hosted.host->patch_count.load(), 0, "Nothing was applied");
+    zassert_equal(hosted.service->GetStatus().rev, 1U);
+
+    // It fits once the patch takes something out: the measure is the new bound, and the next patch need not be measured.
+    hosted.host->encoded_size = 1000;
+    zassert_equal(
+        hosted.service->Patch(PatchBuilder().Put(0, *HostWidget()).Request(*hosted.service, token, 2), info),
+        UiPreviewError::OK
+    );
+    zassert_equal(hosted.host->encode_count.load(), 2);
+    zassert_equal(
+        hosted.service->Patch(PatchBuilder().Put(0, *HostWidget()).Request(*hosted.service, token, 3), info),
+        UiPreviewError::OK
+    );
+    zassert_equal(hosted.host->encode_count.load(), 2, "A configuration known to be small is not measured again");
+
+    // A host that cannot encode it cannot say.
+    hosted.host->encoded_size = 0;
+    const std::vector<uint8_t> second(static_cast<size_t>(CONFIG_EERIE_LEAP_UI_PREVIEW_MAX_STAGE_SIZE), 0x5A);
+    zassert_equal(HostedStage(token, second, std::nullopt, stage), UiPreviewError::OK);
+    zassert_equal(
+        hosted.service->Patch(PatchBuilder().Put(0, *HostWidget()).Request(*hosted.service, token, 9), info),
+        UiPreviewError::UNKNOWN
+    );
+}
+
+// ======== PATCH: what the view shows and publishes after one ========
+
+ZTEST(ui_controller_preview, test_a_patch_publishes_the_state_again_when_it_built_something_and_not_when_it_did_not) {
+    StoreAndShow({ STORED_GROUP_ID });
+    const auto token = BeginPreview();
+    const auto staged = MakePatchConfiguration({ PREVIEW_GROUP_ID });
+    zassert_equal(Stage(token, staged), UiPreviewError::OK);
+    zassert_true(WaitForRebuild(), "The stage rebuilds");
+    k_sem_reset(&rebuild.settings_requested);
+    rebuild.replay_count = 0;
+
+    // In place and bound to nothing: the widgets are the ones that were told already.
+    auto recolored = WidgetOf(*staged, 0, 10);
+    recolored->properties[WidgetPropertyType::COLOR_PRIMARY_ACTIVE] = std::pmr::string("#FF0000FF");
+    UiPreviewService::PatchInfo info;
+    zassert_equal(Patch(token, 2, PatchBuilder().Put(0, *recolored), info), UiPreviewError::OK);
+    zassert_true(info.effects[0] == PatchEffect::InPlace);
+    k_msleep(SETTLE_MS / 2);
+    zassert_equal(rebuild.replay_count.load(), 0, "No replay for a change in place");
+    zassert_not_equal(k_sem_take(&rebuild.settings_requested, K_NO_WAIT), 0, "and no request to publish");
+
+    // A widget built again has not been told what it binds to: the owners publish, and the replay runs.
+    auto smoothed = WidgetOf(*staged, 0, 11);
+    smoothed->properties[WidgetPropertyType::IS_SMOOTHED] = true;
+    zassert_equal(Patch(token, 3, PatchBuilder().Put(0, *smoothed), info), UiPreviewError::OK);
+    zassert_true(info.effects[0] == PatchEffect::WidgetRebuilt);
+    zassert_equal(
+        k_sem_take(&rebuild.settings_requested, K_MSEC(DISPATCH_TIMEOUT_MS)), 0, "Settings are asked to publish"
+    );
+    zassert_true(WaitForRebuild(), "and the state is replayed");
+    zassert_equal(rebuild.replay_count.load(), 1);
+
+    // So is a screen built again.
+    auto restacked = eerie_memory::make_shared_pmr<ScreenConfiguration>(Mrm::GetExtPmr());
+    const auto& screen = *staged->screen_configurations.at(0);
+    restacked->id = screen.id;
+    restacked->screen_group_id = screen.screen_group_id;
+    restacked->type = screen.type;
+    restacked->is_visible = screen.is_visible;
+    restacked->grid = screen.grid;
+    restacked->z_index = 2;
+    for(const auto& widget : screen.widget_configurations)
+        restacked->AddWidget(CopyWidget(*widget));
+    zassert_equal(Patch(token, 4, PatchBuilder().PutScreen(*restacked), info), UiPreviewError::OK);
+    zassert_true(info.effects[0] == PatchEffect::GroupRebuilt);
+    zassert_true(WaitForRebuild(), "A rebuilt screen replays the state too");
+}
+
+// A half-patched view is shown as it was staged, not left half patched.
+ZTEST(ui_controller_preview, test_a_patch_that_fails_half_way_leaves_the_screens_as_they_were_staged) {
+    StoreAndShow({ STORED_GROUP_ID });
+    const auto token = BeginPreview();
+    const auto staged = MakePatchConfiguration({ PREVIEW_GROUP_ID, SECOND_PREVIEW_GROUP_ID });
+    zassert_equal(Stage(token, staged), UiPreviewError::OK);
+    zassert_equal(Preview().Highlight(token, 0, 10), UiPreviewError::OK);
+    const auto before = OutlineAreaAfterSettling();
+    const int stored_count = rebuild.stored_count.load();
+
+    // Two screens are patched; the second one fails after the first has been moved.
+    auto moved = WidgetOf(*staged, 0, 10);
+    moved->position_grid = { 100, 40 };
+    auto other = WidgetOf(*staged, 1, 10);
+    other->properties[WidgetPropertyType::OPACITY] = 100;
+    rebuild.controller->FailPatchAfter(1);
+
+    UiPreviewService::PatchInfo info;
+    zassert_equal(Patch(token, 2, PatchBuilder().Put(0, *moved).Put(1, *other), info), UiPreviewError::UNKNOWN);
+    rebuild.controller->FailPatchAfter(SIZE_MAX);
+
+    // The widget is where the stage put it, the revision is as it was, and the session goes on from the same base.
+    zassert_equal(Preview().GetStatus().rev, 1U);
+    zassert_true(Preview().IsActive());
+    zassert_equal(Preview().Highlight(token, 0, 10), UiPreviewError::OK);
+    const auto after = OutlineAreaAfterSettling();
+    zassert_equal(after.x1, before.x1, "The first screen's move was not kept");
+    zassert_equal(*rebuild.navigation_service->GetActiveGroupId(), PREVIEW_GROUP_ID);
+
+    zassert_equal(Patch(token, 2, PatchBuilder().Put(0, *moved), info), UiPreviewError::OK);
+    zassert_equal(Preview().Highlight(token, 0, 10), UiPreviewError::OK);
+    zassert_true(OutlineAreaAfterSettling().x1 < before.x1);
+    zassert_equal(rebuild.stored_count.load(), stored_count);
+}
+
+namespace {
+
+// The x of the children of the first object below @p object that has exactly these children (identified by the x
+// each was given), in the order LVGL draws them.
+// NOLINTNEXTLINE(misc-no-recursion): it walks a tree of objects.
+std::vector<int32_t> DrawnXs(lv_obj_t* object, const std::vector<int32_t>& expected) {
+    const auto count = lv_obj_get_child_count(object);
+    if(count == expected.size()) {
+        std::vector<int32_t> xs;
+        xs.reserve(count);
+        for(uint32_t i = 0; i < count; ++i)
+            xs.push_back(lv_obj_get_x(lv_obj_get_child(object, static_cast<int32_t>(i))));
+
+        auto sorted = xs;
+        auto wanted = expected;
+        std::ranges::sort(sorted);
+        std::ranges::sort(wanted);
+        if(sorted == wanted)
+            return xs;
+    }
+
+    for(uint32_t i = 0; i < count; ++i) {
+        auto found = DrawnXs(lv_obj_get_child(object, static_cast<int32_t>(i)), expected);
+        if(!found.empty())
+            return found;
+    }
+
+    return {};
+}
+
+} // namespace
+
+ZTEST(ui_controller_preview, test_a_widget_removed_and_put_again_is_drawn_where_the_list_now_has_it) {
+    StoreAndShow({ STORED_GROUP_ID });
+    const auto token = BeginPreview();
+    auto staged = MakeConfiguration({ PREVIEW_GROUP_ID });
+    auto& screen = *staged->screen_configurations.at(0);
+    // Three bars of one z-index, told apart by where they are.
+    screen.widget_configurations.clear();
+    for(uint32_t id : { 20U, 21U, 22U }) {
+        auto bar = eerie_memory::make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
+        bar->type = WidgetType::IndicatorBar;
+        bar->id = id;
+        bar->position_grid = { static_cast<int32_t>(id) * 10, 40 };
+        bar->size_grid = { 5, 5 };
+        screen.AddWidget(bar);
+    }
+    zassert_equal(Stage(token, staged), UiPreviewError::OK);
+    k_msleep(SETTLE_MS / 2);
+
+    const std::vector<int32_t> xs{ 200, 210, 220 };
+    const auto drawn = [&xs] {
+        ScopedLvglLock lvgl_guard;
+        // (The renderer lays out on its own; the test asks for it.)
+        lv_obj_update_layout(lv_screen_active());
+
+        return DrawnXs(lv_screen_active(), xs);
+    };
+    zassert_true((drawn() == std::vector<int32_t>{ 200, 210, 220 }), "Drawn in the order of the list");
+
+    // Out and in again: the same widget, now after the others of its z-index, in the list and on the screen.
+    auto again = WidgetOf(*staged, 0, 21);
+    UiPreviewService::PatchInfo info;
+    zassert_equal(Patch(token, 2, PatchBuilder().Remove(0, 21).Put(0, *again), info), UiPreviewError::OK);
+    zassert_true((drawn() == std::vector<int32_t>{ 200, 220, 210 }), "Now drawn last");
+}
+
+// The same for the screens of a group, which the group orders by z-index and the list.
+ZTEST(ui_controller_preview, test_a_screen_removed_and_put_again_is_drawn_where_the_list_now_has_it) {
+    StoreAndShow({ STORED_GROUP_ID });
+    const auto token = BeginPreview();
+    auto staged = MakeConfiguration({ PREVIEW_GROUP_ID, PREVIEW_GROUP_ID, PREVIEW_GROUP_ID });
+    // Three screens of one group and one z-index, told apart by where their bar is.
+    for(uint32_t index = 0; index < 3; ++index)
+        staged->screen_configurations.at(index)->widget_configurations.front()->position_grid = {
+            static_cast<int32_t>(index) * 10 + 200, 40
+        };
+    zassert_equal(Stage(token, staged), UiPreviewError::OK);
+    k_msleep(SETTLE_MS / 2);
+
+    // A screen is told apart by its first widget; the group's children are the screens.
+    const auto first_xs = [] {
+        ScopedLvglLock lvgl_guard;
+        std::vector<int32_t> xs;
+        lv_obj_update_layout(lv_screen_active());
+        // The screens are the children of the group that holds exactly three of them.
+        std::function<bool(lv_obj_t*)> find = [&](lv_obj_t* object) {
+            const auto count = lv_obj_get_child_count(object);
+            if(count == 3) {
+                bool all_have_a_bar = true;
+                std::vector<int32_t> found;
+                for(uint32_t i = 0; i < count; ++i) {
+                    auto* screen = lv_obj_get_child(object, static_cast<int32_t>(i));
+                    if(lv_obj_get_child_count(screen) != 1
+                        || lv_obj_get_child_count(lv_obj_get_child(screen, 0)) == 0) {
+                        all_have_a_bar = false;
+                        break;
+                    }
+                    found.push_back(lv_obj_get_x(lv_obj_get_child(screen, 0)));
+                }
+                if(all_have_a_bar) {
+                    xs = std::move(found);
+                    return true;
+                }
+            }
+            for(uint32_t i = 0; i < count; ++i) {
+                if(find(lv_obj_get_child(object, static_cast<int32_t>(i))))
+                    return true;
+            }
+            return false;
+        };
+        find(lv_screen_active());
+
+        return xs;
+    };
+    zassert_true((first_xs() == std::vector<int32_t>{ 200, 210, 220 }), "Drawn in the order of the list");
+
+    // The middle screen out and in again: last in the list, last on the screen.
+    auto middle = eerie_memory::make_shared_pmr<ScreenConfiguration>(Mrm::GetExtPmr());
+    const auto& staged_middle = *staged->screen_configurations.at(1);
+    middle->id = staged_middle.id;
+    middle->screen_group_id = staged_middle.screen_group_id;
+    middle->type = staged_middle.type;
+    middle->is_visible = staged_middle.is_visible;
+    middle->grid = staged_middle.grid;
+    for(const auto& widget : staged_middle.widget_configurations)
+        middle->AddWidget(CopyWidget(*widget));
+
+    UiPreviewService::PatchInfo info;
+    zassert_equal(Patch(token, 2, PatchBuilder().RemoveScreen(1).PutScreen(*middle), info), UiPreviewError::OK);
+    zassert_true((first_xs() == std::vector<int32_t>{ 200, 220, 210 }), "Now drawn last");
+}
+
+// ======== PATCH: widgets with bindings (the channels are registered here, for the rest of the process) ========
+
+ZTEST_SUITE(ui_zz_patch_bound, NULL, RebuildSetup, RebuildBefore, PreviewAfter, RebuildTeardown);
+
+ZTEST(ui_zz_patch_bound, test_a_widget_with_bindings_updated_in_place_is_told_what_it_binds_to_again) {
+    InitializeEventChannels();
+    StoreAndShow({ STORED_GROUP_ID });
+    const auto token = BeginPreview();
+
+    auto staged = MakePatchConfiguration({ PREVIEW_GROUP_ID });
+    const auto bind = PropertyBinding{ .target = WidgetPropertyType::OPACITY,
+        .event = { .channel = EventChannelId::Sensors,
+            .event_type = std::to_underlying(SensorEventType::DataUpdated),
+            .payload_key = std::to_underlying(SensorPayloadType::Value),
+            .selector_key = std::to_underlying(SensorPayloadType::SensorId),
+            .selector_value = std::pmr::string("patch_bound", Mrm::GetExtPmr()) } };
+    for(const auto& widget : staged->screen_configurations.at(0)->widget_configurations) {
+        if(widget->id == 10)
+            widget->bindings.push_back(bind);
+    }
+    zassert_equal(Stage(token, staged), UiPreviewError::OK);
+    zassert_true(WaitForRebuild());
+    k_sem_reset(&rebuild.settings_requested);
+    rebuild.replay_count = 0;
+
+    // A widget with nothing bound, recolored: nothing to publish.
+    UiPreviewService::PatchInfo info;
+    auto plain = WidgetOf(*staged, 0, 11);
+    plain->properties[WidgetPropertyType::COLOR_PRIMARY_ACTIVE] = std::pmr::string("#FF0000FF");
+    zassert_equal(Patch(token, 2, PatchBuilder().Put(0, *plain), info), UiPreviewError::OK);
+    k_msleep(SETTLE_MS / 2);
+    zassert_equal(rebuild.replay_count.load(), 0);
+
+    // One with a binding, recolored in place: it keeps the value the last event gave, and the event is asked for.
+    auto bound = WidgetOf(*staged, 0, 10);
+    bound->bindings.push_back(bind);
+    bound->properties[WidgetPropertyType::COLOR_PRIMARY_ACTIVE] = std::pmr::string("#00FF00FF");
+    zassert_equal(Patch(token, 3, PatchBuilder().Put(0, *bound), info), UiPreviewError::OK);
+    zassert_true(info.effects[0] == PatchEffect::InPlace);
+    zassert_equal(k_sem_take(&rebuild.settings_requested, K_MSEC(DISPATCH_TIMEOUT_MS)), 0);
+    zassert_true(WaitForRebuild(), "The state is replayed");
+    zassert_equal(rebuild.replay_count.load(), 1);
 }

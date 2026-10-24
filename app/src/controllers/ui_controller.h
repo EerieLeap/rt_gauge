@@ -61,6 +61,7 @@ using eerie_leap::subsys::event_bus::DispatchGuard;
 using eerie_leap::domain::ui_domain::preview::PatchPlan;
 using eerie_leap::domain::ui_domain::preview::ScreenPatch;
 using eerie_leap::domain::ui_domain::preview::UiPreviewError;
+using eerie_leap::domain::ui_domain::preview::WidgetAction;
 using eerie_leap::domain::ui_preview_domain::IUiPreviewHost;
 using eerie_leap::domain::ui_preview_domain::UiPreviewApplied;
 using eerie_leap::domain::ui_preview_domain::UiPreviewService;
@@ -184,8 +185,14 @@ private:
 
     // What PatchScreen() answers beside 0 and an error: the view cannot do this one in place.
     static constexpr int PATCH_NEEDS_REBUILD = 1;
-    int PatchScreen(const ScreenPatch& patch, std::vector<uint32_t>& overlays_to_reshow);
-    void OrderPatchedGroups(const PatchPlan& plan, const UiConfiguration& patched);
+    int PatchScreen(const ScreenPatch& patch, std::vector<uint32_t>& overlays_to_reshow, bool& has_bound_update);
+    void OrderPatchedGroups(const UiConfiguration& patched);
+    // ApplyPatch() under the LVGL lock; @p is_replay_needed says the state is to be published again after it.
+    int ApplyPatchLocked(std::shared_ptr<UiConfiguration> patched, PatchPlan& plan, bool& is_replay_needed);
+#ifdef CONFIG_ZTEST
+    // Tests only: the patch of this many screens succeeds, and the next one fails.
+    size_t patch_faults_after_ = SIZE_MAX;
+#endif
 
     void SubscribeToNavigation();
     void OnNavigationChanged(const NavigationEventChannel::EventMessage& event);
@@ -233,6 +240,7 @@ public:
     std::shared_ptr<UiConfiguration>
     ParseConfiguration(std::span<const uint8_t> cbor_data, std::span<char> reason) override;
     bool ValidateConfiguration(const UiConfiguration& configuration, std::span<char> reason) override;
+    size_t GetEncodedSize(const UiConfiguration& configuration) override;
     int ApplyPatch(std::shared_ptr<UiConfiguration> patched, PatchPlan& plan) override;
     int ShowConfiguration(std::shared_ptr<UiConfiguration> configuration, UiPreviewApplied& applied) override;
     int ShowStoredConfiguration() override;
@@ -244,6 +252,13 @@ public:
 
     /** @brief Whether the swipes navigate: not while a preview pins the screen. */
     bool IsNavigationEnabled() const;
+
+#ifdef CONFIG_ZTEST
+    /** @brief Tests only: after @p screens screens are patched, the next patch of a screen throws. */
+    void FailPatchAfter(size_t screens) {
+        patch_faults_after_ = screens;
+    }
+#endif
 
     /** @brief The preview of staged configurations; null when the build has none or its work queues did not start. */
     std::shared_ptr<UiPreviewService> GetPreviewService() const;

@@ -53,8 +53,9 @@ bool DecodeTarget(zcbor_state_t* zsd, TargetField* target) {
 // the work is done.
 struct PatchOpsField {
     std::array<UiPreviewService::PatchOpRef, UiPreviewService::MAX_PATCH_OPS> ops{};
+    // Those kept, and all those the request has.
     size_t count = 0;
-    bool has_too_many = false;
+    size_t total = 0;
 };
 
 bool DecodePatchOps(zcbor_state_t* zsd, PatchOpsField* field) {
@@ -104,8 +105,8 @@ bool DecodePatchOps(zcbor_state_t* zsd, PatchOpsField* field) {
         op.bytes = { record.value, record.len };
         if(field->count < field->ops.size())
             field->ops[field->count++] = op;
-        else
-            field->has_too_many = true;
+
+        ++field->total;
     }
 
     return zcbor_list_end_decode(zsd);
@@ -243,14 +244,11 @@ int UiMgmtGroup::HandlePatch(smp_streamer* ctxt) {
     if(!SmpDecodeRequest(ctxt, keys) || !keys[0].found || !keys[1].found || !keys[2].found || ops.count == 0)
         return MGMT_ERR_EINVAL;
 
-    // More operations than the handler keeps are as large as any other request that is too much.
-    if(ops.has_too_many)
-        return Fail(ctxt, UiPreviewError::TOO_LARGE);
-
     const UiPreviewService::PatchRequest request{
         .token = token,
         .rev = rev,
         .ops = { ops.ops.data(), ops.count },
+        .op_count = ops.total,
         .body_size = body_size,
     };
 

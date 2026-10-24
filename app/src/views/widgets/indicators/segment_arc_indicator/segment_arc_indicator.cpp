@@ -36,8 +36,8 @@ void SegmentArcIndicator::RegisterProperties(WidgetPropertyStore& store) const {
     store.RegisterColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE);
     store.RegisterColor(WidgetPropertyType::COLOR_PRIMARY_INACTIVE);
 
-    store.Register(WidgetPropertyType::START_ANGLE, ConfigValue{ 45 }, PropertyChangeEffect::Repaint);
-    store.Register(WidgetPropertyType::END_ANGLE, ConfigValue{ 315 }, PropertyChangeEffect::Repaint);
+    store.Register(WidgetPropertyType::START_ANGLE, ConfigValue{ 45 }, PropertyChangeEffect::Rebuild);
+    store.Register(WidgetPropertyType::END_ANGLE, ConfigValue{ 315 }, PropertyChangeEffect::Rebuild);
 }
 
 int SegmentArcIndicator::ApplyTheme(const ITheme& theme) {

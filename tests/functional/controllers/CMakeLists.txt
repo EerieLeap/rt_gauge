@@ -36,6 +36,12 @@ file(GLOB_RECURSE APP_SRC_DISPLAY_DOMAIN
   ${APP_SRC_DISPLAY_DOMAIN_DIR}/*.cpp
 )
 
+# InitializeEventChannels() registers the channels that widget bindings resolve through.
+file(GLOB_RECURSE APP_SRC_EVENT_BUS
+  ${APP_SRC_DIR}/event_bus/*.c
+  ${APP_SRC_DIR}/event_bus/*.cpp
+)
+
 set(APP_SRC_VIEWS_DIR ${APP_SRC_DIR}/views)
 file(GLOB_RECURSE APP_SRC_VIEWS
   ${APP_SRC_VIEWS_DIR}/*.c
@@ -61,6 +67,7 @@ target_sources(app PRIVATE
   ${APP_SRC_CONFIGURATION}
   ${APP_SRC_CONTROLLERS}
   ${APP_SRC_DISPLAY_DOMAIN}
+  ${APP_SRC_EVENT_BUS}
   ${APP_SRC_UI_DOMAIN}
   ${APP_SRC_UI_PREVIEW}
   ${APP_SRC_UTILITIES}

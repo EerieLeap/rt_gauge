@@ -109,8 +109,8 @@ void IndicatorBase::OnProcessingSuspended() {
 void IndicatorBase::RegisterProperties(WidgetPropertyStore& store) const {
     WidgetBase::RegisterProperties(store);
 
-    store.Register(WidgetPropertyType::MIN_VALUE, ConfigValue{ 0.0 }, PropertyChangeEffect::Repaint);
-    store.Register(WidgetPropertyType::MAX_VALUE, ConfigValue{ 100.0 }, PropertyChangeEffect::Repaint);
+    store.Register(WidgetPropertyType::MIN_VALUE, ConfigValue{ 0.0 }, PropertyChangeEffect::Rebuild);
+    store.Register(WidgetPropertyType::MAX_VALUE, ConfigValue{ 100.0 }, PropertyChangeEffect::Rebuild);
 
     // No effect: Update() drives the animation, which invalidates just the area it moves. Adding
     // a container repaint here dirties the whole widget rect on every sample instead.

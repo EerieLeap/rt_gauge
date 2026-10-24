@@ -178,7 +178,8 @@ public:
     /**
      * @brief A patch is about to be applied: renews the lease and, if @p rev is past the applied one, marks the
      *        session applying until FinishApply(), as the last chunk of a stage does.
-     * @return NO_SESSION, BAD_TOKEN, BUSY while a stage or another patch is being applied, STALE (with the
+     * @return NO_SESSION, BAD_TOKEN, BUSY while a stage is under way (between its chunks too) or being applied, or
+     *         another patch is, STALE (with the
      *         applied revision) for a revision that does not go forward.
      */
     PatchBegin BeginPatch(uint32_t token, uint32_t rev, int64_t now_ms);

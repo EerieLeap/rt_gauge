@@ -35,6 +35,8 @@ using eerie_leap::utilities::memory::Mrm;
 namespace {
 
 constexpr int64_t LEASE_MS = CONFIG_EERIE_LEAP_UI_PREVIEW_LEASE_MS;
+// What a record takes in the configuration beyond its own bytes: the headers of the arrays it sits in.
+constexpr size_t PATCH_RECORD_OVERHEAD = 8;
 constexpr uint32_t MAX_STAGE_SIZE = CONFIG_EERIE_LEAP_UI_PREVIEW_MAX_STAGE_SIZE;
 
 uint32_t NewToken() {
@@ -250,6 +252,7 @@ UiPreviewError UiPreviewService::ExecuteParse() {
         return UiPreviewError::CRC_MISMATCH;
 
     reason_.front() = '\0';
+    parsed_size_ = staged.size();
     parsed_ = host_.ParseConfiguration(staged, reason_);
     if(parsed_ == nullptr) {
         if(reason_.front() == '\0')
@@ -293,6 +296,7 @@ UiPreviewError UiPreviewService::ExecuteApply(Job& job) {
     }
 
     staged_ = shown;
+    staged_size_bound_ = parsed_size_;
     job.rev = session_.CommitStage();
 
     return UiPreviewError::OK;
@@ -358,6 +362,26 @@ UiPreviewError UiPreviewService::ExecutePatchPrepare(Job& job) {
         return UiPreviewError::INVALID;
     }
 
+    // The patched configuration is no larger than a stage takes: judged by a bound that is exact after a stage, and
+    // measured only when the bound says it may be too large.
+    patched_size_bound_ = staged_size_bound_;
+    for(const auto& ref : job.patch->ops)
+        patched_size_bound_ += ref.bytes.size() + PATCH_RECORD_OVERHEAD;
+
+    if(patched_size_bound_ > MAX_STAGE_SIZE) {
+        const size_t size = host_.GetEncodedSize(*patched_);
+        if(size == 0)
+            return UiPreviewError::UNKNOWN;
+
+        if(size > MAX_STAGE_SIZE) {
+            patched_.reset();
+
+            return UiPreviewError::TOO_LARGE;
+        }
+
+        patched_size_bound_ = size;
+    }
+
     patch_plan_ = PlanPatch(*staged_, *patched_, patch_ops_);
 
     return UiPreviewError::OK;
@@ -397,6 +421,7 @@ UiPreviewError UiPreviewService::ExecutePatchApply(Job& job) {
     }
 
     staged_ = patched_;
+    staged_size_bound_ = patched_size_bound_;
     job.rev = session_.CommitPatch(job.patch->rev);
 
     return UiPreviewError::OK;
@@ -445,6 +470,7 @@ std::optional<bool> UiPreviewService::EndSession(bool is_revert) {
     pending_end_ = 0;
 
     staged_.reset();
+    staged_size_bound_ = 0;
     host_.SetNavigationPinned(false);
     host_.Highlight(std::nullopt, std::nullopt);
 
@@ -556,7 +582,7 @@ UiPreviewError UiPreviewService::Patch(const PatchRequest& request, PatchInfo& i
     if(const auto error = session_.Touch(request.token, k_uptime_get()); error != UiPreviewError::OK)
         return error;
 
-    if(request.ops.empty() || request.ops.size() > MAX_PATCH_OPS || request.body_size > MAX_PATCH_SIZE)
+    if(request.ops.empty() || request.op_count > MAX_PATCH_OPS || request.body_size > MAX_PATCH_SIZE)
         return UiPreviewError::TOO_LARGE;
 
     const auto begun = session_.BeginPatch(request.token, request.rev, k_uptime_get());

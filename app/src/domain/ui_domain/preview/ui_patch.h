@@ -42,13 +42,15 @@ enum class WidgetChange : uint8_t {
  * children is classified by its own record; what changed in a child rebuilds its owner, which the caller decides
  * (PlanPatch()). Never RebuildGroup: a group is rebuilt for what the widget does not say, see ClassifyScreenChange().
  */
-[[nodiscard]] WidgetChange ClassifyWidgetChange(const WidgetConfiguration& old_widget, const WidgetConfiguration& new_widget);
+[[nodiscard]] WidgetChange
+ClassifyWidgetChange(const WidgetConfiguration& old_widget, const WidgetConfiguration& new_widget);
 
 /**
  * @brief What the screen's own record changed, leaving its widgets aside: InPlace, or RebuildGroup for a change
  *        of the grid, the type, the visibility, the z-index, the screen group or the overlay flag.
  */
-[[nodiscard]] WidgetChange ClassifyScreenChange(const ScreenConfiguration& old_screen, const ScreenConfiguration& new_screen);
+[[nodiscard]] WidgetChange
+ClassifyScreenChange(const ScreenConfiguration& old_screen, const ScreenConfiguration& new_screen);
 
 /// Whether two records are the same widget in every field.
 [[nodiscard]] bool IsSameWidget(const WidgetConfiguration& a, const WidgetConfiguration& b);
@@ -125,6 +127,8 @@ struct ScreenPatch {
     std::shared_ptr<ScreenConfiguration> new_screen;
     /// Removes first, then the others; for ScreenAction::Widgets only.
     std::vector<WidgetPatch> widgets;
+    /// For ScreenAction::Widgets: the roots that stay are drawn in another order than they were, whatever else changed.
+    bool reorders = false;
 };
 
 struct PatchPlan {
@@ -143,6 +147,7 @@ struct PatchPlan {
  * order is updated in place when only its own record changed in place (ClassifyWidgetChange()); any other
  * change of it, or of a widget it owns, replaces it; roots that are new are added, those that are gone removed.
  */
-[[nodiscard]] PatchPlan PlanPatch(const UiConfiguration& base, const UiConfiguration& patched, std::span<const PatchOp> ops);
+[[nodiscard]] PatchPlan
+PlanPatch(const UiConfiguration& base, const UiConfiguration& patched, std::span<const PatchOp> ops);
 
 } // namespace eerie_leap::domain::ui_domain::preview

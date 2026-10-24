@@ -64,6 +64,10 @@ public:
     // bindings against this unit's channels) and stores nothing. Throws std::invalid_argument naming what is wrong.
     void ValidateConfiguration(const UiConfiguration& configuration) const;
 
+    // The size the configuration has encoded as an upload carries it; 0 if it cannot be encoded. Encodes it, so
+    // it costs what an upload's encoding costs.
+    size_t GetEncodedSize(const UiConfiguration& configuration);
+
     // Validates, persists, and then keeps the configuration itself; do not modify it afterwards.
     bool Update(std::shared_ptr<UiConfiguration> configuration);
     // The returned configuration is already validated; screens build from it without rechecking.

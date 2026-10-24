@@ -96,8 +96,8 @@ void DialIndicator::UpdateIndicator(float value) {
 void DialIndicator::RegisterProperties(WidgetPropertyStore& store) const {
     IndicatorBase::RegisterProperties(store);
 
-    store.Register(WidgetPropertyType::START_ANGLE, ConfigValue{ DEFAULT_START_ANGLE }, PropertyChangeEffect::Repaint);
-    store.Register(WidgetPropertyType::END_ANGLE, ConfigValue{ DEFAULT_END_ANGLE }, PropertyChangeEffect::Repaint);
+    store.Register(WidgetPropertyType::START_ANGLE, ConfigValue{ DEFAULT_START_ANGLE }, PropertyChangeEffect::Rebuild);
+    store.Register(WidgetPropertyType::END_ANGLE, ConfigValue{ DEFAULT_END_ANGLE }, PropertyChangeEffect::Rebuild);
 }
 
 void DialIndicator::OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) {

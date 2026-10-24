@@ -1093,9 +1093,12 @@ ZTEST(smp_ui, test_a_patch_has_limits_and_a_shape) {
     const auto token = BeginAndStage(configuration);
     const auto widget = StagedWidget(*configuration, 0);
 
-    // More operations than a request may carry (the bytes it may carry are the packet, which is as large as BEGIN says).
+    // More operations than a request may carry (the bytes it may carry are the packet, which is as large as BEGIN says),
+    // judged once the token is: a request that is not the session's is not told its size.
     std::vector<Bytes> many(17, PutWidgetOp(0, *widget));
+    zassert_equal(ErrorOf(SendPatch(token + 1, 2, many)), BAD_TOKEN);
     zassert_equal(ErrorOf(SendPatch(token, 2, many)), TOO_LARGE);
+    zassert_equal(ErrorOf(SendPatch(token, 1, many)), TOO_LARGE, "before the revision");
 
     // No operations, an operation of a kind that does not exist, and a request without its keys are malformed.
     zassert_equal(SendPatch(token, 2, {}).Value("rc"), static_cast<uint32_t>(MGMT_ERR_EINVAL));
@@ -1114,6 +1117,33 @@ ZTEST(smp_ui, test_a_patch_has_limits_and_a_shape) {
     // The session is as it was: all of the above changed nothing.
     zassert_equal(Read(Command::STATUS).Value("rev"), 1U);
     zassert_true(SendPatch(token, 2, { PutWidgetOp(0, *widget) }).IsOk());
+}
+
+ZTEST(smp_ui, test_a_patch_between_the_chunks_of_a_stage_is_busy) {
+    const auto configuration = StagedConfiguration();
+    const auto token = BeginAndStage(configuration);
+    const auto widget = StagedWidget(*configuration, 0);
+
+    constexpr uint32_t MANY_WIDGETS = 30;
+    const auto bytes = Encode(MakeConfiguration({ GROUP_ID }, std::nullopt, MANY_WIDGETS));
+    zassert_true(bytes.size() > CHUNK_SIZE);
+    zassert_true(StageChunk(token, bytes, 0).IsOk());
+
+    // The stage is half sent; a patch is not on top of it, whatever its revision.
+    zassert_equal(ErrorOf(SendPatch(token, 2, { PutWidgetOp(0, *widget) })), BUSY);
+    zassert_equal(ErrorOf(SendPatch(token, 9, { PutWidgetOp(0, *widget) })), BUSY);
+
+    Response response;
+    for(size_t offset = CHUNK_SIZE; offset < bytes.size(); offset += CHUNK_SIZE)
+        response = StageChunk(token, bytes, offset);
+    zassert_true(response.IsOk());
+    zassert_equal(response.Value("rev"), 2U);
+
+    // The revision did not go back, and the patch counts on from the stage.
+    zassert_equal(ErrorOf(SendPatch(token, 2, { PutWidgetOp(0, *widget) })), STALE);
+    const auto patched = SendPatch(token, 3, { PutWidgetOp(0, *widget) });
+    zassert_true(patched.IsOk(), "Refused: %u", ErrorOf(patched));
+    zassert_equal(patched.Value("rev"), 3U);
 }
 
 ZTEST(smp_ui, test_a_patch_needs_the_session_and_its_token) {

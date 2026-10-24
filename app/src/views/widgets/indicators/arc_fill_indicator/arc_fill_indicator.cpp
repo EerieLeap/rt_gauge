@@ -33,8 +33,8 @@ void ArcFillIndicator::RegisterProperties(WidgetPropertyStore& store) const {
     store.RegisterColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE);
     store.RegisterColor(WidgetPropertyType::COLOR_SECONDARY_ACTIVE);
 
-    store.Register(WidgetPropertyType::START_ANGLE, ConfigValue{ DEFAULT_START_ANGLE }, PropertyChangeEffect::Repaint);
-    store.Register(WidgetPropertyType::END_ANGLE, ConfigValue{ DEFAULT_END_ANGLE }, PropertyChangeEffect::Repaint);
+    store.Register(WidgetPropertyType::START_ANGLE, ConfigValue{ DEFAULT_START_ANGLE }, PropertyChangeEffect::Rebuild);
+    store.Register(WidgetPropertyType::END_ANGLE, ConfigValue{ DEFAULT_END_ANGLE }, PropertyChangeEffect::Rebuild);
 }
 
 int ArcFillIndicator::ApplyTheme(const ITheme& theme) {

@@ -391,3 +391,43 @@ ZTEST(ui_preview_session, test_the_end_says_what_it_has_to_undo) {
     zassert_false(fresh.had_navigated);
     zassert_false(fresh.had_replaced_screens);
 }
+
+// A stage's transfer is a base that is not yet there: a patch in the middle of it would take the revision back.
+ZTEST(ui_preview_session, test_a_patch_waits_for_a_stage_that_is_under_way) {
+    Open open;
+    const auto bytes = Bytes(100);
+
+    zassert_equal(open.session.Stage(TOKEN, 0, std::span(bytes).first(40), 100, CRC, 7, 0).received, 40U);
+    zassert_equal(open.session.BeginPatch(TOKEN, 9, 0).error, UiPreviewError::BUSY);
+
+    zassert_true(open.session
+            .Stage(TOKEN, 40, std::span(bytes).subspan(40), std::nullopt, std::nullopt, std::nullopt, 0)
+            .is_complete);
+    zassert_equal(
+        open.session.BeginPatch(TOKEN, 9, 0).error, UiPreviewError::BUSY, "and while its last chunk is applied"
+    );
+    zassert_equal(open.session.CommitStage(), 7U);
+    open.session.DropStage();
+    open.session.FinishApply();
+
+    const auto begun = open.session.BeginPatch(TOKEN, 9, 0);
+    zassert_equal(begun.error, UiPreviewError::OK);
+    zassert_equal(begun.rev, 7U);
+    zassert_equal(open.session.CommitPatch(9), 9U);
+    open.session.FinishApply();
+
+    zassert_equal(open.session.BeginPatch(TOKEN, 9, 0).error, UiPreviewError::STALE);
+    zassert_equal(open.session.BeginPatch(TOKEN, 3, 0).rev, 9U);
+}
+
+ZTEST(ui_preview_session, test_a_stage_never_takes_the_revision_back) {
+    Open open;
+    const auto bytes = Bytes(10);
+
+    // A revision that was past the applied one when the transfer began, and no longer is.
+    zassert_equal(open.session.Stage(TOKEN, 0, bytes, 10, CRC, 2, 0).error, UiPreviewError::OK);
+    open.session.CommitPatch(5);
+
+    zassert_equal(open.session.CommitStage(), 6U);
+    zassert_equal(open.session.GetRev(), 6U);
+}

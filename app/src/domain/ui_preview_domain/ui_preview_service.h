@@ -105,6 +105,8 @@ public:
         uint32_t token = 0;
         uint32_t rev = 0;
         std::span<const PatchOpRef> ops;
+        /// How many operations the request has, which can be more than `ops` holds.
+        size_t op_count = 0;
         /// The size of the request's CBOR body, as it came.
         size_t body_size = 0;
     };
@@ -181,6 +183,7 @@ private:
     std::optional<uint32_t> begin_group_;
 
     std::shared_ptr<UiConfiguration> parsed_;
+    size_t parsed_size_ = 0;
     // The configuration the screens show, as the last stage or patch left it: what a patch applies onto. Null
     // before anything was shown and after the stored screens came back. Touched by jobs and ends, which never
     // overlap an apply.
@@ -189,6 +192,10 @@ private:
     std::shared_ptr<UiConfiguration> patched_;
     std::vector<PatchOp> patch_ops_;
     PatchPlan patch_plan_;
+    // No more than the staged configuration's encoded size: exact after a stage or a measurement, and grown by the
+    // records of each patch, whatever they replace. Measured again only when it passes the most a stage takes.
+    size_t staged_size_bound_ = 0;
+    size_t patched_size_bound_ = 0;
     std::array<char, MAX_REASON_LENGTH + 1> reason_{};
 
     UiPreviewError RunJob(std::optional<WorkQueueTask<UiPreviewService>>& task, Job& job);

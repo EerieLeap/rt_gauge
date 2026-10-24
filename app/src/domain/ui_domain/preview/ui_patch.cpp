@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <array>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <utility>
@@ -54,71 +55,37 @@ IconType IconTypeOf(const WidgetConfiguration& widget) {
 
 // What every widget applies as it changes: management, color, anchor and animation.
 bool IsCommonInPlaceProperty(WidgetPropertyType type) {
-    return WidgetPropertyValidator::IsManagementProperty(type)
+    // Not IS_ACTIVE, which stops a widget's processing and tracking: what that leaves on the objects (a segment arc
+    // that is deactivated is not the one that was built so) is the widget's to say, and it is built again.
+    return type == WidgetPropertyType::IS_VISIBLE
+        || type == WidgetPropertyType::OPACITY
         || WidgetPropertyValidator::IsColorProperty(type)
         || WidgetPropertyValidator::IsAnchorProperty(type)
         || WidgetPropertyValidator::IsAnimationProperty(type);
 }
 
-bool IsRangeProperty(WidgetPropertyType type) {
-    return type == WidgetPropertyType::MIN_VALUE || type == WidgetPropertyType::MAX_VALUE
-        || type == WidgetPropertyType::VALUE;
-}
-
-bool IsArcAngleProperty(WidgetPropertyType type) {
-    return type == WidgetPropertyType::START_ANGLE || type == WidgetPropertyType::END_ANGLE;
-}
-
-// Whether a widget of this type applies a change of this property to its objects as it comes. A property it does
-// not know here is one it rebuilds for, which is always right and sometimes slow.
+// Whether a widget of this type applies a change of this property to its objects as it comes, so that the widget
+// looks as one built from the new record does. The table is short on purpose: what a widget reads once, as it is
+// rendered (a range, an angle, a precision, a label, the points of a chart, the segments of an arc), is a rebuild,
+// and so is a value, whose live display belongs to the animation and the history of the widget that shows it.
+// Whatever is not listed is a rebuild, which is always right and sometimes slow.
 bool AppliesInPlace(const WidgetConfiguration& widget, WidgetPropertyType type) {
     if(IsCommonInPlaceProperty(type))
         return true;
 
-    switch(widget.type) {
-        case WidgetType::IndicatorArcFill:
-        case WidgetType::IndicatorSegmentArc:
-        case WidgetType::IndicatorDial:
-            return IsRangeProperty(type) || IsArcAngleProperty(type);
+    // A shape icon's size, stroke, corner, fill, direction and offsets are applied by the icon widget as they change.
+    // An arc icon places its icon on a circle as it renders; the others have none of these.
+    if(widget.type != WidgetType::BasicIcon || !IsShapeIcon(IconTypeOf(widget)))
+        return false;
 
-        case WidgetType::IndicatorDigital:
-            return IsRangeProperty(type) || type == WidgetPropertyType::VALUE_PRECISION;
-
-        case WidgetType::IndicatorBar:
-        case WidgetType::IndicatorHorizontalChart:
-        case WidgetType::ControlSlider:
-            return IsRangeProperty(type);
-
-        case WidgetType::IndicatorSetting:
-            return IsRangeProperty(type)
-                || type == WidgetPropertyType::VALUE_PRECISION
-                || type == WidgetPropertyType::UNIT
-                || type == WidgetPropertyType::LABEL;
-
-        case WidgetType::ControlToggle:
-            return type == WidgetPropertyType::VALUE;
-
-        case WidgetType::ControlButton:
-            return type == WidgetPropertyType::LABEL;
-
-        case WidgetType::BasicIcon:
-        case WidgetType::BasicArcIcon:
-            if(type == WidgetPropertyType::POSITION_X || type == WidgetPropertyType::POSITION_Y)
-                return true;
-
-            if(!IsShapeIcon(IconTypeOf(widget)))
-                return false;
-
-            return type == WidgetPropertyType::WIDTH_PX
-                || type == WidgetPropertyType::HEIGHT_PX
-                || type == WidgetPropertyType::STROKE_PX
-                || type == WidgetPropertyType::CORNER_RAD_PX
-                || type == WidgetPropertyType::FILL_MODE
-                || type == WidgetPropertyType::DIRECTION;
-
-        default:
-            return false;
-    }
+    return type == WidgetPropertyType::POSITION_X
+        || type == WidgetPropertyType::POSITION_Y
+        || type == WidgetPropertyType::WIDTH_PX
+        || type == WidgetPropertyType::HEIGHT_PX
+        || type == WidgetPropertyType::STROKE_PX
+        || type == WidgetPropertyType::CORNER_RAD_PX
+        || type == WidgetPropertyType::FILL_MODE
+        || type == WidgetPropertyType::DIRECTION;
 }
 
 bool IsSameBinding(const PropertyBinding& a, const PropertyBinding& b) {
@@ -151,7 +118,9 @@ bool IsSameBindings(const std::pmr::vector<PropertyBinding>& a, const std::pmr::
 }
 
 bool IsSameGrid(const GridSettings& a, const GridSettings& b) {
-    return a.snap_enabled == b.snap_enabled && a.width == b.width && a.height == b.height
+    return a.snap_enabled == b.snap_enabled
+        && a.width == b.width
+        && a.height == b.height
         && a.spacing_px == b.spacing_px;
 }
 
@@ -241,8 +210,7 @@ std::vector<uint32_t> SubtreeIds(const ScreenConfiguration& screen, const Widget
         ids.push_back(screen.widget_configurations[index]->id);
 
         const auto children = composition.GetChildren(index);
-        for(auto it = children.rbegin(); it != children.rend(); ++it)
-            pending.push_back(*it);
+        pending.insert(pending.end(), children.rbegin(), children.rend());
     }
 
     return ids;
@@ -282,12 +250,13 @@ void PlanWidgets(const ScreenConfiguration& old_screen, const ScreenConfiguratio
     for(const auto root : new_composition.roots) {
         const auto& widget = new_screen.widget_configurations[root];
 
-        if(!is_root(old_screen, old_composition, widget->id)) {
+        const auto old_root_index = IndexOf(old_screen, widget->id);
+        if(!old_root_index.has_value() || !is_root(old_screen, old_composition, widget->id)) {
             changes.push_back({ .widget_id = widget->id, .action = WidgetAction::Add, .widget = widget });
             continue;
         }
 
-        const auto old_root = *IndexOf(old_screen, widget->id);
+        const auto old_root = *old_root_index;
         const auto old_ids = SubtreeIds(old_screen, old_composition, old_root);
         const auto new_ids = SubtreeIds(new_screen, new_composition, root);
 
@@ -304,15 +273,41 @@ void PlanWidgets(const ScreenConfiguration& old_screen, const ScreenConfiguratio
         } else if(before != widget && !IsSameWidget(*before, *widget)) {
             changes.push_back(
                 { .widget_id = widget->id,
-                    .action = ClassifyWidgetChange(*before, *widget) == WidgetChange::InPlace
-                        ? WidgetAction::Update
-                        : WidgetAction::Replace,
+                    .action = ClassifyWidgetChange(*before, *widget) == WidgetChange::InPlace ? WidgetAction::Update
+                                                                                              : WidgetAction::Replace,
                     .widget = widget }
             );
         }
     }
 
     patch.widgets.insert(patch.widgets.end(), changes.begin(), changes.end());
+
+    // The roots that are in both, in the order each screen draws them: a widget put again after a removal is last
+    // among the widgets of its z-index, though it is the same widget.
+    const auto root_order = [](const ScreenConfiguration& screen, const WidgetComposition& composition) {
+        std::vector<size_t> roots(composition.roots.begin(), composition.roots.end());
+        std::ranges::sort(roots, {}, [&screen](size_t i) {
+            return std::pair{ screen.widget_configurations[i]->z_index, i };
+        });
+
+        std::vector<uint32_t> ids;
+        ids.reserve(roots.size());
+        for(const auto root : roots)
+            ids.push_back(screen.widget_configurations[root]->id);
+
+        return ids;
+    };
+    const auto old_ids = root_order(old_screen, old_composition);
+    const auto new_ids = root_order(new_screen, new_composition);
+    const auto in_both = [](const std::vector<uint32_t>& ids, const std::vector<uint32_t>& other) {
+        std::vector<uint32_t> kept;
+        std::ranges::copy_if(ids, std::back_inserter(kept), [&other](uint32_t id) {
+            return std::ranges::find(other, id) != other.end();
+        });
+
+        return kept;
+    };
+    patch.reorders = in_both(old_ids, new_ids) != in_both(new_ids, old_ids);
 }
 
 PatchEffect EffectOf(WidgetAction action) {
@@ -482,7 +477,9 @@ ApplyPatchOps(const UiConfiguration& base, std::span<const PatchOp> ops, std::pm
             case PatchOpKind::RemoveScreen: {
                 const auto it = find_screen(op.screen_id);
                 if(it == patched->screen_configurations.end())
-                    throw PatchBaseMismatch("Screen " + std::to_string(op.screen_id) + " is not in the staged configuration.");
+                    throw PatchBaseMismatch(
+                        "Screen " + std::to_string(op.screen_id) + " is not in the staged configuration."
+                    );
 
                 patched->screen_configurations.erase(it);
 
@@ -537,7 +534,7 @@ PatchPlan PlanPatch(const UiConfiguration& base, const UiConfiguration& patched,
             if(old_screen != new_screen)
                 PlanWidgets(*old_screen, *new_screen, patch);
 
-            if(!patch.widgets.empty())
+            if(!patch.widgets.empty() || patch.reorders)
                 plan.screens.push_back(std::move(patch));
         }
     }

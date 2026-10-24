@@ -181,7 +181,8 @@ UiPreviewSession::PatchBegin UiPreviewSession::BeginPatch(uint32_t token, uint32
     if(const auto error = TouchLocked(token, now_ms); error != UiPreviewError::OK)
         return { .error = error };
 
-    if(is_applying_)
+    // A stage that is under way, between its chunks, is not a base: its last chunk would take the revision back.
+    if(is_applying_ || is_staging_)
         return { .error = UiPreviewError::BUSY };
 
     if(rev <= rev_)
@@ -203,7 +204,8 @@ uint32_t UiPreviewSession::CommitPatch(uint32_t rev) {
 uint32_t UiPreviewSession::CommitStage() {
     const ScopedMutex guard(lock_);
 
-    rev_ = requested_rev_.value_or(rev_ + 1);
+    // Past the applied one, as it was when the transfer began; a revision that no longer is counts on instead.
+    rev_ = requested_rev_.has_value() && *requested_rev_ > rev_ ? *requested_rev_ : rev_ + 1;
     is_staging_ = false;
     received_ = 0;
 

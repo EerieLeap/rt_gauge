@@ -1,5 +1,7 @@
 #include <exception>
 
+#include "configuration/cbor/cbor_serializer.h"
+
 #include <zephyr/logging/log.h>
 
 #include "ui_configuration_manager.h"
@@ -75,6 +77,18 @@ void UiConfigurationManager::ValidateApply(const UiConfiguration& configuration)
 void UiConfigurationManager::ValidateConfiguration(const UiConfiguration& configuration) const {
     UiConfigurationValidator::Validate(configuration, validate_children_);
     UiConfigurationValidator::ValidateBindings(configuration, check_binding_);
+}
+
+size_t UiConfigurationManager::GetEncodedSize(const UiConfiguration& configuration) {
+    try {
+        const auto cbor_configuration = cbor_parser_.Serialize(configuration);
+
+        return eerie_leap::configuration::cbor::CborSerializer<CborUiConfig>().Serialize(*cbor_configuration).size();
+    } catch(const std::exception& e) {
+        LOG_ERR("Failed to encode the UI configuration to measure it. %s", e.what());
+
+        return 0;
+    }
 }
 
 bool UiConfigurationManager::CreateDefaultConfiguration() {
