@@ -112,7 +112,7 @@ void UiHighlight::Follow() {
     if(!is_set_ || outline_ == nullptr)
         return;
 
-    lv_obj_t* target = resolver_ ? resolver_(screen_, widget_) : nullptr;
+    const lv_obj_t* target = resolver_ ? resolver_(screen_, widget_) : nullptr;
     if(target == nullptr) {
         Hide();
 
@@ -130,7 +130,7 @@ void UiHighlight::Follow() {
     lv_obj_set_hidden(outline_, false);
 
     // Above an overlay that was pushed after it.
-    lv_obj_t* layer = lv_obj_get_parent(outline_);
+    const lv_obj_t* layer = lv_obj_get_parent(outline_);
     if(lv_obj_get_index(outline_) != static_cast<int32_t>(lv_obj_get_child_count(layer)) - 1)
         lv_obj_move_foreground(outline_);
 }

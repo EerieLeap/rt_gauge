@@ -610,6 +610,7 @@ void SetupTestLoggingTrigger(
                 "The stored logging control configuration could not be read; it was replaced by one holding only the "
                 "logging button trigger."
             );
-    } else
+    } else {
         LOG_ERR("Failed to add the logging button trigger to the logging control configuration.");
+    }
 }
