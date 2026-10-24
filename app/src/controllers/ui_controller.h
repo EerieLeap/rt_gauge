@@ -79,7 +79,6 @@ using eerie_leap::views::widgets::WidgetContext;
 class UiController final : public IUiPreviewHost {
 private:
     static constexpr const char* UI_CONFIGURATION_NAME = "ui_config";
-    // The directory every asset used to share, which SetupTestAssets() still clears, and the one of each kind.
     static constexpr const char* UI_ASSETS_DIR = "ui_assets";
     static constexpr const char* UI_IMAGES_DIR = "ui_assets/images";
     static constexpr const char* UI_ANIMATIONS_DIR = "ui_assets/animations";
@@ -209,14 +208,6 @@ private:
     void ShowOverlay(uint32_t screen_id);
     void CloseOverlay();
     void ConfigureGestures();
-
-#ifdef CONFIG_EERIE_LEAP_UI_DEMO_CONFIGURATION
-    // TODO: For test purposes only
-    // The demo screens, stored when the unit stores no UI configuration.
-    void SetupTestConfiguration();
-    // The demo files the demo screens show, where they are missing.
-    void SetupTestAssets();
-#endif
 
 public:
     /**
