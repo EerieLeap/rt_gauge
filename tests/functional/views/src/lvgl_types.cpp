@@ -61,9 +61,9 @@ ZTEST(lvgl_types, test_lvgl_color_preserves_existing_rgb_constructors) {
 }
 
 ZTEST(lvgl_types, test_compiled_lvgl_font_returns_its_pointer_and_bind_adds_no_event) {
-    static const lv_font_t source{};
-    LvglFont font(&source);
-    zassert_equal(font.ToLvFont(), &source);
+    static const lv_font_t SOURCE{};
+    LvglFont font(&SOURCE);
+    zassert_equal(font.ToLvFont(), &SOURCE);
 
     ScopedLvglLock lock;
     lv_obj_t* object = lv_obj_create(lv_screen_active());
@@ -74,17 +74,17 @@ ZTEST(lvgl_types, test_compiled_lvgl_font_returns_its_pointer_and_bind_adds_no_e
 }
 
 ZTEST(lvgl_types, test_loaded_lvgl_font_lives_until_the_bound_object_is_deleted) {
-    static const lv_font_t source{};
+    static const lv_font_t SOURCE{};
     bool freed = false;
     lv_obj_t* object = nullptr;
     {
         ScopedLvglLock lock;
         object = lv_obj_create(lv_screen_active());
-        std::shared_ptr<const lv_font_t> loaded(&source, [&freed](const lv_font_t*) {
+        std::shared_ptr<const lv_font_t> loaded(&SOURCE, [&freed](const lv_font_t*) {
             freed = true;
         });
         LvglFont font(std::move(loaded));
-        zassert_equal(font.ToLvFont(), &source);
+        zassert_equal(font.ToLvFont(), &SOURCE);
 
         const uint32_t events = lv_obj_get_event_count(object);
         font.BindTo(object);

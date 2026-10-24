@@ -69,12 +69,19 @@ std::shared_ptr<Frame> MakeRoot() {
 }
 
 lv_obj_t* FindLabel(lv_obj_t* object) {
-    if(lv_obj_check_type(object, &lv_label_class))
-        return object;
-    for(uint32_t i = 0; i < lv_obj_get_child_count(object); ++i)
-        if(auto* label = FindLabel(lv_obj_get_child(object, i)))
-            return label;
-    return nullptr;
+    lv_obj_t* label = nullptr;
+    lv_obj_tree_walk(
+        object,
+        [](lv_obj_t* current, void* result) {
+            if(!lv_obj_check_type(current, &lv_label_class))
+                return LV_OBJ_TREE_WALK_NEXT;
+
+            *static_cast<lv_obj_t**>(result) = current;
+            return LV_OBJ_TREE_WALK_END;
+        },
+        static_cast<void*>(&label)
+    );
+    return label;
 }
 
 const lv_font_t* FontOf(const IWidget& widget) {
@@ -84,7 +91,7 @@ const lv_font_t* FontOf(const IWidget& widget) {
 }
 
 size_t LvglHeapBytes() {
-    sys_memory_stats stats;
+    sys_memory_stats stats{};
     lvgl_heap_stats(&stats);
     return stats.allocated_bytes;
 }

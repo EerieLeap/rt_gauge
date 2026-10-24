@@ -16,7 +16,6 @@
 
 using eerie_leap::domain::ui_domain::ScopedLvglLock;
 using eerie_leap::subsys::assets::AssetKind;
-using eerie_leap::subsys::assets::AssetsManager;
 using eerie_leap::views::utilities::FontCache;
 using eerie_leap::views::utilities::LvglFont;
 
@@ -55,7 +54,7 @@ lv_obj_t* DrawLabel(const LvglFont& font) {
 }
 
 size_t LvglHeapBytes() {
-    sys_memory_stats stats;
+    sys_memory_stats stats{};
     lvgl_heap_stats(&stats);
     return stats.allocated_bytes;
 }

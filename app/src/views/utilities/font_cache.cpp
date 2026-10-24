@@ -92,13 +92,12 @@ std::optional<LvglFont> FontCache::Acquire(std::string_view name, int32_t size_p
         }
 
         if(data == nullptr) {
-            auto bytes = provider->store->Load(name);
-            if(bytes.empty()) {
+            data = make_shared_pmr<std::pmr::vector<uint8_t>>(Mrm::GetExtPmr(), provider->store->Load(name));
+            if(data->empty()) {
                 LOG_ERR("Font '%.*s' is missing or empty.", static_cast<int>(name.size()), name.data());
                 return std::nullopt;
             }
 
-            data = make_shared_pmr<std::pmr::vector<uint8_t>>(Mrm::GetExtPmr(), std::move(bytes));
             faces_.push_back(Face{ std::pmr::string(name, Mrm::GetExtPmr()), generation, data });
         }
 
@@ -113,11 +112,11 @@ std::optional<LvglFont> FontCache::Acquire(std::string_view name, int32_t size_p
         }
 
         // The deleter holds the bytes Tiny TTF points into and nothing of the cache: fonts may outlive it.
-        std::shared_ptr<const lv_font_t> font(
+        std::shared_ptr<lv_font_t> font(
             tiny_ttf,
-            [data](const lv_font_t* released) {
+            [data](lv_font_t* released) {
                 const ScopedLvglLock lock;
-                lv_tiny_ttf_destroy(const_cast<lv_font_t*>(released));
+                lv_tiny_ttf_destroy(released);
             },
             std::pmr::polymorphic_allocator<>(Mrm::GetExtPmr())
         );
