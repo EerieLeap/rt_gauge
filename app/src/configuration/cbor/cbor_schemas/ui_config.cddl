@@ -46,6 +46,8 @@ CborPropertyBinding = [
 ]
 
 ; Keys are UiPropertyType IDs for UI properties and WidgetPropertyType IDs for widget properties.
+; A widget's properties map never holds 45 to 48 (LAYOUT_X, LAYOUT_Y, LAYOUT_WIDTH, LAYOUT_HEIGHT): they are
+; binding targets for a root widget's box, which the widget's position and size set.
 CborPropertiesConfig = {
     * uint => CborPropertyValueType
 }

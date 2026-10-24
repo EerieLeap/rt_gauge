@@ -14,6 +14,45 @@ source "Kconfig.zephyr"
 		int "UI render work queue stack size"
 		default 8192
 
+	config EERIE_LEAP_UI_DEMO_CONFIGURATION
+		bool "Install the demo UI configuration and assets"
+		default y
+		help
+		  Installs the built-in demo screens, and the images and the animation they
+		  show, when the unit stores no UI configuration. A stored configuration is
+		  never replaced, and the demo assets only fill in files that are missing.
+		  Turn it off in a release, where a unit without a configuration shows
+		  nothing until a client stores one.
+
+	config EERIE_LEAP_UI_PREVIEW
+		bool "UI preview over SMP"
+		default y
+		depends on EERIE_LEAP_SMP
+		# SHOW's target is a map inside the request's map; PATCH's ops are lists inside a list inside it.
+		select MCUMGR_SMP_CBOR_MIN_DECODING_LEVEL_4
+		help
+		  Serves the SMP ui group (73): a client stages a UI configuration, which the unit
+		  shows without storing it, and the stored one comes back when the session ends.
+		  Without it the group is not registered and MCUmgr answers rc 8.
+
+	config EERIE_LEAP_UI_PREVIEW_LEASE_MS
+		int "UI preview lease"
+		default 5000
+		range 500 600000
+		depends on EERIE_LEAP_UI_PREVIEW
+		help
+		  A preview ends, and the stored UI comes back, this long after the last request that
+		  carried its token.
+
+	config EERIE_LEAP_UI_PREVIEW_MAX_STAGE_SIZE
+		int "Largest staged UI configuration"
+		default 65536
+		range 1024 65536
+		depends on EERIE_LEAP_UI_PREVIEW
+		help
+		  The buffer a session allocates in external RAM when it begins, in bytes. 65536 is
+		  the largest UI configuration a unit stores.
+
 	config EERIE_LEAP_UI_IMAGE_MAX_SIZE
 		int "Largest image upload"
 		default 4194304

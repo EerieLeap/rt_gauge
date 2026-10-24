@@ -200,6 +200,11 @@ bool FakeScreen::IsVisible() const {
     return is_visible_;
 }
 
+void FakeScreen::ApplyWidgetPatches(
+    std::shared_ptr<ScreenConfiguration> /*configuration*/,
+    std::span<const eerie_leap::domain::ui_domain::preview::WidgetPatch> /*patches*/
+) {}
+
 void FakeScreen::OnActivated() {
     activated_count++;
 }

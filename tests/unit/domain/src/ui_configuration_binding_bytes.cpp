@@ -4,6 +4,7 @@
 #include <iterator>
 #include <memory_resource>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <variant>
@@ -320,4 +321,103 @@ ZTEST(ui_configuration_binding_bytes, test_selector_below_int32_is_refused) {
     const auto bytes = WithSelectorBytes(SELECTOR);
 
     zassert_is_null(CborSerializer<CborUiConfig>().Deserialize(bytes).get());
+}
+
+namespace {
+
+// One widget with one binding of its box, as the encoder writes it. A target of 45 takes two bytes (0x18 0x2d).
+// clang-format off: each row holds the bytes its comment describes.
+const uint8_t LAYOUT_BINDING_CONFIGURATION[] = {
+    0x9f, 0x01, 0x01, 0x9f,                                     // [version 1, active group 1, screens [
+    0x9f, 0x01, 0x01, 0x02, 0x00, 0xf5, 0xf4,                   //   [id 1, group 1, Gauge, z 0, visible, not overlay,
+    0x9f, 0xf4, 0x01, 0x01, 0x00, 0xff, 0x9f,                   //    grid [no snap, 1, 1, 0], widgets [
+    0x9f, 0x1a, 0x00, 0x02, 0x00, 0x66, 0x01,                   //     [IndicatorDigital, id 1,
+    0x9f, 0x00, 0x00, 0xff, 0x9f, 0x01, 0x01, 0xff, 0x00, 0x9f, //      position [0, 0], size [1, 1], z 0, bindings [
+    0x9f, 0x18, 0x2d, 0x01, 0x00, 0x01, 0x00, 0x00, 0xf5, 0x00, // LAYOUT_X, Sensors, DataUpdated, Value, In, 0, SensorId
+    0x68, 0x73, 0x65, 0x6e, 0x73, 0x6f, 0x72, 0x5f, 0x31, 0xff, //   "sensor_1"
+    0xff, 0xff, 0xff, 0xff, 0xff, 0xff                          // bindings, widget, widgets, screen, screens, configuration
+};
+// clang-format on
+
+PmrUniquePtr<UiConfiguration> MakeLayoutBindingConfiguration() {
+    auto configuration = make_unique_pmr<UiConfiguration>(Mrm::GetDefaultPmr());
+    configuration->active_screen_group_id = 1;
+
+    auto screen = make_shared_pmr<ScreenConfiguration>(Mrm::GetDefaultPmr());
+    screen->id = 1;
+    screen->screen_group_id = 1;
+    screen->z_index = 0;
+    screen->is_visible = true;
+    screen->is_overlay = false;
+    screen->type = ScreenType::Gauge;
+    screen->grid = { .snap_enabled = false, .width = 1, .height = 1, .spacing_px = 0 };
+
+    auto widget = make_shared_pmr<WidgetConfiguration>(Mrm::GetDefaultPmr());
+    widget->type = WidgetType::IndicatorDigital;
+    widget->id = 1;
+    widget->position_grid = { 0, 0 };
+    widget->size_grid = { 1, 1 };
+    widget->z_index = 0;
+    widget->bindings.push_back(MakeBinding(
+        WidgetPropertyType::LAYOUT_X, EventChannelId::Sensors, std::to_underlying(SensorEventType::DataUpdated),
+        std::to_underlying(SensorPayloadType::Value), PropertyBindingDirection::In, 0,
+        std::to_underlying(SensorPayloadType::SensorId), std::pmr::string("sensor_1")
+    ));
+
+    screen->AddWidget(std::move(widget));
+    configuration->screen_configurations.push_back(std::move(screen));
+
+    return configuration;
+}
+
+} // namespace
+
+// A binding to the box's X is a binding like any other, with the target 45.
+ZTEST(ui_configuration_binding_bytes, test_a_binding_to_the_box_encodes_with_the_target_45) {
+    zassert_equal(static_cast<int>(WidgetPropertyType::LAYOUT_X), 45);
+
+    auto configuration = MakeLayoutBindingConfiguration();
+    auto cbor_configuration = UiConfigurationCborParser().Serialize(*configuration);
+    auto bytes = CborSerializer<CborUiConfig>().Serialize(*cbor_configuration);
+
+    const bool matches = bytes.size() == sizeof(LAYOUT_BINDING_CONFIGURATION)
+        && std::memcmp(bytes.data(), LAYOUT_BINDING_CONFIGURATION, bytes.size()) == 0;
+
+    if(!matches)
+        PrintBytes(bytes);
+
+    zassert_true(matches, "The encoder no longer writes a binding to the box as it did.");
+}
+
+ZTEST(ui_configuration_binding_bytes, test_the_bytes_of_a_binding_to_the_box_decode_to_the_target_45) {
+    auto cbor_configuration = CborSerializer<CborUiConfig>().Deserialize(LAYOUT_BINDING_CONFIGURATION);
+    zassert_not_null(cbor_configuration.get());
+
+    auto configuration = UiConfigurationCborParser().Deserialize(Mrm::GetDefaultPmr(), *cbor_configuration);
+    const auto& bindings = configuration->screen_configurations[0]->widget_configurations[0]->bindings;
+
+    zassert_equal(bindings.size(), 1U);
+    zassert_equal(bindings[0].target, WidgetPropertyType::LAYOUT_X);
+    zassert_equal(bindings[0].direction, PropertyBindingDirection::In);
+    zassert_true(std::get<std::pmr::string>(bindings[0].event.selector_value) == "sensor_1");
+}
+
+// 49 is the first property no firmware knows, in a binding as in a map.
+ZTEST(ui_configuration_binding_bytes, test_a_target_past_the_box_properties_is_refused) {
+    std::vector<uint8_t> bytes(std::begin(LAYOUT_BINDING_CONFIGURATION), std::end(LAYOUT_BINDING_CONFIGURATION));
+    const uint8_t layout_target[] = { 0x9f, 0x18, 0x2d };
+    const auto mark = std::ranges::search(bytes, layout_target).begin();
+    *(mark + 2) = 0x31; // 49
+
+    auto cbor_configuration = CborSerializer<CborUiConfig>().Deserialize(bytes);
+    zassert_not_null(cbor_configuration.get());
+
+    bool is_refused = false;
+    try {
+        UiConfigurationCborParser().Deserialize(Mrm::GetDefaultPmr(), *cbor_configuration);
+    } catch(const std::invalid_argument&) {
+        is_refused = true;
+    }
+
+    zassert_true(is_refused, "Expected the target 49 to be unknown.");
 }

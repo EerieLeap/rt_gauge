@@ -1,6 +1,9 @@
 #pragma once
 
+#include <algorithm>
+#include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <string>
 #include <variant>
@@ -32,6 +35,28 @@ inline ConfigValue CoerceAnchorValue(const EventData& value, WidgetPropertyType 
         converted = static_cast<int>(*unsigned_coordinate);
     }
     return WidgetPropertyValidator::IsValidAnchorValue(type, converted) ? converted : ConfigValue{};
+}
+
+// A box coordinate or extent in grid cells, a whole number: what a publisher sends rounds to the nearest, and
+// a value that is no number (NaN, an infinity), a flag or a text fills nothing. A number past the range a box
+// can have is held at its end, so no conversion leaves the range of an int.
+inline ConfigValue CoerceLayoutValue(const EventData& value) {
+    constexpr float LIMIT = static_cast<float>(1 << 24);
+
+    if(const auto* integer = std::get_if<int>(&value))
+        return std::clamp(*integer, -(1 << 24), 1 << 24);
+
+    if(const auto* unsigned_integer = std::get_if<uint32_t>(&value))
+        return static_cast<int>(std::min<uint32_t>(*unsigned_integer, 1U << 24));
+
+    if(const auto* fractional = std::get_if<float>(&value)) {
+        if(!std::isfinite(*fractional))
+            return std::monostate{};
+
+        return static_cast<int>(std::lround(std::clamp(*fractional, -LIMIT, LIMIT)));
+    }
+
+    return std::monostate{};
 }
 
 // Only 0 and 1 stand for a flag.
@@ -160,6 +185,9 @@ inline ConfigValue
 CoerceToConfigValue(const EventData& value, size_t alternative, WidgetPropertyType type = WidgetPropertyType::NONE) {
     if(WidgetPropertyValidator::IsAnchorProperty(type))
         return detail::CoerceAnchorValue(value, type);
+
+    if(WidgetPropertyValidator::IsLayoutProperty(type))
+        return detail::CoerceLayoutValue(value);
 
     if(type == WidgetPropertyType::IS_ACTIVE
         || type == WidgetPropertyType::IS_VISIBLE

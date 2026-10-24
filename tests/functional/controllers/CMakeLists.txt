@@ -14,6 +14,7 @@ project(functional_controllers)
 include(${RT_GAUGE_DIR}/cmake/lvgl_vector.cmake)
 
 include_directories(${APP_SRC_DIR})
+include_directories(${RT_GAUGE_DIR}/tests/common)
 
 set(APP_SRC_CONFIGURATION_DIR ${APP_SRC_DIR}/configuration)
 file(GLOB_RECURSE APP_SRC_CONFIGURATION
@@ -35,6 +36,12 @@ file(GLOB_RECURSE APP_SRC_DISPLAY_DOMAIN
   ${APP_SRC_DISPLAY_DOMAIN_DIR}/*.cpp
 )
 
+# InitializeEventChannels() registers the channels that widget bindings resolve through.
+file(GLOB_RECURSE APP_SRC_EVENT_BUS
+  ${APP_SRC_DIR}/event_bus/*.c
+  ${APP_SRC_DIR}/event_bus/*.cpp
+)
+
 set(APP_SRC_VIEWS_DIR ${APP_SRC_DIR}/views)
 file(GLOB_RECURSE APP_SRC_VIEWS
   ${APP_SRC_VIEWS_DIR}/*.c
@@ -50,6 +57,9 @@ file(GLOB_RECURSE APP_SRC_CONTROLLERS
   ${APP_SRC_DIR}/controllers/ui_controller.cpp
 )
 
+# The UI preview a controller serves: its service. The SMP group is tested in functional/smp_ui.
+set(APP_SRC_UI_PREVIEW ${APP_SRC_DIR}/domain/ui_preview_domain/ui_preview_service.cpp)
+
 file(GLOB_RECURSE TEST_SOURCES src/*.c src/*.cpp)
 
 # Add all source files to the app target
@@ -57,7 +67,9 @@ target_sources(app PRIVATE
   ${APP_SRC_CONFIGURATION}
   ${APP_SRC_CONTROLLERS}
   ${APP_SRC_DISPLAY_DOMAIN}
+  ${APP_SRC_EVENT_BUS}
   ${APP_SRC_UI_DOMAIN}
+  ${APP_SRC_UI_PREVIEW}
   ${APP_SRC_UTILITIES}
   ${APP_SRC_VIEWS}
   ${TEST_SOURCES}

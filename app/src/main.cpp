@@ -49,6 +49,10 @@
 
 #include "event_bus/event_channels.h"
 
+#ifdef CONFIG_EERIE_LEAP_UI_PREVIEW
+    #include "domain/ui_preview_domain/smp/ui_mgmt_group.h"
+#endif
+
 #include "controllers/ble_controller.h"
 #include "controllers/canbus_controller.h"
 #include "controllers/display_controller.h"
@@ -60,6 +64,8 @@
 #include "controllers/sensors_controller.h"
 #include "controllers/system_controller.h"
 #include "controllers/ui_controller.h"
+
+#include "subsys/bluetooth/ble.h"
 
 using namespace eerie_memory;
 using namespace eerie_leap::utilities::memory;
@@ -194,7 +200,8 @@ int main() {
     const auto time_service = std::make_shared<TimeService>(rtc_provider, boot_elapsed_time_provider);
     eerie_leap::subsys::time::TimeService::Initialize();
 
-    const int config_work_queue_stack_size = 6144;
+    // A refused upload unwinds an exception from the validators on this stack, on top of the decode of up to 64 KiB.
+    const int config_work_queue_stack_size = 8192;
     const int config_work_queue_priority = 5;
     const auto config_work_queue_thread = std::make_shared<WorkQueueThread>(
         "config_work_queue", config_work_queue_stack_size, config_work_queue_priority
@@ -326,6 +333,15 @@ int main() {
         }
     }
 
+    // A UI rebuilt from a configuration a client stored asks the settings owners to publish again by itself.
+    // What only publishes on change is replayed to it from here, since the UI is built before the owners:
+    // the sensors' last values (a slow or indicator sensor would leave a new widget on its default) and the
+    // logging status.
+    ui_controller->SetStateReplay([sensor_events_publisher, logging_controller] {
+        sensor_events_publisher->Replay();
+        logging_controller->RepublishStatus();
+    });
+
     sensors_controller->Start();
 
     // Last of the boot's stores (the UI test configuration, the logging button's sensor and trigger):
@@ -348,6 +364,31 @@ int main() {
     const bool is_management_ready = management_controller->Initialize() == 0;
     if(!is_management_ready)
         LOG_ERR("Failed to initialize the management controller.");
+
+#ifdef CONFIG_EERIE_LEAP_UI_PREVIEW
+    // After the management controller, which serves the config groups: the UI preview group, so a client can stage a
+    // UI configuration the unit shows without storing it. Without the preview service (its work queues did not start)
+    // the group is not registered and MCUmgr answers rc 8.
+    std::shared_ptr<eerie_leap::domain::ui_preview_domain::smp::UiMgmtGroup> ui_mgmt_group;
+    if(const auto ui_preview_service = ui_controller->GetPreviewService()) {
+        ui_mgmt_group = std::make_shared<eerie_leap::domain::ui_preview_domain::smp::UiMgmtGroup>(ui_preview_service);
+
+        try {
+            ui_mgmt_group->Register();
+        } catch(const std::exception& e) {
+            LOG_ERR("Failed to register the UI preview group. %s", e.what());
+        }
+
+        // A client reached over this unit's own Bluetooth link relies on it to end its preview; one routed through
+        // another unit relies on the lease. Registered before the BLE controller starts, which calls the handlers.
+        eerie_leap::subsys::bluetooth::Ble::RegisterDisconnectedHandler(
+            [weak_preview = std::weak_ptr(ui_preview_service)](bt_conn* /*conn*/) {
+                if(const auto preview = weak_preview.lock())
+                    preview->OnLinkDropped();
+            }
+        );
+    }
+#endif
 
     const auto ble_controller = std::make_shared<BleController>(
         sensors_controller->GetProcessingService(), sensor_readings_frame, canbus_com_service
@@ -569,6 +610,7 @@ void SetupTestLoggingTrigger(
                 "The stored logging control configuration could not be read; it was replaced by one holding only the "
                 "logging button trigger."
             );
-    } else
+    } else {
         LOG_ERR("Failed to add the logging button trigger to the logging control configuration.");
+    }
 }

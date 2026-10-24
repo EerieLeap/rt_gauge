@@ -43,6 +43,10 @@ public:
     NavigationService(const NavigationService&) = delete;
     NavigationService& operator=(const NavigationService&) = delete;
 
+    // Forgets the groups, the history, the active group and an open overlay, for a UI that is about to be
+    // rebuilt from another configuration. SetGroupIds() and SetActiveGroupId() follow.
+    void Reset();
+
     void SetGroupIds(std::vector<uint32_t> screen_group_ids);
     void SetActiveGroupId(uint32_t screen_group_id);
 
@@ -57,6 +61,8 @@ public:
 
     std::optional<uint32_t> GetActiveGroupId() const;
     bool IsOverlayActive() const;
+    // The overlay a request was taken for and not closed since; what the view layer checks an event against.
+    std::optional<uint32_t> GetActiveOverlayId() const;
 };
 
 } // namespace eerie_leap::domain::ui_domain::services

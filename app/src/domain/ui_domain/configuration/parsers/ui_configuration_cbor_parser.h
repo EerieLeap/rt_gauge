@@ -1,5 +1,9 @@
 #pragma once
 
+#include <memory>
+#include <memory_resource>
+#include <span>
+
 #include "eerie_memory.hpp"
 
 #include "configuration/cbor/cbor_ui_config/cbor_ui_config.h"
@@ -9,7 +13,9 @@
 
 namespace eerie_leap::domain::ui_domain::configuration::parsers {
 
+using eerie_leap::domain::ui_domain::models::ScreenConfiguration;
 using eerie_leap::domain::ui_domain::models::UiConfiguration;
+using eerie_leap::domain::ui_domain::models::WidgetConfiguration;
 using eerie_leap::utilities::type::ConfigValue;
 
 class UiConfigurationCborParser {
@@ -27,6 +33,15 @@ public:
 
     eerie_memory::PmrUniquePtr<CborUiConfig> Serialize(const UiConfiguration& configuration);
     eerie_memory::PmrUniquePtr<UiConfiguration> Deserialize(std::pmr::memory_resource* mr, const CborUiConfig& config);
+
+    // One widget (a CborWidgetConfig) or one screen (a CborScreenConfig) as a patch carries it. Decoded and
+    // turned into the model, and checked by nothing: the patched configuration is validated as a whole, since a
+    // widget's rules need its screen. Throws std::invalid_argument for bytes that are no such record, trailing
+    // bytes included.
+    static std::shared_ptr<WidgetConfiguration>
+    DecodeWidget(std::pmr::memory_resource* mr, std::span<const uint8_t> cbor);
+    static std::shared_ptr<ScreenConfiguration>
+    DecodeScreen(std::pmr::memory_resource* mr, std::span<const uint8_t> cbor);
 };
 
 } // namespace eerie_leap::domain::ui_domain::configuration::parsers

@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <vector>
 
 #include "views/renderable_base.h"
@@ -33,7 +34,16 @@ public:
     uint32_t GetGroupId() const;
 
     void AddScreen(std::shared_ptr<IScreen> screen);
+    // Puts @p screen in the place of the screen of its ID, or adds it. A group that is rendered renders it, one
+    // that is active activates it, and the screens end in drawing order. The screen it replaces goes after.
+    void PutScreen(std::shared_ptr<IScreen> screen);
+    // Takes a screen out, with everything it built. False if the group has none of that ID.
+    bool RemoveScreen(uint32_t screen_id);
+    // Puts the screens in the order of @p screen_ids, bottom first, in the vector and in LVGL; a screen not listed
+    // follows the listed ones in the order it had.
+    void OrderScreens(std::span<const uint32_t> screen_ids);
     std::shared_ptr<IScreen> GetScreen(uint32_t screen_id) const;
+    std::vector<std::shared_ptr<IScreen>> GetScreens() const;
     bool IsEmpty() const;
 
     int EnsureRendered();

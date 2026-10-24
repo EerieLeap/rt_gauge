@@ -31,6 +31,9 @@ private:
     // before the gesture callback is ever attached.
     std::array<std::atomic<uint32_t>, DIRECTION_COUNT> gesture_argument_{};
 
+    // Off while a UI preview pins the screen: the gestures then do nothing, and the controls stay live.
+    std::atomic<bool> is_navigation_enabled_ = true;
+
     lv_obj_t* root_ = nullptr;
     uint32_t last_gesture_tick_ = 0;
 
@@ -47,6 +50,13 @@ public:
 
     int Initialize(lv_obj_t* root);
     void SetGestureMapping(lv_dir_t direction, NavigationIntent intent, uint32_t argument = 0);
+
+    /**
+     * @brief Lets the gestures navigate, or not. Any thread. Only the gestures: a button on a screen still runs its
+     *        own navigation intent.
+     */
+    void SetNavigationEnabled(bool is_enabled);
+    [[nodiscard]] bool IsNavigationEnabled() const;
 };
 
 } // namespace eerie_leap::domain::ui_domain::services

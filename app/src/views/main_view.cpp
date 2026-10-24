@@ -54,6 +54,49 @@ std::shared_ptr<Frame> MainView::GetGroupContainer(uint32_t screen_group_id) {
     return GetOrCreateGroup(screen_group_id)->GetContainer();
 }
 
+bool MainView::PutScreen(std::shared_ptr<IScreen> screen) {
+    if(screen == nullptr)
+        return false;
+
+    ScopedLvglLock lvgl_guard;
+
+    const auto it = screen_groups_.find(screen->GetGroupId());
+    if(it == screen_groups_.end())
+        return false;
+
+    // A screen that changed group is a removal from one and an addition to the other.
+    for(const auto& [screen_group_id, screen_group] : screen_groups_) {
+        if(screen_group_id != screen->GetGroupId() && screen_group->GetScreen(screen->GetId()) != nullptr)
+            return false;
+    }
+
+    it->second->PutScreen(std::move(screen));
+
+    return true;
+}
+
+bool MainView::RemoveScreen(uint32_t screen_id) {
+    ScopedLvglLock lvgl_guard;
+
+    for(const auto& [screen_group_id, screen_group] : screen_groups_) {
+        if(screen_group->GetScreen(screen_id) == nullptr)
+            continue;
+
+        if(screen_group->GetScreens().size() <= 1)
+            return false;
+
+        return screen_group->RemoveScreen(screen_id);
+    }
+
+    return false;
+}
+
+void MainView::OrderScreens(uint32_t screen_group_id, std::span<const uint32_t> screen_ids) {
+    const auto it = screen_groups_.find(screen_group_id);
+    if(it != screen_groups_.end())
+        it->second->OrderScreens(screen_ids);
+}
+
 void MainView::PruneEmptyGroups() {
     // GetGroupContainer() creates a group up front, so a screen that failed to
     // configure can leave behind a blank but navigable group.
@@ -67,7 +110,18 @@ void MainView::PruneEmptyGroups() {
     }
 }
 
-int MainView::SetActiveGroup(uint32_t screen_group_id) {
+void MainView::Clear() {
+    ScopedLvglLock lvgl_guard;
+
+    // A group tells its widgets they stop, then its objects go with it.
+    for(const auto& [screen_group_id, screen_group] : screen_groups_)
+        screen_group->Deactivate();
+
+    screen_groups_.clear();
+    active_screen_group_id_.reset();
+}
+
+int MainView::SetActiveGroup(uint32_t screen_group_id, bool render_inline) {
     const auto it = screen_groups_.find(screen_group_id);
     if(it == screen_groups_.end()) {
         LOG_WRN("Screen group %u is not configured.", screen_group_id);
@@ -102,14 +156,28 @@ int MainView::SetActiveGroup(uint32_t screen_group_id) {
     if(screen_group->IsRendered())
         return 0;
 
-    if(render_dispatcher_ != nullptr) {
+    if(render_dispatcher_ != nullptr && !render_inline) {
         // Capturing `this` is safe because the dispatcher's work queue is drained
         // and stopped before this view is destroyed.
-        const auto deferred_screen_group = screen_group;
-        render_dispatcher_([this, deferred_screen_group, previous_screen_group] {
+        //
+        // The groups are held weakly: the work queue keeps a finished task, and so its captures, until it
+        // prunes it on a later Run() without the LVGL lock, and a group that outlived Clear() that way would be
+        // destroyed there, taking the LVGL lock under the queue's own.
+        render_dispatcher_([this, deferred_screen_group = std::weak_ptr<ScreenGroup>(screen_group),
+                               deferred_previous_screen_group = std::weak_ptr<ScreenGroup>(previous_screen_group)] {
             ScopedLvglLock lvgl_guard;
 
-            RenderGroupOrRollBack(deferred_screen_group, previous_screen_group);
+            // Taken under the lock, and released before it: a group dropped by Clear() while this waited is
+            // gone, and rendering it would draw a group that is no longer part of the view.
+            const auto group = deferred_screen_group.lock();
+            if(group == nullptr)
+                return;
+
+            const auto current = screen_groups_.find(group->GetGroupId());
+            if(current == screen_groups_.end() || current->second != group)
+                return;
+
+            RenderGroupOrRollBack(group, deferred_previous_screen_group.lock());
         });
 
         return 0;
@@ -169,6 +237,12 @@ std::shared_ptr<IScreen> MainView::GetScreen(uint32_t screen_id) const {
     }
 
     return nullptr;
+}
+
+std::vector<std::shared_ptr<IScreen>> MainView::GetGroupScreens(uint32_t screen_group_id) const {
+    const auto it = screen_groups_.find(screen_group_id);
+
+    return it != screen_groups_.end() ? it->second->GetScreens() : std::vector<std::shared_ptr<IScreen>>{};
 }
 
 [[maybe_unused]] static void RenderCenterCrossHelperGuides(lv_obj_t* screen) {

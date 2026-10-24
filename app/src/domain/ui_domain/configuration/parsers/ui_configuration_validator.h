@@ -35,6 +35,10 @@ private:
         const ScreenConfiguration& screen_configuration,
         std::span<const std::optional<size_t>> parents
     );
+    static void ValidateLayoutBindings(
+        const ScreenConfiguration& screen_configuration,
+        std::span<const std::optional<size_t>> parents
+    );
     static void ValidateWidgetProperties(const ScreenConfiguration& screen_configuration);
     static void ValidateWidgetBindings(const ScreenConfiguration& screen_configuration);
 

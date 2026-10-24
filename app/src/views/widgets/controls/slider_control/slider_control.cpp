@@ -118,16 +118,29 @@ double SliderControl::ToValue(int32_t index) const {
     return std::clamp(min_ + (index * step_), min_, max_);
 }
 
-int SliderControl::DoRender() {
-    lv_slider_ = lv_slider_create(content_frame_->GetObject());
-
-    lv_obj_set_width(lv_slider_, lv_pct(100));
+void SliderControl::UpdateKnobPadding() {
     lv_obj_update_layout(lv_slider_);
 
     // Include the default theme's 3-DPX knob growth when pressed.
     const auto half_knob_size = (lv_obj_get_height(lv_slider_) + 1) / 2 + lv_dpx(3);
     content_frame_->SetPaddingLeft(half_knob_size + lv_obj_get_style_pad_left(lv_slider_, LV_PART_KNOB));
     content_frame_->SetPaddingRight(half_knob_size + lv_obj_get_style_pad_right(lv_slider_, LV_PART_KNOB));
+}
+
+void SliderControl::OnBoxResized() {
+    if(lv_slider_ == nullptr)
+        return;
+
+    UpdateKnobPadding();
+    lv_obj_center(lv_slider_);
+    WidgetBase::OnBoxResized();
+}
+
+int SliderControl::DoRender() {
+    lv_slider_ = lv_slider_create(content_frame_->GetObject());
+
+    lv_obj_set_width(lv_slider_, lv_pct(100));
+    UpdateKnobPadding();
 
     lv_obj_center(lv_slider_);
     lv_slider_set_range(lv_slider_, 0, step_count_);

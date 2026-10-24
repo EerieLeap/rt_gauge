@@ -1,13 +1,20 @@
 #pragma once
 
 #include <array>
+#include <atomic>
+#include <functional>
 #include <memory>
 #include <optional>
+#include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
+#include <zephyr/kernel.h>
+
 #include "subsys/assets/asset_store.h"
 #include "subsys/assets/assets_manager.h"
+#include "subsys/event_bus/dispatch_guard.h"
 #include "subsys/event_bus/i_scoped_subscription.h"
 #include "subsys/fs/services/i_fs_service.h"
 #include "subsys/threading/work_queue_thread.h"
@@ -22,9 +29,13 @@
 #include "domain/ui_domain/services/ui_input_service.h"
 #include "domain/ui_domain/services/ui_renderer_service.h"
 
+#include "domain/ui_preview_domain/i_ui_preview_host.h"
+#include "domain/ui_preview_domain/ui_preview_service.h"
+
 #include "views/main_view.h"
 #include "views/overlay_host.h"
 #include "views/screens/i_screen.h"
+#include "views/ui_highlight.h"
 #include "views/utilitites/frame.h"
 #include "views/widgets/widget_context.h"
 
@@ -45,14 +56,25 @@ using eerie_leap::domain::ui_domain::services::NavigationService;
 using eerie_leap::domain::ui_domain::services::UiInputService;
 using eerie_leap::domain::ui_domain::services::UiRendererService;
 using eerie_leap::subsys::event_bus::AnySubscription;
+using eerie_leap::subsys::event_bus::DispatchGuard;
 
+using eerie_leap::domain::ui_domain::preview::PatchPlan;
+using eerie_leap::domain::ui_domain::preview::ScreenPatch;
+using eerie_leap::domain::ui_domain::preview::UiPreviewError;
+using eerie_leap::domain::ui_domain::preview::WidgetAction;
+using eerie_leap::domain::ui_preview_domain::IUiPreviewHost;
+using eerie_leap::domain::ui_preview_domain::UiPreviewApplied;
+using eerie_leap::domain::ui_preview_domain::UiPreviewService;
+using eerie_leap::domain::ui_preview_domain::UiPreviewShown;
+using eerie_leap::domain::ui_preview_domain::UiPreviewTarget;
 using eerie_leap::views::MainView;
 using eerie_leap::views::OverlayHost;
+using eerie_leap::views::UiHighlight;
 using eerie_leap::views::screens::IScreen;
 using eerie_leap::views::utilitites::Frame;
 using eerie_leap::views::widgets::WidgetContext;
 
-class UiController {
+class UiController final : public IUiPreviewHost {
 private:
     static constexpr const char* UI_CONFIGURATION_NAME = "ui_config";
     // The directory every asset used to share, which SetupTestAssets() still clears, and the one of each kind.
@@ -102,7 +124,53 @@ private:
     std::optional<uint32_t> default_overlay_screen_id_;
 
     AnySubscription navigation_subscription_;
-    int Configure(std::shared_ptr<UiConfiguration> config);
+
+    // Builds the screens of a configuration into the (empty) main view and shows its start group.
+    // @param render_inline Renders the start group here instead of on the render work queue.
+    // @param preferred_group The group to start on when the configuration has it, instead of its own start group.
+    int Configure(
+        std::shared_ptr<UiConfiguration> config,
+        bool render_inline = false,
+        std::optional<uint32_t> preferred_group = std::nullopt
+    );
+
+    // Replaces the screens with those of a stored configuration, in place and in one hold of the LVGL lock:
+    // overlays are dismissed, the main view is cleared, the configuration is built with its start group
+    // rendered at once (the last frame stays up meanwhile, with no blank one between), the gestures are armed
+    // again, and then the state the new widgets missed is asked for and replayed. Navigation starts over at
+    // the configuration's start group. Runs on the render work queue.
+    int
+    Reconfigure(std::shared_ptr<UiConfiguration> configuration, std::optional<uint32_t> preferred_group = std::nullopt);
+
+    // The manager's updated handler, on the storing thread: queues one Reconfigure() of the latest stored
+    // configuration, however many stores come before it runs.
+    void OnConfigurationStored();
+
+    // What the new widgets' bindings missed, which no owner publishes again until it changes: the settings
+    // (asked for), and what StateReplay brings.
+    void ReplayState();
+
+    // Set from any thread; read by ReplayState() on the render work queue.
+    mutable k_mutex state_replay_mutex_{};
+    std::shared_ptr<const std::function<void()>> state_replay_;
+
+    // The updated handler and the queued rebuild hold one each instead of this, and the destructor detaches
+    // both first, so neither reaches a destroyed controller. Apart, because the rebuild holds its guard for
+    // all of its run, and the handler, on the thread that stores, must not wait for it.
+    std::shared_ptr<DispatchGuard> dispatch_guard_;
+    std::shared_ptr<DispatchGuard> rebuild_guard_;
+    std::atomic<bool> is_reconfigure_queued_ = false;
+
+    // The outline a preview puts over a widget; made when the first one is asked for.
+    std::unique_ptr<UiHighlight> highlight_;
+    // The preview of a staged configuration. Declared after the work queues it runs on, so it goes first.
+    std::shared_ptr<UiPreviewService> preview_service_;
+
+    // The object a highlight outlines; the LVGL lock is held. Null if the screens have no such widget or screen.
+    lv_obj_t* ResolveHighlightTarget(std::optional<uint32_t> screen, std::optional<uint32_t> widget) const;
+    // The screen of the configuration shown that a highlight names, built or not yet: the screen itself, or, for a
+    // widget alone, the first screen of the overlay up and then of the group navigation stands on that has it.
+    std::optional<uint32_t> FindHighlightScreen(std::optional<uint32_t> screen, std::optional<uint32_t> widget) const;
 
     // Offers ui_assets/images and ui_assets/animations to clients as the image and animation kinds.
     void RegisterAssets();
@@ -115,6 +183,17 @@ private:
     // its default until the value happens to change.
     static void RequestSettingsState();
 
+    // What PatchScreen() answers beside 0 and an error: the view cannot do this one in place.
+    static constexpr int PATCH_NEEDS_REBUILD = 1;
+    int PatchScreen(const ScreenPatch& patch, std::vector<uint32_t>& overlays_to_reshow, bool& has_bound_update);
+    void OrderPatchedGroups(const UiConfiguration& patched);
+    // ApplyPatch() under the LVGL lock; @p is_replay_needed says the state is to be published again after it.
+    int ApplyPatchLocked(std::shared_ptr<UiConfiguration> patched, PatchPlan& plan, bool& is_replay_needed);
+#ifdef CONFIG_ZTEST
+    // Tests only: the patch of this many screens succeeds, and the next one fails.
+    size_t patch_faults_after_ = SIZE_MAX;
+#endif
+
     void SubscribeToNavigation();
     void OnNavigationChanged(const NavigationEventChannel::EventMessage& event);
     void ShowGroup(uint32_t screen_group_id);
@@ -122,9 +201,13 @@ private:
     void CloseOverlay();
     void ConfigureGestures();
 
+#ifdef CONFIG_EERIE_LEAP_UI_DEMO_CONFIGURATION
     // TODO: For test purposes only
+    // The demo screens, stored when the unit stores no UI configuration.
     void SetupTestConfiguration();
+    // The demo files the demo screens show, where they are missing.
     void SetupTestAssets();
+#endif
 
 public:
     /**
@@ -137,7 +220,8 @@ public:
         std::shared_ptr<ConfigurationService> configuration_service,
         std::shared_ptr<AssetsManager> assets_manager = nullptr
     );
-    ~UiController();
+    // Not under the LVGL lock: it waits for a rebuild in progress, which holds its guard and then takes that lock.
+    ~UiController() override;
     // The subscriptions, the render dispatcher and the registered asset kinds refer to it.
     UiController(const UiController&) = delete;
     UiController& operator=(const UiController&) = delete;
@@ -148,6 +232,46 @@ public:
     int Start();
 
     std::shared_ptr<NavigationService> GetNavigationService() const;
+    std::shared_ptr<UiConfigurationManager> GetConfigurationManager() const;
+    // Whether a screen group is on the display: false for a unit that stores no screens and runs no demo.
+    bool IsShowingScreens() const;
+
+    // The UI preview (IUiPreviewHost): the screens a staged configuration is shown on.
+    std::shared_ptr<UiConfiguration>
+    ParseConfiguration(std::span<const uint8_t> cbor_data, std::span<char> reason) override;
+    bool ValidateConfiguration(const UiConfiguration& configuration, std::span<char> reason) override;
+    size_t GetEncodedSize(const UiConfiguration& configuration) override;
+    int ApplyPatch(std::shared_ptr<UiConfiguration> patched, PatchPlan& plan) override;
+    int ShowConfiguration(std::shared_ptr<UiConfiguration> configuration, UiPreviewApplied& applied) override;
+    int ShowStoredConfiguration() override;
+    void SetNavigationPinned(bool is_pinned) override;
+    UiPreviewError ShowTarget(const UiPreviewTarget& target, UiPreviewShown& shown) override;
+    UiPreviewError Highlight(std::optional<uint32_t> screen, std::optional<uint32_t> widget) override;
+    [[nodiscard]] uint32_t GetStoredCrc() const override;
+    [[nodiscard]] std::optional<uint32_t> GetActiveGroupId() const override;
+
+    /** @brief Whether the swipes navigate: not while a preview pins the screen. */
+    bool IsNavigationEnabled() const;
+
+#ifdef CONFIG_ZTEST
+    /** @brief Tests only: after @p screens screens are patched, the next patch of a screen throws. */
+    void FailPatchAfter(size_t screens) {
+        patch_faults_after_ = screens;
+    }
+#endif
+
+    /** @brief The preview of staged configurations; null when the build has none or its work queues did not start. */
+    std::shared_ptr<UiPreviewService> GetPreviewService() const;
+
+    /**
+     * @brief Sets what Reconfigure() replays once the new screens stand, after it has asked every settings
+     *        owner to publish again: whatever else only publishes on change, such as the sensors' last
+     *        values and the logging status.
+     *
+     * Built after this controller, those owners are handed over here. Callable from any thread; it runs on
+     * the render work queue, and must not block.
+     */
+    void SetStateReplay(std::function<void()> replay);
 };
 
 } // namespace eerie_leap::controllers

@@ -1,0 +1,121 @@
+; The `ui` SMP group (73): the preview of a UI configuration on the unit that shows it. A client stages a whole
+; CborUiConfig (ui_config.cddl), which the unit checks as an upload is and shows without storing it, so a preview
+; never stops logging. The stored configuration comes back when the session ends.
+;
+; Every request that carries `tok` renews the session's lease (EERIE_LEAP_UI_PREVIEW_LEASE_MS, `lease_ms` in the
+; answer to BEGIN). The session ends on END, when the lease runs out, when the local BLE link drops (a client
+; routed through another unit relies on the lease), and when a UI configuration is stored (that store's own rebuild
+; shows what it stored). It then reverts to the stored configuration (on its start group, or, for a session that
+; only used SHOW, on the group that was shown at BEGIN, with no overlay), clears the highlight and lets the swipes
+; navigate again. The lease of a session runs from the arrival of a request, and of a STAGE's last chunk from the end
+; of its apply, which can take longer than the lease. A configuration that cannot be shown (it passed the checks and
+; failed to render) puts the stored screens back at once: the answer is UNKNOWN and END then answers reverted: false.
+;
+; Commands: BEGIN write 0, STAGE write 1, PATCH write 2,
+; SHOW write 3, HIGHLIGHT write 4, END write 5, STATUS read 6.
+;
+; Errors are SMP v2 group errors, {err: {group: 73, rc}}, beside which a few answer a key of the top-level map:
+;   INVALID    msg: tstr   the validator's message, as the `config` group's APPLY_FAILED has it
+;   BAD_OFFSET off: uint   where the transfer resumes
+;   STALE      rev: uint   the revision applied
+
+; UiError: OK 0, UNKNOWN 1, NO_SESSION 2, BAD_TOKEN 3, BUSY 4, STALE 5, BASE_MISMATCH 6 (FW-2), TOO_LARGE 7,
+;          BAD_OFFSET 8, CRC_MISMATCH 9, INVALID 10, NOT_FOUND 11, NO_MEMORY 12
+
+; BEGIN: opens a session, or renews one with its tok. A BEGIN sent again because its answer got lost, before any
+; request carried the tok, gets the same tok; any other BEGIN without the tok is BUSY, with another tok BAD_TOKEN.
+; A BEGIN with a tok when no session is open is NO_SESSION: the session ended (END, lease, link, a store), and the
+; client learns that instead of being given a new one.
+ui-begin-req  = { ? tok: uint, ? pin: bool }            ; pin (default true): the swipes do not navigate
+ui-begin-rsp  = { tok: uint, lease_ms: uint, rev: uint, stored_crc: uint, max_patch: uint, max_ops: uint, max_stage: uint }
+                                                        ; rev 0 until a configuration is staged or patched
+                                                        ; max_patch: the most bytes a PATCH request's whole CBOR body may take
+                                                        ;   (tok, rev and ops with their keys and headers included): one SMP
+                                                        ;   packet less its 8-byte header, 1016 with a 1024-byte packet
+                                                        ; max_ops: the most operations one PATCH takes, 16
+                                                        ; max_stage: the most bytes a staged configuration may take
+
+; STAGE: a whole CborUiConfig in chunks, in order, shown when the last arrives. Checked as an upload is, never
+; stored. len, crc and rev at off 0 only; rev, if given, must be past the applied one (else STALE), else the unit
+; counts on. An earlier unfinished transfer is dropped by an off 0. While the last chunk is being applied a STAGE
+; is BUSY. The gauge stays on the group and the overlay it shows when the new configuration still has them (else the
+; start group, and no overlay); the answer to the last chunk says where it stands.
+ui-stage-req  = { tok: uint, off: uint, data: bstr, ? len: uint, ? crc: uint, ? rev: uint }
+ui-stage-rsp  = { off: uint, ? rev: uint, ? group: uint, ? overlay: uint }
+                                                        ; off: bytes received; rev, group and overlay once the
+                                                        ; configuration is shown (overlay only while one is up)
+
+; PATCH: operations applied in order onto the configuration the screens show (the last stage, with the patches since), all or
+; nothing. In the firmware's words a "screen" is the editor's group: a stack of widgets that belongs to a screen group (the
+; editor's screen); screen_id is a screen's own ID. Needs a staged configuration: a session that staged nothing, or whose
+; stage failed to show, has none (BASE_MISMATCH), and so has a session after END.
+;   [0, screen_id, widget]  put a widget: replaces the widget of its ID on that screen, or adds it
+;   [1, screen_id, widget_id]  remove a widget and the widgets it owns (CHILD_WIDGET_IDS, recursively)
+;   [2, screen]  put a screen: replaces the screen of its ID, or adds it (its screen group may be new)
+;   [3, screen_id]  remove a screen
+; The patched configuration is checked as an upload is (every rule, the widgets' own and the bindings), as a whole.
+; rev must be past the applied one (a stage sets it, a patch sets it to its own): rev <= applied is STALE with {rev: applied}
+; and nothing changes. The answer's rev is the request's.
+; Order of the list, which a whole stage of the resulting configuration reproduces: a screen's widgets are listed by z-index
+; and, among equal ones, in the order of the list; a put of a widget that is there with the same z-index keeps its place; a put
+; with another z-index, and a widget that is new, go after the widgets of their z-index; a widget removed and put again in one
+; request is last of its z-index. The screens of a screen group are drawn by z-index, equal ones in the order the configuration
+; lists its screens; a put of a screen that is there keeps its place in that list, a new one, and one removed and put again in
+; one request, goes last. (A put of a screen replaces its widgets with the ones it carries, in its order.) The view follows
+; the list for every screen group and every screen the patch leaves, also where the patch changes nothing but the order.
+; Errors, in the order they are judged: NO_SESSION or BAD_TOKEN (the token, which renews the lease), TOO_LARGE (more than max_ops
+; operations, or a body past max_patch), BUSY (a stage is being sent or applied, between its chunks too, or another patch is
+; being applied), STALE, then, in the jobs: BASE_MISMATCH when nothing is staged (nothing staged in this session, a stage that
+; failed to show, a session reopened), INVALID with msg for a widget or screen record that is none ("Malformed CBOR" or the
+; decoder's own message; records are decoded before anything is looked up, so a malformed record is INVALID even where
+; another operation names a screen the configuration lacks), BASE_MISMATCH when an operation names a screen or a widget the
+; configuration it patches does not have at that point (earlier operations of the request counted), INVALID with the
+; validator's msg for the patched configuration, TOO_LARGE once more when the patched configuration would encode to more
+; than a stage takes (max_stage; it is measured only when it may be close, so a patch that fits costs nothing). A request
+; that is not shaped like this (no ops, an operation of a kind there is none of, a missing key) is an SMP error (rc 3,
+; EINVAL), as for the other commands. A patch the screens could not show (UNKNOWN) leaves the screens as they were, the
+; revision too.
+ui-patch-req  = { tok: uint, rev: uint, ops: [+ ui-op] }
+ui-op         = [0, screen_id: uint, widget: bstr .cbor CborWidgetConfig]
+              / [1, screen_id: uint, widget_id: uint]
+              / [2, screen: bstr .cbor CborScreenConfig]
+              / [3, screen_id: uint]
+ui-patch-rsp  = { rev: uint, effects: [+ ui-effect] }
+ui-effect     = 0   ; applied in place: the widget and its objects stay and take the new value, and look as one built from the
+                    ; new record: a root widget's position, size and z-index; IS_VISIBLE, IS_ACTIVE, OPACITY; the six colors;
+                    ; the anchor and the animation; a shape icon's (rectangle, triangles, oval, line) offsets, WIDTH_PX,
+                    ; HEIGHT_PX, STROKE_PX, CORNER_RAD_PX, FILL_MODE and DIRECTION. A property an inbound binding drives keeps
+                    ; the last event's value (also the box, when LAYOUT_X/Y/WIDTH/HEIGHT are bound); the unit asks the
+                    ; settings and the state to be published again, so the event comes. A property the record drops is back
+                    ; at the widget's default.
+              / 1   ; a widget was built again, added or removed: everything else of a widget: the type, the bindings, the
+                    ; value (VALUE), the range (MIN_VALUE, MAX_VALUE), the arc angles, the precision, the unit, the label
+                    ; (a button's, a setting indicator's, a label icon's), STEP, the icon type, a file and an image's size,
+                    ; a chart's points and type, IS_SMOOTHED, the structure, an arc icon's whole box and placement, and
+                    ; anything of a widget a dial or other owner holds (which rebuilds the owner); and any property the
+                    ; table above does not list. The settings and state are published again.
+              / 2   ; a screen was built again or added or removed (its grid, type, visibility, z-index, screen group or overlay
+                    ; flag), or, for an operation on an overlay that is up, the overlay was shown again; a screen group that
+                    ; appears or goes, or a screen that changes screen group, shows all of it again. The screen group and the
+                    ; overlay shown stay. The settings and state are published again.
+              / 3   ; not shown: an operation on an overlay that is not up (it is built from the configuration when shown)
+; One effect per operation, in order; an operation that changes nothing, on an overlay too, is 0.
+
+; SHOW: asks navigation for a group of the configuration shown, or an overlay (closing the one up first).
+ui-target     = { group: uint } / { overlay: uint }
+ui-show-req   = { tok: uint, target: ui-target }
+ui-show-rsp   = { group: uint, ? overlay: uint }
+
+; HIGHLIGHT: an outline over a widget, following it (it moves, resizes, is rebuilt). screen and widget outline
+; the widget; screen alone, the screen; widget alone, the first widget of that ID on the overlay that is up, else
+; on the group shown. Neither clears the outline. NOT_FOUND if there is no such screen or widget.
+ui-highlight-req = { tok: uint, ? screen: uint, ? widget: uint }
+ui-highlight-rsp = {}
+
+; END: back to what the unit stores. reverted: whether a staged configuration was showing and had to be replaced.
+ui-end-req    = { tok: uint }
+ui-end-rsp    = { reverted: bool }
+
+; STATUS: needs no tok.
+ui-status-rsp = { active: bool, ? rev: uint, ? lease_left_ms: uint, stored_crc: uint, ? group: uint }
+                                                        ; rev, lease_left_ms while active; group once navigation knows it

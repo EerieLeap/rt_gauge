@@ -29,7 +29,7 @@ void ButtonControl::RegisterProperties(WidgetPropertyStore& store) const {
     store.RegisterColor(WidgetPropertyType::COLOR_SECONDARY_ACTIVE);
     store.RegisterColor(WidgetPropertyType::COLOR_SECONDARY_INACTIVE);
 
-    store.Register(WidgetPropertyType::LABEL, ConfigValue{ std::pmr::string{} }, PropertyChangeEffect::Repaint);
+    store.Register(WidgetPropertyType::LABEL, ConfigValue{ std::pmr::string{} }, PropertyChangeEffect::Rebuild);
     store.Register(WidgetPropertyType::TARGET_SCREEN_GROUP, ConfigValue{ NO_TARGET }, PropertyChangeEffect::None);
     store.Register(
         WidgetPropertyType::NAVIGATION_INTENT, ConfigValue{ static_cast<int>(NavigationIntent::None) },

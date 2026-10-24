@@ -35,6 +35,14 @@ public:
         return type == WidgetPropertyType::CHILD_WIDGET_IDS;
     }
 
+    // The root widget's box in grid cells; a binding target only, never a value in a properties map.
+    static constexpr bool IsLayoutProperty(WidgetPropertyType type) {
+        return type == WidgetPropertyType::LAYOUT_X
+            || type == WidgetPropertyType::LAYOUT_Y
+            || type == WidgetPropertyType::LAYOUT_WIDTH
+            || type == WidgetPropertyType::LAYOUT_HEIGHT;
+    }
+
     static constexpr bool IsAnimationProperty(WidgetPropertyType type) {
         return type == WidgetPropertyType::ANIMATION_TYPE
             || type == WidgetPropertyType::IS_ANIMATION_ACTIVE

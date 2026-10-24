@@ -1,0 +1,16 @@
+common:
+  tags:
+    - functional
+    - smp_ui
+  # The group drives the real UI controller on the dummy display, and a lease runs out in some of the cases.
+  timeout: 180
+  platform_allow:
+    - native_sim
+
+tests:
+  functional.smp_ui: {}
+  # A build without the UI preview: the group is not registered and MCUmgr answers as it does for any group it
+  # does not serve.
+  functional.smp_ui.no_preview:
+    extra_configs:
+      - CONFIG_EERIE_LEAP_UI_PREVIEW=n

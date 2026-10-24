@@ -36,6 +36,8 @@ private:
         PropertyChangeEffect effect;
         uint8_t declared_alternative;
         ConfigValue value;
+        // What the widget registered the property with, which a property left out of its configuration holds.
+        ConfigValue default_value;
     };
 
     // A widget declares roughly ten properties, so a scan beats hashing and allocates once.
@@ -78,6 +80,13 @@ public:
     bool Set(WidgetPropertyType type, const ConfigValue& value);
 
     ConfigValue Get(WidgetPropertyType type) const;
+
+    // What the property was registered with; no value for a property that is not registered.
+    ConfigValue GetDefault(WidgetPropertyType type) const;
+
+    // Sets the property back to its registered default (a color to none). False for a property that is
+    // not registered.
+    bool Reset(WidgetPropertyType type);
 
     template<typename T>
     T GetAs(WidgetPropertyType type, const T& fallback) const {

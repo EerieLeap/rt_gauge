@@ -33,6 +33,8 @@ private:
 
 protected:
     int DoRender() override;
+    // The canvas is as large as the box, so it is made again.
+    void OnBoxResized() override;
     void OnProcessingUpdated(bool enabled) override;
     void RegisterProperties(WidgetPropertyStore& store) const override;
     void OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) override;

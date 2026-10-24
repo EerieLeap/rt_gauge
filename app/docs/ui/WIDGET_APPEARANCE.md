@@ -236,6 +236,29 @@ with the same 32 bits, the same selector, and a re-save writes it that way.
 Publish from services rather than accessing LVGL directly; widget dispatch takes
 the LVGL lock before its dispatch guard.
 
+### Binding a widget's box
+
+A root widget's position and size can be bound too, by four properties in the
+cells of its screen's grid, like the record's `position` and `size` (y counts up
+from the bottom, and a pixel grid's cell is a pixel):
+
+| Id | Property | Default |
+| --- | --- | --- |
+| 45 | `LAYOUT_X` | the record's `position` x |
+| 46 | `LAYOUT_Y` | the record's `position` y |
+| 47 | `LAYOUT_WIDTH` | the record's `size` width |
+| 48 | `LAYOUT_HEIGHT` | the record's `size` height |
+
+A change moves or sizes the widget's LVGL object in place, with no rebuild (an
+inbound value is truncated to an integer). A bound size under one cell is held
+at one, and a size or a position is held to the grid. The record stays the one
+place the box is written: the properties are binding targets only, and a
+properties map that holds one is refused ("set by the widget's position and
+size"). A child fills its owner's box, so a binding to one on a child is refused
+("a child fills its owner"); the owner takes it. Like the other properties, a
+change reaches a widget that is hidden or on an inactive group when it is shown
+again.
+
 ## Activity and compatibility
 
 All three management properties default to enabled/full coverage:

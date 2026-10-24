@@ -1,3 +1,4 @@
+#include <array>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -6,6 +7,8 @@
 #include "utilities/memory/memory_resource_manager.h"
 
 #include "domain/ui_domain/models/widget_property.h"
+
+#include "configuration/cbor/cbor_ui_config/cbor_ui_config_cbor_decode.h"
 
 #include "ui_configuration_cbor_parser.h"
 #include "ui_configuration_validator.h"
@@ -226,7 +229,96 @@ void ValueTypeToCborPropertyValueType(
     }
 }
 
+std::shared_ptr<WidgetConfiguration>
+ToWidgetConfiguration(std::pmr::memory_resource* mr, const CborWidgetConfig& widget) {
+    auto widget_configuration = make_shared_pmr<WidgetConfiguration>(mr);
+    widget_configuration->type = static_cast<WidgetType>(widget.type);
+    widget_configuration->id = widget.id;
+    widget_configuration->position_grid.x = widget.position.x;
+    widget_configuration->position_grid.y = widget.position.y;
+    widget_configuration->size_grid.width = widget.size.width;
+    widget_configuration->size_grid.height = widget.size.height;
+    widget_configuration->z_index = widget.z_index;
+
+    if(widget.properties_present)
+        CborPropertyValueTypeToWidgetValueType(mr, widget_configuration->properties, widget.properties);
+
+    FromCborBindings(mr, widget_configuration->bindings, widget.CborPropertyBinding_m);
+
+    return widget_configuration;
+}
+
+std::shared_ptr<ScreenConfiguration>
+ToScreenConfiguration(std::pmr::memory_resource* mr, const CborScreenConfig& screen) {
+    auto screen_configuration = make_shared_pmr<ScreenConfiguration>(mr);
+    screen_configuration->id = screen.id;
+    screen_configuration->screen_group_id = screen.group_id;
+    screen_configuration->type = static_cast<ScreenType>(screen.type);
+    screen_configuration->z_index = screen.z_index;
+    screen_configuration->is_visible = screen.is_visible;
+    screen_configuration->is_overlay = screen.is_overlay;
+
+    screen_configuration->grid.snap_enabled = screen.grid.snap_enabled;
+    screen_configuration->grid.width = screen.grid.width;
+    screen_configuration->grid.height = screen.grid.height;
+    screen_configuration->grid.spacing_px = screen.grid.spacing_px;
+
+    for(const auto& widget : screen.CborWidgetConfig_m)
+        screen_configuration->AddWidget(ToWidgetConfiguration(mr, widget));
+
+    return screen_configuration;
+}
+
+// A CborUiConfig around one screen: [version, active group 0, [screen]]. The generated decoder has this one entry point.
+constexpr std::array<uint8_t, 4> UI_CONFIG_HEADER = { 0x83, UiConfigurationCborParser::CONFIGURATION_VERSION, 0x00,
+    0x81 };
+
+// A CborScreenConfig around one widget, up to the widget: [id 0, group 0, type 0, z 0, visible false, overlay false,
+// grid [snap false, 0, 0, 0], [widget]].
+constexpr std::array<uint8_t, 13> SCREEN_HEADER = { 0x88, 0x00, 0x00, 0x00, 0x00, 0xF4, 0xF4, 0x84, 0xF4, 0x00, 0x00,
+    0x00, 0x81 };
+
+PmrUniquePtr<CborUiConfig> DecodeWrapped(std::pmr::memory_resource* mr, std::span<const uint8_t> wrapped) {
+    auto config = make_unique_pmr<CborUiConfig>(mr);
+    size_t decoded_size = 0;
+    // Trailing bytes are not the record's: a second record in the same bytes ends up after the wrapper's list.
+    if(cbor_decode_CborUiConfig(wrapped.data(), wrapped.size(), config.get(), &decoded_size) != 0
+        || decoded_size != wrapped.size())
+        throw std::invalid_argument("Malformed CBOR");
+
+    return config;
+}
+
 } // namespace
+
+std::shared_ptr<WidgetConfiguration>
+UiConfigurationCborParser::DecodeWidget(std::pmr::memory_resource* mr, std::span<const uint8_t> cbor) {
+    std::pmr::vector<uint8_t> wrapped(mr);
+    wrapped.reserve(UI_CONFIG_HEADER.size() + SCREEN_HEADER.size() + cbor.size());
+    wrapped.insert(wrapped.end(), UI_CONFIG_HEADER.begin(), UI_CONFIG_HEADER.end());
+    wrapped.insert(wrapped.end(), SCREEN_HEADER.begin(), SCREEN_HEADER.end());
+    wrapped.insert(wrapped.end(), cbor.begin(), cbor.end());
+
+    const auto config = DecodeWrapped(mr, wrapped);
+    if(config->CborScreenConfig_m.size() != 1 || config->CborScreenConfig_m.front().CborWidgetConfig_m.size() != 1)
+        throw std::invalid_argument("Malformed CBOR");
+
+    return ToWidgetConfiguration(mr, config->CborScreenConfig_m.front().CborWidgetConfig_m.front());
+}
+
+std::shared_ptr<ScreenConfiguration>
+UiConfigurationCborParser::DecodeScreen(std::pmr::memory_resource* mr, std::span<const uint8_t> cbor) {
+    std::pmr::vector<uint8_t> wrapped(mr);
+    wrapped.reserve(UI_CONFIG_HEADER.size() + cbor.size());
+    wrapped.insert(wrapped.end(), UI_CONFIG_HEADER.begin(), UI_CONFIG_HEADER.end());
+    wrapped.insert(wrapped.end(), cbor.begin(), cbor.end());
+
+    const auto config = DecodeWrapped(mr, wrapped);
+    if(config->CborScreenConfig_m.size() != 1)
+        throw std::invalid_argument("Malformed CBOR");
+
+    return ToScreenConfiguration(mr, config->CborScreenConfig_m.front());
+}
 
 UiConfigurationCborParser::UiConfigurationCborParser(UiConfigurationValidator::ChildValidator validate_children) :
     validate_children_(std::move(validate_children)) {}
@@ -303,40 +395,8 @@ UiConfigurationCborParser::Deserialize(std::pmr::memory_resource* mr, const Cbor
     if(config.properties_present)
         CborPropertyValueTypeToUiValueType(mr, configuration->properties, config.properties);
 
-    for(const auto& i : config.CborScreenConfig_m) {
-        auto screen_configuration = make_shared_pmr<ScreenConfiguration>(mr);
-        screen_configuration->id = i.id;
-        screen_configuration->screen_group_id = i.group_id;
-        screen_configuration->type = static_cast<ScreenType>(i.type);
-        screen_configuration->z_index = i.z_index;
-        screen_configuration->is_visible = i.is_visible;
-        screen_configuration->is_overlay = i.is_overlay;
-
-        screen_configuration->grid.snap_enabled = i.grid.snap_enabled;
-        screen_configuration->grid.width = i.grid.width;
-        screen_configuration->grid.height = i.grid.height;
-        screen_configuration->grid.spacing_px = i.grid.spacing_px;
-
-        for(const auto& widget : i.CborWidgetConfig_m) {
-            auto widget_configuration = make_shared_pmr<WidgetConfiguration>(mr);
-            widget_configuration->type = static_cast<WidgetType>(widget.type);
-            widget_configuration->id = widget.id;
-            widget_configuration->position_grid.x = widget.position.x;
-            widget_configuration->position_grid.y = widget.position.y;
-            widget_configuration->size_grid.width = widget.size.width;
-            widget_configuration->size_grid.height = widget.size.height;
-            widget_configuration->z_index = widget.z_index;
-
-            if(widget.properties_present)
-                CborPropertyValueTypeToWidgetValueType(mr, widget_configuration->properties, widget.properties);
-
-            FromCborBindings(mr, widget_configuration->bindings, widget.CborPropertyBinding_m);
-
-            screen_configuration->AddWidget(std::move(widget_configuration));
-        }
-
-        configuration->screen_configurations.push_back(std::move(screen_configuration));
-    }
+    for(const auto& screen : config.CborScreenConfig_m)
+        configuration->screen_configurations.push_back(ToScreenConfiguration(mr, screen));
 
     UiConfigurationValidator::Validate(*configuration, validate_children_);
 

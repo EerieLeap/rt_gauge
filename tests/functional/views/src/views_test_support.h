@@ -106,6 +106,11 @@ public:
 
     void OnActivated() override;
     void OnDeactivated() override;
+
+    void ApplyWidgetPatches(
+        std::shared_ptr<eerie_leap::domain::ui_domain::models::ScreenConfiguration> configuration,
+        std::span<const eerie_leap::domain::ui_domain::preview::WidgetPatch> patches
+    ) override;
 };
 
 } // namespace views_test

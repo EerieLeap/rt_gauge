@@ -322,3 +322,79 @@ ZTEST(main_view, test_a_failed_deferred_render_does_not_undo_a_later_switch) {
     zassert_true(IsGroupHidden(view, 0));
     zassert_true(IsGroupHidden(view, 1));
 }
+
+// The work queue keeps a finished task, and what it captured, until a later Run() prunes it without the LVGL
+// lock; a group it kept alive past Clear() would be destroyed there, under the queue's lock.
+ZTEST(main_view, test_a_pending_render_keeps_no_group_alive_past_clear) {
+    MainView view;
+    DeferredRenderQueue queue;
+
+    auto first = AddScreen(view, 0, 0);
+    auto second = AddScreen(view, 1, 1);
+    zassert_equal(view.SetActiveGroup(0), 0);
+    zassert_equal(view.Render(), 0);
+    view.SetRenderDispatcher(queue.GetDispatcher());
+
+    zassert_equal(view.SetActiveGroup(1), 0);
+    zassert_equal(queue.Pending(), 1);
+
+    std::weak_ptr<FakeScreen> first_alive = first;
+    std::weak_ptr<FakeScreen> second_alive = second;
+    first.reset();
+    second.reset();
+    zassert_false(first_alive.expired(), "The view still holds its groups.");
+
+    view.Clear();
+
+    zassert_true(first_alive.expired(), "The previous group went with Clear().");
+    zassert_true(second_alive.expired(), "The group waiting to be rendered went with Clear().");
+    zassert_false(view.GetActiveGroupId().has_value());
+
+    // The work that was queued finds nothing to render.
+    queue.RunAll();
+    zassert_false(view.GetActiveGroupId().has_value());
+}
+
+// A group dropped and a new one built under the same id: the old work must not render the new group as its own.
+ZTEST(main_view, test_a_pending_render_of_a_dropped_group_does_not_touch_the_new_one) {
+    MainView view;
+    DeferredRenderQueue queue;
+
+    auto first = AddScreen(view, 0, 0);
+    auto second = AddScreen(view, 1, 1);
+    zassert_equal(view.SetActiveGroup(0), 0);
+    zassert_equal(view.Render(), 0);
+    view.SetRenderDispatcher(queue.GetDispatcher());
+    zassert_equal(view.SetActiveGroup(1), 0);
+    zassert_equal(queue.Pending(), 1);
+
+    view.Clear();
+    first.reset();
+    second.reset();
+
+    auto replacement = AddScreen(view, 1, 1);
+    zassert_equal(view.SetActiveGroup(1, true), 0);
+    zassert_equal(replacement->render_count, 1, "Rendered inline once.");
+
+    queue.RunAll();
+
+    zassert_equal(replacement->render_count, 1, "The old work did not render it again.");
+    zassert_equal(view.GetActiveGroupId().value(), 1);
+}
+
+ZTEST(main_view, test_an_inline_switch_renders_at_once_despite_a_dispatcher) {
+    MainView view;
+    DeferredRenderQueue queue;
+
+    auto first = AddScreen(view, 0, 0);
+    auto second = AddScreen(view, 1, 1);
+    zassert_equal(view.SetActiveGroup(0), 0);
+    zassert_equal(view.Render(), 0);
+    view.SetRenderDispatcher(queue.GetDispatcher());
+
+    zassert_equal(view.SetActiveGroup(1, true), 0);
+
+    zassert_equal(queue.Pending(), 0);
+    zassert_equal(second->render_count, 1);
+    zassert_equal(second->activated_count, 1);
+}

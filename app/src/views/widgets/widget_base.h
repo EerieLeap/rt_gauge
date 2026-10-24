@@ -15,6 +15,7 @@
 #include "domain/ui_domain/models/property_binding.h"
 
 #include "views/renderable_base.h"
+#include "views/utilitites/grid_layout.h"
 #include "views/widgets/i_widget.h"
 #include "views/widgets/widget_context.h"
 #include "views/widgets/widget_dispatch_guard.h"
@@ -62,6 +63,11 @@ protected:
     WidgetPosition position_px_{};
     WidgetSize size_px_{};
 
+    // Set for a root widget by AttachGrid(); the grid its LAYOUT_* properties are in cells of.
+    std::optional<eerie_leap::views::utilitites::GridLayout> grid_layout_;
+    // Whether the box was placed once, from the record; the layout properties only move it from then on.
+    bool is_box_placed_ = false;
+
     std::shared_ptr<Frame> parent_;
     // Stable presentation target beneath the public layout/management container.
     std::shared_ptr<Frame> content_frame_;
@@ -104,6 +110,14 @@ protected:
 
     void ApplyProperty(WidgetPropertyType type, const ConfigValue& value);
     void ApplyProperties(const PropertySet& selected);
+    // Registers the box's properties with the record's values as their defaults. A root widget only.
+    void RegisterLayoutProperties(WidgetPropertyStore& store) const;
+    // Moves and sizes the widget to the box the layout properties hold now: a size under one cell is held at
+    // one, and a size and position within the grid. Does nothing before the box was placed.
+    void ApplyLayout();
+    // After the box of a rendered widget changed size. The default applies the theme again, which is where
+    // most widgets place what depends on their size; one that builds from its size renders again.
+    virtual void OnBoxResized();
     void UpdateProcessingState();
     virtual void OnProcessingSuspended();
     // Idempotently synchronize owned work, including after an ancestor changes between refreshes.
@@ -127,6 +141,11 @@ protected:
     // once. Callers are already on the UI thread, so this skips the dispatch guard.
     void ReplayProperties();
     void ReplayPendingProperties();
+
+    // The parts of ApplyEditorConfiguration(), all on the UI thread with the new record already in place.
+    bool IsDrivenByInboundBinding(WidgetPropertyType type) const;
+    void ApplyEditorProperty(const WidgetConfiguration& previous, WidgetPropertyType type);
+    void ApplyEditorBox(const WidgetConfiguration& previous);
     static void RefreshCallback(lv_event_t* event);
 
     void RunEffect(PropertyChangeEffect effect);
@@ -170,9 +189,15 @@ public:
     // Sealed: the configuration path is register -> seed -> replay -> OnConfigured -> bindings,
     // and a derived override would run its own reads after the replay had already used the defaults.
     void Configure(std::shared_ptr<WidgetConfiguration> configuration) final;
+    void ApplyEditorConfiguration(std::shared_ptr<WidgetConfiguration> configuration) final;
 
     std::vector<WidgetPropertyType> GetSupportedProperties() const override;
+    // What a change of this property takes (None for one the widget does not register): the widget's own word on
+    // whether a patch can apply it in place, which ClassifyWidgetChange() has to agree with.
+    PropertyChangeEffect GetPropertyEffect(WidgetPropertyType type) const;
     std::shared_ptr<WidgetConfiguration> GetConfiguration() const override;
+
+    void AttachGrid(const eerie_leap::views::utilitites::GridLayout& layout) final;
 
     WidgetPosition GetPositionPx() const override;
     void SetPositionPx(const WidgetPosition& pos) override;

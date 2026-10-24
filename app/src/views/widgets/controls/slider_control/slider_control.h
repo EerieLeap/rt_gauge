@@ -24,6 +24,9 @@ private:
     double ToValue(int32_t index) const;
     void ApplyRange();
     void UpdateSlider();
+    // Room at the track's ends for the knob, which sticks out by half its size.
+    void UpdateKnobPadding();
+    void OnBoxResized() override;
 
     int DoRender() override;
     int ApplyTheme(const ITheme& theme) override;

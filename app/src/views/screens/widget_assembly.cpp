@@ -22,6 +22,28 @@ WidgetAssembly::Roots WidgetAssembly::Assemble(
     const std::shared_ptr<Frame>& container,
     const WidgetContext& context
 ) {
+    return AssembleRoots(configuration, std::nullopt, container, context);
+}
+
+std::unique_ptr<IWidget> WidgetAssembly::AssembleRoot(
+    const std::shared_ptr<ScreenConfiguration>& configuration,
+    uint32_t root_id,
+    const std::shared_ptr<Frame>& container,
+    const WidgetContext& context
+) {
+    auto roots = AssembleRoots(configuration, root_id, container, context);
+    if(roots.empty())
+        return nullptr;
+
+    return std::move(roots.front());
+}
+
+WidgetAssembly::Roots WidgetAssembly::AssembleRoots(
+    const std::shared_ptr<ScreenConfiguration>& configuration,
+    std::optional<uint32_t> only_root_id,
+    const std::shared_ptr<Frame>& container,
+    const WidgetContext& context
+) {
     ScopedLvglLock lvgl_guard;
 
     const auto& definitions = configuration->widget_configurations;
@@ -29,6 +51,24 @@ WidgetAssembly::Roots WidgetAssembly::Assemble(
     auto& factory = WidgetFactory::GetInstance();
     const auto layout = GridLayout::FromActiveScreen(configuration->grid);
     const auto composition = WidgetComposition::Build(*configuration);
+
+    // The roots to build, and everything they own.
+    std::pmr::vector<size_t> roots(resource);
+    for(const auto i : composition.roots) {
+        if(!only_root_id.has_value() || definitions[i]->id == *only_root_id)
+            roots.push_back(i);
+    }
+
+    std::pmr::vector<bool> included(definitions.size(), false, resource);
+    for(const auto i : roots)
+        included[i] = true;
+    // A postorder lists descendants before owners, so walking it backwards visits every owner first.
+    for(auto it = composition.postorder.rbegin(); it != composition.postorder.rend(); ++it) {
+        if(!included[*it])
+            continue;
+        for(const auto child : composition.GetChildren(*it))
+            included[child] = true;
+    }
 
     std::pmr::vector<std::unique_ptr<IWidget>> instances(definitions.size(), resource);
     std::pmr::vector<size_t> siblings(resource);
@@ -45,15 +85,22 @@ WidgetAssembly::Roots WidgetAssembly::Assemble(
     };
 
     try {
-        construct(composition.roots, container);
+        construct(roots, container);
+        // Before configuring, which registers the box's properties on a root.
+        for(const auto i : roots)
+            instances[i]->AttachGrid(layout);
         // Reverse postorder visits every owner before its descendants.
         for(auto it = composition.postorder.rbegin(); it != composition.postorder.rend(); ++it) {
+            if(!included[*it])
+                continue;
             const auto children = composition.GetChildren(*it);
             if(!children.empty())
                 construct(children, instances[*it]->GetChildMount());
         }
 
         for(const auto i : composition.postorder) {
+            if(!included[i])
+                continue;
             const auto indices = composition.GetChildren(i);
             IWidget::Children children;
             children.reserve(indices.size());
@@ -63,7 +110,7 @@ WidgetAssembly::Roots WidgetAssembly::Assemble(
             WidgetFactory::ConfigureWidget(*instances[i], definitions[i], std::move(children));
         }
 
-        for(const auto i : composition.roots) {
+        for(const auto i : roots) {
             const auto size_px = layout.ToPx(definitions[i]->size_grid);
             instances[i]->SetSizePx(size_px);
             instances[i]->SetPositionPx(layout.ToPx(definitions[i]->position_grid, size_px));
@@ -75,12 +122,12 @@ WidgetAssembly::Roots WidgetAssembly::Assemble(
         throw;
     }
 
-    Roots roots;
-    roots.reserve(composition.roots.size());
-    for(const auto i : composition.roots)
-        roots.push_back(std::move(instances[i]));
+    Roots built;
+    built.reserve(roots.size());
+    for(const auto i : roots)
+        built.push_back(std::move(instances[i]));
 
-    return roots;
+    return built;
 }
 
 } // namespace eerie_leap::views::screens

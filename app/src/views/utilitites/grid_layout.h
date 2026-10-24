@@ -24,6 +24,8 @@ public:
 
     static GridLayout FromActiveScreen(const GridSettings& grid);
 
+    const GridSettings& GetGrid() const;
+
     WidgetSize ToPx(const WidgetSize& size_grid) const;
     WidgetPosition ToPx(const WidgetPosition& position_grid, const WidgetSize& size_px) const;
 };

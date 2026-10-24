@@ -29,6 +29,10 @@ GridLayout GridLayout::FromActiveScreen(const GridSettings& grid) {
     return { grid, lv_obj_get_width(active_screen), lv_obj_get_height(active_screen) };
 }
 
+const GridSettings& GridLayout::GetGrid() const {
+    return grid_;
+}
+
 WidgetSize GridLayout::ToPx(const WidgetSize& size_grid) const {
     if(size_grid.width == 0)
         throw std::invalid_argument("Invalid widget width.");
