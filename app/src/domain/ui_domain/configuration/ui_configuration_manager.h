@@ -29,6 +29,7 @@ class UiConfigurationManager :
     public CborConfigurationManagerBase<UiConfiguration, CborUiConfig>,
     public IConfigurationManager {
 private:
+    UiConfigurationValidator::ChildValidator validate_children_;
     UiConfigurationCborParser cbor_parser_;
     EventBindingChecker check_binding_;
     ConfigurationUpdatedHandler configuration_updated_handler_;
@@ -58,6 +59,10 @@ public:
     using CborConfigurationManagerBase::ApplyCborConfiguration;
 
     bool ApplyCborConfiguration(std::span<const uint8_t> cbor_data, std::span<char> reason) override;
+
+    // Checks a configuration as an upload is checked (the domain rules, the widgets' own child rules and the
+    // bindings against this unit's channels) and stores nothing. Throws std::invalid_argument naming what is wrong.
+    void ValidateConfiguration(const UiConfiguration& configuration) const;
 
     // Validates, persists, and then keeps the configuration itself; do not modify it afterwards.
     bool Update(std::shared_ptr<UiConfiguration> configuration);

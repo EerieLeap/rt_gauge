@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cerrno>
+#include <cstring>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -73,6 +74,8 @@ using eerie_leap::domain::ui_domain::ScopedLvglLock;
 using eerie_leap::domain::ui_domain::event_bus::NavigationEventType;
 using eerie_leap::domain::ui_domain::event_bus::NavigationPayloadType;
 using eerie_leap::domain::ui_domain::models::Animation;
+using eerie_leap::domain::ui_domain::preview::PatchEffect;
+using eerie_leap::domain::ui_domain::preview::ScreenAction;
 using eerie_leap::subsys::assets::AssetAccess;
 using eerie_leap::subsys::assets::AssetKind;
 using eerie_leap::subsys::assets::AssetProvider;
@@ -713,6 +716,158 @@ std::shared_ptr<UiPreviewService> UiController::GetPreviewService() const {
 std::shared_ptr<UiConfiguration>
 UiController::ParseConfiguration(std::span<const uint8_t> cbor_data, std::span<char> reason) {
     return ui_configuration_manager_->ParseCborConfiguration(cbor_data, reason);
+}
+
+bool UiController::ValidateConfiguration(const UiConfiguration& configuration, std::span<char> reason) {
+    try {
+        ui_configuration_manager_->ValidateConfiguration(configuration);
+
+        return true;
+    } catch(const std::exception& e) {
+        if(!reason.empty()) {
+            const size_t length = std::min(std::strlen(e.what()), reason.size() - 1);
+            std::copy_n(e.what(), length, reason.begin());
+            reason[length] = '\0';
+        }
+
+        return false;
+    }
+}
+
+// The view cannot add or drop a screen group, or an overlay, nor move a screen between groups, in place: those
+// are left to a whole show, which keeps the place.
+int UiController::PatchScreen(const ScreenPatch& patch, std::vector<uint32_t>& overlays_to_reshow) {
+    const auto& old_screen = patch.old_screen;
+    const auto& new_screen = patch.new_screen;
+    const bool is_overlay = (old_screen != nullptr && old_screen->is_overlay)
+        || (new_screen != nullptr && new_screen->is_overlay);
+
+    if(is_overlay) {
+        const bool is_kept = patch.action == ScreenAction::Widgets || patch.action == ScreenAction::Rebuild;
+        const bool is_same_kind = old_screen != nullptr
+            && new_screen != nullptr
+            && old_screen->is_overlay == new_screen->is_overlay;
+        if(!is_kept || !is_same_kind)
+            return PATCH_NEEDS_REBUILD;
+
+        overlays_to_reshow.push_back(patch.screen_id);
+
+        return 0;
+    }
+
+    if(patch.action == ScreenAction::Widgets) {
+        const auto screen = main_view_->GetScreen(patch.screen_id);
+        if(screen == nullptr)
+            return PATCH_NEEDS_REBUILD;
+
+        screen->ApplyWidgetPatches(new_screen, patch.widgets);
+
+        return 0;
+    }
+
+    if(patch.action == ScreenAction::Remove)
+        return main_view_->RemoveScreen(patch.screen_id) ? 0 : PATCH_NEEDS_REBUILD;
+
+    // Rebuild or Add: the screen is built again, in its group, which has to be there.
+    const auto group_ids = main_view_->GetGroupIds();
+    const bool is_moved = old_screen != nullptr && old_screen->screen_group_id != new_screen->screen_group_id;
+    if(is_moved || std::ranges::find(group_ids, new_screen->screen_group_id) == group_ids.end())
+        return PATCH_NEEDS_REBUILD;
+
+    const auto screen = CreateScreen(new_screen, main_view_->GetGroupContainer(new_screen->screen_group_id));
+    if(screen == nullptr)
+        return -EIO;
+
+    return main_view_->PutScreen(screen) ? 0 : PATCH_NEEDS_REBUILD;
+}
+
+// The screens of a group are drawn by z-index, and equal ones in the order the configuration lists them, which is
+// what a whole stage of this configuration would give: a screen that was put again is where the list has it.
+void UiController::OrderPatchedGroups(const PatchPlan& plan, const UiConfiguration& patched) {
+    for(const auto& patch : plan.screens) {
+        if(patch.new_screen == nullptr || patch.new_screen->is_overlay || patch.action == ScreenAction::Widgets)
+            continue;
+
+        const auto group_id = patch.new_screen->screen_group_id;
+        std::vector<std::shared_ptr<ScreenConfiguration>> members;
+        for(const auto& screen : patched.screen_configurations) {
+            if(!screen->is_overlay && screen->screen_group_id == group_id)
+                members.push_back(screen);
+        }
+
+        std::ranges::stable_sort(members, {}, [](const auto& screen) {
+            return screen->z_index;
+        });
+        std::vector<uint32_t> ids;
+        ids.reserve(members.size());
+        for(const auto& screen : members)
+            ids.push_back(screen->id);
+
+        main_view_->OrderScreens(group_id, ids);
+    }
+}
+
+int UiController::ApplyPatch(std::shared_ptr<UiConfiguration> patched, PatchPlan& plan) {
+    ScopedLvglLock lvgl_guard;
+
+    if(configuration_ == nullptr || main_view_ == nullptr || patched == nullptr)
+        return -EINVAL;
+
+    // Every overlay a change was made on, whether it is up now or not.
+    std::vector<uint32_t> overlays_to_reshow;
+    int outcome = 0;
+    try {
+        for(const auto& patch : plan.screens) {
+            outcome = PatchScreen(patch, overlays_to_reshow);
+            if(outcome != 0)
+                break;
+        }
+    } catch(const std::exception& e) {
+        LOG_ERR("Failed to patch the screens. %s", e.what());
+
+        return -EIO;
+    } catch(...) {
+        LOG_ERR("Failed to patch the screens.");
+
+        return -EIO;
+    }
+
+    if(outcome < 0)
+        return outcome;
+
+    if(outcome == PATCH_NEEDS_REBUILD) {
+        UiPreviewApplied applied;
+        const int res = ShowConfiguration(std::move(patched), applied);
+        std::ranges::fill(plan.effects, PatchEffect::GroupRebuilt);
+
+        return res == -ENOENT ? 0 : res;
+    }
+
+    OrderPatchedGroups(plan, *patched);
+
+    // Overlays are built from the configuration when they are shown.
+    const auto active_overlay = navigation_service_->GetActiveOverlayId();
+    std::vector<uint32_t> overlay_ids = overlays_to_reshow;
+    for(const auto& screen : configuration_->screen_configurations) {
+        if(screen->is_overlay)
+            overlay_ids.push_back(screen->id);
+    }
+    configuration_ = patched;
+
+    if(active_overlay.has_value()
+        && std::ranges::find(overlays_to_reshow, *active_overlay) != overlays_to_reshow.end()) {
+        navigation_service_->CloseOverlay();
+        navigation_service_->ShowOverlay(*active_overlay);
+    }
+
+    // A change on an overlay shows only where the overlay is up.
+    for(size_t i = 0; i < plan.effects.size() && i < plan.op_screen_ids.size(); ++i) {
+        const auto screen_id = plan.op_screen_ids[i];
+        if(std::ranges::find(overlay_ids, screen_id) != overlay_ids.end())
+            plan.effects[i] = active_overlay == screen_id ? PatchEffect::GroupRebuilt : PatchEffect::NotShown;
+    }
+
+    return 0;
 }
 
 int UiController::ShowConfiguration(std::shared_ptr<UiConfiguration> configuration, UiPreviewApplied& applied) {

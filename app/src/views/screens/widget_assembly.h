@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "domain/ui_domain/models/screen_configuration.h"
@@ -27,6 +29,24 @@ public:
     // Roots keep definition order; descendants belong to their owners.
     static Roots Assemble(
         const std::shared_ptr<ScreenConfiguration>& configuration,
+        const std::shared_ptr<Frame>& container,
+        const WidgetContext& context
+    );
+
+    // One root widget with the subtree it owns, built under @p container like Assemble() builds it and
+    // placed on the screen's grid; the rest of the screen is left alone. Appended to the container's
+    // children: the caller puts it in its place. Requires a root's ID.
+    static std::unique_ptr<IWidget> AssembleRoot(
+        const std::shared_ptr<ScreenConfiguration>& configuration,
+        uint32_t root_id,
+        const std::shared_ptr<Frame>& container,
+        const WidgetContext& context
+    );
+
+private:
+    static Roots AssembleRoots(
+        const std::shared_ptr<ScreenConfiguration>& configuration,
+        std::optional<uint32_t> only_root_id,
         const std::shared_ptr<Frame>& container,
         const WidgetContext& context
     );

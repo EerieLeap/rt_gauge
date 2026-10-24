@@ -38,6 +38,7 @@
 #include "controllers/ui_controller.h"
 
 #include "smp_test_client.h"
+#include "ui_patch_records.h"
 
 using eerie_leap::configuration::cbor::CborSerializer;
 using eerie_leap::controllers::UiController;
@@ -50,6 +51,7 @@ using eerie_leap::domain::ui_domain::models::ScreenConfiguration;
 using eerie_leap::domain::ui_domain::models::ScreenType;
 using eerie_leap::domain::ui_domain::models::UiConfiguration;
 using eerie_leap::domain::ui_domain::models::WidgetConfiguration;
+using eerie_leap::domain::ui_domain::models::WidgetPropertyType;
 using eerie_leap::domain::ui_domain::models::WidgetType;
 using eerie_leap::subsys::assets::AssetsManager;
 using eerie_leap::subsys::device_tree::DtDisplay;
@@ -461,7 +463,8 @@ ZTEST(smp_ui, test_begin_opens_a_session_and_says_what_the_unit_has) {
     zassert_equal(response.Value("lease_ms"), static_cast<uint32_t>(LEASE_MS));
     zassert_equal(response.Value("rev"), 0U);
     zassert_equal(response.Value("stored_crc"), stored_crc);
-    zassert_equal(response.Value("max_patch"), 0U);
+    zassert_equal(response.Value("max_patch"), static_cast<uint32_t>(CONFIG_MCUMGR_TRANSPORT_NETBUF_SIZE - 8));
+    zassert_equal(response.Value("max_ops"), 16U);
     zassert_equal(response.Value("max_stage"), static_cast<uint32_t>(CONFIG_EERIE_LEAP_UI_PREVIEW_MAX_STAGE_SIZE));
     zassert_false(fixture.controller->IsNavigationEnabled(), "pin defaults to true");
 }
@@ -828,14 +831,314 @@ ZTEST(smp_ui, test_a_stored_configuration_ends_the_session) {
     zassert_true(WaitUntilGroupIs(STORED_GROUP_ID));
 }
 
-// PATCH comes with FW-2.
-ZTEST(smp_ui, test_patch_is_not_served_yet) {
+// ======== PATCH ========
+
+namespace {
+
+using ui_patch_records::Writer;
+
+// Group 5 holds the stored screens; the staged ones are screen 0 of group GROUP_ID with `widget_count` bars (IDs 0 up).
+constexpr uint32_t BASE_MISMATCH = 6;
+constexpr uint32_t PATCH_WIDGETS = 3;
+
+Bytes PatchRequest(uint32_t token, uint32_t rev, const std::vector<Bytes>& ops) {
+    Writer writer;
+    writer.Map(3).Text("tok").Uint(token).Text("rev").Uint(rev).Text("ops").Array(ops.size());
+    for(const auto& op : ops)
+        writer.Raw(op);
+
+    return writer.Get();
+}
+
+Bytes PutWidgetOp(uint32_t screen_id, const WidgetConfiguration& widget) {
+    return Writer().Array(3).Uint(0).Uint(screen_id).ByteString(ui_patch_records::EncodeWidget(widget)).Get();
+}
+
+Bytes RemoveWidgetOp(uint32_t screen_id, uint32_t widget_id) {
+    return Writer().Array(3).Uint(1).Uint(screen_id).Uint(widget_id).Get();
+}
+
+Bytes PutScreenOp(const ScreenConfiguration& screen) {
+    return Writer().Array(2).Uint(2).ByteString(ui_patch_records::EncodeScreen(screen)).Get();
+}
+
+Bytes RemoveScreenOp(uint32_t screen_id) {
+    return Writer().Array(2).Uint(3).Uint(screen_id).Get();
+}
+
+std::shared_ptr<WidgetConfiguration> CopyWidget(const WidgetConfiguration& source) {
+    auto widget = eerie_memory::make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
+    widget->type = source.type;
+    widget->id = source.id;
+    widget->position_grid = source.position_grid;
+    widget->size_grid = source.size_grid;
+    widget->z_index = source.z_index;
+    for(const auto& [type, value] : source.properties)
+        widget->properties.emplace(type, value);
+
+    return widget;
+}
+
+// The staged configuration the tests patch: screen 0 in GROUP_ID with PATCH_WIDGETS bars, IDs 0 up.
+std::shared_ptr<UiConfiguration> StagedConfiguration() {
+    return MakeConfiguration({ GROUP_ID, SECOND_GROUP_ID }, OVERLAY_SCREEN_ID, PATCH_WIDGETS);
+}
+
+std::shared_ptr<WidgetConfiguration>
+StagedWidget(const UiConfiguration& configuration, uint32_t id, uint32_t screen = 0) {
+    return CopyWidget(*configuration.screen_configurations.at(screen)->widget_configurations.at(id));
+}
+
+uint32_t BeginAndStage(const std::shared_ptr<UiConfiguration>& configuration) {
     const auto token = Begin();
+    zassert_true(StageAll(token, Encode(configuration)).IsOk());
 
-    const auto response = Write(Command::PATCH, CborMap().Put("tok", token).Put("rev", 1).Build());
+    return token;
+}
 
-    zassert_false(response.IsOk());
-    zassert_equal(response.Value("rc"), static_cast<uint32_t>(MGMT_ERR_ENOTSUP));
+Response SendPatch(uint32_t token, uint32_t rev, const std::vector<Bytes>& ops) {
+    return Write(Command::PATCH, PatchRequest(token, rev, ops));
+}
+
+} // namespace
+
+ZTEST(smp_ui, test_a_patch_before_anything_is_staged_has_no_base) {
+    const auto token = Begin();
+    const auto configuration = StagedConfiguration();
+
+    const auto response = SendPatch(token, 1, { PutWidgetOp(0, *StagedWidget(*configuration, 0)) });
+
+    zassert_equal(ErrorOf(response), BASE_MISMATCH);
+    zassert_true(Read(Command::STATUS).Flag("active"), "The session stays: the client stages");
+    zassert_equal(*fixture.navigation->GetActiveGroupId(), STORED_GROUP_ID);
+}
+
+ZTEST(smp_ui, test_a_patch_changes_what_it_can_in_place_and_answers_what_each_operation_took) {
+    const auto stored_info = fixture.manager->GetCborConfigurationInfo();
+    const int stored_count = fixture.stored_count.load();
+    const auto configuration = StagedConfiguration();
+    const auto token = BeginAndStage(configuration);
+
+    auto recolored = StagedWidget(*configuration, 0);
+    recolored->properties[WidgetPropertyType::COLOR_PRIMARY_ACTIVE] = std::pmr::string("#FF0000FF");
+    recolored->position_grid = { 20, 30 };
+    auto smoothed = StagedWidget(*configuration, 1);
+    smoothed->properties[WidgetPropertyType::IS_SMOOTHED] = true;
+    auto added = StagedWidget(*configuration, 2);
+    added->id = 7;
+
+    const auto response = SendPatch(
+        token, 2,
+        { PutWidgetOp(0, *recolored), PutWidgetOp(0, *smoothed), PutWidgetOp(0, *added), RemoveWidgetOp(0, 2) }
+    );
+
+    zassert_true(response.IsOk(), "Refused: %u", ErrorOf(response));
+    zassert_equal(response.Value("rev"), 2U);
+    zassert_true((response.uint_lists.at("effects") == std::vector<uint32_t>{ 0, 1, 1, 1 }));
+    zassert_equal(Read(Command::STATUS).Value("rev"), 2U);
+
+    // The gauge stayed where it was, and nothing was stored.
+    zassert_equal(*fixture.navigation->GetActiveGroupId(), GROUP_ID);
+    zassert_equal(fixture.manager->GetCborConfigurationInfo().crc, stored_info.crc);
+    zassert_equal(fixture.stored_count.load(), stored_count, "No stored handler, which would stop logging");
+
+    // The staged configuration is the patched one now: what the patch removed is gone, what it added is there.
+    zassert_equal(ErrorOf(SendPatch(token, 3, { RemoveWidgetOp(0, 2) })), BASE_MISMATCH);
+    zassert_true(SendPatch(token, 3, { RemoveWidgetOp(0, 7) }).IsOk());
+
+    const auto ended = Write(Command::END, CborMap().Put("tok", token).Build());
+    zassert_true(ended.IsOk());
+    zassert_true(ended.Flag("reverted"));
+    zassert_true(WaitUntilGroupIs(STORED_GROUP_ID));
+}
+
+ZTEST(smp_ui, test_a_change_to_the_screens_own_record_rebuilds_its_group) {
+    const auto configuration = StagedConfiguration();
+    const auto token = BeginAndStage(configuration);
+
+    auto screen = eerie_memory::make_shared_pmr<ScreenConfiguration>(Mrm::GetExtPmr());
+    const auto& staged = *configuration->screen_configurations.at(0);
+    screen->id = staged.id;
+    screen->screen_group_id = staged.screen_group_id;
+    screen->type = staged.type;
+    screen->is_visible = staged.is_visible;
+    screen->grid = staged.grid;
+    screen->z_index = 4;
+    for(const auto& widget : staged.widget_configurations)
+        screen->AddWidget(CopyWidget(*widget));
+
+    const auto response = SendPatch(token, 2, { PutScreenOp(*screen) });
+
+    zassert_true(response.IsOk(), "Refused: %u", ErrorOf(response));
+    zassert_true((response.uint_lists.at("effects") == std::vector<uint32_t>{ 2 }));
+    zassert_equal(*fixture.navigation->GetActiveGroupId(), GROUP_ID);
+}
+
+ZTEST(smp_ui, test_a_change_on_an_overlay_is_a_rebuild_when_it_is_up_and_not_shown_when_it_is_not) {
+    const auto configuration = StagedConfiguration();
+    const auto token = BeginAndStage(configuration);
+    const auto overlay_index = configuration->screen_configurations.size() - 1;
+
+    auto recolored = StagedWidget(*configuration, 0, static_cast<uint32_t>(overlay_index));
+    recolored->properties[WidgetPropertyType::COLOR_PRIMARY_ACTIVE] = std::pmr::string("#FF0000FF");
+
+    const auto not_up = SendPatch(token, 2, { PutWidgetOp(OVERLAY_SCREEN_ID, *recolored) });
+    zassert_true(not_up.IsOk(), "Refused: %u", ErrorOf(not_up));
+    zassert_true((not_up.uint_lists.at("effects") == std::vector<uint32_t>{ 3 }));
+
+    zassert_true(
+        Write(Command::SHOW, CborMap().Put("tok", token).PutMap("target", "overlay", OVERLAY_SCREEN_ID).Build()).IsOk()
+    );
+    k_msleep(SETTLE_MS);
+    zassert_true(fixture.navigation->IsOverlayActive());
+
+    recolored = CopyWidget(*recolored);
+    recolored->properties[WidgetPropertyType::COLOR_PRIMARY_ACTIVE] = std::pmr::string("#00FF00FF");
+    const auto up = SendPatch(token, 3, { PutWidgetOp(OVERLAY_SCREEN_ID, *recolored) });
+    zassert_true(up.IsOk(), "Refused: %u", ErrorOf(up));
+    zassert_true((up.uint_lists.at("effects") == std::vector<uint32_t>{ 2 }));
+    k_msleep(SETTLE_MS);
+    zassert_true(fixture.navigation->IsOverlayActive(), "The overlay is shown again");
+    zassert_true(fixture.navigation->GetActiveOverlayId() == OVERLAY_SCREEN_ID);
+}
+
+ZTEST(smp_ui, test_the_group_shown_and_the_highlight_survive_a_patch) {
+    const auto configuration = StagedConfiguration();
+    const auto token = BeginAndStage(configuration);
+
+    zassert_true(
+        Write(Command::SHOW, CborMap().Put("tok", token).PutMap("target", "group", SECOND_GROUP_ID).Build()).IsOk()
+    );
+    zassert_true(WaitUntilGroupIs(SECOND_GROUP_ID));
+    zassert_true(Write(Command::HIGHLIGHT, CborMap().Put("tok", token).Put("widget", 0).Build()).IsOk());
+
+    auto recolored = StagedWidget(*configuration, 0, 1);
+    recolored->properties[WidgetPropertyType::COLOR_PRIMARY_ACTIVE] = std::pmr::string("#FF0000FF");
+    zassert_true(SendPatch(token, 2, { PutWidgetOp(1, *recolored) }).IsOk());
+
+    zassert_equal(*fixture.navigation->GetActiveGroupId(), SECOND_GROUP_ID);
+    zassert_true(
+        Write(Command::HIGHLIGHT, CborMap().Put("tok", token).Put("screen", 1).Put("widget", 0).Build()).IsOk()
+    );
+}
+
+ZTEST(smp_ui, test_a_revision_that_does_not_go_forward_is_stale_for_a_patch_too) {
+    const auto configuration = StagedConfiguration();
+    const auto token = BeginAndStage(configuration);
+    auto recolored = StagedWidget(*configuration, 0);
+    recolored->properties[WidgetPropertyType::COLOR_PRIMARY_ACTIVE] = std::pmr::string("#FF0000FF");
+    const auto op = PutWidgetOp(0, *recolored);
+
+    // The stage was revision 1.
+    const auto stale = SendPatch(token, 1, { op });
+    zassert_equal(ErrorOf(stale), STALE);
+    zassert_equal(stale.Value("rev"), 1U);
+
+    zassert_true(SendPatch(token, 5, { op }).IsOk());
+    const auto again = SendPatch(token, 5, { op });
+    zassert_equal(ErrorOf(again), STALE);
+    zassert_equal(again.Value("rev"), 5U);
+    zassert_equal(ErrorOf(SendPatch(token, 3, { op })), STALE);
+    zassert_true(SendPatch(token, 6, { op }).IsOk());
+    zassert_equal(Read(Command::STATUS).Value("rev"), 6U);
+
+    // A stage after patches counts on from them.
+    const auto restaged = StageAll(token, Encode(configuration));
+    zassert_true(restaged.IsOk());
+    zassert_equal(restaged.Value("rev"), 7U);
+}
+
+ZTEST(smp_ui, test_a_patch_is_refused_whole_when_one_of_its_operations_is) {
+    const auto configuration = StagedConfiguration();
+    const auto token = BeginAndStage(configuration);
+    auto added = StagedWidget(*configuration, 0);
+    added->id = 9;
+    const auto good = PutWidgetOp(0, *added);
+
+    // An operation on what is not there is the client's idea of the base not being the unit's.
+    zassert_equal(ErrorOf(SendPatch(token, 2, { good, RemoveWidgetOp(0, 99) })), BASE_MISMATCH);
+    zassert_equal(ErrorOf(SendPatch(token, 2, { good, RemoveWidgetOp(77, 0) })), BASE_MISMATCH);
+    zassert_equal(ErrorOf(SendPatch(token, 2, { good, PutWidgetOp(77, *added) })), BASE_MISMATCH);
+    zassert_equal(ErrorOf(SendPatch(token, 2, { good, RemoveScreenOp(77) })), BASE_MISMATCH);
+
+    // A record the validator refuses, with its message, and one that is no record.
+    auto unknown = StagedWidget(*configuration, 0);
+    unknown->properties.emplace(static_cast<WidgetPropertyType>(60), 1);
+    const auto refused = SendPatch(token, 2, { good, PutWidgetOp(0, *unknown) });
+    zassert_equal(ErrorOf(refused), INVALID);
+    zassert_true(refused.texts.at("msg").contains("Unknown property ID: 60"), "'%s'", refused.texts.at("msg").c_str());
+
+    auto outside = StagedWidget(*configuration, 0);
+    outside->position_grid = { 100000, 0 };
+    const auto outside_response = SendPatch(token, 2, { good, PutWidgetOp(0, *outside) });
+    zassert_equal(ErrorOf(outside_response), INVALID);
+    zassert_true(
+        outside_response.texts.at("msg").starts_with("Invalid UI"), "'%s'", outside_response.texts.at("msg").c_str()
+    );
+
+    const auto noise = Writer().Array(3).Uint(0).Uint(0).ByteString(Bytes(12, 0xFF)).Get();
+    const auto malformed = SendPatch(token, 2, { good, noise });
+    zassert_equal(ErrorOf(malformed), INVALID);
+    zassert_equal(malformed.texts.at("msg"), "Malformed CBOR");
+
+    // None of it was applied: the widget the good operation adds is not there, and the revision did not move.
+    zassert_equal(Read(Command::STATUS).Value("rev"), 1U);
+    zassert_equal(ErrorOf(SendPatch(token, 2, { RemoveWidgetOp(0, 9) })), BASE_MISMATCH);
+    zassert_true(SendPatch(token, 2, { good }).IsOk());
+    zassert_true(SendPatch(token, 3, { RemoveWidgetOp(0, 9) }).IsOk());
+}
+
+ZTEST(smp_ui, test_a_patch_has_limits_and_a_shape) {
+    const auto configuration = StagedConfiguration();
+    const auto token = BeginAndStage(configuration);
+    const auto widget = StagedWidget(*configuration, 0);
+
+    // More operations than a request may carry (the bytes it may carry are the packet, which is as large as BEGIN says).
+    std::vector<Bytes> many(17, PutWidgetOp(0, *widget));
+    zassert_equal(ErrorOf(SendPatch(token, 2, many)), TOO_LARGE);
+
+    // No operations, an operation of a kind that does not exist, and a request without its keys are malformed.
+    zassert_equal(SendPatch(token, 2, {}).Value("rc"), static_cast<uint32_t>(MGMT_ERR_EINVAL));
+    zassert_equal(
+        SendPatch(token, 2, { Writer().Array(2).Uint(9).Uint(0).Get() }).Value("rc"),
+        static_cast<uint32_t>(MGMT_ERR_EINVAL)
+    );
+    zassert_equal(
+        Write(Command::PATCH, CborMap().Put("tok", token).Put("rev", 2).Build()).Value("rc"),
+        static_cast<uint32_t>(MGMT_ERR_EINVAL)
+    );
+    zassert_equal(
+        Write(Command::PATCH, CborMap().Put("tok", token).Build()).Value("rc"), static_cast<uint32_t>(MGMT_ERR_EINVAL)
+    );
+
+    // The session is as it was: all of the above changed nothing.
+    zassert_equal(Read(Command::STATUS).Value("rev"), 1U);
+    zassert_true(SendPatch(token, 2, { PutWidgetOp(0, *widget) }).IsOk());
+}
+
+ZTEST(smp_ui, test_a_patch_needs_the_session_and_its_token) {
+    const auto configuration = StagedConfiguration();
+    const auto widget = StagedWidget(*configuration, 0);
+
+    zassert_equal(ErrorOf(SendPatch(1, 2, { PutWidgetOp(0, *widget) })), NO_SESSION);
+
+    const auto token = BeginAndStage(configuration);
+    zassert_equal(ErrorOf(SendPatch(token + 1, 2, { PutWidgetOp(0, *widget) })), BAD_TOKEN);
+    zassert_true(Read(Command::STATUS).Flag("active"), "A wrong token ends nothing");
+}
+
+ZTEST(smp_ui, test_a_patch_renews_the_lease) {
+    const auto configuration = StagedConfiguration();
+    const auto token = BeginAndStage(configuration);
+    auto recolored = StagedWidget(*configuration, 0);
+
+    // Together longer than the lease.
+    for(uint32_t rev = 2; rev < 8; ++rev) {
+        k_msleep(LEASE_MS / 3);
+        recolored->properties[WidgetPropertyType::OPACITY] = static_cast<int>(rev);
+        zassert_true(SendPatch(token, rev, { PutWidgetOp(0, *recolored) }).IsOk());
+        zassert_true(Read(Command::STATUS).Flag("active"), "Round %u", rev);
+    }
 }
 
 ZTEST(smp_ui, test_a_command_that_does_not_exist_is_not_served) {

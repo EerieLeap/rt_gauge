@@ -8,17 +8,23 @@
 #include <optional>
 #include <span>
 #include <string_view>
+#include <vector>
 
 #include <zephyr/kernel.h>
 
 #include "subsys/threading/work_queue_task.h"
 #include "subsys/threading/work_queue_thread.h"
 
+#include "domain/ui_domain/preview/ui_patch.h"
 #include "domain/ui_domain/preview/ui_preview_session.h"
 #include "domain/ui_preview_domain/i_ui_preview_host.h"
 
 namespace eerie_leap::domain::ui_preview_domain {
 
+using eerie_leap::domain::ui_domain::preview::PatchEffect;
+using eerie_leap::domain::ui_domain::preview::PatchOp;
+using eerie_leap::domain::ui_domain::preview::PatchOpKind;
+using eerie_leap::domain::ui_domain::preview::PatchPlan;
 using eerie_leap::domain::ui_domain::preview::UiPreviewError;
 using eerie_leap::domain::ui_domain::preview::UiPreviewSession;
 using eerie_leap::subsys::threading::WorkQueueTask;
@@ -46,14 +52,26 @@ class UiPreviewService {
 public:
     static constexpr size_t MAX_REASON_LENGTH = 191;
 
+    /// The most operations one PATCH takes.
+    static constexpr size_t MAX_PATCH_OPS = 16;
+    /// The most bytes the CBOR body of one PATCH request may take, `tok`, `rev` and `ops` with their keys included:
+    /// one SMP packet less its 8-byte header.
+#ifdef CONFIG_MCUMGR_TRANSPORT_NETBUF_SIZE
+    static constexpr size_t MAX_PATCH_SIZE = CONFIG_MCUMGR_TRANSPORT_NETBUF_SIZE - 8;
+#else
+    static constexpr size_t MAX_PATCH_SIZE = 1024 - 8;
+#endif
+
     /** @brief What BEGIN answers. */
     struct BeginInfo {
         uint32_t token = 0;
         uint32_t lease_ms = 0;
         uint32_t rev = 0;
         uint32_t stored_crc = 0;
-        /// The most a PATCH may carry; 0 while the unit takes none (FW-2).
+        /// The most bytes a PATCH request may take.
         uint32_t max_patch = 0;
+        /// The most operations a PATCH takes.
+        uint32_t max_ops = 0;
         uint32_t max_stage = 0;
     };
 
@@ -75,6 +93,31 @@ public:
         uint32_t current_rev = 0;
     };
 
+    /// One operation of a PATCH as the request carries it; the bytes are the widget or screen record, in the request.
+    struct PatchOpRef {
+        PatchOpKind kind = PatchOpKind::PutWidget;
+        uint32_t screen_id = 0;
+        uint32_t widget_id = 0;
+        std::span<const uint8_t> bytes;
+    };
+
+    struct PatchRequest {
+        uint32_t token = 0;
+        uint32_t rev = 0;
+        std::span<const PatchOpRef> ops;
+        /// The size of the request's CBOR body, as it came.
+        size_t body_size = 0;
+    };
+
+    /// What PATCH answers.
+    struct PatchInfo {
+        uint32_t rev = 0;
+        std::array<PatchEffect, MAX_PATCH_OPS> effects{};
+        size_t effect_count = 0;
+        /// For STALE, the revision applied.
+        uint32_t current_rev = 0;
+    };
+
     struct Status {
         bool is_active = false;
         uint32_t rev = 0;
@@ -88,6 +131,8 @@ private:
         BEGIN,
         PARSE,
         APPLY,
+        PATCH_PREPARE,
+        PATCH_APPLY,
         SHOW,
         HIGHLIGHT,
         END,
@@ -108,6 +153,7 @@ private:
         UiPreviewApplied applied;
         bool is_reverted = false;
         uint32_t rev = 0;
+        const PatchRequest* patch = nullptr;
     };
 
     static constexpr uint8_t END_LINK_DROPPED = 1U << 0;
@@ -135,6 +181,14 @@ private:
     std::optional<uint32_t> begin_group_;
 
     std::shared_ptr<UiConfiguration> parsed_;
+    // The configuration the screens show, as the last stage or patch left it: what a patch applies onto. Null
+    // before anything was shown and after the stored screens came back. Touched by jobs and ends, which never
+    // overlap an apply.
+    std::shared_ptr<UiConfiguration> staged_;
+    // A patch in the making, between its two jobs.
+    std::shared_ptr<UiConfiguration> patched_;
+    std::vector<PatchOp> patch_ops_;
+    PatchPlan patch_plan_;
     std::array<char, MAX_REASON_LENGTH + 1> reason_{};
 
     UiPreviewError RunJob(std::optional<WorkQueueTask<UiPreviewService>>& task, Job& job);
@@ -143,6 +197,9 @@ private:
     UiPreviewError ExecuteBegin(Job& job);
     UiPreviewError ExecuteParse();
     UiPreviewError ExecuteApply(Job& job);
+    UiPreviewError ExecutePatchPrepare(Job& job);
+    UiPreviewError ExecutePatchApply(Job& job);
+    void SetReason(std::string_view text);
 
     WorkQueueTaskResult ProcessLease();
     WorkQueueTaskResult ProcessEnd();
@@ -180,6 +237,16 @@ public:
 
     /** @brief Takes a chunk of the staged configuration; the last one shows it. */
     UiPreviewError Stage(const StageRequest& request, StageInfo& info);
+
+    /**
+     * @brief Applies the operations in order onto the configuration the screens show, all or nothing, and shows the
+     *        result. Decoded on the configuration work queue and checked as an upload is; shown on the render one.
+     * @return BASE_MISMATCH when nothing was staged, or an operation names a screen or widget the staged
+     *         configuration lacks (the client stages the whole configuration again); INVALID with the reason for
+     *         records the validator refuses; TOO_LARGE for more operations or bytes than a request may carry; STALE
+     *         with the applied revision in @p info; BUSY while a stage or patch is being applied.
+     */
+    UiPreviewError Patch(const PatchRequest& request, PatchInfo& info);
 
     UiPreviewError Show(uint32_t token, const UiPreviewTarget& target, UiPreviewShown& shown);
     UiPreviewError Highlight(uint32_t token, std::optional<uint32_t> screen, std::optional<uint32_t> widget);

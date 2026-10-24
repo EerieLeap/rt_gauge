@@ -68,6 +68,13 @@ public:
         bool has_applied = false;
     };
 
+    /** @brief What BeginPatch() decided. */
+    struct PatchBegin {
+        UiPreviewError error = UiPreviewError::OK;
+        /// The revision applied, for STALE.
+        uint32_t rev = 0;
+    };
+
     /** @brief What closing a session found. */
     struct EndResult {
         /// False while a staged configuration is being applied: the session stays, and the end is asked again.
@@ -167,6 +174,17 @@ public:
 
     /** @brief The staged configuration is showing: its revision is the client's, else the next. Returns it. */
     uint32_t CommitStage();
+
+    /**
+     * @brief A patch is about to be applied: renews the lease and, if @p rev is past the applied one, marks the
+     *        session applying until FinishApply(), as the last chunk of a stage does.
+     * @return NO_SESSION, BAD_TOKEN, BUSY while a stage or another patch is being applied, STALE (with the
+     *         applied revision) for a revision that does not go forward.
+     */
+    PatchBegin BeginPatch(uint32_t token, uint32_t rev, int64_t now_ms);
+
+    /** @brief The patch is shown: its revision is the applied one now. Returns it. */
+    uint32_t CommitPatch(uint32_t rev);
 
     /** @brief The screens are about to be replaced by a staged configuration, and may not be the stored ones from now on. */
     void MarkScreensReplaced();

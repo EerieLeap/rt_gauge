@@ -4,6 +4,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <unordered_map>
 #include <vector>
 
@@ -52,6 +53,14 @@ public:
     std::shared_ptr<Frame> GetGroupContainer(uint32_t screen_group_id);
 
     void AddScreen(std::shared_ptr<IScreen> screen);
+    // Puts a screen in the place of the screen of its ID in its group, or adds it to the group, which must be
+    // there; false if it is not. The screen it replaces goes with its objects.
+    bool PutScreen(std::shared_ptr<IScreen> screen);
+    // Takes a screen out of whichever group has it. False if none does, or if it is the last of its group:
+    // a group with no screens is not a group, so the caller builds the view again.
+    bool RemoveScreen(uint32_t screen_id);
+    // Puts the screens of a group in the drawing order of @p screen_ids, bottom first.
+    void OrderScreens(uint32_t screen_group_id, std::span<const uint32_t> screen_ids);
     void PruneEmptyGroups();
 
     // Drops every screen group with everything it built, and the active one, so the view can be configured

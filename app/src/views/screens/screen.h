@@ -24,7 +24,11 @@ protected:
     std::shared_ptr<std::vector<std::unique_ptr<IWidget>>> widgets_;
     std::shared_ptr<ScreenConfiguration> configuration_;
 
+    bool is_activated_ = false;
+
     void SetVisibility(bool is_visible);
+    // Puts the root widgets in the drawing order the configuration gives, in the vector and in LVGL.
+    void ApplyRootOrder();
 
     int DoRender() override;
     int ApplyTheme(const ITheme& theme) override;
@@ -44,6 +48,11 @@ public:
     void OnDeactivated() override;
 
     std::shared_ptr<std::vector<std::unique_ptr<IWidget>>> GetWidgets() const override;
+
+    void ApplyWidgetPatches(
+        std::shared_ptr<ScreenConfiguration> configuration,
+        std::span<const WidgetPatch> patches
+    ) override;
 };
 
 } // namespace eerie_leap::views::screens

@@ -184,8 +184,12 @@ public:
     // Sealed: the configuration path is register -> seed -> replay -> OnConfigured -> bindings,
     // and a derived override would run its own reads after the replay had already used the defaults.
     void Configure(std::shared_ptr<WidgetConfiguration> configuration) final;
+    void ApplyEditorConfiguration(std::shared_ptr<WidgetConfiguration> configuration) final;
 
     std::vector<WidgetPropertyType> GetSupportedProperties() const override;
+    // What a change of this property takes (None for one the widget does not register): the widget's own word on
+    // whether a patch can apply it in place, which ClassifyWidgetChange() has to agree with.
+    PropertyChangeEffect GetPropertyEffect(WidgetPropertyType type) const;
     std::shared_ptr<WidgetConfiguration> GetConfiguration() const override;
 
     void AttachGrid(const eerie_leap::views::utilitites::GridLayout& layout) final;

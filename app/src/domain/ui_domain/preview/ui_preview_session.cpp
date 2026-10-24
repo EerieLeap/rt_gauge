@@ -175,6 +175,31 @@ void UiPreviewSession::DropStage() {
     received_ = 0;
 }
 
+UiPreviewSession::PatchBegin UiPreviewSession::BeginPatch(uint32_t token, uint32_t rev, int64_t now_ms) {
+    const ScopedMutex guard(lock_);
+
+    if(const auto error = TouchLocked(token, now_ms); error != UiPreviewError::OK)
+        return { .error = error };
+
+    if(is_applying_)
+        return { .error = UiPreviewError::BUSY };
+
+    if(rev <= rev_)
+        return { .error = UiPreviewError::STALE, .rev = rev_ };
+
+    is_applying_ = true;
+
+    return { .rev = rev_ };
+}
+
+uint32_t UiPreviewSession::CommitPatch(uint32_t rev) {
+    const ScopedMutex guard(lock_);
+
+    rev_ = rev;
+
+    return rev_;
+}
+
 uint32_t UiPreviewSession::CommitStage() {
     const ScopedMutex guard(lock_);
 

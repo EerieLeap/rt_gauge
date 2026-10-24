@@ -14,6 +14,7 @@ LOG_MODULE_REGISTER(ui_mgmt_group, LOG_LEVEL_INF);
 
 namespace eerie_leap::domain::ui_preview_domain::smp {
 
+using eerie_leap::domain::ui_domain::preview::PatchOpKind;
 using eerie_leap::subsys::smp::SmpAddGroupError;
 using eerie_leap::subsys::smp::SmpDecodeRequest;
 using eerie_leap::subsys::smp::SmpGroupId;
@@ -48,13 +49,74 @@ bool DecodeTarget(zcbor_state_t* zsd, TargetField* target) {
     return true;
 }
 
+// PATCH's `ops`: a list of lists, each `[kind, ...]`. The records stay in the request, which the handler holds until
+// the work is done.
+struct PatchOpsField {
+    std::array<UiPreviewService::PatchOpRef, UiPreviewService::MAX_PATCH_OPS> ops{};
+    size_t count = 0;
+    bool has_too_many = false;
+};
+
+bool DecodePatchOps(zcbor_state_t* zsd, PatchOpsField* field) {
+    if(!zcbor_list_start_decode(zsd))
+        return false;
+
+    while(!zcbor_array_at_end(zsd)) {
+        UiPreviewService::PatchOpRef op;
+        uint32_t kind = 0;
+        zcbor_string record{};
+
+        if(!zcbor_list_start_decode(zsd) || !zcbor_uint32_decode(zsd, &kind))
+            return false;
+
+        switch(kind) {
+            case 0:
+                op.kind = PatchOpKind::PutWidget;
+                if(!zcbor_uint32_decode(zsd, &op.screen_id) || !zcbor_bstr_decode(zsd, &record))
+                    return false;
+
+                break;
+            case 1:
+                op.kind = PatchOpKind::RemoveWidget;
+                if(!zcbor_uint32_decode(zsd, &op.screen_id) || !zcbor_uint32_decode(zsd, &op.widget_id))
+                    return false;
+
+                break;
+            case 2:
+                op.kind = PatchOpKind::PutScreen;
+                if(!zcbor_bstr_decode(zsd, &record))
+                    return false;
+
+                break;
+            case 3:
+                op.kind = PatchOpKind::RemoveScreen;
+                if(!zcbor_uint32_decode(zsd, &op.screen_id))
+                    return false;
+
+                break;
+            default:
+                return false;
+        }
+
+        if(!zcbor_list_end_decode(zsd))
+            return false;
+
+        op.bytes = { record.value, record.len };
+        if(field->count < field->ops.size())
+            field->ops[field->count++] = op;
+        else
+            field->has_too_many = true;
+    }
+
+    return zcbor_list_end_decode(zsd);
+}
+
 } // namespace
 
 const mgmt_handler UiMgmtGroup::HANDLERS[] = {
     { .mh_read = nullptr, .mh_write = Dispatch<&UiMgmtGroup::HandleBegin> },
     { .mh_read = nullptr, .mh_write = Dispatch<&UiMgmtGroup::HandleStage> },
-    // PATCH: FW-2.
-    { .mh_read = nullptr, .mh_write = nullptr },
+    { .mh_read = nullptr, .mh_write = Dispatch<&UiMgmtGroup::HandlePatch> },
     { .mh_read = nullptr, .mh_write = Dispatch<&UiMgmtGroup::HandleShow> },
     { .mh_read = nullptr, .mh_write = Dispatch<&UiMgmtGroup::HandleHighlight> },
     { .mh_read = nullptr, .mh_write = Dispatch<&UiMgmtGroup::HandleEnd> },
@@ -94,6 +156,8 @@ int UiMgmtGroup::HandleBegin(smp_streamer* ctxt) {
         && zcbor_uint32_put(zse, info.stored_crc)
         && zcbor_tstr_put_lit(zse, "max_patch")
         && zcbor_uint32_put(zse, info.max_patch)
+        && zcbor_tstr_put_lit(zse, "max_ops")
+        && zcbor_uint32_put(zse, info.max_ops)
         && zcbor_tstr_put_lit(zse, "max_stage")
         && zcbor_uint32_put(zse, info.max_stage);
 
@@ -159,6 +223,61 @@ int UiMgmtGroup::HandleStage(smp_streamer* ctxt) {
 
     if(ok && info.applied.has_value() && info.applied->overlay.has_value())
         ok = zcbor_tstr_put_lit(zse, "overlay") && zcbor_uint32_put(zse, *info.applied->overlay);
+
+    return MGMT_RETURN_CHECK(ok);
+}
+
+int UiMgmtGroup::HandlePatch(smp_streamer* ctxt) {
+    // The request's body as it came, before anything of it is read.
+    const auto body_size = static_cast<size_t>(ctxt->reader->zs->payload_end - ctxt->reader->zs->payload);
+
+    uint32_t token = 0;
+    uint32_t rev = 0;
+    PatchOpsField ops;
+    std::array keys = {
+        SmpMapKey("tok", zcbor_uint32_decode, &token),
+        SmpMapKey("rev", zcbor_uint32_decode, &rev),
+        SmpMapKey("ops", DecodePatchOps, &ops),
+    };
+
+    if(!SmpDecodeRequest(ctxt, keys) || !keys[0].found || !keys[1].found || !keys[2].found || ops.count == 0)
+        return MGMT_ERR_EINVAL;
+
+    // More operations than the handler keeps are as large as any other request that is too much.
+    if(ops.has_too_many)
+        return Fail(ctxt, UiPreviewError::TOO_LARGE);
+
+    const UiPreviewService::PatchRequest request{
+        .token = token,
+        .rev = rev,
+        .ops = { ops.ops.data(), ops.count },
+        .body_size = body_size,
+    };
+
+    UiPreviewService::PatchInfo info;
+    const auto error = preview_service_->Patch(request, info);
+
+    switch(error) {
+        case UiPreviewError::OK:
+            break;
+        case UiPreviewError::STALE:
+            return Fail(ctxt, error, "rev", info.current_rev);
+        case UiPreviewError::INVALID:
+            return FailInvalid(ctxt);
+        default:
+            return Fail(ctxt, error);
+    }
+
+    zcbor_state_t* zse = ctxt->writer->zs;
+    bool ok = zcbor_tstr_put_lit(zse, "rev")
+        && zcbor_uint32_put(zse, info.rev)
+        && zcbor_tstr_put_lit(zse, "effects")
+        && zcbor_list_start_encode(zse, info.effect_count);
+
+    for(size_t i = 0; ok && i < info.effect_count; ++i)
+        ok = zcbor_uint32_put(zse, std::to_underlying(info.effects[i]));
+
+    ok = ok && zcbor_list_end_encode(zse, info.effect_count);
 
     return MGMT_RETURN_CHECK(ok);
 }

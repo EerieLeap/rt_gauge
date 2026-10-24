@@ -28,8 +28,8 @@ source "Kconfig.zephyr"
 		bool "UI preview over SMP"
 		default y
 		depends on EERIE_LEAP_SMP
-		# SHOW's target is a map inside the request's map.
-		select MCUMGR_SMP_CBOR_MIN_DECODING_LEVEL_3
+		# SHOW's target is a map inside the request's map; PATCH's ops are lists inside a list inside it.
+		select MCUMGR_SMP_CBOR_MIN_DECODING_LEVEL_4
 		help
 		  Serves the SMP ui group (73): a client stages a UI configuration, which the unit
 		  shows without storing it, and the stored one comes back when the session ends.

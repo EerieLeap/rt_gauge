@@ -6,11 +6,13 @@
 #include <span>
 
 #include "domain/ui_domain/models/ui_configuration.h"
+#include "domain/ui_domain/preview/ui_patch.h"
 #include "domain/ui_domain/preview/ui_preview_session.h"
 
 namespace eerie_leap::domain::ui_preview_domain {
 
 using eerie_leap::domain::ui_domain::models::UiConfiguration;
+using eerie_leap::domain::ui_domain::preview::PatchPlan;
 using eerie_leap::domain::ui_domain::preview::UiPreviewError;
 
 /** @brief What SHOW names: the screen group of the app's screen, or an overlay's screen ID. */
@@ -59,6 +61,24 @@ public:
      *         the screens may be half built.
      */
     virtual int ShowConfiguration(std::shared_ptr<UiConfiguration> configuration, UiPreviewApplied& applied) = 0;
+
+    /**
+     * @brief Checks a configuration as an upload is checked, storing nothing: the domain rules, the widgets' own
+     *        rules and the bindings against this unit's channels. Callable from the configuration work queue.
+     * @param reason Receives why it was refused.
+     */
+    virtual bool ValidateConfiguration(const UiConfiguration& configuration, std::span<char> reason) = 0;
+
+    /**
+     * @brief Brings the screens from the configuration shown to @p patched, which @p plan says how to reach: widgets
+     *        updated in place, rebuilt, added or removed, screens replaced; or, when the plan needs more than the
+     *        view can do in place (a screen group that appears or goes, an overlay that does), all of it shown
+     *        again, as ShowConfiguration() does. Navigation, the group shown and the overlay up stay as they are.
+     * @param plan Its effects are adjusted to what was done (a change on an overlay is a rebuild of the overlay
+     *        if it is up, else not shown).
+     * @return 0, or a negative error after which the screens may be half patched.
+     */
+    virtual int ApplyPatch(std::shared_ptr<UiConfiguration> patched, PatchPlan& plan) = 0;
 
     /** @brief Shows what the unit stores again. */
     virtual int ShowStoredConfiguration() = 0;

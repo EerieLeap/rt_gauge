@@ -58,6 +58,8 @@ using eerie_leap::domain::ui_domain::services::UiRendererService;
 using eerie_leap::subsys::event_bus::AnySubscription;
 using eerie_leap::subsys::event_bus::DispatchGuard;
 
+using eerie_leap::domain::ui_domain::preview::PatchPlan;
+using eerie_leap::domain::ui_domain::preview::ScreenPatch;
 using eerie_leap::domain::ui_domain::preview::UiPreviewError;
 using eerie_leap::domain::ui_preview_domain::IUiPreviewHost;
 using eerie_leap::domain::ui_preview_domain::UiPreviewApplied;
@@ -180,6 +182,11 @@ private:
     // its default until the value happens to change.
     static void RequestSettingsState();
 
+    // What PatchScreen() answers beside 0 and an error: the view cannot do this one in place.
+    static constexpr int PATCH_NEEDS_REBUILD = 1;
+    int PatchScreen(const ScreenPatch& patch, std::vector<uint32_t>& overlays_to_reshow);
+    void OrderPatchedGroups(const PatchPlan& plan, const UiConfiguration& patched);
+
     void SubscribeToNavigation();
     void OnNavigationChanged(const NavigationEventChannel::EventMessage& event);
     void ShowGroup(uint32_t screen_group_id);
@@ -225,6 +232,8 @@ public:
     // The UI preview (IUiPreviewHost): the screens a staged configuration is shown on.
     std::shared_ptr<UiConfiguration>
     ParseConfiguration(std::span<const uint8_t> cbor_data, std::span<char> reason) override;
+    bool ValidateConfiguration(const UiConfiguration& configuration, std::span<char> reason) override;
+    int ApplyPatch(std::shared_ptr<UiConfiguration> patched, PatchPlan& plan) override;
     int ShowConfiguration(std::shared_ptr<UiConfiguration> configuration, UiPreviewApplied& applied) override;
     int ShowStoredConfiguration() override;
     void SetNavigationPinned(bool is_pinned) override;

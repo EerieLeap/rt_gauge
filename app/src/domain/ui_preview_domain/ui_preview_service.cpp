@@ -16,12 +16,18 @@
     #include "subsys/threading/scoped_mutex.h"
     #include "utilities/memory/memory_resource_manager.h"
 
+    #include "domain/ui_domain/configuration/parsers/ui_configuration_cbor_parser.h"
+
     #include "ui_preview_service.h"
 
 LOG_MODULE_REGISTER(ui_preview_service, LOG_LEVEL_INF);
 
 namespace eerie_leap::domain::ui_preview_domain {
 
+using eerie_leap::domain::ui_domain::configuration::parsers::UiConfigurationCborParser;
+using eerie_leap::domain::ui_domain::preview::ApplyPatchOps;
+using eerie_leap::domain::ui_domain::preview::PatchBaseMismatch;
+using eerie_leap::domain::ui_domain::preview::PlanPatch;
 using eerie_leap::subsys::random::Rng;
 using eerie_leap::subsys::threading::ScopedMutex;
 using eerie_leap::utilities::memory::Mrm;
@@ -158,6 +164,12 @@ UiPreviewError UiPreviewService::ExecuteJob(Job& job) {
         case JobKind::APPLY:
             return ExecuteApply(job);
 
+        case JobKind::PATCH_PREPARE:
+            return ExecutePatchPrepare(job);
+
+        case JobKind::PATCH_APPLY:
+            return ExecutePatchApply(job);
+
         case JobKind::SHOW: {
             if(const auto error = session_.Touch(job.required_token, k_uptime_get()); error != UiPreviewError::OK)
                 return error;
@@ -210,6 +222,7 @@ UiPreviewError UiPreviewService::ExecuteBegin(Job& job) {
         }
 
         begin_group_ = host_.GetActiveGroupId();
+        staged_.reset();
         host_.SetNavigationPinned(job.is_pinned);
         if(lease_task_.has_value())
             lease_task_->Reschedule(K_MSEC(LEASE_MS));
@@ -221,7 +234,8 @@ UiPreviewError UiPreviewService::ExecuteBegin(Job& job) {
         .lease_ms = static_cast<uint32_t>(LEASE_MS),
         .rev = session_.GetRev(),
         .stored_crc = host_.GetStoredCrc(),
-        .max_patch = 0,
+        .max_patch = MAX_PATCH_SIZE,
+        .max_ops = MAX_PATCH_OPS,
         .max_stage = MAX_STAGE_SIZE };
 
     return UiPreviewError::OK;
@@ -257,6 +271,9 @@ UiPreviewError UiPreviewService::ExecuteApply(Job& job) {
     // Marked before the screens go: a show that fails half way has dropped the stored ones all the same, and
     // whatever ends the session then has to put them back.
     session_.MarkScreensReplaced();
+    // Not the staged configuration until it shows whole.
+    staged_.reset();
+    const auto shown = configuration;
 
     int res = 0;
     try {
@@ -275,12 +292,120 @@ UiPreviewError UiPreviewService::ExecuteApply(Job& job) {
         return UiPreviewError::UNKNOWN;
     }
 
+    staged_ = shown;
     job.rev = session_.CommitStage();
 
     return UiPreviewError::OK;
 }
 
+void UiPreviewService::SetReason(std::string_view text) {
+    const size_t length = std::min(text.size(), reason_.size() - 1);
+    std::copy_n(text.begin(), length, reason_.begin());
+    reason_[length] = '\0';
+}
+
+UiPreviewError UiPreviewService::ExecutePatchPrepare(Job& job) {
+    if(!session_.IsActive())
+        return UiPreviewError::NO_SESSION;
+
+    // Nothing was shown, or the screens came back to the stored ones: there is nothing to patch.
+    if(staged_ == nullptr)
+        return UiPreviewError::BASE_MISMATCH;
+
+    reason_.front() = '\0';
+    patch_ops_.clear();
+    patched_.reset();
+    patch_plan_ = {};
+
+    try {
+        auto* mr = Mrm::GetExtPmr();
+        for(const auto& ref : job.patch->ops) {
+            PatchOp op{ .kind = ref.kind, .screen_id = ref.screen_id, .widget_id = ref.widget_id };
+            if(ref.kind == PatchOpKind::PutWidget) {
+                op.widget = UiConfigurationCborParser::DecodeWidget(mr, ref.bytes);
+                op.widget_id = op.widget->id;
+            } else if(ref.kind == PatchOpKind::PutScreen) {
+                op.screen = UiConfigurationCborParser::DecodeScreen(mr, ref.bytes);
+                op.screen_id = op.screen->id;
+            }
+
+            patch_ops_.push_back(std::move(op));
+        }
+    } catch(const std::bad_alloc&) {
+        throw;
+    } catch(const std::exception& e) {
+        SetReason(e.what());
+
+        return UiPreviewError::INVALID;
+    }
+
+    try {
+        patched_ = ApplyPatchOps(*staged_, patch_ops_, Mrm::GetExtPmr());
+    } catch(const PatchBaseMismatch& e) {
+        // The client's idea of what is shown is not the unit's: it stages the whole configuration again.
+        LOG_INF("A UI patch does not fit the staged configuration. %s", e.what());
+        SetReason(e.what());
+
+        return UiPreviewError::BASE_MISMATCH;
+    }
+
+    // The patched configuration is checked as an upload is: the screens, the widgets' rules and the bindings.
+    if(!host_.ValidateConfiguration(*patched_, reason_)) {
+        patched_.reset();
+        if(reason_.front() == '\0')
+            SetReason("The patched configuration was refused.");
+
+        return UiPreviewError::INVALID;
+    }
+
+    patch_plan_ = PlanPatch(*staged_, *patched_, patch_ops_);
+
+    return UiPreviewError::OK;
+}
+
+UiPreviewError UiPreviewService::ExecutePatchApply(Job& job) {
+    if(!session_.IsActive() || patched_ == nullptr || staged_ == nullptr)
+        return UiPreviewError::NO_SESSION;
+
+    int res = -EIO;
+    try {
+        res = host_.ApplyPatch(patched_, patch_plan_);
+    } catch(const std::exception& e) {
+        LOG_ERR("Failed to apply the UI patch. %s", e.what());
+    } catch(...) {
+        LOG_ERR("Failed to apply the UI patch.");
+    }
+
+    if(res != 0) {
+        LOG_ERR("Failed to apply the UI patch. Error: %d.", res);
+
+        // The screens may be half patched. All or nothing: they show what they showed, else what is stored.
+        UiPreviewApplied applied;
+        int shown = -EIO;
+        try {
+            shown = host_.ShowConfiguration(staged_, applied);
+        } catch(...) {
+            LOG_ERR("Failed to show the staged UI configuration again.");
+        }
+
+        if(shown != 0 && shown != -ENOENT) {
+            staged_.reset();
+            RestoreStoredScreens();
+        }
+
+        return UiPreviewError::UNKNOWN;
+    }
+
+    staged_ = patched_;
+    job.rev = session_.CommitPatch(job.patch->rev);
+
+    return UiPreviewError::OK;
+}
+
 void UiPreviewService::RestoreStoredScreens() {
+    // The stored screens are not the staged configuration.
+    staged_.reset();
+
     try {
         const int res = host_.ShowStoredConfiguration();
         if(res != 0 && res != -ENOENT) {
@@ -319,6 +444,7 @@ std::optional<bool> UiPreviewService::EndSession(bool is_revert) {
     // Whatever asked for an end is answered by this one.
     pending_end_ = 0;
 
+    staged_.reset();
     host_.SetNavigationPinned(false);
     host_.Highlight(std::nullopt, std::nullopt);
 
@@ -420,6 +546,42 @@ UiPreviewError UiPreviewService::Stage(const StageRequest& request, StageInfo& i
     session_.FinishApply();
 
     // The lease runs from the end of the apply, which can take longer than the lease itself.
+    session_.Touch(request.token, k_uptime_get());
+
+    return error;
+}
+
+UiPreviewError UiPreviewService::Patch(const PatchRequest& request, PatchInfo& info) {
+    // The token first: a request that cannot be answered is not told how large it is.
+    if(const auto error = session_.Touch(request.token, k_uptime_get()); error != UiPreviewError::OK)
+        return error;
+
+    if(request.ops.empty() || request.ops.size() > MAX_PATCH_OPS || request.body_size > MAX_PATCH_SIZE)
+        return UiPreviewError::TOO_LARGE;
+
+    const auto begun = session_.BeginPatch(request.token, request.rev, k_uptime_get());
+    info.current_rev = begun.rev;
+    if(begun.error != UiPreviewError::OK)
+        return begun.error;
+
+    // From here the session is applying, so no end takes what the jobs read.
+    Job prepare{ .kind = JobKind::PATCH_PREPARE, .required_token = request.token, .patch = &request };
+    auto error = RunJob(config_job_task_, prepare);
+    if(error == UiPreviewError::OK) {
+        Job apply{ .kind = JobKind::PATCH_APPLY, .required_token = request.token, .patch = &request };
+        error = RunJob(render_job_task_, apply);
+        if(error == UiPreviewError::OK) {
+            info.rev = apply.rev;
+            info.effect_count = std::min(patch_plan_.effects.size(), info.effects.size());
+            std::copy_n(patch_plan_.effects.begin(), info.effect_count, info.effects.begin());
+        }
+    }
+
+    patched_.reset();
+    patch_ops_.clear();
+    patch_plan_ = {};
+
+    session_.FinishApply();
     session_.Touch(request.token, k_uptime_get());
 
     return error;

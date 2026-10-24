@@ -56,6 +56,13 @@ public:
     // Configuration
     virtual void Configure(std::shared_ptr<WidgetConfiguration> configuration) = 0;
     virtual std::shared_ptr<WidgetConfiguration> GetConfiguration() const = 0;
+
+    // The editor changed this configured root widget's record, and nothing in it that ClassifyWidgetChange() says
+    // needs a rebuild: every property that differs from the current record is set to its new value, or back to its
+    // registered default when the new record leaves it out, through the path an inbound binding takes, and the box
+    // is placed again if the position or size changed. The widget object, its LVGL objects and its subscriptions
+    // stay. Throws std::logic_error for a record of another widget or type.
+    virtual void ApplyEditorConfiguration(std::shared_ptr<WidgetConfiguration> configuration) = 0;
     virtual bool IsSmoothed() const = 0;
 
     // Configurable keys for this widget, without requiring configuration first.

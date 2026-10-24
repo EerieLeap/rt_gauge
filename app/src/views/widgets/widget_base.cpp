@@ -382,6 +382,10 @@ std::vector<WidgetPropertyType> WidgetBase::GetSupportedProperties() const {
     return supported;
 }
 
+PropertyChangeEffect WidgetBase::GetPropertyEffect(WidgetPropertyType type) const {
+    return properties_->GetEffect(type);
+}
+
 void WidgetBase::RegisterLayoutProperties(WidgetPropertyStore& store) const {
     store.Register(
         WidgetPropertyType::LAYOUT_X, ConfigValue{ configuration_->position_grid.x }, PropertyChangeEffect::Relayout
@@ -669,6 +673,63 @@ void WidgetBase::Configure(std::shared_ptr<WidgetConfiguration> configuration) {
     ReplayProperties();
     OnConfigured();
     ResolveBindings();
+}
+
+void WidgetBase::ApplyEditorConfiguration(std::shared_ptr<WidgetConfiguration> configuration) {
+    ScopedLvglLock lvgl_guard;
+
+    if(detached_
+        || configuration_ == nullptr
+        || configuration == nullptr
+        || configuration->id != id_
+        || configuration->type != configuration_->type)
+        throw std::logic_error("An editor record replaces the record of the same configured widget.");
+
+    const auto previous = std::exchange(configuration_, std::move(configuration));
+    transform_.Configure(*configuration_);
+
+    dispatch_guard_->Dispatch([&] {
+        const auto apply = [&](WidgetPropertyType type) {
+            const auto before = previous->properties.find(type);
+            const auto after = configuration_->properties.find(type);
+            const bool had_before = before != previous->properties.end();
+            const bool has_after = after != configuration_->properties.end();
+            if(!had_before && !has_after)
+                return;
+
+            if(had_before && has_after && before->second == after->second)
+                return;
+
+            const bool is_set = has_after ? properties_->Set(type, after->second) : properties_->Reset(type);
+            if(!is_set) {
+                LOG_WRN(
+                    "Widget %u kept property %u: the editor's value was refused.", id_, static_cast<unsigned>(type)
+                );
+                return;
+            }
+
+            NotifyPropertyChanged(type, properties_->Get(type), properties_->GetEffect(type));
+        };
+
+        // VALUE consumes what the others set, as a replay applies it last.
+        const auto registered = properties_->GetRegisteredTypes();
+        for(const auto type : registered) {
+            if(type != WidgetPropertyType::VALUE && !WidgetPropertyValidator::IsLayoutProperty(type))
+                apply(type);
+        }
+        apply(WidgetPropertyType::VALUE);
+
+        if(grid_layout_.has_value()
+            && (previous->position_grid.x != configuration_->position_grid.x
+                || previous->position_grid.y != configuration_->position_grid.y
+                || previous->size_grid.width != configuration_->size_grid.width
+                || previous->size_grid.height != configuration_->size_grid.height)) {
+            // The record's box is the default the layout properties start from.
+            RegisterLayoutProperties(*properties_);
+            ApplyLayout();
+            transform_.UpdateAnchor();
+        }
+    });
 }
 
 std::shared_ptr<WidgetConfiguration> WidgetBase::GetConfiguration() const {

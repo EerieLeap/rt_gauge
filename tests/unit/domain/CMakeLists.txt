@@ -9,6 +9,7 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(unit_domain)
 
 include_directories(${APP_SRC_DIR})
+include_directories(${RT_GAUGE_DIR}/tests/common)
 
 set(APP_SRC_CONFIGURATION_DIR ${APP_SRC_DIR}/configuration)
 file(GLOB_RECURSE APP_SRC_CONFIGURATION

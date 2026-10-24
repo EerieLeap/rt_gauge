@@ -51,13 +51,18 @@ void WidgetPropertyStore::Register(WidgetPropertyType type, ConfigValue default_
     if(auto* entry = Find(type)) {
         entry->effect = effect;
         entry->declared_alternative = alternative;
+        entry->default_value = default_value;
         entry->value = std::move(default_value);
 
         return;
     }
 
     entries_.push_back(
-        Entry{ .type = type, .effect = effect, .declared_alternative = alternative, .value = std::move(default_value) }
+        Entry{ .type = type,
+            .effect = effect,
+            .declared_alternative = alternative,
+            .value = default_value,
+            .default_value = std::move(default_value) }
     );
 }
 
@@ -153,6 +158,31 @@ ConfigValue WidgetPropertyStore::Get(WidgetPropertyType type) const {
     const auto* entry = Find(type);
 
     return entry == nullptr ? ConfigValue{} : entry->value;
+}
+
+ConfigValue WidgetPropertyStore::GetDefault(WidgetPropertyType type) const {
+    ScopedMutex guard(lock_);
+
+    const auto* entry = Find(type);
+
+    return entry == nullptr ? ConfigValue{} : entry->default_value;
+}
+
+bool WidgetPropertyStore::Reset(WidgetPropertyType type) {
+    ScopedMutex guard(lock_);
+
+    auto* entry = Find(type);
+    if(entry == nullptr)
+        return false;
+
+    entry->value = entry->default_value;
+
+    if(const auto index = WidgetPropertyValidator::GetColorPropertyIndex(type)) {
+        const auto* text = std::get_if<std::pmr::string>(&entry->default_value);
+        colors_[*index] = text == nullptr ? std::nullopt : Color::TryParse(*text).value_or(std::nullopt);
+    }
+
+    return true;
 }
 
 std::vector<WidgetPropertyType> WidgetPropertyStore::GetRegisteredTypes() const {

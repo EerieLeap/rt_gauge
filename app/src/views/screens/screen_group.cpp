@@ -42,6 +42,75 @@ void ScreenGroup::AddScreen(std::shared_ptr<IScreen> screen) {
     screens_.insert(insert_position, std::move(screen));
 }
 
+void ScreenGroup::PutScreen(std::shared_ptr<IScreen> screen) {
+    if(screen == nullptr)
+        return;
+
+    ScopedLvglLock lvgl_guard;
+
+    // The old one stays until the new one stands, so a screen that fails to render leaves the group as it was.
+    std::shared_ptr<IScreen> replaced;
+    const auto it = std::ranges::find_if(screens_, [&screen](const auto& current) {
+        return current->GetId() == screen->GetId();
+    });
+    if(it != screens_.end()) {
+        replaced = *it;
+        screens_.erase(it);
+    }
+
+    AddScreen(screen);
+
+    if(is_rendered_) {
+        if(screen->Render() != 0)
+            LOG_ERR("Failed to render screen %u in group %u.", screen->GetId(), screen_group_id_);
+
+        if(is_activated_)
+            screen->OnActivated();
+
+        ApplyScreenOrder();
+        container_->Invalidate();
+    }
+
+    if(replaced != nullptr && is_activated_)
+        replaced->OnDeactivated();
+}
+
+void ScreenGroup::OrderScreens(std::span<const uint32_t> screen_ids) {
+    ScopedLvglLock lvgl_guard;
+
+    const auto rank = [&screen_ids](const std::shared_ptr<IScreen>& screen) {
+        const auto it = std::ranges::find(screen_ids, screen->GetId());
+
+        return static_cast<size_t>(it - screen_ids.begin());
+    };
+    std::ranges::stable_sort(screens_, {}, rank);
+
+    if(is_rendered_) {
+        ApplyScreenOrder();
+        container_->Invalidate();
+    }
+}
+
+bool ScreenGroup::RemoveScreen(uint32_t screen_id) {
+    ScopedLvglLock lvgl_guard;
+
+    const auto it = std::ranges::find_if(screens_, [screen_id](const auto& current) {
+        return current->GetId() == screen_id;
+    });
+    if(it == screens_.end())
+        return false;
+
+    const auto removed = std::move(*it);
+    screens_.erase(it);
+
+    if(is_activated_)
+        removed->OnDeactivated();
+
+    container_->Invalidate();
+
+    return true;
+}
+
 std::shared_ptr<IScreen> ScreenGroup::GetScreen(uint32_t screen_id) const {
     for(const auto& screen : screens_)
         if(screen->GetId() == screen_id)

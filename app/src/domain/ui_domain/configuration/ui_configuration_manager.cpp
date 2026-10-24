@@ -18,6 +18,7 @@ UiConfigurationManager::UiConfigurationManager(
     EventBindingChecker check_binding
 ) :
     CborConfigurationManagerBase("UI", std::move(cbor_configuration_service)),
+    validate_children_(validate_children),
     cbor_parser_(std::move(validate_children)),
     check_binding_(std::move(check_binding)) {
 
@@ -68,6 +69,11 @@ PmrUniquePtr<UiConfiguration> UiConfigurationManager::Deserialize(const CborUiCo
 }
 
 void UiConfigurationManager::ValidateApply(const UiConfiguration& configuration) {
+    UiConfigurationValidator::ValidateBindings(configuration, check_binding_);
+}
+
+void UiConfigurationManager::ValidateConfiguration(const UiConfiguration& configuration) const {
+    UiConfigurationValidator::Validate(configuration, validate_children_);
     UiConfigurationValidator::ValidateBindings(configuration, check_binding_);
 }
 

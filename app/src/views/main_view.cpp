@@ -54,6 +54,49 @@ std::shared_ptr<Frame> MainView::GetGroupContainer(uint32_t screen_group_id) {
     return GetOrCreateGroup(screen_group_id)->GetContainer();
 }
 
+bool MainView::PutScreen(std::shared_ptr<IScreen> screen) {
+    if(screen == nullptr)
+        return false;
+
+    ScopedLvglLock lvgl_guard;
+
+    const auto it = screen_groups_.find(screen->GetGroupId());
+    if(it == screen_groups_.end())
+        return false;
+
+    // A screen that changed group is a removal from one and an addition to the other.
+    for(const auto& [screen_group_id, screen_group] : screen_groups_) {
+        if(screen_group_id != screen->GetGroupId() && screen_group->GetScreen(screen->GetId()) != nullptr)
+            return false;
+    }
+
+    it->second->PutScreen(std::move(screen));
+
+    return true;
+}
+
+bool MainView::RemoveScreen(uint32_t screen_id) {
+    ScopedLvglLock lvgl_guard;
+
+    for(const auto& [screen_group_id, screen_group] : screen_groups_) {
+        if(screen_group->GetScreen(screen_id) == nullptr)
+            continue;
+
+        if(screen_group->GetScreens().size() <= 1)
+            return false;
+
+        return screen_group->RemoveScreen(screen_id);
+    }
+
+    return false;
+}
+
+void MainView::OrderScreens(uint32_t screen_group_id, std::span<const uint32_t> screen_ids) {
+    const auto it = screen_groups_.find(screen_group_id);
+    if(it != screen_groups_.end())
+        it->second->OrderScreens(screen_ids);
+}
+
 void MainView::PruneEmptyGroups() {
     // GetGroupContainer() creates a group up front, so a screen that failed to
     // configure can leave behind a blank but navigable group.

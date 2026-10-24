@@ -14,6 +14,7 @@ project(functional_controllers)
 include(${RT_GAUGE_DIR}/cmake/lvgl_vector.cmake)
 
 include_directories(${APP_SRC_DIR})
+include_directories(${RT_GAUGE_DIR}/tests/common)
 
 set(APP_SRC_CONFIGURATION_DIR ${APP_SRC_DIR}/configuration)
 file(GLOB_RECURSE APP_SRC_CONFIGURATION
