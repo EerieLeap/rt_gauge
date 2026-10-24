@@ -21,9 +21,11 @@ void ReleaseFontRef(lv_event_t* event) {
 } // namespace
 
 // The empty owner makes the pointer an alias: no control block, so no allocation and a use_count() of 0.
-LvglFont::LvglFont(const lv_font_t* font) : lv_font_(std::shared_ptr<void>{}, font) {}
+LvglFont::LvglFont(const lv_font_t* font) :
+    lv_font_(std::shared_ptr<void>{}, font) {}
 
-LvglFont::LvglFont(std::shared_ptr<const lv_font_t> font) : lv_font_(std::move(font)) {}
+LvglFont::LvglFont(std::shared_ptr<const lv_font_t> font) :
+    lv_font_(std::move(font)) {}
 
 const lv_font_t* LvglFont::ToLvFont() const {
     return lv_font_.get();

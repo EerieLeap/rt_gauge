@@ -57,3 +57,7 @@ target_sources(app PRIVATE
 )
 
 zephyr_link_libraries(-Wl,--wrap=lv_anim_start)
+
+# A TrueType font small enough for the suite's heap, taken from the LVGL checkout so that no font binary lives here.
+generate_inc_file_for_target(app ${ZEPHYR_LVGL_MODULE_DIR}/tests/src/test_assets/test_gpos_one.ttf
+  ${ZEPHYR_BINARY_DIR}/include/generated/test_font_ttf.inc)

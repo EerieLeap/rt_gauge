@@ -65,6 +65,14 @@ config EERIE_LEAP_UI_ANIMATION_MAX_SIZE
 	int "Largest animation upload"
 	default 524288
 
+config EERIE_LEAP_UI_FONT_MAX_SIZE
+	int "Largest font upload"
+	default 262144
+
+config EERIE_LEAP_UI_FONT_GLYPH_CACHE_SIZE
+	int "Glyph cache of one font size"
+	default 131072
+
 config EERIE_LEAP_UI_ROTATION
 	int
 	default 0

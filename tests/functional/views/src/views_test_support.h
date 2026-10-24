@@ -44,8 +44,8 @@ const lv_color32_t* PixelRow(const lv_draw_buf_t& buffer, uint32_t row);
 // there stay for the tests after it.
 std::shared_ptr<eerie_leap::subsys::assets::AssetStore> MakeAssetStore(std::string_view directory);
 
-// A registry that serves the store as the kind, the way UiController registers its kinds. Only IMAGES
-// and ANIMATIONS are supported.
+// A registry that serves the store as the kind, the way UiController registers its kinds. Only IMAGES,
+// ANIMATIONS and FONTS are supported.
 std::shared_ptr<eerie_leap::subsys::assets::AssetsManager> MakeAssetsManager(
     eerie_leap::subsys::assets::AssetKind kind,
     std::shared_ptr<eerie_leap::subsys::assets::AssetStore> store

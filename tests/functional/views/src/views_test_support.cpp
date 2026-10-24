@@ -42,6 +42,7 @@ constexpr int32_t MAX_BYTES_PER_PIXEL = 4;
 // A provider keeps only a span of its extensions.
 constexpr std::array<std::string_view, 1> IMAGE_EXTENSIONS{ ".bin" };
 constexpr std::array<std::string_view, 1> ANIMATION_EXTENSIONS{ ".json" };
+constexpr std::array<std::string_view, 1> FONT_EXTENSIONS{ ".ttf" };
 
 uint8_t draw_buffer[DISPLAY_WIDTH * BUFFER_LINES * MAX_BYTES_PER_PIXEL];
 lv_display_t* test_display = nullptr;
@@ -92,15 +93,16 @@ std::shared_ptr<AssetStore> MakeAssetStore(std::string_view directory) {
 }
 
 std::shared_ptr<AssetsManager> MakeAssetsManager(AssetKind kind, std::shared_ptr<AssetStore> store) {
-    zassert_true(kind == AssetKind::IMAGES || kind == AssetKind::ANIMATIONS);
+    zassert_true(kind == AssetKind::IMAGES || kind == AssetKind::ANIMATIONS || kind == AssetKind::FONTS);
     const bool is_image = kind == AssetKind::IMAGES;
+    const bool is_font = kind == AssetKind::FONTS;
 
     auto assets = std::make_shared<AssetsManager>();
     zassert_true(assets->Register(
         AssetProvider{ .kind = kind,
-            .name = is_image ? "images" : "animations",
+            .name = is_image ? "images" : (is_font ? "fonts" : "animations"),
             .store = std::move(store),
-            .extensions = is_image ? IMAGE_EXTENSIONS : ANIMATION_EXTENSIONS,
+            .extensions = is_image ? IMAGE_EXTENSIONS : (is_font ? FONT_EXTENSIONS : ANIMATION_EXTENSIONS),
             .access = static_cast<uint8_t>(
                 ToMask(AssetAccess::READ) | ToMask(AssetAccess::WRITE) | ToMask(AssetAccess::DELETE)
             ),

@@ -65,6 +65,19 @@ source "Kconfig.zephyr"
 		help
 		  Largest animation a client may upload, in bytes.
 
+	config EERIE_LEAP_UI_FONT_MAX_SIZE
+		int "Largest font upload"
+		default 262144
+		help
+		  Largest font a client may upload, in bytes.
+
+	config EERIE_LEAP_UI_FONT_GLYPH_CACHE_SIZE
+		int "Glyph cache of one font size"
+		default 131072
+		help
+		  Bytes of rasterized glyphs one font at one size may cache in the LVGL heap. The cache never holds fewer
+		  than 16 glyphs, so sizes above about 128 px can use more.
+
 	choice EERIE_LEAP_UI_ROTATION_CHOICE
 		prompt "UI rotation"
 		default EERIE_LEAP_UI_ROTATION_NONE
