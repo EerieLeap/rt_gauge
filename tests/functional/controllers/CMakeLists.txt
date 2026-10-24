@@ -12,6 +12,7 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(functional_controllers)
 
 include(${RT_GAUGE_DIR}/cmake/lvgl_vector.cmake)
+include(${RT_GAUGE_DIR}/cmake/builtin_fonts.cmake)
 
 include_directories(${APP_SRC_DIR})
 include_directories(${RT_GAUGE_DIR}/tests/common)

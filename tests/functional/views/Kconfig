@@ -52,6 +52,10 @@ config EERIE_LEAP_SD_CHECK_INTERVAL_MS
 	int "SD check interval ms"
 	default 1000
 
+config EERIE_LEAP_UI_BUILTIN_FONTS
+	bool "Built-in fonts"
+	default y
+
 config EERIE_LEAP_UI_FONT_GLYPH_CACHE_SIZE
 	int "Glyph cache of one font size"
 	default 131072

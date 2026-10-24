@@ -50,8 +50,7 @@
 #include "domain/sensor_domain/event_bus/sensor_payload_type.h"
 #include "event_bus/event_channels.h"
 #include "ui_patch_records.h"
-#include "views/assets/animations/animations_register.h"
-#include "views/assets/images/images_register.h"
+#include "views/assets/fonts/builtin_fonts.h"
 
 using eerie_leap::configuration::cbor::CborSerializer;
 using eerie_leap::configuration::services::CborConfigurationService;
@@ -84,11 +83,15 @@ using eerie_leap::domain::ui_preview_domain::UiPreviewService;
 using eerie_leap::domain::ui_preview_domain::UiPreviewShown;
 using eerie_leap::domain::ui_preview_domain::UiPreviewTarget;
 using eerie_leap::event_bus::InitializeEventChannels;
+#ifdef CONFIG_EERIE_LEAP_UI_DEMO_CONFIGURATION
 using eerie_leap::subsys::assets::AssetAccess;
+#endif
 using eerie_leap::subsys::assets::AssetKind;
 using eerie_leap::subsys::assets::AssetProvider;
 using eerie_leap::subsys::assets::AssetsManager;
+#ifdef CONFIG_EERIE_LEAP_UI_DEMO_CONFIGURATION
 using eerie_leap::subsys::assets::AssetStore;
+#endif
 using eerie_leap::subsys::device_tree::DtDisplay;
 using eerie_leap::subsys::device_tree::DtFs;
 using eerie_leap::subsys::event_bus::AnySubscription;
@@ -99,9 +102,6 @@ using eerie_leap::subsys::fs::services::FsService;
 using eerie_leap::subsys::fs::services::IFsService;
 using eerie_leap::subsys::threading::WorkQueueThread;
 using eerie_leap::utilities::memory::Mrm;
-using eerie_leap::views::assets::animations::UI_LOTTIE_SPINNER_JSON;
-using eerie_leap::views::assets::images::UI_IMG_ARROW_AL88_DATA;
-using eerie_leap::views::assets::images::UI_IMG_NORMA_AL88_DATA;
 
 namespace {
 
@@ -109,9 +109,11 @@ constexpr int BUS_STACK_SIZE = 4096;
 constexpr int CONFIG_WORK_QUEUE_STACK_SIZE = 8192;
 constexpr int CONFIG_WORK_QUEUE_PRIORITY = 10;
 
+#ifdef CONFIG_EERIE_LEAP_UI_DEMO_CONFIGURATION
 // The demo configuration UiController installs on every Initialize().
 constexpr uint32_t DEMO_OVERLAY_SCREEN_ID = 3;
 constexpr uint32_t UNKNOWN_SCREEN_ID = 99;
+#endif
 constexpr uint32_t FIRST_GROUP_ID = 0;
 
 // A navigation change is applied on the bus worker; give it room to run and, for
@@ -697,6 +699,45 @@ ZTEST(ui_controller_stored, test_without_the_demo_a_unit_with_nothing_stored_sho
     }
 }
 #endif
+
+// The fonts kind serves the three fonts in flash, by the names saved configurations use, and the other kinds none.
+ZTEST_SUITE(ui_controller_fonts, NULL, NULL, NULL, NULL, NULL);
+
+ZTEST(ui_controller_fonts, test_the_fonts_kind_serves_the_built_in_fonts_and_the_other_kinds_none) {
+    EnsureBus();
+    auto fs_service = FormatFs();
+    auto config_work_queue = StartConfigWorkQueue();
+
+    auto assets_manager = std::make_shared<AssetsManager>();
+    auto controller = std::make_shared<UiController>(fs_service, config_work_queue, nullptr, assets_manager);
+    zassert_equal(controller->Initialize(), 0, "Expected the UI controller to initialize.");
+
+    const auto fonts = assets_manager->Find(AssetKind::FONTS);
+    zassert_not_null(fonts.get());
+
+#ifdef CONFIG_EERIE_LEAP_UI_BUILTIN_FONTS
+    zassert_equal(fonts->built_ins.size(), 3U);
+    zassert_true(fonts->built_ins[0].name == "Rubik-Medium.ttf");
+    zassert_true(fonts->built_ins[1].name == "Montserrat-Medium.ttf");
+    zassert_true(fonts->built_ins[2].name == "Inconsolata-Bold.ttf");
+
+    for(const auto& built_in : fonts->built_ins) {
+        zassert_true(!built_in.data.empty());
+        zassert_equal(
+            eerie_leap::subsys::assets::FindBuiltIn(*fonts, built_in.name), &built_in,
+            "Expected a built-in to be found by its name."
+        );
+        zassert_false(
+            fonts->store->GetSize(built_in.name).has_value(), "Expected no copy of a built-in on the volume."
+        );
+    }
+#else
+    zassert_true(fonts->built_ins.empty());
+#endif
+
+    zassert_true(assets_manager->Find(AssetKind::IMAGES)->built_ins.empty());
+    zassert_true(assets_manager->Find(AssetKind::ANIMATIONS)->built_ins.empty());
+}
 
 namespace {
 

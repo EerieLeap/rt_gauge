@@ -203,6 +203,34 @@ A missing file, a file that is not TrueType, or an out-of-range size leaves the
 theme font in place (logged). Only `.ttf` is supported, through Tiny TTF; bitmap
 (binfont) fonts are not.
 
+### Built-in fonts
+
+Three fonts are in the firmware's flash and need no upload. Name one in `FONT_FILE_PATH`:
+
+| Name | Font | Use |
+| --- | --- | --- |
+| `Rubik-Medium.ttf` | Rubik Medium | The gauge's text face |
+| `Montserrat-Medium.ttf` | Montserrat Medium | A wider, rounder face |
+| `Inconsolata-Bold.ttf` | Inconsolata Bold | Monospace: readouts whose digits must not shift |
+
+They are Latin-1 subsets (U+0020-007E and U+00A0-00FF, kerning kept, no hinting), so Latin text and the
+accented letters of Western European languages draw, and everything else (Cyrillic, Greek, symbols, CJK) draws
+LVGL's placeholder box; upload a font for those. They are SIL Open Font License 1.1 fonts (the licenses sit in
+`app/src/views/assets/fonts/builtin/`).
+
+The assets group serves them as files of the `fonts` kind, read-only: `assets ls fonts` lists them first with
+`builtin: true`, and `READ` and `STAT` answer as for any file. `WRITE`, `DELETE` and `RENAME` of their names
+are refused with the error `BUILT_IN` (16), so they can be neither replaced nor renamed nor deleted; a file
+uploaded under a built-in's name (a name compares ignoring ASCII case) is hidden by the built-in. They count in
+neither the volume's free nor its used bytes.
+
+Tiny TTF reads a built-in from flash in place: no RAM copy, no read of the file system, whatever the number of
+widgets and sizes. Each size still has the glyph cache described under Cost. They cost 79 KB of flash together
+(Rubik 34 KB, Montserrat 29 KB, Inconsolata 16 KB); `CONFIG_EERIE_LEAP_UI_BUILTIN_FONTS=n` leaves them out, and a
+unit built so lists no built-ins.
+
+### Uploaded fonts
+
 Upload the file (`assets put fonts NAME FILE`) under a flat name, `.ttf`, at most 256 KiB
 (`EERIE_LEAP_UI_FONT_MAX_SIZE`), then set `FONT_FILE_PATH` to that name:
 
@@ -225,7 +253,8 @@ font draws LVGL's placeholder box; there is no fallback to a theme font.
 
 ### Cost
 
-- The file's bytes sit in external RAM, once per file, shared by all its sizes.
+- The bytes of an uploaded file sit in external RAM, once per file, shared by all its sizes. A built-in font's
+  bytes stay in flash and are read in place.
 - Each file and size has one glyph cache in the LVGL heap, shared by every
   widget using it. It holds only glyphs that were drawn.
 - Nothing is loaded per frame. A file is read when a widget is built, and a

@@ -71,6 +71,15 @@ source "Kconfig.zephyr"
 		help
 		  Largest font a client may upload, in bytes.
 
+	config EERIE_LEAP_UI_BUILTIN_FONTS
+		bool "Built-in fonts"
+		default y
+		help
+		  Compile three TrueType fonts (Rubik Medium, Montserrat Medium and Inconsolata Bold, Latin-1 subsets, 79 KB
+		  together) into flash and serve them as read-only files of the fonts asset kind: a client lists them, reads
+		  them and names them in FONT_FILE_PATH, and Tiny TTF draws them from flash with no RAM copy. Off: the unit
+		  has no built-in fonts and the flash is not spent.
+
 	config EERIE_LEAP_UI_FONT_GLYPH_CACHE_SIZE
 		int "Glyph cache of one font size"
 		default 131072

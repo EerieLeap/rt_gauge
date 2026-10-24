@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <memory_resource>
@@ -22,6 +23,10 @@ namespace eerie_leap::views::utilities {
  * share its bytes. Entries are weak: a font lives as long as a label holds it (LvglFont::BindTo()), a file's bytes as
  * long as one of its sizes. An upload or delete in the kind changes the store's generation, so the next Acquire()
  * loads the new file while the fonts already handed out stay as they are.
+ *
+ * The kind's built-in fonts (AssetProvider::built_ins) are not loaded: Tiny TTF reads the bytes in flash in place, so
+ * a built-in costs no RAM copy and no store read, and an upload or delete does not touch its entries. A built-in wins
+ * over a stored file of its name, as the assets group serves it.
  *
  * Not thread-safe: call it with the LVGL lock held, as every render path does.
  */
@@ -53,6 +58,9 @@ public:
      *         font, or memory ran out; nullopt without a log for an empty name.
      */
     std::optional<LvglFont> Acquire(std::string_view name, int32_t size_px);
+
+    /** @return The bytes of uploaded font files the cache holds in RAM right now; built-in fonts never count. */
+    [[nodiscard]] size_t GetCopiedBytes() const;
 };
 
 } // namespace eerie_leap::views::utilities

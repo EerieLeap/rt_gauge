@@ -12,6 +12,7 @@
 #include "domain/ui_domain/models/icon_type.h"
 #include "domain/ui_domain/models/widget_configuration.h"
 #include "subsys/assets/asset_kind.h"
+#include "subsys/assets/asset_provider.h"
 #include "subsys/assets/asset_store.h"
 #include "subsys/assets/assets_manager.h"
 #include "views/renderable_base.h"
@@ -44,11 +45,12 @@ const lv_color32_t* PixelRow(const lv_draw_buf_t& buffer, uint32_t row);
 // there stay for the tests after it.
 std::shared_ptr<eerie_leap::subsys::assets::AssetStore> MakeAssetStore(std::string_view directory);
 
-// A registry that serves the store as the kind, the way UiController registers its kinds. Only IMAGES,
-// ANIMATIONS and FONTS are supported.
+// A registry that serves the store as the kind, the way UiController registers its kinds, with the kind's built-in
+// files if it has any. Only IMAGES, ANIMATIONS and FONTS are supported.
 std::shared_ptr<eerie_leap::subsys::assets::AssetsManager> MakeAssetsManager(
     eerie_leap::subsys::assets::AssetKind kind,
-    std::shared_ptr<eerie_leap::subsys::assets::AssetStore> store
+    std::shared_ptr<eerie_leap::subsys::assets::AssetStore> store,
+    std::span<const eerie_leap::subsys::assets::BuiltInAsset> built_ins = {}
 );
 
 // A fill-slot BasicIcon needle for a dial. Labels get text so they can render.

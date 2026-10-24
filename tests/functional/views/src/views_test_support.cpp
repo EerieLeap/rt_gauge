@@ -1,5 +1,6 @@
 #include <array>
 #include <cerrno>
+#include <span>
 #include <utility>
 
 #include <lvgl.h>
@@ -24,6 +25,7 @@ using eerie_leap::subsys::assets::AssetKind;
 using eerie_leap::subsys::assets::AssetProvider;
 using eerie_leap::subsys::assets::AssetsManager;
 using eerie_leap::subsys::assets::AssetStore;
+using eerie_leap::subsys::assets::BuiltInAsset;
 using eerie_leap::subsys::device_tree::DtFs;
 using eerie_leap::subsys::fs::services::FsService;
 using eerie_leap::views::themes::ITheme;
@@ -92,7 +94,8 @@ std::shared_ptr<AssetStore> MakeAssetStore(std::string_view directory) {
     return std::make_shared<AssetStore>(std::move(fs), directory);
 }
 
-std::shared_ptr<AssetsManager> MakeAssetsManager(AssetKind kind, std::shared_ptr<AssetStore> store) {
+std::shared_ptr<AssetsManager>
+MakeAssetsManager(AssetKind kind, std::shared_ptr<AssetStore> store, std::span<const BuiltInAsset> built_ins) {
     zassert_true(kind == AssetKind::IMAGES || kind == AssetKind::ANIMATIONS || kind == AssetKind::FONTS);
     const bool is_image = kind == AssetKind::IMAGES;
     const bool is_font = kind == AssetKind::FONTS;
@@ -106,7 +109,8 @@ std::shared_ptr<AssetsManager> MakeAssetsManager(AssetKind kind, std::shared_ptr
             .access = static_cast<uint8_t>(
                 ToMask(AssetAccess::READ) | ToMask(AssetAccess::WRITE) | ToMask(AssetAccess::DELETE)
             ),
-            .max_size = 1024 * 1024 }
+            .max_size = 1024 * 1024,
+            .built_ins = built_ins }
     ));
 
     return assets;

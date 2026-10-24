@@ -295,6 +295,7 @@ ASSETS_ERRORS = {
     13: "CRC mismatch",
     14: "I/O error",
     15: "no memory",
+    16: "built in: the file is part of the firmware and cannot be replaced, renamed or deleted",
 }
 ASSETS_BAD_OFFSET = 10
 ASSETS_BAD_TOKEN = 11
@@ -2883,6 +2884,9 @@ def log_start_ms(name: str) -> int | None:
 
 def format_asset_entry(entry: dict) -> str:
     line = f"{entry['size']:>10}  {entry['name']}"
+    # builtin (fonts kind): a file in the firmware's flash, read-only.
+    if entry.get("builtin"):
+        line += "  built in"
     # end_ms (logs kind): when the file was last written, Unix ms UTC.
     if "end_ms" in entry:
         line += f"  end {format_utc_ms(entry['end_ms'])}"

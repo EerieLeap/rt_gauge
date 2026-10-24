@@ -169,10 +169,12 @@ kind that takes none) and `avail` says whether the volume is mounted now.
 | 2 | `sensor_scripts` | a unit with an SD card and sensors, from `scripts/sensors` |
 | 3 | `can_scripts` | a unit with an SD card and a CAN bus, from `scripts/can` |
 | 4 | `logs` | a unit that logs, from `logs` (download and delete only; the file being written is in use) |
-| 5 | `fonts` | the gauge, from `ui_assets/fonts` |
+| 5 | `fonts` | the gauge, from `ui_assets/fonts`, and three built-in fonts |
 
 A unit serves the kinds it has the services for, so the gauge lists `images`, `animations` and `fonts`. `assets ls` prints the
-size and name of each file, and for a log the end time the unit reports (`end_ms`) and, when the name is
+size and name of each file, `built in` after a file that is part of the firmware (the gauge's three fonts,
+`Rubik-Medium.ttf`, `Montserrat-Medium.ttf` and `Inconsolata-Bold.ttf`, listed first: they can be read, with `get` and
+`stat`, but `put`, `rm` and `rename` of their names fail with `built in`), and for a log the end time the unit reports (`end_ms`) and, when the name is
 `<prefix>_YYYYMMDDTHHMMSSZ_NNNN.mf4`, the duration from the time in the name. A name is 1 to 64 characters of `A-Z a-z 0-9 . _ -`, does not start with `.`,
 and ends in one of the kind's extensions with at least one character before it. A unit built before the
 group answers every `assets` command with `MCUmgr error 8 (the unit has no assets group (older firmware))`.

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <new>
+#include <span>
 #include <utility>
 
 #include <zephyr/logging/log.h>
@@ -20,6 +21,8 @@ using eerie_leap::domain::ui_domain::ScopedLvglLock;
 using eerie_leap::domain::ui_domain::utilities::WidgetPropertyValidator;
 using eerie_leap::subsys::assets::AssetKind;
 using eerie_leap::subsys::assets::AssetsManager;
+using eerie_leap::subsys::assets::BuiltInAsset;
+using eerie_leap::subsys::assets::FindBuiltIn;
 using eerie_leap::utilities::memory::Mrm;
 using eerie_memory::make_shared_pmr;
 
@@ -28,6 +31,9 @@ LOG_MODULE_REGISTER(font_cache_logger);
 namespace {
 
 using FaceData = std::shared_ptr<const std::pmr::vector<uint8_t>>;
+
+// The generation a built-in's entries carry: flash does not change, whatever the store does.
+constexpr uint64_t BUILT_IN_GENERATION = 0;
 
 constexpr int32_t MIN_GLYPH_CACHE_COUNT = 16;
 static_assert(CONFIG_LV_TINY_TTF_CACHE_GLYPH_CNT >= MIN_GLYPH_CACHE_COUNT);
@@ -48,6 +54,17 @@ FontCache::FontCache(std::shared_ptr<AssetsManager> assets_manager) :
     assets_manager_(std::move(assets_manager)),
     faces_(Mrm::GetExtPmr()),
     fonts_(Mrm::GetExtPmr()) {}
+
+size_t FontCache::GetCopiedBytes() const {
+    size_t total = 0;
+
+    for(const auto& face : faces_) {
+        if(const auto data = face.data.lock())
+            total += data->size();
+    }
+
+    return total;
+}
 
 std::optional<LvglFont> FontCache::Acquire(std::string_view name, int32_t size_px) {
     if(name.empty())
@@ -76,33 +93,48 @@ std::optional<LvglFont> FontCache::Acquire(std::string_view name, int32_t size_p
             return font.font.expired();
         });
 
+        // A built-in is read in place, from the flash the provider's span points into: nothing to load or to keep
+        // alive. Its entries do not depend on the store, so a write there leaves them be.
+        const BuiltInAsset* built_in = FindBuiltIn(*provider, name);
+        const uint64_t font_generation = built_in != nullptr ? BUILT_IN_GENERATION : generation;
+        // Names compare ignoring ASCII case, as the assets group's do: a built-in is cached under its own spelling.
+        const std::string_view font_name = built_in != nullptr ? built_in->name : name;
+
         for(const auto& entry : fonts_) {
-            if(entry.size_px == size_px && entry.generation == generation && entry.name == name) {
+            if(entry.size_px == size_px && entry.generation == font_generation && entry.name == font_name) {
                 if(auto font = entry.font.lock())
                     return LvglFont{ std::move(font) };
             }
         }
 
         FaceData data;
-        for(const auto& face : faces_) {
-            if(face.generation == generation && face.name == name) {
-                data = face.data.lock();
-                break;
-            }
-        }
+        std::span<const uint8_t> bytes;
 
-        if(data == nullptr) {
-            data = make_shared_pmr<std::pmr::vector<uint8_t>>(Mrm::GetExtPmr(), provider->store->Load(name));
-            if(data->empty()) {
-                LOG_ERR("Font '%.*s' is missing or empty.", static_cast<int>(name.size()), name.data());
-                return std::nullopt;
+        if(built_in != nullptr) {
+            bytes = built_in->data;
+        } else {
+            for(const auto& face : faces_) {
+                if(face.generation == generation && face.name == name) {
+                    data = face.data.lock();
+                    break;
+                }
             }
 
-            faces_.push_back(Face{ std::pmr::string(name, Mrm::GetExtPmr()), generation, data });
+            if(data == nullptr) {
+                data = make_shared_pmr<std::pmr::vector<uint8_t>>(Mrm::GetExtPmr(), provider->store->Load(name));
+                if(data->empty()) {
+                    LOG_ERR("Font '%.*s' is missing or empty.", static_cast<int>(name.size()), name.data());
+                    return std::nullopt;
+                }
+
+                faces_.push_back(Face{ std::pmr::string(name, Mrm::GetExtPmr()), generation, data });
+            }
+
+            bytes = *data;
         }
 
         auto* tiny_ttf = lv_tiny_ttf_create_data_ex(
-            data->data(), data->size(), size_px, LV_FONT_KERNING_NORMAL, GlyphCacheCount(size_px)
+            bytes.data(), bytes.size(), size_px, LV_FONT_KERNING_NORMAL, GlyphCacheCount(size_px)
         );
         if(tiny_ttf == nullptr) {
             LOG_ERR(
@@ -111,7 +143,8 @@ std::optional<LvglFont> FontCache::Acquire(std::string_view name, int32_t size_p
             return std::nullopt;
         }
 
-        // The deleter holds the bytes Tiny TTF points into and nothing of the cache: fonts may outlive it.
+        // The deleter holds the bytes Tiny TTF points into (none for a built-in: they are in flash) and nothing of the
+        // cache: fonts may outlive it.
         std::shared_ptr<lv_font_t> font(
             tiny_ttf,
             [data](lv_font_t* released) {
@@ -120,7 +153,7 @@ std::optional<LvglFont> FontCache::Acquire(std::string_view name, int32_t size_p
             },
             std::pmr::polymorphic_allocator<>(Mrm::GetExtPmr())
         );
-        fonts_.push_back(Font{ std::pmr::string(name, Mrm::GetExtPmr()), size_px, generation, font });
+        fonts_.push_back(Font{ std::pmr::string(font_name, Mrm::GetExtPmr()), size_px, font_generation, font });
 
         return LvglFont{ std::move(font) };
     } catch(const std::bad_alloc&) {

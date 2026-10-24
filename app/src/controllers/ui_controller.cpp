@@ -42,6 +42,7 @@
 #include "subsys/event_bus/event_channel_id.h"
 #include "subsys/threading/scoped_mutex.h"
 
+#include "views/assets/fonts/builtin_fonts.h"
 #include "views/screens/i_screen.h"
 #include "views/screens/screen_factory.h"
 #include "views/themes/dark_bw_theme.h"
@@ -65,11 +66,9 @@ namespace config_services = eerie_leap::configuration::services;
 
 using eerie_leap::domain::settings_domain::event_bus::SettingsEventsChannel;
 using eerie_leap::domain::settings_domain::event_bus::SettingsEventType;
-using eerie_leap::domain::settings_domain::models::SettingId;
 using eerie_leap::domain::ui_domain::ScopedLvglLock;
 using eerie_leap::domain::ui_domain::event_bus::NavigationEventType;
 using eerie_leap::domain::ui_domain::event_bus::NavigationPayloadType;
-using eerie_leap::domain::ui_domain::models::Animation;
 using eerie_leap::domain::ui_domain::preview::PatchEffect;
 using eerie_leap::domain::ui_domain::preview::ScreenAction;
 using eerie_leap::subsys::assets::AssetAccess;
@@ -79,6 +78,7 @@ using eerie_leap::subsys::event_bus::CreateScopedSubscription;
 using eerie_leap::subsys::event_bus::GetEventBindingError;
 using eerie_leap::subsys::threading::ScopedMutex;
 using eerie_leap::utilities::reflection::GetCallerName;
+using eerie_leap::views::assets::BuiltInFonts;
 using eerie_leap::views::widgets::WidgetFactory;
 
 LOG_MODULE_REGISTER(ui_controller_logger);
@@ -312,14 +312,15 @@ void UiController::RegisterAssets() {
     if(!animations_registered_)
         LOG_ERR("Failed to register the animation assets, the registry has them already.");
 
-    // A font keeps its own RAM copy, like the others.
+    // An uploaded font keeps its own RAM copy, like the others; the built-in ones are read from flash in place.
     fonts_registered_ = assets_manager_->Register(
         AssetProvider{ .kind = AssetKind::FONTS,
             .name = "fonts",
             .store = fonts_store_,
             .extensions = FONT_EXTENSIONS,
             .access = ACCESS,
-            .max_size = CONFIG_EERIE_LEAP_UI_FONT_MAX_SIZE }
+            .max_size = CONFIG_EERIE_LEAP_UI_FONT_MAX_SIZE,
+            .built_ins = BuiltInFonts() }
     );
     if(!fonts_registered_)
         LOG_ERR("Failed to register the font assets, the registry has them already.");

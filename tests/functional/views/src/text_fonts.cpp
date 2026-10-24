@@ -11,6 +11,7 @@
 #include "domain/ui_domain/models/widget_configuration.h"
 #include "event_bus/event_channels.h"
 #include "subsys/assets/asset_kind.h"
+#include "views/assets/fonts/builtin_fonts.h"
 #include "views/themes/theme_manager.h"
 #include "views/utilities/font_cache.h"
 #include "views/widgets/widget_factory.h"
@@ -177,3 +178,32 @@ ZTEST(text_fonts, test_destroying_the_widgets_returns_the_memory) {
 
     zassert_equal(LvglHeapBytes(), baseline);
 }
+
+#ifdef CONFIG_EERIE_LEAP_UI_BUILTIN_FONTS
+
+// A built-in font is named like an uploaded one, and loads from flash: the store has no font, and the cache copies
+// nothing to RAM.
+ZTEST(text_fonts, test_a_widget_draws_with_a_built_in_font_without_a_store_read_or_a_ram_copy) {
+    const ScopedLvglLock lock;
+    auto store = views_test::MakeAssetStore("ui_assets/no_fonts");
+    auto assets = views_test::MakeAssetsManager(AssetKind::FONTS, store, eerie_leap::views::assets::BuiltInFonts());
+    auto cache = std::make_shared<FontCache>(assets);
+    const WidgetContext context{ .assets_manager = assets, .font_cache = cache };
+    const auto& theme = ThemeManager::GetInstance().GetCurrentTheme();
+
+    for(auto type : { WidgetType::IndicatorDigital, WidgetType::BasicIcon }) {
+        auto widget = Render(Configuration(type, "Rubik-Medium.ttf", 40), context, MakeRoot());
+
+        const auto theme_font = type == WidgetType::BasicIcon ? theme.GetPrimaryFont() : theme.GetPrimaryFontLarge();
+        zassert_not_equal(FontOf(*widget), theme_font.ToLvFont(), "widget %d", static_cast<int>(type));
+        zassert_true(lv_font_get_line_height(FontOf(*widget)) >= 40, "widget %d", static_cast<int>(type));
+        zassert_equal(cache->GetCopiedBytes(), 0U, "widget %d", static_cast<int>(type));
+    }
+
+    auto inconsolata = Render(Configuration(WidgetType::BasicIcon, "Inconsolata-Bold.ttf", 24), context, MakeRoot());
+    auto montserrat = Render(Configuration(WidgetType::BasicIcon, "Montserrat-Medium.ttf", 24), context, MakeRoot());
+    zassert_not_equal(FontOf(*inconsolata), FontOf(*montserrat));
+    zassert_equal(cache->GetCopiedBytes(), 0U);
+}
+
+#endif // CONFIG_EERIE_LEAP_UI_BUILTIN_FONTS
