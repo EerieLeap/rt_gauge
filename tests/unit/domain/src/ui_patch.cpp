@@ -185,6 +185,29 @@ ZTEST(ui_patch, test_the_classifier_applies_in_place_what_a_widget_takes_as_it_c
     zassert_equal(ClassifyProperty(T::IndicatorBar, P::FILE_PATH, Text("x"), none), WidgetChange::RebuildWidget);
 }
 
+ZTEST(ui_patch, test_a_font_change_rebuilds_the_widget) {
+    using P = WidgetPropertyType;
+    using T = WidgetType;
+    const ConfigValue none;
+
+    zassert_equal(
+        ClassifyProperty(T::IndicatorDigital, P::FONT_FILE_PATH, Text("a.bin"), Text("b.bin")),
+        WidgetChange::RebuildWidget
+    );
+    zassert_equal(
+        ClassifyProperty(T::IndicatorDigital, P::FONT_FILE_PATH, none, Text("b.bin")), WidgetChange::RebuildWidget
+    );
+    zassert_equal(ClassifyProperty(T::IndicatorDigital, P::FONT_SIZE_PX, 24, 32), WidgetChange::RebuildWidget);
+    zassert_equal(ClassifyProperty(T::IndicatorDigital, P::FONT_SIZE_PX, none, 32), WidgetChange::RebuildWidget);
+    zassert_equal(
+        ClassifyProperty(T::BasicIcon, P::FONT_FILE_PATH, Text("a.bin"), Text("b.bin"), IconType::Label),
+        WidgetChange::RebuildWidget
+    );
+    zassert_equal(
+        ClassifyProperty(T::BasicIcon, P::FONT_SIZE_PX, 24, 32, IconType::Label), WidgetChange::RebuildWidget
+    );
+}
+
 ZTEST(ui_patch, test_the_classifier_reads_the_icon_type_for_an_icon) {
     using P = WidgetPropertyType;
     using T = WidgetType;

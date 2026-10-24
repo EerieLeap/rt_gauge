@@ -55,11 +55,13 @@ enum class WidgetPropertyType : std::uint16_t {
     // A root widget's box, in its screen's grid cells like the record's position and size (y counts up from the
     // bottom). Binding targets only: the record stays the one place the box is written, so a properties map never
     // holds them, and a child fills its owner, so it has none.
-    LAYOUT_X = 45,      // int
-    LAYOUT_Y = 46,      // int
-    LAYOUT_WIDTH = 47,  // int
-    LAYOUT_HEIGHT = 48, // int
-    COUNT = 49          // Sentinel, not a property
+    LAYOUT_X = 45,       // int
+    LAYOUT_Y = 46,       // int
+    LAYOUT_WIDTH = 47,   // int
+    LAYOUT_HEIGHT = 48,  // int
+    FONT_FILE_PATH = 49, // string, a `fonts` asset name; empty means the theme font
+    FONT_SIZE_PX = 50,   // int, the em size in pixels
+    COUNT = 51           // Sentinel, not a property
 };
 
 constexpr bool IsValidWidgetPropertyType(WidgetPropertyType type) {

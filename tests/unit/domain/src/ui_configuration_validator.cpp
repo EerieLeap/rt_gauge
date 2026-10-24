@@ -477,6 +477,36 @@ ZTEST(ui_configuration_validator, test_opacity_requires_an_integer_in_byte_range
     zassert_true(Validates(*configuration));
 }
 
+ZTEST(ui_configuration_validator, test_font_file_path_requires_text) {
+    auto configuration = MakeConfiguration();
+    auto& properties = configuration->screen_configurations[0]->widget_configurations[0]->properties;
+    for(const char* name : { "", "font.bin", "any name.bin" }) {
+        properties[WidgetPropertyType::FONT_FILE_PATH] = std::pmr::string(name, Mrm::GetExtPmr());
+        zassert_true(Validates(*configuration));
+    }
+    const ConfigValue invalid_values[] = { {}, 0, 12.5, true, false };
+    for(const auto& value : invalid_values) {
+        properties[WidgetPropertyType::FONT_FILE_PATH] = value;
+        zassert_false(Validates(*configuration));
+    }
+}
+
+ZTEST(ui_configuration_validator, test_font_size_requires_an_integral_number_in_range) {
+    auto configuration = MakeConfiguration();
+    auto& properties = configuration->screen_configurations[0]->widget_configurations[0]->properties;
+    const ConfigValue valid_values[] = { 8, 24, 256, 8.0, 24.0, 256.0 };
+    for(const auto& value : valid_values) {
+        properties[WidgetPropertyType::FONT_SIZE_PX] = value;
+        zassert_true(Validates(*configuration));
+    }
+    const ConfigValue invalid_values[] = { {}, 7, 257, 0, -8, INT32_MAX, 7.0, 257.0, 24.5, true,
+        std::pmr::string("24") };
+    for(const auto& value : invalid_values) {
+        properties[WidgetPropertyType::FONT_SIZE_PX] = value;
+        zassert_false(Validates(*configuration));
+    }
+}
+
 ZTEST(ui_configuration_validator, test_fill_mode_accepts_only_known_numeric_modes) {
     auto configuration = MakeConfiguration();
     auto& properties = configuration->screen_configurations[0]->widget_configurations[0]->properties;

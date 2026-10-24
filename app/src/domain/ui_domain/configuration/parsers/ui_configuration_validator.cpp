@@ -62,6 +62,7 @@ static PropertyValueKind GetPropertyValueKind(WidgetPropertyType type) {
 
         case WidgetPropertyType::LABEL:
         case WidgetPropertyType::FILE_PATH:
+        case WidgetPropertyType::FONT_FILE_PATH:
         case WidgetPropertyType::SETTING_ID:
         case WidgetPropertyType::UNIT:
             return PropertyValueKind::Text;
@@ -104,6 +105,15 @@ static bool IsValidDirection(const ConfigValue& value) {
     return val >= 1.0 && val <= 4.0 && val == std::floor(val);
 }
 
+static bool IsValidFontSize(const ConfigValue& value) {
+    if(!std::holds_alternative<int>(value) && !std::holds_alternative<double>(value))
+        return false;
+    const double val = std::holds_alternative<int>(value) ? std::get<int>(value) : std::get<double>(value);
+    return val >= WidgetPropertyValidator::MIN_FONT_SIZE_PX
+        && val <= WidgetPropertyValidator::MAX_FONT_SIZE_PX
+        && val == std::floor(val);
+}
+
 static std::string GetWidgetPropertyValidationError(WidgetPropertyType type, const ConfigValue& value) {
     if(!IsValidWidgetPropertyType(type))
         return "Unknown property ID: " + std::to_string(static_cast<uint16_t>(type)) + ".";
@@ -131,6 +141,9 @@ static std::string GetWidgetPropertyValidationError(WidgetPropertyType type, con
 
     if(type == WidgetPropertyType::DIRECTION && !IsValidDirection(value))
         return "Invalid value for property 'DIRECTION'.";
+
+    if(type == WidgetPropertyType::FONT_SIZE_PX && !IsValidFontSize(value))
+        return "Invalid value for property 'FONT_SIZE_PX'.";
 
     return {};
 }

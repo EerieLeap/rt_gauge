@@ -18,6 +18,9 @@ using eerie_leap::utilities::type::ConfigValue;
 class WidgetPropertyValidator {
 public:
     static constexpr int MAX_ANCHOR_COORDINATE = (1 << 29) - 1;
+    // The range FONT_SIZE_PX accepts; FontCache refuses sizes outside it too.
+    static constexpr int MIN_FONT_SIZE_PX = 8;
+    static constexpr int MAX_FONT_SIZE_PX = 256;
 
     static constexpr bool IsAnchorProperty(WidgetPropertyType type) {
         return type == WidgetPropertyType::ANCHOR_POINT_X || type == WidgetPropertyType::ANCHOR_POINT_Y;

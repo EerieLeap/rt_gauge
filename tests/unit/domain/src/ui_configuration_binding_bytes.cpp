@@ -402,12 +402,12 @@ ZTEST(ui_configuration_binding_bytes, test_the_bytes_of_a_binding_to_the_box_dec
     zassert_true(std::get<std::pmr::string>(bindings[0].event.selector_value) == "sensor_1");
 }
 
-// 49 is the first property no firmware knows, in a binding as in a map.
+// 51 (COUNT) is the first property no firmware knows, in a binding as in a map.
 ZTEST(ui_configuration_binding_bytes, test_a_target_past_the_box_properties_is_refused) {
     std::vector<uint8_t> bytes(std::begin(LAYOUT_BINDING_CONFIGURATION), std::end(LAYOUT_BINDING_CONFIGURATION));
     const uint8_t layout_target[] = { 0x9f, 0x18, 0x2d };
     const auto mark = std::ranges::search(bytes, layout_target).begin();
-    *(mark + 2) = 0x31; // 49
+    *(mark + 2) = 0x33; // 51
 
     auto cbor_configuration = CborSerializer<CborUiConfig>().Deserialize(bytes);
     zassert_not_null(cbor_configuration.get());
@@ -419,5 +419,5 @@ ZTEST(ui_configuration_binding_bytes, test_a_target_past_the_box_properties_is_r
         is_refused = true;
     }
 
-    zassert_true(is_refused, "Expected the target 49 to be unknown.");
+    zassert_true(is_refused, "Expected the target 51 to be unknown.");
 }

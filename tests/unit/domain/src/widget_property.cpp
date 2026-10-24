@@ -34,7 +34,8 @@ constexpr std::array ALL_TYPES = { WidgetPropertyType::NONE, WidgetPropertyType:
     WidgetPropertyType::COLOR_TERTIARY_ACTIVE, WidgetPropertyType::COLOR_TERTIARY_INACTIVE,
     WidgetPropertyType::ANIMATION_TYPE, WidgetPropertyType::IS_ANIMATION_ACTIVE,
     WidgetPropertyType::ANIMATION_DURATION_MS, WidgetPropertyType::CHILD_WIDGET_IDS, WidgetPropertyType::LAYOUT_X,
-    WidgetPropertyType::LAYOUT_Y, WidgetPropertyType::LAYOUT_WIDTH, WidgetPropertyType::LAYOUT_HEIGHT };
+    WidgetPropertyType::LAYOUT_Y, WidgetPropertyType::LAYOUT_WIDTH, WidgetPropertyType::LAYOUT_HEIGHT,
+    WidgetPropertyType::FONT_FILE_PATH, WidgetPropertyType::FONT_SIZE_PX };
 
 } // namespace
 
@@ -55,7 +56,7 @@ ZTEST(widget_property, test_shape_additions_preserve_persisted_values) {
 
 // Persisted numeric IDs must stay stable when properties are added.
 ZTEST(widget_property, test_property_ids_preserve_persisted_values) {
-    zassert_equal(ALL_TYPES.size(), 49);
+    zassert_equal(ALL_TYPES.size(), 51);
     zassert_equal(static_cast<uint16_t>(WidgetPropertyType::COUNT), ALL_TYPES.size());
     zassert_equal(static_cast<uint16_t>(WidgetPropertyType::ANCHOR_POINT_X), 19);
     zassert_equal(static_cast<uint16_t>(WidgetPropertyType::ANCHOR_POINT_Y), 20);
@@ -64,6 +65,8 @@ ZTEST(widget_property, test_property_ids_preserve_persisted_values) {
     zassert_equal(static_cast<uint16_t>(WidgetPropertyType::LAYOUT_Y), 46);
     zassert_equal(static_cast<uint16_t>(WidgetPropertyType::LAYOUT_WIDTH), 47);
     zassert_equal(static_cast<uint16_t>(WidgetPropertyType::LAYOUT_HEIGHT), 48);
+    zassert_equal(static_cast<uint16_t>(WidgetPropertyType::FONT_FILE_PATH), 49);
+    zassert_equal(static_cast<uint16_t>(WidgetPropertyType::FONT_SIZE_PX), 50);
     for(size_t index = 0; index < ALL_TYPES.size(); ++index)
         zassert_equal(static_cast<uint16_t>(ALL_TYPES[index]), index);
 }
