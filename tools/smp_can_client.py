@@ -21,7 +21,7 @@ tools/README.md. Failed SMP requests are resent: once on CAN and over Bluetooth,
 where a log line landing in a response corrupts it. The request that completes a configuration write is
 never resent blindly; the client reads the stored CRC to learn whether it was applied.
 
-Asset files (images, animations, scripts, logs) are listed, downloaded, uploaded and deleted with the
+Asset files (images, animations, fonts, scripts, logs) are listed, downloaded, uploaded and deleted with the
 assets commands. A download keeps several requests in flight, can continue a partial file and checks
 the file's CRC32 against the unit's; the format is in tools/README.md.
 
@@ -355,7 +355,7 @@ class AssetsCommand(IntEnum):
     RENAME = 6
 
 
-ASSET_KINDS = {"images": 0, "animations": 1, "sensor_scripts": 2, "can_scripts": 3, "logs": 4}
+ASSET_KINDS = {"images": 0, "animations": 1, "sensor_scripts": 2, "can_scripts": 3, "logs": 4, "fonts": 5}
 
 
 class SmpError(Exception):
@@ -3501,7 +3501,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     decode.add_argument("type", type=parse_config_type)
     decode.add_argument("input", type=Path)
     decode.add_argument("output", nargs="?")
-    assets = commands.add_parser("assets", help="asset files: images, animations, scripts, logs")
+    assets = commands.add_parser("assets", help="asset files: images, animations, fonts, scripts, logs")
     assets_commands = assets.add_subparsers(dest="assets_command", required=True)
     assets_commands.add_parser("kinds", help="the asset kinds the unit serves")
     asset_ls = assets_commands.add_parser("ls", help="list the files of a kind")
