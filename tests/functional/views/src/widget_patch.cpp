@@ -609,12 +609,22 @@ ZTEST(widget_patch, test_what_an_in_place_change_a_widget_rebuild_and_a_screen_r
         screen_configuration->AddWidget(Bar(id, static_cast<int32_t>(id), static_cast<int32_t>(id) % 8));
     Scene scene(screen_configuration);
 
-    const auto measure = [](auto&& work) {
-        const auto start = std::chrono::steady_clock::now();
+    // native_sim's clock stands still while code runs, so there the host's clock times it. Elsewhere the kernel's
+    // does: the std::chrono clocks of the Zephyr SDK's libstdc++ need gettimeofday, which picolibc does not have.
+    const auto now_us = [] -> int64_t {
+#ifdef CONFIG_ARCH_POSIX
+        const auto since_epoch = std::chrono::steady_clock::now().time_since_epoch();
+        return std::chrono::duration_cast<std::chrono::microseconds>(since_epoch).count();
+#else
+        return static_cast<int64_t>(k_ticks_to_us_floor64(k_uptime_ticks()));
+#endif
+    };
+    const auto measure = [&now_us](auto&& work) {
+        const int64_t start = now_us();
         for(int round = 0; round < ROUNDS; ++round)
             work(round);
 
-        return std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start).count() / ROUNDS;
+        return static_cast<double>(now_us() - start) / ROUNDS;
     };
 
     const auto in_place = measure([&scene](int round) {
