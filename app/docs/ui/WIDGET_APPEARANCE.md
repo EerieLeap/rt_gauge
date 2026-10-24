@@ -186,6 +186,62 @@ and phase synchronization are not supported. Whole-layer rotation and
 fade require temporary composition buffers; hardware capacity and frame rate
 must be measured for the intended widget sizes and simultaneous effects.
 
+## Fonts
+
+Text widgets draw with their theme's compiled font unless a TrueType font is
+configured. Two properties select one:
+
+| Id | Property | Value | Default |
+| --- | --- | --- | --- |
+| 49 | `FONT_FILE_PATH` | String: the name of a file in the `fonts` asset kind | Empty: the theme font |
+| 50 | `FONT_SIZE_PX` | Integer em size in pixels, 8 through 256 | 20; `DigitalIndicator` 120 |
+
+Label icon (`LabelIcon`), digital indicator, button, and setting indicator take
+both. The size default applies when only `FONT_FILE_PATH` is set. `FONT_SIZE_PX`
+without a file is accepted and ignored: a compiled theme font has its own size.
+A missing file, a file that is not TrueType, or an out-of-range size leaves the
+theme font in place (logged). Only `.ttf` is supported, through Tiny TTF; bitmap
+(binfont) fonts are not.
+
+Upload the file (`assets put fonts NAME FILE`) under a flat name, `.ttf`, at most 256 KiB
+(`EERIE_LEAP_UI_FONT_MAX_SIZE`), then set `FONT_FILE_PATH` to that name:
+
+```sh
+tools/smp_can_client.py <transport> assets put fonts Rubik-Subset.ttf ./Rubik-Subset.ttf
+```
+
+Subset the font before uploading, with fontTools `pyftsubset`, to ASCII or to
+the glyphs the widget shows (for a readout, `0-9 . - +`). Rubik Medium is
+208 KB whole; a subset is a small fraction of that. This cuts the RAM each
+file takes, and
+since fontTools rewrites every table, it also normalizes what reaches the
+unit.
+
+A font applies when the widget is built: when a configuration is applied or an
+editor patch changes either property, which rebuilds the widget. It is not a
+live binding. Uploading a new file under the same name reaches widgets built
+afterwards; widgets already drawn keep the old one. A glyph missing from the
+font draws LVGL's placeholder box; there is no fallback to a theme font.
+
+### Cost
+
+- The file's bytes sit in external RAM, once per file, shared by all its sizes.
+- Each file and size has one glyph cache in the LVGL heap, shared by every
+  widget using it. It holds only glyphs that were drawn.
+- Nothing is loaded per frame. A file is read when a widget is built, and a
+  glyph is rasterized the first time it is drawn at a size; after that it is
+  copied from the cache.
+- An overlay is built when it opens and destroyed when it closes, so a font only
+  an overlay uses is read and rasterized again at each opening.
+- The cache holds at most `EERIE_LEAP_UI_FONT_GLYPH_CACHE_SIZE` (128 KiB) of
+  glyphs per file and size, never fewer than 16 glyphs. If a font at one size
+  shows more distinct glyphs on screen than that, glyphs are evicted and
+  rasterized again on every frame. At 120 px the limit is 18 glyphs by default.
+
+`transform_scale` does not size text: a scaled label renders whole into an
+off-screen ARGB layer, and that layer is resampled on every redraw (memory,
+CPU and blur). Use `FONT_SIZE_PX`.
+
 ## Live bindings
 
 Color bindings publish RGBA text, including an empty string for reset. For
@@ -281,8 +337,9 @@ are never replayed. Inactive controls cannot publish, navigate, or change values
 
 Persisted IDs 0-33 and CBOR version 1/layout are unchanged. Opacity is ID 34;
 the six colors are IDs 35-40; animation type, requested active, and duration are
-IDs 41-43. Old configurations load without enabling animations. Older firmware
-rejects these new IDs; this is not downgrade compatibility. Color
+IDs 41-43; `FONT_FILE_PATH` and `FONT_SIZE_PX` are IDs 49 and 50. Old
+configurations load without enabling animations. Older firmware rejects these
+new IDs; this is not downgrade compatibility. Color
 membership/cache indexing uses an explicit list, not consecutive enum IDs.
 
 Migrate old icon configurations that used `IS_ACTIVE=false` to hide:
