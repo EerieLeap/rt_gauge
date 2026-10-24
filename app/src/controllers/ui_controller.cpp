@@ -246,6 +246,9 @@ UiController::~UiController() {
 
     if(animations_registered_)
         assets_manager_->Unregister(AssetKind::ANIMATIONS);
+
+    if(fonts_registered_)
+        assets_manager_->Unregister(AssetKind::FONTS);
 }
 
 int UiController::Initialize() {
@@ -324,7 +327,9 @@ int UiController::Initialize() {
         ui_render_work_queue_thread_.reset();
     }
 
-    widget_context_ = WidgetContext{ .assets_manager = assets_manager_, .navigation_service = navigation_service_ };
+    widget_context_ = WidgetContext{
+        .assets_manager = assets_manager_, .font_cache = font_cache_, .navigation_service = navigation_service_
+    };
 
     if(Configure(ui_configuration_manager_->Get()) != 0)
         LOG_ERR("Failed to configure the UI from the stored configuration.");
@@ -364,6 +369,7 @@ int UiController::Initialize() {
 void UiController::RegisterAssets() {
     images_store_ = std::make_shared<AssetStore>(fs_service_, UI_IMAGES_DIR);
     animations_store_ = std::make_shared<AssetStore>(fs_service_, UI_ANIMATIONS_DIR);
+    fonts_store_ = std::make_shared<AssetStore>(fs_service_, UI_FONTS_DIR);
 
     // Widgets keep RAM copies of what they load, so a client may overwrite or delete a file a widget
     // shows: nothing is ever in use, and the change appears at the widget's next render.
@@ -392,6 +398,20 @@ void UiController::RegisterAssets() {
     );
     if(!animations_registered_)
         LOG_ERR("Failed to register the animation assets, the registry has them already.");
+
+    // A font keeps its own RAM copy, like the others.
+    fonts_registered_ = assets_manager_->Register(
+        AssetProvider{ .kind = AssetKind::FONTS,
+            .name = "fonts",
+            .store = fonts_store_,
+            .extensions = FONT_EXTENSIONS,
+            .access = ACCESS,
+            .max_size = CONFIG_EERIE_LEAP_UI_FONT_MAX_SIZE }
+    );
+    if(!fonts_registered_)
+        LOG_ERR("Failed to register the font assets, the registry has them already.");
+
+    font_cache_ = std::make_shared<FontCache>(assets_manager_);
 }
 
 void UiController::ConfigureGestures() {

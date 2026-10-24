@@ -3,15 +3,15 @@
 #include <lvgl.h>
 
 #include "domain/ui_domain/models/icon_type.h"
-#include "subsys/assets/assets_manager.h"
 
 #include "views/i_renderable.h"
+#include "views/widgets/widget_context.h"
 #include "views/widgets/widget_property_store.h"
 
 namespace eerie_leap::views::widgets::basic::icons {
 
 using eerie_leap::domain::ui_domain::models::IconType;
-using eerie_leap::subsys::assets::AssetsManager;
+using eerie_leap::views::widgets::WidgetContext;
 using eerie_leap::views::widgets::WidgetPropertyStore;
 
 using eerie_leap::views::IRenderable;
@@ -21,7 +21,7 @@ class IIcon : public virtual IRenderable {
 public:
     ~IIcon() override = default;
 
-    virtual void SetAssetsManager(std::shared_ptr<AssetsManager> ui_assets_manager) = 0;
+    virtual void SetContext(WidgetContext context) = 0;
 
     virtual IconType GetIconType() const = 0;
 

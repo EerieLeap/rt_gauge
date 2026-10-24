@@ -36,6 +36,7 @@
 #include "views/overlay_host.h"
 #include "views/screens/i_screen.h"
 #include "views/ui_highlight.h"
+#include "views/utilities/font_cache.h"
 #include "views/utilitites/frame.h"
 #include "views/widgets/widget_context.h"
 
@@ -71,6 +72,7 @@ using eerie_leap::views::MainView;
 using eerie_leap::views::OverlayHost;
 using eerie_leap::views::UiHighlight;
 using eerie_leap::views::screens::IScreen;
+using eerie_leap::views::utilities::FontCache;
 using eerie_leap::views::utilitites::Frame;
 using eerie_leap::views::widgets::WidgetContext;
 
@@ -81,10 +83,12 @@ private:
     static constexpr const char* UI_ASSETS_DIR = "ui_assets";
     static constexpr const char* UI_IMAGES_DIR = "ui_assets/images";
     static constexpr const char* UI_ANIMATIONS_DIR = "ui_assets/animations";
+    static constexpr const char* UI_FONTS_DIR = "ui_assets/fonts";
 
     // What a client may upload as each kind. A provider keeps only a span of its extensions.
     static constexpr std::array<std::string_view, 1> IMAGE_EXTENSIONS{ ".bin" };
     static constexpr std::array<std::string_view, 1> ANIMATION_EXTENSIONS{ ".json" };
+    static constexpr std::array<std::string_view, 1> FONT_EXTENSIONS{ ".ttf" };
 
     // The first render of a screen group builds its whole LVGL tree, so it gets
     // a stack of its own instead of running on the event bus worker.
@@ -101,9 +105,13 @@ private:
     std::shared_ptr<AssetsManager> assets_manager_;
     std::shared_ptr<AssetStore> images_store_;
     std::shared_ptr<AssetStore> animations_store_;
+    std::shared_ptr<AssetStore> fonts_store_;
     // Whether the registry took the kind from this controller, so only that is taken back.
     bool images_registered_ = false;
     bool animations_registered_ = false;
+    bool fonts_registered_ = false;
+    // Finds the fonts kind through the registry, so it works whichever controller registered it.
+    std::shared_ptr<FontCache> font_cache_;
     std::shared_ptr<NavigationService> navigation_service_;
 
     // Declared before ui_input_service_, which detaches from the view's LVGL object on teardown.
@@ -172,7 +180,8 @@ private:
     // widget alone, the first screen of the overlay up and then of the group navigation stands on that has it.
     std::optional<uint32_t> FindHighlightScreen(std::optional<uint32_t> screen, std::optional<uint32_t> widget) const;
 
-    // Offers ui_assets/images and ui_assets/animations to clients as the image and animation kinds.
+    // Offers ui_assets/images, ui_assets/animations and ui_assets/fonts to clients as the image, animation and font
+    // kinds.
     void RegisterAssets();
 
     std::shared_ptr<IScreen>
@@ -211,7 +220,7 @@ private:
 
 public:
     /**
-     * @param assets_manager The registry the image and animation kinds are registered in on
+     * @param assets_manager The registry the image, animation and font kinds are registered in on
      *        Initialize() and removed from on destruction; a registry of its own when null.
      */
     UiController(

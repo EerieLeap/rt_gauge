@@ -279,8 +279,8 @@ void CheckDemoAssets(const AssetsManager& assets, const IFsService& fs_service) 
 #ifdef CONFIG_EERIE_LEAP_UI_DEMO_CONFIGURATION
 ZTEST_SUITE(ui_controller, NULL, Setup, Reset, Reset, Teardown);
 
-// What a client sees of the gauge's UI assets (the SMP assets group) is these two kinds.
-ZTEST(ui_controller, test_the_controller_registers_the_image_and_animation_kinds) {
+// What a client sees of the gauge's UI assets (the SMP assets group) is these kinds.
+ZTEST(ui_controller, test_the_controller_registers_the_image_animation_and_font_kinds) {
     CheckProvider(
         Assets(), AssetKind::IMAGES, "images", "ui_assets/images", ".bin", CONFIG_EERIE_LEAP_UI_IMAGE_MAX_SIZE
     );
@@ -288,10 +288,15 @@ ZTEST(ui_controller, test_the_controller_registers_the_image_and_animation_kinds
         Assets(), AssetKind::ANIMATIONS, "animations", "ui_assets/animations", ".json",
         CONFIG_EERIE_LEAP_UI_ANIMATION_MAX_SIZE
     );
+    CheckProvider(Assets(), AssetKind::FONTS, "fonts", "ui_assets/fonts", ".ttf", CONFIG_EERIE_LEAP_UI_FONT_MAX_SIZE);
 
-    zassert_equal(Assets().GetProviders().size(), 2U, "Expected no kind but those of the UI.");
+    zassert_equal(Assets().GetProviders().size(), 3U, "Expected no kind but those of the UI.");
     zassert_not_equal(
         Assets().Find(AssetKind::IMAGES)->store.get(), Assets().Find(AssetKind::ANIMATIONS)->store.get(),
+        "Expected a store for each kind."
+    );
+    zassert_not_equal(
+        Assets().Find(AssetKind::FONTS)->store.get(), Assets().Find(AssetKind::IMAGES)->store.get(),
         "Expected a store for each kind."
     );
 }
@@ -468,6 +473,9 @@ ZTEST(ui_controller_assets, test_destroying_the_controller_unregisters_its_asset
         *assets_manager, AssetKind::ANIMATIONS, "animations", "ui_assets/animations", ".json",
         CONFIG_EERIE_LEAP_UI_ANIMATION_MAX_SIZE
     );
+    CheckProvider(
+        *assets_manager, AssetKind::FONTS, "fonts", "ui_assets/fonts", ".ttf", CONFIG_EERIE_LEAP_UI_FONT_MAX_SIZE
+    );
 
     controller.reset();
 
@@ -475,6 +483,7 @@ ZTEST(ui_controller_assets, test_destroying_the_controller_unregisters_its_asset
     zassert_is_null(
         assets_manager->Find(AssetKind::ANIMATIONS).get(), "Expected the animations to go with the controller."
     );
+    zassert_is_null(assets_manager->Find(AssetKind::FONTS).get(), "Expected the fonts to go with the controller.");
     zassert_true(assets_manager->GetProviders().empty());
 }
 

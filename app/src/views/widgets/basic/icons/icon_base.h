@@ -19,8 +19,8 @@ protected:
 
     bool IsProcessingEligible() const;
 
-    // The unit's asset registry, in which an icon looks its files up by kind.
-    std::shared_ptr<AssetsManager> ui_assets_manager_ = nullptr;
+    // What the owning widget was given, where an icon finds its files and fonts.
+    WidgetContext context_;
 
 public:
     explicit IconBase(std::shared_ptr<Frame> parent);
@@ -29,7 +29,7 @@ public:
     // Factory metadata: declarations must be available without creating LVGL objects.
     static void RegisterProperties(WidgetPropertyStore&) {}
 
-    void SetAssetsManager(std::shared_ptr<AssetsManager> ui_assets_manager) override;
+    void SetContext(WidgetContext context) override;
 
     void SetProcessingEnabled(bool enabled) override;
     void Configure(std::shared_ptr<WidgetPropertyStore> properties) override;

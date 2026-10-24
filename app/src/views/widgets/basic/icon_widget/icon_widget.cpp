@@ -84,7 +84,7 @@ lv_obj_t* IconWidget::Create() {
     }
 
     icon_ = IconFactory::GetInstance().Create(icon_type_, properties_, content_frame_);
-    icon_->SetAssetsManager(context_.assets_manager);
+    icon_->SetContext(context_);
     if(icon_->Render() != 0)
         return nullptr;
 

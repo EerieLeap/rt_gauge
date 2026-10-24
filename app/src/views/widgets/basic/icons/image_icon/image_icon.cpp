@@ -84,10 +84,10 @@ lv_obj_t* ImageIcon::Create(lv_obj_t* parent) {
     if(image_width_ <= 0 || image_height_ <= 0)
         return nullptr;
 
-    if(ui_assets_manager_ == nullptr)
+    if(context_.assets_manager == nullptr)
         return nullptr;
 
-    const auto provider = ui_assets_manager_->Find(AssetKind::IMAGES);
+    const auto provider = context_.assets_manager->Find(AssetKind::IMAGES);
     if(provider == nullptr || provider->store == nullptr)
         return nullptr;
 

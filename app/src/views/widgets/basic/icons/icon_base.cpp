@@ -18,8 +18,8 @@ IconBase::IconBase(std::shared_ptr<Frame> parent) :
     );
 }
 
-void IconBase::SetAssetsManager(std::shared_ptr<AssetsManager> ui_assets_manager) {
-    ui_assets_manager_ = std::move(ui_assets_manager);
+void IconBase::SetContext(WidgetContext context) {
+    context_ = std::move(context);
 }
 
 void IconBase::SetProcessingEnabled(bool enabled) {
