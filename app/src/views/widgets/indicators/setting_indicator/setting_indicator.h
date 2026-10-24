@@ -3,9 +3,11 @@
 #include <cstdint>
 #include <memory>
 #include <memory_resource>
+#include <optional>
 
 #include <lvgl.h>
 
+#include "views/utilities/lvgl_font.h"
 #include "views/widgets/setting_widget_base.h"
 
 namespace eerie_leap::views::widgets::indicators {
@@ -19,6 +21,8 @@ private:
     static constexpr int MAX_VALUE_PRECISION = 9;
 
     lv_obj_t* lv_label_ = nullptr;
+    // The configured font; the theme's when empty.
+    std::optional<eerie_leap::views::utilities::LvglFont> font_;
 
     std::pmr::string label_;
     std::pmr::string unit_;

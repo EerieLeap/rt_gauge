@@ -1,7 +1,10 @@
 #pragma once
 
+#include <optional>
+
 #include <lvgl.h>
 
+#include "views/utilities/lvgl_font.h"
 #include "views/widgets/indicators/indicator_base.h"
 
 namespace eerie_leap::views::widgets::indicators {
@@ -10,6 +13,8 @@ class DigitalIndicator : public IndicatorBase {
 private:
     lv_obj_t* lv_label_{};
     int value_precision_{};
+    // The configured font; the theme's when empty.
+    std::optional<eerie_leap::views::utilities::LvglFont> font_;
 
     void UpdateIndicator(float value) override;
     lv_obj_t* Create(const std::shared_ptr<Frame>& parent);

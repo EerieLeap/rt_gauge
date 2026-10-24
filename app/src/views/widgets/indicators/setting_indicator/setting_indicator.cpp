@@ -5,6 +5,8 @@
 
 #include "domain/ui_domain/models/widget_property.h"
 
+#include "views/widgets/text_font.h"
+
 #include "setting_indicator.h"
 
 namespace eerie_leap::views::widgets::indicators {
@@ -25,12 +27,13 @@ void SettingIndicator::RegisterProperties(WidgetPropertyStore& store) const {
     store.Register(WidgetPropertyType::LABEL, ConfigValue{ std::pmr::string{} }, PropertyChangeEffect::Rebuild);
     store.Register(WidgetPropertyType::UNIT, ConfigValue{ std::pmr::string{} }, PropertyChangeEffect::Rebuild);
     store.Register(WidgetPropertyType::VALUE_PRECISION, ConfigValue{ 0 }, PropertyChangeEffect::Rebuild);
+    TextFont::RegisterProperties(store, 20);
 }
 
 int SettingIndicator::ApplyTheme(const ITheme& theme) {
     const auto primary = properties_->ResolveColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE, theme.GetPrimaryColor());
 
-    lv_obj_set_style_text_font(lv_label_, theme.GetPrimaryFont().ToLvFont(), LV_PART_MAIN);
+    lv_obj_set_style_text_font(lv_label_, font_.value_or(theme.GetPrimaryFont()).ToLvFont(), LV_PART_MAIN);
     lv_obj_set_style_text_color(lv_label_, primary.ToLvColor(), LV_PART_MAIN);
     lv_obj_set_style_text_opa(lv_label_, primary.ToLvOpa(), LV_PART_MAIN);
 
@@ -64,7 +67,11 @@ void SettingIndicator::OnPropertyChanged(WidgetPropertyType type, const ConfigVa
 }
 
 int SettingIndicator::DoRender() {
+    font_ = TextFont::Acquire(*properties_, context_.font_cache);
+
     lv_label_ = lv_label_create(content_frame_->GetObject());
+    if(font_)
+        font_->BindTo(lv_label_);
 
     lv_obj_set_width(lv_label_, LV_SIZE_CONTENT);
     lv_obj_set_height(lv_label_, LV_SIZE_CONTENT);

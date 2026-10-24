@@ -4,6 +4,8 @@
 
 #include "domain/ui_domain/models/widget_property.h"
 
+#include "views/widgets/text_font.h"
+
 #include "button_control.h"
 
 namespace eerie_leap::views::widgets::controls {
@@ -30,6 +32,7 @@ void ButtonControl::RegisterProperties(WidgetPropertyStore& store) const {
     store.RegisterColor(WidgetPropertyType::COLOR_SECONDARY_INACTIVE);
 
     store.Register(WidgetPropertyType::LABEL, ConfigValue{ std::pmr::string{} }, PropertyChangeEffect::Rebuild);
+    TextFont::RegisterProperties(store, 20);
     store.Register(WidgetPropertyType::TARGET_SCREEN_GROUP, ConfigValue{ NO_TARGET }, PropertyChangeEffect::None);
     store.Register(
         WidgetPropertyType::NAVIGATION_INTENT, ConfigValue{ static_cast<int>(NavigationIntent::None) },
@@ -65,7 +68,7 @@ int ButtonControl::ApplyTheme(const ITheme& theme) {
         );
     }
 
-    lv_obj_set_style_text_font(lv_label_, theme.GetPrimaryFont().ToLvFont(), LV_PART_MAIN);
+    lv_obj_set_style_text_font(lv_label_, font_.value_or(theme.GetPrimaryFont()).ToLvFont(), LV_PART_MAIN);
     lv_obj_set_state(lv_label_, LV_STATE_PRESSED, lv_obj_has_state(lv_button_, LV_STATE_PRESSED));
 
     return 0;
@@ -99,12 +102,16 @@ void ButtonControl::OnPropertyChanged(WidgetPropertyType type, const ConfigValue
 }
 
 int ButtonControl::DoRender() {
+    font_ = TextFont::Acquire(*properties_, context_.font_cache);
+
     lv_button_ = lv_button_create(content_frame_->GetObject());
 
     lv_obj_set_size(lv_button_, lv_pct(100), lv_pct(100));
     lv_obj_center(lv_button_);
 
     lv_label_ = lv_label_create(lv_button_);
+    if(font_)
+        font_->BindTo(lv_label_);
     lv_label_set_text(lv_label_, label_.c_str());
     lv_obj_center(lv_label_);
 

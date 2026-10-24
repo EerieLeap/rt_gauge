@@ -101,6 +101,34 @@ ZTEST(widget_supported_properties, test_a_dial_and_its_needle_report_separate_pr
     }
 }
 
+// Every widget that draws text takes a font; the others do not.
+ZTEST(widget_supported_properties, test_text_widgets_report_font_properties) {
+    using eerie_leap::domain::ui_domain::models::IconType;
+    using eerie_leap::domain::ui_domain::models::WidgetType;
+    using eerie_leap::views::widgets::WidgetFactory;
+    for(auto type : { WidgetType::IndicatorDigital, WidgetType::IndicatorSetting, WidgetType::ControlButton,
+            WidgetType::IndicatorBar, WidgetType::IndicatorDial, WidgetType::ControlSlider }) {
+        auto widget = WidgetFactory::GetInstance().CreateWidget(type, 1, MakeRoot(), WidgetContext{});
+        const auto supported = widget->GetSupportedProperties();
+        const bool draws_text = type == WidgetType::IndicatorDigital
+            || type == WidgetType::IndicatorSetting
+            || type == WidgetType::ControlButton;
+        zassert_equal(
+            Supports(supported, WidgetPropertyType::FONT_FILE_PATH), draws_text, "widget %d", static_cast<int>(type)
+        );
+        zassert_equal(
+            Supports(supported, WidgetPropertyType::FONT_SIZE_PX), draws_text, "widget %d", static_cast<int>(type)
+        );
+    }
+
+    for(auto type : { IconType::Label, IconType::Rectangle, IconType::Image }) {
+        eerie_leap::views::widgets::basic::IconWidget icon(1, MakeRoot(), WidgetContext{}, type);
+        const auto supported = icon.GetSupportedProperties();
+        zassert_equal(Supports(supported, WidgetPropertyType::FONT_FILE_PATH), type == IconType::Label);
+        zassert_equal(Supports(supported, WidgetPropertyType::FONT_SIZE_PX), type == IconType::Label);
+    }
+}
+
 ZTEST(widget_supported_properties, test_every_reported_property_is_a_valid_type) {
     DialIndicator dial(1, MakeRoot(), WidgetContext{});
 

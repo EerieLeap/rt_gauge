@@ -1,9 +1,11 @@
 #pragma once
 
+#include <optional>
 #include <string>
 
 #include <lvgl.h>
 
+#include "views/utilities/lvgl_font.h"
 #include "views/widgets/basic/icons/icon_base.h"
 
 namespace eerie_leap::views::widgets::basic::icons {
@@ -12,6 +14,8 @@ class LabelIcon : public IconBase {
 private:
     std::pmr::string label_;
     lv_obj_t* lv_label_{};
+    // The configured font; the theme's when empty.
+    std::optional<eerie_leap::views::utilities::LvglFont> font_;
 
     lv_obj_t* Create(lv_obj_t* parent);
 

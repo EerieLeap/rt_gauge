@@ -1,5 +1,6 @@
 #include "domain/ui_domain/models/widget_property.h"
 #include "views/themes/theme_manager.h"
+#include "views/widgets/text_font.h"
 
 #include "label_icon.h"
 
@@ -19,6 +20,7 @@ void LabelIcon::RegisterProperties(WidgetPropertyStore& store) {
     store.RegisterColor(WidgetPropertyType::COLOR_SECONDARY_ACTIVE);
 
     store.Register(WidgetPropertyType::LABEL, ConfigValue{ std::pmr::string{} }, PropertyChangeEffect::Rebuild);
+    TextFont::RegisterProperties(store, 20);
 }
 
 int LabelIcon::ApplyTheme(const ITheme& theme) {
@@ -32,7 +34,7 @@ int LabelIcon::ApplyTheme(const ITheme& theme) {
 
     lv_obj_set_style_text_color(lv_label_, secondary.ToLvColor(), LV_PART_MAIN);
     lv_obj_set_style_text_opa(lv_label_, secondary.ToLvOpa(), LV_PART_MAIN);
-    lv_obj_set_style_text_font(lv_label_, theme.GetPrimaryFont().ToLvFont(), LV_PART_MAIN);
+    lv_obj_set_style_text_font(lv_label_, font_.value_or(theme.GetPrimaryFont()).ToLvFont(), LV_PART_MAIN);
 
     lv_obj_update_layout(lv_label_);
 
@@ -56,7 +58,11 @@ int LabelIcon::ApplyTheme(const ITheme& theme) {
 }
 
 int LabelIcon::DoRender() {
+    font_ = TextFont::Acquire(*properties_, context_.font_cache);
+
     auto* lv_icon = Create(parent_->GetObject());
+    if(font_)
+        font_->BindTo(lv_label_);
     container_ = std::make_shared<Frame>(Frame::Create(lv_icon).Build());
 
     return 0;

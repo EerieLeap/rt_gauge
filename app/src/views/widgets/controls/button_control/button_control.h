@@ -10,6 +10,7 @@
 
 #include "domain/ui_domain/models/navigation_intent.h"
 
+#include "views/utilities/lvgl_font.h"
 #include "views/widgets/controls/control_base.h"
 
 namespace eerie_leap::views::widgets::controls {
@@ -20,6 +21,8 @@ class ButtonControl : public ControlBase {
 private:
     lv_obj_t* lv_button_ = nullptr;
     lv_obj_t* lv_label_ = nullptr;
+    // The configured font; the theme's when empty.
+    std::optional<eerie_leap::views::utilities::LvglFont> font_;
 
     std::pmr::string label_;
     NavigationIntent intent_ = NavigationIntent::None;

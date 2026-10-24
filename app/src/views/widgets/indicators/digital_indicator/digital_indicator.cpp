@@ -1,6 +1,7 @@
 #include "domain/ui_domain/models/widget_property.h"
 
 #include "views/themes/theme_manager.h"
+#include "views/widgets/text_font.h"
 
 #include "digital_indicator.h"
 
@@ -15,7 +16,11 @@ DigitalIndicator::DigitalIndicator(uint32_t id, std::shared_ptr<Frame> parent, W
     IndicatorBase(id, std::move(parent), std::move(context)) {}
 
 int DigitalIndicator::DoRender() {
+    font_ = TextFont::Acquire(*properties_, context_.font_cache);
+
     auto* lv_obj = Create(content_frame_);
+    if(font_)
+        font_->BindTo(lv_label_);
     const auto child = std::make_shared<Frame>(Frame::Create(lv_obj).Build());
     content_frame_->SetChild(child);
 
@@ -28,12 +33,13 @@ void DigitalIndicator::RegisterProperties(WidgetPropertyStore& store) const {
     store.RegisterColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE);
 
     store.Register(WidgetPropertyType::VALUE_PRECISION, ConfigValue{ 0 }, PropertyChangeEffect::Rebuild);
+    TextFont::RegisterProperties(store, 120);
 }
 
 int DigitalIndicator::ApplyTheme(const ITheme& theme) {
     const auto primary = properties_->ResolveColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE, theme.GetPrimaryColor());
 
-    lv_obj_set_style_text_font(lv_label_, theme.GetPrimaryFontLarge().ToLvFont(), LV_PART_MAIN);
+    lv_obj_set_style_text_font(lv_label_, font_.value_or(theme.GetPrimaryFontLarge()).ToLvFont(), LV_PART_MAIN);
     lv_obj_set_style_text_color(lv_label_, primary.ToLvColor(), LV_PART_MAIN);
     lv_obj_set_style_text_opa(lv_label_, primary.ToLvOpa(), LV_PART_MAIN);
 
