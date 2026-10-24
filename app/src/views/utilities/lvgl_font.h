@@ -1,28 +1,27 @@
 #pragma once
 
-#include <cstdint>
-#include <string>
-#include <utility>
+#include <memory>
 
 #include <lvgl.h>
 
 namespace eerie_leap::views::utilities {
 
-struct LvglFont {
+// A font as widgets hand it to LVGL: a compiled font, or one FontCache loaded, which it keeps alive.
+class LvglFont {
 private:
-    const lv_font_t* lv_font_;
+    std::shared_ptr<const lv_font_t> lv_font_;
 
 public:
-    const std::string name;
+    // A compiled font: static, so nothing is owned or counted.
+    explicit LvglFont(const lv_font_t* font);
+    // A loaded font, freed by its deleter when the last copy goes.
+    explicit LvglFont(std::shared_ptr<const lv_font_t> font);
 
-    // The size is part of a font's description in the themes, but LVGL's font already carries it.
-    LvglFont(std::string name, const lv_font_t* font, uint32_t /*size*/) :
-        lv_font_(font),
-        name(std::move(name)) {}
+    [[nodiscard]] const lv_font_t* ToLvFont() const;
 
-    [[nodiscard]] const lv_font_t* ToLvFont() const {
-        return lv_font_;
-    }
+    // Keeps the font alive until @p object is deleted, whatever order its owner releases things in. No effect for a
+    // compiled font.
+    void BindTo(lv_obj_t* object) const;
 };
 
 } // namespace eerie_leap::views::utilities

@@ -1,16 +1,30 @@
 #include <array>
+#include <memory>
 
 #include <zephyr/ztest.h>
 
+#include "domain/ui_domain/lvgl_lock.h"
 #include "utilities/type/color.h"
 #include "views/utilities/lvgl_color.h"
 #include "views/utilities/lvgl_font.h"
 
+#include "views_test_support.h"
+
+using eerie_leap::domain::ui_domain::ScopedLvglLock;
 using eerie_leap::utilities::type::Color;
 using eerie_leap::views::utilities::LvglColor;
 using eerie_leap::views::utilities::LvglFont;
 
-ZTEST_SUITE(lvgl_types, NULL, NULL, NULL, NULL, NULL);
+namespace {
+
+void* Setup() {
+    views_test::EnsureTestDisplay();
+    return nullptr;
+}
+
+} // namespace
+
+ZTEST_SUITE(lvgl_types, NULL, Setup, NULL, views_test::CleanTestDisplay, NULL);
 
 ZTEST(lvgl_types, test_parsed_property_color_converts_to_lvgl_with_explicit_alpha) {
     constexpr std::array VALUES{ "#12345600", "#12345680", "#123456FF" };
@@ -46,9 +60,40 @@ ZTEST(lvgl_types, test_lvgl_color_preserves_existing_rgb_constructors) {
     }
 }
 
-ZTEST(lvgl_types, test_lvgl_font_preserves_name_and_font_pointer) {
-    const lv_font_t source{};
-    LvglFont font("Test", &source, 20);
-    zassert_true(font.name == "Test");
+ZTEST(lvgl_types, test_compiled_lvgl_font_returns_its_pointer_and_bind_adds_no_event) {
+    static const lv_font_t source{};
+    LvglFont font(&source);
     zassert_equal(font.ToLvFont(), &source);
+
+    ScopedLvglLock lock;
+    lv_obj_t* object = lv_obj_create(lv_screen_active());
+    const uint32_t events = lv_obj_get_event_count(object);
+    font.BindTo(object);
+    zassert_equal(lv_obj_get_event_count(object), events);
+    lv_obj_delete(object);
+}
+
+ZTEST(lvgl_types, test_loaded_lvgl_font_lives_until_the_bound_object_is_deleted) {
+    static const lv_font_t source{};
+    bool freed = false;
+    lv_obj_t* object = nullptr;
+    {
+        ScopedLvglLock lock;
+        object = lv_obj_create(lv_screen_active());
+        std::shared_ptr<const lv_font_t> loaded(&source, [&freed](const lv_font_t*) {
+            freed = true;
+        });
+        LvglFont font(std::move(loaded));
+        zassert_equal(font.ToLvFont(), &source);
+
+        const uint32_t events = lv_obj_get_event_count(object);
+        font.BindTo(object);
+        zassert_equal(lv_obj_get_event_count(object), events + 1);
+    }
+
+    zassert_false(freed, "the bound object still holds the font");
+
+    ScopedLvglLock lock;
+    lv_obj_delete(object);
+    zassert_true(freed, "deleting the object released the last reference");
 }

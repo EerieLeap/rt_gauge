@@ -23,7 +23,6 @@ public:
     [[nodiscard]] virtual LvglColor GetErrorColor() const = 0;
 
     [[nodiscard]] virtual LvglFont GetPrimaryFont() const = 0;
-    [[nodiscard]] virtual LvglFont GetSecondaryFont() const = 0;
     [[nodiscard]] virtual LvglFont GetPrimaryFontLarge() const = 0;
 };
 

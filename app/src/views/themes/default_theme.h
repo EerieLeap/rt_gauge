@@ -37,15 +37,11 @@ public:
     }
 
     LvglFont GetPrimaryFont() const override {
-        return { "Montserrat", &lv_font_rubik_medium_20, 20 };
-    }
-
-    LvglFont GetSecondaryFont() const override {
-        return { "Montserrat", &lv_font_montserrat_20, 20 };
+        return LvglFont{ &lv_font_rubik_medium_20 };
     }
 
     LvglFont GetPrimaryFontLarge() const override {
-        return { "Inconsolata", &lv_font_inconsolata_bold_120, 120 };
+        return LvglFont{ &lv_font_inconsolata_bold_120 };
     }
 };
 
