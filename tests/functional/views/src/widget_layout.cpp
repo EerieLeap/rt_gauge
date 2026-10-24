@@ -24,7 +24,6 @@
 #include "event_bus/event_channels.h"
 #include "subsys/assets/asset_kind.h"
 #include "subsys/event_bus/event_channel_id.h"
-#include "views/assets/animations/animations_register.h"
 #include "views/widgets/property_value_conversion.h"
 
 #include "views/screens/widget_assembly.h"
@@ -32,6 +31,7 @@
 #include "views/utilitites/grid_layout.h"
 #include "views/widgets/widget_factory.h"
 
+#include "lottie_spinner_json.h"
 #include "views_test_support.h"
 
 using namespace eerie_memory;
@@ -451,9 +451,7 @@ ZTEST(widget_layout, test_an_arc_icon_places_its_icon_on_the_circle_of_its_new_s
 // A Lottie canvas is as large as the box, so it is drawn again at the new size.
 ZTEST(widget_layout, test_a_lottie_widget_draws_its_animation_at_its_new_size) {
     auto store = views_test::MakeAssetStore("widget-layout-lottie");
-    zassert_true(store->Save(
-        "spinner.json", views_test::TextBytes(eerie_leap::views::assets::animations::UI_LOTTIE_SPINNER_JSON)
-    ));
+    zassert_true(store->Save("spinner.json", views_test::TextBytes(views_test::LOTTIE_SPINNER_JSON)));
     const WidgetContext context{ .assets_manager = views_test::MakeAssetsManager(
                                      eerie_leap::subsys::assets::AssetKind::ANIMATIONS, std::move(store)
                                  ) };

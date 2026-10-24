@@ -17,7 +17,6 @@
 #include "subsys/assets/asset_kind.h"
 #include "subsys/assets/assets_manager.h"
 #include "subsys/event_bus/event_channel_id.h"
-#include "views/assets/animations/animations_register.h"
 #include "views/screens/screen.h"
 #include "views/themes/default_theme.h"
 #include "views/widgets/basic/icon_widget/icon_widget.h"
@@ -25,6 +24,7 @@
 #include "views/widgets/indicators/dial_indicator/dial_indicator.h"
 #include "views/widgets/widget_factory.h"
 
+#include "lottie_spinner_json.h"
 #include "views_test_support.h"
 
 using namespace eerie_leap::domain::ui_domain::models;
@@ -200,9 +200,8 @@ WidgetContext ImageContext(
 }
 
 WidgetContext LottieContext(WidgetConfiguration& configuration) {
-    using eerie_leap::views::assets::animations::UI_LOTTIE_SPINNER_JSON;
     auto store = views_test::MakeAssetStore("icon-lifecycle");
-    zassert_true(store->Save("spinner.json", views_test::TextBytes(UI_LOTTIE_SPINNER_JSON)));
+    zassert_true(store->Save("spinner.json", views_test::TextBytes(views_test::LOTTIE_SPINNER_JSON)));
     configuration.properties[WidgetPropertyType::FILE_PATH] = std::pmr::string("spinner.json");
     return WidgetContext{ .assets_manager = views_test::MakeAssetsManager(AssetKind::ANIMATIONS, std::move(store)) };
 }

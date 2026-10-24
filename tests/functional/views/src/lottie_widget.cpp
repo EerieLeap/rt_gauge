@@ -11,10 +11,10 @@
 #include "event_bus/event_channels.h"
 #include "subsys/assets/asset_kind.h"
 #include "subsys/assets/assets_manager.h"
-#include "views/assets/animations/animations_register.h"
 #include "views/widgets/basic/lottie_widget/lottie_widget.h"
 #include "views/widgets/widget_factory.h"
 
+#include "lottie_spinner_json.h"
 #include "views_test_support.h"
 
 using namespace eerie_leap::domain::ui_domain::models;
@@ -23,7 +23,6 @@ using namespace eerie_leap::views::widgets::basic;
 using eerie_leap::domain::ui_domain::ScopedLvglLock;
 using eerie_leap::subsys::assets::AssetKind;
 using eerie_leap::subsys::assets::AssetsManager;
-using eerie_leap::views::assets::animations::UI_LOTTIE_SPINNER_JSON;
 using eerie_leap::views::utilitites::Frame;
 
 namespace {
@@ -63,7 +62,7 @@ std::shared_ptr<Frame> MakeRoot() {
 
 WidgetContext Context() {
     auto store = views_test::MakeAssetStore("lottie-widget");
-    zassert_true(store->Save("spinner.json", views_test::TextBytes(UI_LOTTIE_SPINNER_JSON)));
+    zassert_true(store->Save("spinner.json", views_test::TextBytes(views_test::LOTTIE_SPINNER_JSON)));
     zassert_true(store->Save("fade.json", views_test::TextBytes(FADE_JSON)));
     zassert_true(store->Save("broken.json", views_test::TextBytes("{\"v\":\"5.7.4\"")));
     return WidgetContext{ .assets_manager = views_test::MakeAssetsManager(AssetKind::ANIMATIONS, std::move(store)) };
