@@ -29,6 +29,7 @@
 #include "views/utilities/lvgl_color.h"
 #include "views/utilitites/frame.h"
 #include "views/utilitites/grid_layout.h"
+#include "views/widgets/indicators/indicator_base.h"
 #include "views/widgets/widget_base.h"
 #include "views/widgets/widget_factory.h"
 
@@ -38,6 +39,7 @@ using namespace eerie_memory;
 using namespace eerie_leap::domain::ui_domain::models;
 using namespace eerie_leap::domain::ui_domain::preview;
 using namespace eerie_leap::views::widgets;
+using eerie_leap::views::widgets::indicators::IndicatorBase;
 
 using namespace eerie_leap::domain::sensor_domain::event_bus;
 using eerie_leap::domain::ui_domain::configuration::parsers::UiConfigurationValidator;
@@ -556,6 +558,23 @@ ZTEST(widget_patch, test_the_classifier_never_applies_in_place_what_a_widget_reg
         }
 
         zassert_true(compared > 0, "Widget type %u registered nothing", static_cast<unsigned>(type));
+
+        // The value alone is in place for the indicators that take it through IndicatorBase::Update(), the path a live
+        // value takes, and for no other: a chart's Update() adds a sample, and a control's value is its state.
+        auto value_changed = Copy(*configuration);
+        value_changed->properties[WidgetPropertyType::VALUE] = 987654;
+        const bool is_value_in_place = ClassifyWidgetChange(*configuration, *value_changed) == WidgetChange::InPlace;
+        const bool takes_value_through_update = dynamic_cast<const IndicatorBase*>(widget.get()) != nullptr
+            && type != WidgetType::IndicatorHorizontalChart;
+        zassert_equal(
+            is_value_in_place, takes_value_through_update, "Widget type %u: the value alone in place",
+            static_cast<unsigned>(type)
+        );
+        if(is_value_in_place)
+            zassert_equal(
+                base.GetPropertyEffect(WidgetPropertyType::VALUE), PropertyChangeEffect::None,
+                "Widget type %u: a value Update() draws is no deferred effect", static_cast<unsigned>(type)
+            );
     }
 }
 
@@ -869,6 +888,210 @@ ZTEST(widget_patch, test_a_widget_patched_in_place_looks_as_one_built_from_the_n
     }
 
     zassert_true(compared > 300, "Compared %u", static_cast<unsigned>(compared));
+}
+
+// ======== A value patched in place ========
+
+namespace {
+
+// The indicators that take a value alone in place, as a slider sends it.
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization)
+const std::vector<WidgetType> EASED_INDICATORS{ WidgetType::IndicatorArcFill, WidgetType::IndicatorSegmentArc,
+    WidgetType::IndicatorDigital, WidgetType::IndicatorDial, WidgetType::IndicatorBar };
+
+// The records of a ranged indicator showing @p value, smoothed or not.
+std::vector<std::shared_ptr<WidgetConfiguration>> ValueRecords(WidgetType type, double value, bool is_smoothed) {
+    auto records = LookRecords({ type, IconType::None });
+    records.front()->properties[WidgetPropertyType::MIN_VALUE] = 0.0;
+    records.front()->properties[WidgetPropertyType::MAX_VALUE] = 100.0;
+    records.front()->properties[WidgetPropertyType::VALUE] = value;
+    records.front()->properties[WidgetPropertyType::IS_SMOOTHED] = is_smoothed;
+
+    // A label needle is turned by a style of its content, which a test can read.
+    if(type == WidgetType::IndicatorDial)
+        records.back() = views_test::NeedleConfiguration(2, IconType::Label);
+
+    return records;
+}
+
+std::shared_ptr<WidgetConfiguration> WithValue(const WidgetConfiguration& source, double value) {
+    auto changed = Copy(source);
+    changed->properties[WidgetPropertyType::VALUE] = value;
+
+    return changed;
+}
+
+// How far the dial's needle is turned (tenths of a degree), which is where the dial shows its value.
+int32_t NeedleRotation(const IWidget& dial) {
+    return lv_obj_get_style_transform_rotation(WidgetContent(*dial.GetChildren().front()), LV_PART_MAIN);
+}
+
+// The signed difference of two angles in tenths of a degree, within half a turn.
+int32_t AngleBetween(int32_t from, int32_t to) {
+    constexpr int32_t TURN = 3600;
+
+    return ((to - from + (TURN * 3 / 2)) % TURN + TURN) % TURN - (TURN / 2);
+}
+
+const lv_anim_t* ValueAnimation(IWidget& widget) {
+    return lv_anim_get(dynamic_cast<IndicatorBase*>(&widget), nullptr);
+}
+
+void Settle() {
+    lv_tick_inc(5000);
+    lv_anim_refr_now();
+}
+
+} // namespace
+
+// The point of the in-place value: the widget a slider moves is the one that was there, and once it has arrived it
+// looks as one built with that value, to the pixel.
+ZTEST(widget_patch, test_a_value_alone_is_patched_in_place_and_looks_as_a_widget_built_with_it) {
+    for(const auto type : EASED_INDICATORS) {
+        for(const bool is_smoothed : { false, true }) {
+            const auto label = std::string("widget ") + std::to_string(static_cast<unsigned>(type))
+                + (is_smoothed ? " smoothed" : " plain");
+            auto old_records = ValueRecords(type, 10.0, is_smoothed);
+            Scene patched(LookScreen(old_records));
+            auto* widget = Find(patched.screen, 1);
+            lv_obj_t* const container = widget->GetContainer()->GetObject();
+            lv_obj_t* const content = WidgetContent(*widget);
+
+            // Several values in a row, as a slider sends them; the last is the one that is compared.
+            for(const double value : { 40.0, 85.0, 70.0 }) {
+                const auto plan = patched.Patch({ Put(WithValue(*widget->GetConfiguration(), value)) });
+                zassert_true(plan.effects[0] == PatchEffect::InPlace, "%s: %.0f", label.c_str(), value);
+                zassert_equal(Find(patched.screen, 1), widget, "%s: the same widget", label.c_str());
+                zassert_equal(widget->GetContainer()->GetObject(), container, "%s: the same object", label.c_str());
+                zassert_equal(WidgetContent(*widget), content, "%s: the same content", label.c_str());
+            }
+
+            Settle();
+            auto new_records = old_records;
+            new_records.front() = WithValue(*old_records.front(), 70.0);
+            Scene fresh(LookScreen(new_records));
+            Settle();
+            ExpectSameLook(*widget, *Find(fresh.screen, 1), label);
+        }
+    }
+}
+
+// A slider that sets the range along with the value, or anything else built in, gets a widget built again.
+ZTEST(widget_patch, test_a_value_with_the_range_builds_the_widget_again_and_shows_the_value_at_once) {
+    for(const auto type : EASED_INDICATORS) {
+        const auto records = ValueRecords(type, 10.0, true);
+        Scene scene(LookScreen(records));
+        auto* old_widget = Find(scene.screen, 1);
+
+        auto changed = WithValue(*records.front(), 70.0);
+        changed->properties[WidgetPropertyType::MAX_VALUE] = 200.0;
+        const auto plan = scene.Patch({ Put(changed) });
+
+        zassert_true(plan.effects[0] == PatchEffect::WidgetRebuilt, "Widget type %u", static_cast<unsigned>(type));
+        auto* new_widget = Find(scene.screen, 1);
+        zassert_not_equal(new_widget, old_widget);
+        zassert_is_null(
+            ValueAnimation(*new_widget), "Widget type %u: built showing its value", static_cast<unsigned>(type)
+        );
+    }
+
+    // (A chart's value is built again too: in place it would add a sample to its history.)
+    auto chart = LookRecords({ WidgetType::IndicatorHorizontalChart, IconType::None });
+    Scene scene(LookScreen(chart));
+    const auto plan = scene.Patch({ Put(WithValue(*chart.front(), 70.0)) });
+    zassert_true(plan.effects[0] == PatchEffect::WidgetRebuilt);
+}
+
+// With IS_SMOOTHED a patched value is eased to from the value on the display, as a live value is; a built widget has
+// shown nothing to ease from, so it shows its value at once instead of coming up from its minimum.
+ZTEST(widget_patch, test_a_smoothed_bar_eases_to_a_patched_value_from_the_value_it_shows) {
+    Scene scene(LookScreen(ValueRecords(WidgetType::IndicatorBar, 20.0, true)));
+    auto* widget = Find(scene.screen, 1);
+    lv_obj_t* const bar = Inner(*widget);
+
+    zassert_equal(lv_bar_get_value(bar), 20, "Built showing its value");
+    zassert_is_null(ValueAnimation(*widget), "and not easing to it");
+
+    const auto plan = scene.Patch({ Put(WithValue(*widget->GetConfiguration(), 80.0)) });
+    zassert_true(plan.effects[0] == PatchEffect::InPlace);
+    zassert_equal(Find(scene.screen, 1), widget);
+    zassert_equal(Inner(*widget), bar);
+    zassert_not_null(ValueAnimation(*widget), "Easing to the new value");
+    zassert_equal(lv_bar_get_value(bar), 20, "from the old one");
+
+    // A move of 60 in 100 takes 2.4 s; a tenth of a second in, it is just off 20, not off the minimum.
+    lv_tick_inc(100);
+    lv_anim_refr_now();
+    zassert_between_inclusive(lv_bar_get_value(bar), 21, 30);
+
+    // Another value while easing: from where it is now.
+    scene.Patch({ Put(WithValue(*widget->GetConfiguration(), 30.0)) });
+    lv_tick_inc(100);
+    lv_anim_refr_now();
+    zassert_between_inclusive(lv_bar_get_value(bar), 21, 30);
+
+    Settle();
+    zassert_equal(lv_bar_get_value(bar), 30);
+    zassert_is_null(ValueAnimation(*widget));
+}
+
+ZTEST(widget_patch, test_a_smoothed_dial_eases_its_needle_from_where_it_stands) {
+    Scene scene(LookScreen(ValueRecords(WidgetType::IndicatorDial, 20.0, true)));
+    auto* widget = Find(scene.screen, 1);
+
+    Scene reference(LookScreen(ValueRecords(WidgetType::IndicatorDial, 20.0, false)));
+    const auto at_20 = NeedleRotation(*Find(reference.screen, 1));
+    zassert_equal(NeedleRotation(*widget), at_20, "Built with its needle at the value");
+    zassert_is_null(ValueAnimation(*widget));
+
+    const auto plan = scene.Patch({ Put(WithValue(*widget->GetConfiguration(), 80.0)) });
+    zassert_true(plan.effects[0] == PatchEffect::InPlace);
+    zassert_equal(Find(scene.screen, 1), widget);
+    zassert_not_null(ValueAnimation(*widget));
+    zassert_equal(NeedleRotation(*widget), at_20, "The needle has not moved yet");
+
+    // 270 degrees over the range: 60 of 100 is 162 degrees in 2.4 s, so a tenth of a second is 6.75 degrees.
+    lv_tick_inc(100);
+    lv_anim_refr_now();
+    const auto moved = AngleBetween(at_20, NeedleRotation(*widget));
+    zassert_between_inclusive(moved, 1, 300, "Moved %d tenths of a degree from the value it showed", moved);
+
+    Settle();
+    Scene at_80(LookScreen(ValueRecords(WidgetType::IndicatorDial, 80.0, false)));
+    zassert_equal(NeedleRotation(*widget), NeedleRotation(*Find(at_80.screen, 1)));
+    zassert_is_null(ValueAnimation(*widget));
+}
+
+// Smoothing eases a change of what is shown; a widget that is built (staged, uploaded, or rebuilt by a patch) shows
+// its value first, whatever the smoothing.
+ZTEST(widget_patch, test_a_built_smoothed_indicator_shows_its_value_at_once) {
+    for(const auto type : EASED_INDICATORS) {
+        Scene smoothed(LookScreen(ValueRecords(type, 70.0, true)));
+        auto* widget = Find(smoothed.screen, 1);
+        zassert_is_null(ValueAnimation(*widget), "Widget type %u", static_cast<unsigned>(type));
+
+        Scene plain(LookScreen(ValueRecords(type, 70.0, false)));
+        ExpectSameLook(
+            *widget, *Find(plain.screen, 1), "built smoothed " + std::to_string(static_cast<unsigned>(type))
+        );
+    }
+
+    Scene dial(LookScreen(ValueRecords(WidgetType::IndicatorDial, 70.0, true)));
+    Scene plain_dial(LookScreen(ValueRecords(WidgetType::IndicatorDial, 70.0, false)));
+    const auto at_70 = NeedleRotation(*Find(plain_dial.screen, 1));
+    Scene at_min(LookScreen(ValueRecords(WidgetType::IndicatorDial, 0.0, false)));
+    zassert_not_equal(at_70, NeedleRotation(*Find(at_min.screen, 1)), "70 is not where the minimum is");
+    zassert_equal(NeedleRotation(*Find(dial.screen, 1)), at_70, "A smoothed dial is built at its value");
+
+    // A widget a patch builds again is the same: shown at the value of the record, not eased from the minimum.
+    Scene scene(LookScreen(ValueRecords(WidgetType::IndicatorBar, 20.0, false)));
+    auto smoothed = WithValue(*scene.configuration->widget_configurations.front(), 70.0);
+    smoothed->properties[WidgetPropertyType::IS_SMOOTHED] = true;
+    const auto plan = scene.Patch({ Put(smoothed) });
+    zassert_true(plan.effects[0] == PatchEffect::WidgetRebuilt);
+    auto* rebuilt = Find(scene.screen, 1);
+    zassert_equal(lv_bar_get_value(Inner(*rebuilt)), 70);
+    zassert_is_null(ValueAnimation(*rebuilt));
 }
 
 // A rotation that is taken away leaves the widget as straight as one that never rotated.

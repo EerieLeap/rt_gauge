@@ -2099,6 +2099,31 @@ ZTEST(ui_controller_preview, test_a_patch_is_shown_in_place_and_stores_nothing) 
     zassert_equal(rebuild.stored_count.load(), stored_count);
 }
 
+ZTEST(ui_controller_preview, test_a_value_alone_is_shown_in_place_and_a_value_with_the_range_is_a_rebuild) {
+    StoreAndShow({ STORED_GROUP_ID });
+    const auto token = BeginPreview();
+    const auto staged = MakePatchConfiguration({ PREVIEW_GROUP_ID });
+    UiPreviewService::StageInfo stage;
+    zassert_equal(StageBytes(token, Encode(staged), stage), UiPreviewError::OK);
+
+    // A slider moving: the value alone, patch after patch.
+    auto bar = WidgetOf(*staged, 0, 10);
+    UiPreviewService::PatchInfo info;
+    for(uint32_t rev = 2; rev < 5; ++rev) {
+        bar = CopyWidget(*bar);
+        bar->properties[WidgetPropertyType::VALUE] = 10.0 * rev;
+        zassert_equal(Patch(token, rev, PatchBuilder().Put(0, *bar), info), UiPreviewError::OK);
+        zassert_equal(info.effect_count, 1U);
+        zassert_true(info.effects[0] == PatchEffect::InPlace, "Revision %u", rev);
+    }
+
+    bar = CopyWidget(*bar);
+    bar->properties[WidgetPropertyType::VALUE] = 50.0;
+    bar->properties[WidgetPropertyType::MAX_VALUE] = 200.0;
+    zassert_equal(Patch(token, 5, PatchBuilder().Put(0, *bar), info), UiPreviewError::OK);
+    zassert_true(info.effects[0] == PatchEffect::WidgetRebuilt);
+}
+
 ZTEST(ui_controller_preview, test_a_rebuilt_widget_is_outlined_again) {
     StoreAndShow({ STORED_GROUP_ID });
     const auto token = BeginPreview();

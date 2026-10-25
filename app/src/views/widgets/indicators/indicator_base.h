@@ -27,6 +27,9 @@ protected:
     float range_start_ = 0;
     float range_end_ = 0;
     float value_ = 0;
+    // Whether a value has been shown yet. The first one is shown at once, whatever IS_SMOOTHED says: smoothing eases
+    // a change of what is on the display, and a widget that was just built has shown nothing to ease from.
+    bool is_value_shown_ = false;
 
     virtual void UpdateIndicator(float value) = 0;
     lv_anim_t CreateValueChangeAnimation();

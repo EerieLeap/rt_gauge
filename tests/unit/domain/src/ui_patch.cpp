@@ -144,16 +144,14 @@ ZTEST(ui_patch, test_the_classifier_applies_in_place_what_a_widget_takes_as_it_c
         zassert_equal(ClassifyProperty(type, P::ANIMATION_DURATION_MS, 500, 800), WidgetChange::InPlace);
     }
 
-    // What an indicator or a control reads as it renders: the range, the angles, the precision, the unit, the label
-    // and the value (whose display is an animation, and whose history a chart keeps) rebuild the widget.
+    // What an indicator or a control reads as it renders: the range, the angles, the precision, the unit and the
+    // label rebuild the widget.
     for(const auto type :
         { T::IndicatorBar, T::IndicatorArcFill, T::IndicatorSegmentArc, T::IndicatorDial, T::IndicatorDigital,
             T::IndicatorHorizontalChart, T::IndicatorSetting, T::ControlSlider, T::ControlToggle }) {
         zassert_equal(ClassifyProperty(type, P::MIN_VALUE, 0.0, 1.0), WidgetChange::RebuildWidget);
         zassert_equal(ClassifyProperty(type, P::MAX_VALUE, 100.0, 200.0), WidgetChange::RebuildWidget);
         zassert_equal(ClassifyProperty(type, P::MAX_VALUE, none, 5.0), WidgetChange::RebuildWidget);
-        zassert_equal(ClassifyProperty(type, P::VALUE, 1.0, 2.0), WidgetChange::RebuildWidget);
-        zassert_equal(ClassifyProperty(type, P::VALUE, 1.0, none), WidgetChange::RebuildWidget);
         zassert_equal(ClassifyProperty(type, P::START_ANGLE, 45, 90), WidgetChange::RebuildWidget);
         zassert_equal(ClassifyProperty(type, P::END_ANGLE, none, 300), WidgetChange::RebuildWidget);
         zassert_equal(ClassifyProperty(type, P::VALUE_PRECISION, 1, 2), WidgetChange::RebuildWidget);
@@ -161,6 +159,21 @@ ZTEST(ui_patch, test_the_classifier_applies_in_place_what_a_widget_takes_as_it_c
         zassert_equal(ClassifyProperty(type, P::LABEL, Text("a"), Text("b")), WidgetChange::RebuildWidget);
         zassert_equal(ClassifyProperty(type, P::STEP, 1.0, 2.0), WidgetChange::RebuildWidget);
         zassert_equal(ClassifyProperty(type, P::SETTING_ID, Text("a"), Text("b")), WidgetChange::RebuildWidget);
+    }
+
+    // The value is in place for the indicators that ease to it as a live value does, and a rebuild for the rest: a
+    // chart would add a sample to its history, and a slider or a toggle shows the value it is set to.
+    for(const auto type :
+        { T::IndicatorBar, T::IndicatorArcFill, T::IndicatorSegmentArc, T::IndicatorDial, T::IndicatorDigital }) {
+        zassert_equal(ClassifyProperty(type, P::VALUE, 1.0, 2.0), WidgetChange::InPlace);
+        zassert_equal(ClassifyProperty(type, P::VALUE, none, 2.0), WidgetChange::InPlace);
+        zassert_equal(ClassifyProperty(type, P::VALUE, 1.0, none), WidgetChange::InPlace);
+        zassert_equal(ClassifyProperty(type, P::VALUE, 1.0, 1.0), WidgetChange::InPlace, "Nothing changed");
+    }
+
+    for(const auto type : { T::IndicatorHorizontalChart, T::IndicatorSetting, T::ControlSlider, T::ControlToggle }) {
+        zassert_equal(ClassifyProperty(type, P::VALUE, 1.0, 2.0), WidgetChange::RebuildWidget);
+        zassert_equal(ClassifyProperty(type, P::VALUE, 1.0, none), WidgetChange::RebuildWidget);
     }
 
     zassert_equal(ClassifyProperty(T::ControlButton, P::LABEL, Text("a"), Text("b")), WidgetChange::RebuildWidget);
@@ -295,6 +308,51 @@ ZTEST(ui_patch, test_the_classifier_takes_the_box_and_the_order_in_place_and_the
     zassert_true(IsSameWidget(*bound, *Copy(*bound)));
     zassert_false(IsSameWidget(*bound, *rebound));
     zassert_false(IsSameWidget(*before, *moved));
+}
+
+// A slider sets the value alone; a record that changes the range along with it is built again, since a widget reads
+// its range as it renders.
+ZTEST(ui_patch, test_a_value_changed_with_the_range_or_anything_built_in_rebuilds_the_indicator) {
+    using P = WidgetPropertyType;
+
+    for(const auto type : { WidgetType::IndicatorBar, WidgetType::IndicatorArcFill, WidgetType::IndicatorSegmentArc,
+            WidgetType::IndicatorDial, WidgetType::IndicatorDigital }) {
+        auto before = MakeWidget(type, 3);
+        before->properties[P::MIN_VALUE] = 0.0;
+        before->properties[P::MAX_VALUE] = 100.0;
+        before->properties[P::VALUE] = 10.0;
+
+        auto value_alone = Copy(*before);
+        value_alone->properties[P::VALUE] = 70.0;
+        zassert_equal(ClassifyWidgetChange(*before, *value_alone), WidgetChange::InPlace);
+
+        // With a color, the box and the order: all in place.
+        auto with_look = Copy(*value_alone);
+        with_look->properties[P::COLOR_PRIMARY_ACTIVE] = std::pmr::string("#FF0000FF", Mr());
+        with_look->position_grid = { 4, 4 };
+        with_look->z_index = 2;
+        zassert_equal(ClassifyWidgetChange(*before, *with_look), WidgetChange::InPlace);
+
+        for(const auto range : { P::MIN_VALUE, P::MAX_VALUE }) {
+            auto with_range = Copy(*value_alone);
+            with_range->properties[range] = 50.0;
+            zassert_equal(
+                ClassifyWidgetChange(*before, *with_range), WidgetChange::RebuildWidget,
+                "Widget type %u: the value together with property %u", static_cast<unsigned>(type),
+                static_cast<unsigned>(range)
+            );
+        }
+
+        auto with_smoothing = Copy(*value_alone);
+        with_smoothing->properties[P::IS_SMOOTHED] = true;
+        zassert_equal(ClassifyWidgetChange(*before, *with_smoothing), WidgetChange::RebuildWidget);
+    }
+
+    // A chart's value would add a sample to its history, so it is built again.
+    auto chart = MakeWidget(WidgetType::IndicatorHorizontalChart, 4);
+    auto chart_value = Copy(*chart);
+    chart_value->properties[P::VALUE] = 70.0;
+    zassert_equal(ClassifyWidgetChange(*chart, *chart_value), WidgetChange::RebuildWidget);
 }
 
 ZTEST(ui_patch, test_a_screen_changes_in_place_but_for_its_own_record) {

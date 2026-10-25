@@ -33,13 +33,15 @@ enum class WidgetChange : uint8_t {
 /**
  * @brief How a root widget's configuration changed from @p old_widget to @p new_widget, which have one ID.
  *
- * In place: the properties a widget applies to its objects as they change (visibility, opacity, activity, the
- * colors, the range and the value, the precision, the unit, a setting indicator's or button's label, the
- * angles of an arc, the anchor, the animation, a shape icon's offsets, sizes, stroke, corner, fill and
- * direction), a root widget's position and size, and its z-index among its siblings. Everything else rebuilds
- * the widget: the type, the bindings, the icon type, a file and an image's size, a label icon's label, a chart's
- * points and type, the structure, and any property this does not know to apply in place. A widget that owns
- * children is classified by its own record; what changed in a child rebuilds its owner, which the caller decides
+ * In place: the properties a widget applies to its objects as they change (visibility, opacity, the colors, the
+ * value of an arc fill, segment arc, digital, dial or bar indicator, which it eases to as a live value, the anchor,
+ * the animation, a shape icon's offsets, sizes, stroke, corner, fill and direction), a root widget's position and
+ * size, and its z-index among its siblings. Everything else rebuilds the widget: the type, the bindings, activity,
+ * the range, the angles of an arc, the precision, the unit and a label, a chart's value (in place it would add a
+ * sample to its history), a slider's or a toggle's, the icon type, a file and an image's size, a label icon's
+ * label, a chart's points and type, the structure, and any property this does not know to apply in place. A
+ * record that changes the value together with the range rebuilds. A widget that owns children is classified by its
+ * own record; what changed in a child rebuilds its owner, which the caller decides
  * (PlanPatch()). Never RebuildGroup: a group is rebuilt for what the widget does not say, see ClassifyScreenChange().
  */
 [[nodiscard]] WidgetChange

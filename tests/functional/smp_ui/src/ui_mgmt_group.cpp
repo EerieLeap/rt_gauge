@@ -952,6 +952,36 @@ ZTEST(smp_ui, test_a_patch_changes_what_it_can_in_place_and_answers_what_each_op
     zassert_true(WaitUntilGroupIs(STORED_GROUP_ID));
 }
 
+// What a preview's slider sends: the value alone, patch after patch. The unit takes it as a live value (effect 0),
+// and builds the widget again only when the range comes along (effect 1).
+ZTEST(smp_ui, test_a_value_alone_is_taken_in_place_and_a_value_with_the_range_rebuilds_the_widget) {
+    const auto configuration = StagedConfiguration();
+    const auto token = BeginAndStage(configuration);
+
+    auto value = StagedWidget(*configuration, 0);
+    value->properties[WidgetPropertyType::VALUE] = 40.0;
+    auto response = SendPatch(token, 2, { PutWidgetOp(0, *value) });
+    zassert_true(response.IsOk(), "Refused: %u", ErrorOf(response));
+    zassert_true((response.uint_lists.at("effects") == std::vector<uint32_t>{ 0 }));
+
+    // The same widget, the next value: again in place, as many times as the slider moves.
+    value = CopyWidget(*value);
+    value->properties[WidgetPropertyType::VALUE] = 70.0;
+    response = SendPatch(token, 3, { PutWidgetOp(0, *value) });
+    zassert_true(response.IsOk(), "Refused: %u", ErrorOf(response));
+    zassert_true((response.uint_lists.at("effects") == std::vector<uint32_t>{ 0 }));
+
+    value = CopyWidget(*value);
+    value->properties[WidgetPropertyType::VALUE] = 20.0;
+    value->properties[WidgetPropertyType::MAX_VALUE] = 200.0;
+    response = SendPatch(token, 4, { PutWidgetOp(0, *value) });
+    zassert_true(response.IsOk(), "Refused: %u", ErrorOf(response));
+    zassert_true((response.uint_lists.at("effects") == std::vector<uint32_t>{ 1 }));
+
+    zassert_true(Write(Command::END, CborMap().Put("tok", token).Build()).IsOk());
+    zassert_true(WaitUntilGroupIs(STORED_GROUP_ID));
+}
+
 ZTEST(smp_ui, test_a_change_to_the_screens_own_record_rebuilds_its_group) {
     const auto configuration = StagedConfiguration();
     const auto token = BeginAndStage(configuration);

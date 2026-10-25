@@ -64,14 +64,32 @@ bool IsCommonInPlaceProperty(WidgetPropertyType type) {
         || WidgetPropertyValidator::IsAnimationProperty(type);
 }
 
+// The indicators that show a value by IndicatorBase::Update(), the path a live binding's value takes: it clamps the
+// value to the range the widget was built with and, with IS_SMOOTHED, eases to it from the value on the display.
+// Not the chart, which has the same path but appends a sample to its history for each value, where a widget built
+// from the record has the one sample of its value: a chart whose value changed is built again. Not the setting
+// indicator and the controls, which show a setting's value, not a sensor's.
+bool IsEasedValueIndicator(WidgetType type) {
+    return type == WidgetType::IndicatorArcFill
+        || type == WidgetType::IndicatorSegmentArc
+        || type == WidgetType::IndicatorDigital
+        || type == WidgetType::IndicatorDial
+        || type == WidgetType::IndicatorBar;
+}
+
 // Whether a widget of this type applies a change of this property to its objects as it comes, so that the widget
 // looks as one built from the new record does. The table is short on purpose: what a widget reads once, as it is
-// rendered (a range, an angle, a precision, a label, the points of a chart, the segments of an arc), is a rebuild,
-// and so is a value, whose live display belongs to the animation and the history of the widget that shows it.
+// rendered (a range, an angle, a precision, a label, the points of a chart, the segments of an arc), is a rebuild.
+// A value is in place only for the indicators that take it through Update(), so a slider that sets it patch after
+// patch moves the needle or the bar from where it stands instead of building the widget again (which starts it at
+// its minimum); a patch that changes the range as well changes MIN_VALUE or MAX_VALUE, and those rebuild.
 // Whatever is not listed is a rebuild, which is always right and sometimes slow.
 bool AppliesInPlace(const WidgetConfiguration& widget, WidgetPropertyType type) {
     if(IsCommonInPlaceProperty(type))
         return true;
+
+    if(type == WidgetPropertyType::VALUE)
+        return IsEasedValueIndicator(widget.type);
 
     // A shape icon's size, stroke, corner, fill, direction and offsets are applied by the icon widget as they change.
     // An arc icon places its icon on a circle as it renders; the others have none of these.
