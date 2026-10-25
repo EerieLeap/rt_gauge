@@ -38,10 +38,6 @@ file(GLOB_RECURSE APP_SRC_VIEWS
   ${APP_SRC_VIEWS_DIR}/*.cpp
 )
 
-# The bundled images are ~430 KB of pixel data each and nothing under views/
-# references them; the fonts are needed by the themes.
-list(FILTER APP_SRC_VIEWS EXCLUDE REGEX "/views/assets/images/")
-
 # LottieWidget keeps ThorVG on the external heap.
 set(APP_SRC_UTILITIES ${APP_SRC_DIR}/utilities/memory/scoped_new_resource.cpp)
 

@@ -134,8 +134,7 @@ afterwards. Updates after that go over the air.
    The erase also removes the BLE bonds, so the configurator app pairs again.
 
 3. Restore: `config-write <type> backup/<type>.cbor` for every type, and `assets put <kind> <name> <file>` for the files.
-   The gauge rewrites its demo screens and demo assets on every boot while the test scaffolding in
-   `UiController::Initialize()` is in place, so its UI configuration may need no restore.
+   The gauge's UI configuration is restored the same way, as type 6.
 
 ### Board-Specific Commands
 

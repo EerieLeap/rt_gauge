@@ -51,7 +51,7 @@
 		#address-cells = <1>;
 		#size-cells = <1>;
 
-		/* The demo assets are ~870 KB of pixel data, so 1 MB is not enough. */
+		/* Images are megabytes of pixel data, so 1 MB is not enough. */
 		intfs0_partition: partition@1000 {
 			label = "intfs0_storage";
 			reg = <0x00001000 DT_SIZE_M(2)>;

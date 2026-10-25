@@ -233,7 +233,7 @@ public:
 
     std::shared_ptr<NavigationService> GetNavigationService() const;
     std::shared_ptr<UiConfigurationManager> GetConfigurationManager() const;
-    // Whether a screen group is on the display: false for a unit that stores no screens and runs no demo.
+    // Whether a screen group is on the display: false for a unit that stores no screens.
     bool IsShowingScreens() const;
 
     // The UI preview (IUiPreviewHost): the screens a staged configuration is shown on.

@@ -40,10 +40,6 @@ config EERIE_LEAP_UI_RENDER_WORK_QUEUE_STACK_SIZE
 	int "UI render work queue stack size"
 	default 8192
 
-config EERIE_LEAP_UI_DEMO_CONFIGURATION
-	bool "Install the demo UI configuration and assets"
-	default y
-
 config EERIE_LEAP_UI_PREVIEW
 	bool "UI preview"
 	default y
