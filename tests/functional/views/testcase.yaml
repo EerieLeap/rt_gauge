@@ -9,3 +9,7 @@ common:
 
 tests:
   functional.views: {}
+  # A build without the built-in fonts: the unit lists none and spends no flash on them.
+  functional.views.no_builtin_fonts:
+    extra_configs:
+      - CONFIG_EERIE_LEAP_UI_BUILTIN_FONTS=n

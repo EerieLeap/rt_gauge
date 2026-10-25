@@ -323,7 +323,7 @@ void UiController::RegisterAssets() {
             .built_ins = BuiltInFonts() }
     );
     if(!fonts_registered_)
-        LOG_ERR("Failed to register the font assets, the registry has them already.");
+        LOG_ERR("Failed to register the font assets.");
 
     font_cache_ = std::make_shared<FontCache>(assets_manager_);
 }
@@ -442,7 +442,7 @@ int UiController::Reconfigure(std::shared_ptr<UiConfiguration> configuration, st
         res = Configure(std::move(configuration), true, preferred_group);
         ConfigureGestures();
 
-        // A unit that showed nothing when it started (no screens stored, no demo) never rendered its view, and
+        // A unit that showed nothing when it started (no screens stored) never rendered its view, and
         // a group is then only recorded as the active one. The first configuration it is given renders it.
         if(res == 0 && !main_view_->IsReady())
             res = main_view_->Render();

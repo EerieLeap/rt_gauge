@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string_view>
 
 #include <lvgl.h>
@@ -167,6 +168,8 @@ ZTEST(font_cache, test_deleting_the_labels_returns_the_memory) {
 namespace {
 
 constexpr int32_t BUILT_IN_SIZE_PX = 40;
+// Large enough that a kerning of a few percent of an em is whole pixels.
+constexpr int32_t BIG_SIZE_PX = 200;
 // What a client may upload as a font (EERIE_LEAP_UI_FONT_MAX_SIZE): a built-in must not be larger.
 constexpr size_t FONT_UPLOAD_LIMIT = 256 * 1024;
 constexpr uint32_t E_ACUTE = 0x00E9;
@@ -179,6 +182,22 @@ std::shared_ptr<eerie_leap::subsys::assets::AssetsManager> BuiltInFontsManager(
     std::shared_ptr<eerie_leap::subsys::assets::AssetStore> store = views_test::MakeAssetStore("ui_assets/no_fonts")
 ) {
     return views_test::MakeAssetsManager(AssetKind::FONTS, std::move(store), BuiltInFonts());
+}
+
+// Whether the sfnt font has a table of this tag (the table directory follows the 12-byte header, 16 bytes a record).
+bool HasTable(std::span<const uint8_t> font, std::string_view tag) {
+    constexpr size_t HEADER_SIZE = 12;
+    constexpr size_t RECORD_SIZE = 16;
+    constexpr size_t TAG_SIZE = 4;
+
+    const size_t count = (static_cast<size_t>(font[4]) << 8) | font[5];
+    for(size_t i = 0; i < count; ++i) {
+        const auto record = font.subspan(HEADER_SIZE + i * RECORD_SIZE, TAG_SIZE);
+        if(std::ranges::equal(record, tag))
+            return true;
+    }
+
+    return false;
 }
 
 } // namespace
@@ -289,6 +308,41 @@ ZTEST(font_cache, test_deleting_the_labels_of_a_built_in_returns_the_memory) {
     lv_obj_delete(label);
     font.reset();
     zassert_equal(LvglHeapBytes(), baseline);
+}
+
+// stb_truetype, which Tiny TTF draws with, reads kerning from a `kern` table, and from GPOS only in a narrow form: the
+// built-in fonts carry their kerning as a `kern` table and no GPOS (see builtin/make_fonts.py).
+ZTEST(font_cache, test_the_built_in_fonts_carry_their_kerning_in_a_kern_table_and_no_gpos) {
+    for(const BuiltInAsset& built_in : BuiltInFonts()) {
+        zassert_false(
+            HasTable(built_in.data, "GPOS"), "%.*s", static_cast<int>(built_in.name.size()), built_in.name.data()
+        );
+        // Monospace Inconsolata has no kerned pair, so no table.
+        zassert_equal(
+            HasTable(built_in.data, "kern"), built_in.name != "Inconsolata-Bold.ttf", "%.*s",
+            static_cast<int>(built_in.name.size()), built_in.name.data()
+        );
+    }
+}
+
+ZTEST(font_cache, test_a_kerned_pair_of_a_built_in_font_is_narrower_through_tiny_ttf) {
+    const ScopedLvglLock lock;
+    auto cache = std::make_shared<FontCache>(BuiltInFontsManager());
+
+    for(const auto* const name : { "Rubik-Medium.ttf", "Montserrat-Medium.ttf" }) {
+        auto font = cache->Acquire(name, BIG_SIZE_PX);
+        zassert_true(font.has_value(), "%s", name);
+
+        // The advance of 'A' with kerning against a letter it is kerned with, and against a space, which it is not.
+        lv_font_glyph_dsc_t kerned{};
+        lv_font_glyph_dsc_t plain{};
+        zassert_true(lv_font_get_glyph_dsc(font->ToLvFont(), &kerned, 'A', 'V'), "%s", name);
+        zassert_true(lv_font_get_glyph_dsc(font->ToLvFont(), &plain, 'A', ' '), "%s", name);
+
+        zassert_true(
+            kerned.adv_w < plain.adv_w, "%s: AV advances %d, A and a space %d", name, kerned.adv_w, plain.adv_w
+        );
+    }
 }
 
 #endif // CONFIG_EERIE_LEAP_UI_BUILTIN_FONTS

@@ -32,7 +32,9 @@ namespace {
 
 using FaceData = std::shared_ptr<const std::pmr::vector<uint8_t>>;
 
-// The generation a built-in's entries carry: flash does not change, whatever the store does.
+// The generation a built-in's entries carry: flash does not change, whatever the store does. It cannot collide with a
+// stored file's: a built-in's name always wins over a stored file of that name (the assets group hides the stored one
+// and Acquire() never loads it), so no entry of a stored file carries a name that has a built-in.
 constexpr uint64_t BUILT_IN_GENERATION = 0;
 
 constexpr int32_t MIN_GLYPH_CACHE_COUNT = 16;

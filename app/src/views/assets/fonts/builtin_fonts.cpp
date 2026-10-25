@@ -12,16 +12,17 @@ using eerie_leap::subsys::assets::BuiltInAsset;
 namespace {
 
 // The files, as generated at build time from builtin/*.ttf (cmake/builtin_fonts.cmake). const, so the linker puts
-// them in flash (.rodata) and nothing copies them to RAM.
-alignas(4) const uint8_t RUBIK_MEDIUM[] = {
+// them in flash (.rodata) and nothing copies them to RAM. No alignment is asked for: stb_truetype reads a font byte
+// by byte.
+const uint8_t RUBIK_MEDIUM[] = {
     #include "builtin_font_rubik_medium.inc"
 };
 
-alignas(4) const uint8_t MONTSERRAT_MEDIUM[] = {
+const uint8_t MONTSERRAT_MEDIUM[] = {
     #include "builtin_font_montserrat_medium.inc"
 };
 
-alignas(4) const uint8_t INCONSOLATA_BOLD[] = {
+const uint8_t INCONSOLATA_BOLD[] = {
     #include "builtin_font_inconsolata_bold.inc"
 };
 

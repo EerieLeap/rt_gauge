@@ -213,7 +213,8 @@ Three fonts are in the firmware's flash and need no upload. Name one in `FONT_FI
 | `Montserrat-Medium.ttf` | Montserrat Medium | A wider, rounder face |
 | `Inconsolata-Bold.ttf` | Inconsolata Bold | Monospace: readouts whose digits must not shift |
 
-They are Latin-1 subsets (U+0020-007E and U+00A0-00FF, kerning kept, no hinting), so Latin text and the
+They are Latin-1 subsets (U+0020-007E and U+00A0-00FF, no hinting), with their kerning in a `kern` table (Tiny TTF
+does not read the OpenType kerning that fonts usually carry; `make_fonts.py` next to the files converts it), so Latin text and the
 accented letters of Western European languages draw, and everything else (Cyrillic, Greek, symbols, CJK) draws
 LVGL's placeholder box; upload a font for those. They are SIL Open Font License 1.1 fonts (the licenses sit in
 `app/src/views/assets/fonts/builtin/`).
@@ -225,8 +226,8 @@ uploaded under a built-in's name (a name compares ignoring ASCII case) is hidden
 neither the volume's free nor its used bytes.
 
 Tiny TTF reads a built-in from flash in place: no RAM copy, no read of the file system, whatever the number of
-widgets and sizes. Each size still has the glyph cache described under Cost. They cost 79 KB of flash together
-(Rubik 34 KB, Montserrat 29 KB, Inconsolata 16 KB); `CONFIG_EERIE_LEAP_UI_BUILTIN_FONTS=n` leaves them out, and a
+widgets and sizes. Each size still has the glyph cache described under Cost. They cost 139 KB of flash together
+(Rubik 54 KB, Montserrat 69 KB, Inconsolata 16 KB); `CONFIG_EERIE_LEAP_UI_BUILTIN_FONTS=n` leaves them out, and a
 unit built so lists no built-ins.
 
 ### Uploaded fonts
@@ -389,8 +390,8 @@ it now means paused tracking and processing, not a palette or visibility state.
 These are real LVGL snapshots from `widget_colors.test_simulator_gallery` in
 [widget_colors.cpp](../../../tests/functional/views/src/widget_colors.cpp),
 enlarged 2x with nearest-neighbor sampling. The deterministic buffer-only native
-simulator gallery does not replace the application's sample screens or persist
-demo configuration. Captions are added outside LVGL. The solid empty frames are
+simulator gallery does not replace the application's screens or persist any
+configuration. Captions are added outside LVGL. The solid empty frames are
 intentional hidden/zero-opacity cases, not missing assets.
 
 ![Theme, explicit RGBA, and whole-widget opacity](images/widget_colors_rgba.png)

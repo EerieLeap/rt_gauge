@@ -23,3 +23,6 @@ __pycache__/
 /docker-compose.yml
 
 /dev_docs
+
+# built-in fonts: the sources make_fonts.py fetches
+/app/src/views/assets/fonts/builtin/sources/

@@ -2,14 +2,14 @@ common:
   tags:
     - functional
     - controllers
-  # UiController links ~870 KB of demo image data and needs a bound display; only
+  # UiController goes through UiRendererService, which needs a bound display; only
   # native_sim is provisioned for that here.
   platform_allow:
     - native_sim
 
 tests:
   functional.controllers: {}
-  # A release build: no demo screens, so a unit with nothing stored shows nothing until a client stores a UI.
-  functional.controllers.no_demo:
+  # A build without the built-in fonts: the unit lists none and spends no flash on them.
+  functional.controllers.no_builtin_fonts:
     extra_configs:
-      - CONFIG_EERIE_LEAP_UI_DEMO_CONFIGURATION=n
+      - CONFIG_EERIE_LEAP_UI_BUILTIN_FONTS=n
