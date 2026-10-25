@@ -84,16 +84,21 @@ the selected widget/icon's usable keys.
 
 | Widget | Primary | Secondary | Tertiary | Selection/default |
 | --- | --- | --- | --- | --- |
-| Digital / setting | Active text | - | - | Theme primary |
+| Digital / setting / label icon | Active text | - | - | Theme primary |
 | Horizontal chart | Active series | - | - | Theme primary, line and bar |
 | Bar / filled arc | Active fill | Active track | - | Theme secondary fill; transparent track |
 | Segmented arc | Stroke pair | - | - | Displayed on/off; secondary/transparent |
 | Shapes (including oval) | Active fill or stroke | - | - | Theme accent |
-| Label icon | Active background | Active text | - | Accent/primary |
 | Slider | Filled-track pair | Background pair | Knob pair | Pressed/idle; primary/surface/accent |
 | Toggle | Track pair | Knob pair | - | Checked/unchecked; primary/surface track, accent knob |
 | Button | Background pair | Text pair | - | Pressed/released; accent/surface background, primary text |
 | Image / dial | None | None | None | Original image pixels |
+
+A label icon is its text alone, like the digital and setting indicators: no
+background, radius or padding, sized to its text (the label's content size) and
+centered in the icon's box. `COLOR_PRIMARY_ACTIVE` colors and fades the text
+(theme primary by default). `COLOR_SECONDARY_ACTIVE` is not registered for it: a
+stored value is accepted and ignored.
 
 Basic and arc icon wrappers expose only their selected icon's properties. For
 a button's explicit released and pressed backgrounds:

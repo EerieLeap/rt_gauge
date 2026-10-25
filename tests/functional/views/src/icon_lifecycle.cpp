@@ -1558,14 +1558,13 @@ ZTEST(icon_lifecycle, test_inactive_label_keeps_the_normal_palette) {
     widget.OnActivated();
     ThemeManager::GetInstance().SetTheme(std::make_shared<BlueTheme>());
     auto* object = Inner(widget);
-    zassert_equal(
-        lv_color_to_u32(lv_obj_get_style_bg_color(object, LV_PART_MAIN)), lv_color_to_u32(lv_color_hex(0x3366FF))
-    );
-    zassert_equal(lv_obj_get_style_bg_opa(object, LV_PART_MAIN), 128);
+    auto* label = lv_obj_get_child(object, 0);
+    const auto expected = lv_color_to_u32(ThemeManager::GetInstance().GetCurrentTheme().GetPrimaryColor().ToLvColor());
+    zassert_equal(lv_color_to_u32(lv_obj_get_style_text_color(label, LV_PART_MAIN)), expected);
     Publish(WidgetPropertyType::IS_ACTIVE, true);
     Publish(WidgetPropertyType::IS_ACTIVE, false);
     zassert_false(lv_obj_is_hidden(widget.GetContainer()->GetObject()));
-    zassert_equal(lv_obj_get_style_bg_opa(object, LV_PART_MAIN), 128);
+    zassert_equal(lv_color_to_u32(lv_obj_get_style_text_color(label, LV_PART_MAIN)), expected);
 }
 
 ZTEST(icon_lifecycle, test_inactive_image_keeps_its_pixels_and_opacity) {

@@ -17,23 +17,16 @@ void LabelIcon::RegisterProperties(WidgetPropertyStore& store) {
     IconBase::RegisterProperties(store);
 
     store.RegisterColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE);
-    store.RegisterColor(WidgetPropertyType::COLOR_SECONDARY_ACTIVE);
 
     store.Register(WidgetPropertyType::LABEL, ConfigValue{ std::pmr::string{} }, PropertyChangeEffect::Rebuild);
     TextFont::RegisterProperties(store, 20);
 }
 
 int LabelIcon::ApplyTheme(const ITheme& theme) {
-    const auto primary = properties_->ResolveColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE, theme.GetAccentColor());
-    const auto secondary = properties_->ResolveColor(
-        WidgetPropertyType::COLOR_SECONDARY_ACTIVE, theme.GetPrimaryColor()
-    );
+    const auto primary = properties_->ResolveColor(WidgetPropertyType::COLOR_PRIMARY_ACTIVE, theme.GetPrimaryColor());
 
-    lv_obj_set_style_bg_color(container_->GetObject(), primary.ToLvColor(), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(container_->GetObject(), primary.ToLvOpa(), LV_PART_MAIN);
-
-    lv_obj_set_style_text_color(lv_label_, secondary.ToLvColor(), LV_PART_MAIN);
-    lv_obj_set_style_text_opa(lv_label_, secondary.ToLvOpa(), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lv_label_, primary.ToLvColor(), LV_PART_MAIN);
+    lv_obj_set_style_text_opa(lv_label_, primary.ToLvOpa(), LV_PART_MAIN);
     lv_obj_set_style_text_font(lv_label_, font_.value_or(theme.GetPrimaryFont()).ToLvFont(), LV_PART_MAIN);
 
     lv_obj_update_layout(lv_label_);
@@ -44,15 +37,12 @@ int LabelIcon::ApplyTheme(const ITheme& theme) {
     if(label_width == 0 || label_height == 0)
         throw std::runtime_error("IconWidget: Label dimensions are invalid.");
 
-    const auto icon_width = static_cast<int32_t>(label_width + label_height * 0.75);
-    const int32_t icon_height = label_height + label_height / 4;
+    // The icon is its text: no background, no padding, the label's own size.
+    lv_obj_set_width(container_->GetObject(), label_width);
+    lv_obj_set_height(container_->GetObject(), label_height);
 
-    lv_obj_set_width(container_->GetObject(), icon_width);
-    lv_obj_set_height(container_->GetObject(), icon_height);
-    lv_obj_set_style_radius(container_->GetObject(), icon_height / 2, LV_PART_MAIN);
-
-    lv_obj_set_style_transform_pivot_x(container_->GetObject(), icon_width / 2, LV_PART_MAIN);
-    lv_obj_set_style_transform_pivot_y(container_->GetObject(), icon_height / 2, LV_PART_MAIN);
+    lv_obj_set_style_transform_pivot_x(container_->GetObject(), label_width / 2, LV_PART_MAIN);
+    lv_obj_set_style_transform_pivot_y(container_->GetObject(), label_height / 2, LV_PART_MAIN);
 
     return 0;
 }
@@ -72,6 +62,9 @@ lv_obj_t* LabelIcon::Create(lv_obj_t* parent) {
     auto* lv_icon = lv_obj_create(parent);
     lv_obj_set_align(lv_icon, LV_ALIGN_CENTER);
     lv_obj_set_scrollable(lv_icon, false);
+    lv_obj_set_style_bg_opa(lv_icon, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_radius(lv_icon, 0, LV_PART_MAIN);
+    lv_obj_set_style_pad_all(lv_icon, 0, LV_PART_MAIN);
     lv_obj_set_style_border_width(lv_icon, 0, LV_PART_MAIN);
     lv_obj_set_style_shadow_opa(lv_icon, 0, LV_PART_MAIN);
 

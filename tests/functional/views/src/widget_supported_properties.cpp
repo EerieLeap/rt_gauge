@@ -189,7 +189,7 @@ ZTEST(widget_supported_properties, test_icon_wrappers_report_only_selected_icon_
                     WidgetPropertyType::ANIMATION_DURATION_MS })
                 zassert_equal(std::count(supported.begin(), supported.end(), property), 1);
             zassert_equal(Supports(supported, WidgetPropertyType::COLOR_PRIMARY_ACTIVE), type != IconType::Image);
-            zassert_equal(Supports(supported, WidgetPropertyType::COLOR_SECONDARY_ACTIVE), type == IconType::Label);
+            zassert_false(Supports(supported, WidgetPropertyType::COLOR_SECONDARY_ACTIVE));
             for(auto property :
                 { WidgetPropertyType::COLOR_PRIMARY_INACTIVE, WidgetPropertyType::COLOR_SECONDARY_INACTIVE,
                     WidgetPropertyType::COLOR_TERTIARY_ACTIVE, WidgetPropertyType::COLOR_TERTIARY_INACTIVE })

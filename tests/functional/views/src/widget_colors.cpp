@@ -634,21 +634,45 @@ ZTEST(widget_colors, test_label_and_shapes_apply_colors_without_rebuilding) {
             zassert_equal(lv_obj_get_style_opa(object, LV_PART_MAIN), 128);
             zassert_equal(lv_image_get_src(object), source);
         } else {
-            CheckBackground(object, LV_PART_MAIN, LvglColor(0x112233, 128));
+            CheckText(lv_obj_get_child(object, 0), LvglColor(0x112233, 128));
             zassert_equal(lv_obj_get_style_opa(object, LV_PART_MAIN), LV_OPA_COVER);
-        }
-        if(type == IconType::Label) {
-            auto* label = lv_obj_get_child(object, 0);
-            CheckText(label, ThemeManager::GetInstance().GetCurrentTheme().GetPrimaryColor());
-            Color(SECONDARY, "#aabbcc40");
-            CheckText(label, LvglColor(0xAABBCC, 64));
         }
         Publish(WidgetPropertyType::IS_ACTIVE, false);
         Color(PRIMARY, "#ffffffff");
         if(!shape)
-            CheckBackground(object, LV_PART_MAIN, LvglColor(0x112233, 128));
+            CheckText(lv_obj_get_child(object, 0), LvglColor(0x112233, 128));
         zassert_equal(Inner(*widget), object);
     }
+}
+
+ZTEST(widget_colors, test_label_icon_is_its_text_alone) {
+    auto configuration = Configuration(WidgetType::BasicIcon, IconType::Label);
+    configuration->properties[WidgetPropertyType::LABEL] = std::pmr::string("Log");
+    // A stored secondary colour is accepted by the validator and ignored by the label.
+    configuration->properties[SECONDARY] = std::pmr::string("#aabbcc40");
+    auto widget = Render(configuration);
+    auto* object = Inner(*widget);
+    auto* label = lv_obj_get_child(object, 0);
+    const auto& theme = ThemeManager::GetInstance().GetCurrentTheme();
+
+    // No pill: transparent, square and unpadded, the size of its text.
+    zassert_equal(lv_obj_get_style_bg_opa(object, LV_PART_MAIN), LV_OPA_TRANSP);
+    zassert_equal(lv_obj_get_style_radius(object, LV_PART_MAIN), 0);
+    zassert_equal(lv_obj_get_style_pad_left(object, LV_PART_MAIN), 0);
+    zassert_equal(lv_obj_get_style_pad_top(object, LV_PART_MAIN), 0);
+    lv_obj_update_layout(object);
+    zassert_equal(lv_obj_get_width(object), lv_obj_get_width(label));
+    zassert_equal(lv_obj_get_height(object), lv_obj_get_height(label));
+
+    // The text takes the primary colour, the theme's primary by default.
+    CheckText(label, theme.GetPrimaryColor());
+    Color(PRIMARY, "#11223380");
+    CheckText(label, LvglColor(0x112233, 128));
+    Color(SECONDARY, "#aabbcc40");
+    CheckText(label, LvglColor(0x112233, 128));
+    zassert_equal(lv_obj_get_style_bg_opa(object, LV_PART_MAIN), LV_OPA_TRANSP);
+    Color(PRIMARY, "");
+    CheckText(label, theme.GetPrimaryColor());
 }
 
 ZTEST(widget_colors, test_direct_icon_configuration_applies_parsed_colors) {
