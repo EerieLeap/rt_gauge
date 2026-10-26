@@ -92,7 +92,7 @@ the selected widget/icon's usable keys.
 | Slider | Filled-track pair | Background pair | Knob pair | Pressed/idle; primary/surface/accent |
 | Toggle | Track pair | Knob pair | - | Checked/unchecked; primary/surface track, accent knob |
 | Button | Background pair | Text pair | - | Pressed/released; accent/surface background, primary text |
-| Image / dial | None | None | None | Original image pixels |
+| Image / SVG / dial | None | None | None | Original image or document colours |
 
 A label icon is its text alone, like the digital and setting indicators: no
 background, radius or padding, sized to its text (the label's content size) and

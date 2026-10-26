@@ -154,7 +154,7 @@ name, never by a path. `KIND` is a name or a number, as in the table; what a uni
 access, size cap and extensions) is what `assets kinds` prints, one line per kind:
 
 ```
-kind 0  images  dir ui_assets/images  access RWD  max 4194304 B  ext .bin  avail yes
+kind 0  images  dir ui_assets/images  access RWD  max 4194304 B  ext .bin .svg  avail yes
 kind 4  logs  dir logs  access R-D  max none  ext .mf4  avail yes
 ```
 
