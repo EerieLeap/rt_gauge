@@ -180,7 +180,7 @@ ZTEST(widget_supported_properties, test_icon_wrappers_report_only_selected_icon_
     using eerie_leap::views::widgets::basic::ArcIconWidget;
     using eerie_leap::views::widgets::basic::IconWidget;
     for(auto type : { IconType::Label, IconType::Rectangle, IconType::TriangleIsosceles, IconType::TriangleRight,
-            IconType::Oval, IconType::Line, IconType::Image }) {
+            IconType::Oval, IconType::Line, IconType::Image, IconType::Svg }) {
         IconWidget basic(1, MakeRoot(), WidgetContext{}, type);
         ArcIconWidget arc(2, MakeRoot(), WidgetContext{}, type);
         for(const auto* widget : { static_cast<const IconWidget*>(&basic), static_cast<const IconWidget*>(&arc) }) {
@@ -188,7 +188,10 @@ ZTEST(widget_supported_properties, test_icon_wrappers_report_only_selected_icon_
             for(auto property : { WidgetPropertyType::ANIMATION_TYPE, WidgetPropertyType::IS_ANIMATION_ACTIVE,
                     WidgetPropertyType::ANIMATION_DURATION_MS })
                 zassert_equal(std::count(supported.begin(), supported.end(), property), 1);
-            zassert_equal(Supports(supported, WidgetPropertyType::COLOR_PRIMARY_ACTIVE), type != IconType::Image);
+            zassert_equal(
+                Supports(supported, WidgetPropertyType::COLOR_PRIMARY_ACTIVE),
+                type != IconType::Image && type != IconType::Svg
+            );
             zassert_false(Supports(supported, WidgetPropertyType::COLOR_SECONDARY_ACTIVE));
             for(auto property :
                 { WidgetPropertyType::COLOR_PRIMARY_INACTIVE, WidgetPropertyType::COLOR_SECONDARY_INACTIVE,

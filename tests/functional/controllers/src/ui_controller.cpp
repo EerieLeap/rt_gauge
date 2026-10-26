@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cstdint>
 #include <deque>
+#include <initializer_list>
 #include <memory>
 #include <optional>
 #include <span>
@@ -13,6 +14,7 @@
 #include <vector>
 
 #include <eerie_memory.hpp>
+#include <image/lv_image_decoder_private.h>
 #include <lvgl.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/crc.h>
@@ -245,7 +247,7 @@ void CheckProvider(
     AssetKind kind,
     std::string_view name,
     std::string_view directory,
-    std::string_view extension,
+    std::initializer_list<std::string_view> extensions,
     uint32_t max_size
 ) {
 
@@ -254,8 +256,9 @@ void CheckProvider(
 
     zassert_equal(provider->kind, kind);
     zassert_true(provider->name == name, "Expected the kind to be listed as %s.", std::string(name).c_str());
-    zassert_equal(provider->extensions.size(), 1U);
-    zassert_true(provider->extensions[0] == extension, "Expected the extension %s.", std::string(extension).c_str());
+    zassert_true(
+        std::ranges::equal(provider->extensions, extensions), "Unexpected %s extensions.", std::string(name).c_str()
+    );
     zassert_equal(provider->access, UI_ASSETS_ACCESS);
     zassert_equal(provider->max_size, max_size);
     zassert_false(static_cast<bool>(provider->is_in_use), "Expected nothing to be in use: widgets keep copies.");
@@ -343,16 +346,28 @@ AssetsManager& Assets() {
 
 ZTEST_SUITE(ui_controller, NULL, Setup, Reset, Reset, Teardown);
 
+// SVG icons draw their documents within limits. LVGL's decoder would parse any image that begins like an SVG
+// document, an icon's pixels or a raw image included, on every redraw and without them.
+ZTEST(ui_controller, test_lvgl_decodes_no_svg_images) {
+    ScopedLvglLock lvgl_guard;
+    for(auto* decoder = lv_image_decoder_get_next(nullptr); decoder != nullptr;
+        decoder = lv_image_decoder_get_next(decoder))
+        zassert_false(decoder->name != nullptr && std::string_view(decoder->name) == "SVG");
+}
+
 // What a client sees of the gauge's UI assets (the SMP assets group) is these kinds.
 ZTEST(ui_controller, test_the_controller_registers_the_image_animation_and_font_kinds) {
     CheckProvider(
-        Assets(), AssetKind::IMAGES, "images", "ui_assets/images", ".bin", CONFIG_EERIE_LEAP_UI_IMAGE_MAX_SIZE
+        Assets(), AssetKind::IMAGES, "images", "ui_assets/images", { ".bin", ".svg" },
+        CONFIG_EERIE_LEAP_UI_IMAGE_MAX_SIZE
     );
     CheckProvider(
-        Assets(), AssetKind::ANIMATIONS, "animations", "ui_assets/animations", ".json",
+        Assets(), AssetKind::ANIMATIONS, "animations", "ui_assets/animations", { ".json" },
         CONFIG_EERIE_LEAP_UI_ANIMATION_MAX_SIZE
     );
-    CheckProvider(Assets(), AssetKind::FONTS, "fonts", "ui_assets/fonts", ".ttf", CONFIG_EERIE_LEAP_UI_FONT_MAX_SIZE);
+    CheckProvider(
+        Assets(), AssetKind::FONTS, "fonts", "ui_assets/fonts", { ".ttf" }, CONFIG_EERIE_LEAP_UI_FONT_MAX_SIZE
+    );
 
     zassert_equal(Assets().GetProviders().size(), 3U, "Expected no kind but those of the UI.");
     zassert_not_equal(
@@ -499,14 +514,15 @@ ZTEST(ui_controller_assets, test_destroying_the_controller_unregisters_its_asset
     zassert_equal(controller->Initialize(), 0, "Expected the UI controller to initialize.");
 
     CheckProvider(
-        *assets_manager, AssetKind::IMAGES, "images", "ui_assets/images", ".bin", CONFIG_EERIE_LEAP_UI_IMAGE_MAX_SIZE
+        *assets_manager, AssetKind::IMAGES, "images", "ui_assets/images", { ".bin", ".svg" },
+        CONFIG_EERIE_LEAP_UI_IMAGE_MAX_SIZE
     );
     CheckProvider(
-        *assets_manager, AssetKind::ANIMATIONS, "animations", "ui_assets/animations", ".json",
+        *assets_manager, AssetKind::ANIMATIONS, "animations", "ui_assets/animations", { ".json" },
         CONFIG_EERIE_LEAP_UI_ANIMATION_MAX_SIZE
     );
     CheckProvider(
-        *assets_manager, AssetKind::FONTS, "fonts", "ui_assets/fonts", ".ttf", CONFIG_EERIE_LEAP_UI_FONT_MAX_SIZE
+        *assets_manager, AssetKind::FONTS, "fonts", "ui_assets/fonts", { ".ttf" }, CONFIG_EERIE_LEAP_UI_FONT_MAX_SIZE
     );
 
     controller.reset();

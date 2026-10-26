@@ -85,7 +85,7 @@ private:
     static constexpr const char* UI_FONTS_DIR = "ui_assets/fonts";
 
     // What a client may upload as each kind. A provider keeps only a span of its extensions.
-    static constexpr std::array<std::string_view, 1> IMAGE_EXTENSIONS{ ".bin" };
+    static constexpr std::array<std::string_view, 2> IMAGE_EXTENSIONS{ ".bin", ".svg" };
     static constexpr std::array<std::string_view, 1> ANIMATION_EXTENSIONS{ ".json" };
     static constexpr std::array<std::string_view, 1> FONT_EXTENSIONS{ ".ttf" };
 

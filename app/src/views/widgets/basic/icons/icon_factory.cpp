@@ -5,6 +5,7 @@
 #include "views/widgets/basic/icons/shape_icon/oval_icon/oval_icon.h"
 #include "views/widgets/basic/icons/shape_icon/rectangle_icon/rectangle_icon.h"
 #include "views/widgets/basic/icons/shape_icon/right_triangle_icon/right_triangle_icon.h"
+#include "views/widgets/basic/icons/svg_icon/svg_icon.h"
 
 #include "icon_factory.h"
 
@@ -74,6 +75,7 @@ std::vector<IconType> IconFactory::GetAvailableTypes() const {
 void IconFactory::RegisterTypes() {
     Register<LabelIcon>(IconType::Label);
     Register<ImageIcon>(IconType::Image);
+    Register<SvgIcon>(IconType::Svg);
 
     Register<RectangleIcon>(IconType::Rectangle);
     Register<IsoscelesTriangleIcon>(IconType::TriangleIsosceles);

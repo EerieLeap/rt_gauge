@@ -240,9 +240,12 @@ ZTEST(shape_icons, test_icon_metadata_is_specific_before_rendering) {
         IconFactory::GetInstance().RegisterProperties(type, store);
         zassert_equal(lv_obj_get_child_count(root->GetObject()), before);
         zassert_equal(store.IsRegistered(WidgetPropertyType::LABEL), type == IconType::Label);
-        zassert_equal(store.IsRegistered(WidgetPropertyType::FILE_PATH), type == IconType::Image);
         zassert_equal(
-            store.IsRegistered(WidgetPropertyType::WIDTH_PX), std::ranges::find(SHAPE_TYPES, type) != SHAPE_TYPES.end()
+            store.IsRegistered(WidgetPropertyType::FILE_PATH), type == IconType::Image || type == IconType::Svg
+        );
+        zassert_equal(
+            store.IsRegistered(WidgetPropertyType::WIDTH_PX),
+            type == IconType::Svg || std::ranges::find(SHAPE_TYPES, type) != SHAPE_TYPES.end()
         );
     }
     IconWidget line(1, root, WidgetContext{}, IconType::Line);

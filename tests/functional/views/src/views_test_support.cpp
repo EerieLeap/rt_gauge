@@ -3,6 +3,7 @@
 #include <span>
 #include <utility>
 
+#include <image/svg/lv_svg_decoder.h>
 #include <lvgl.h>
 #include <zephyr/ztest.h>
 
@@ -42,7 +43,7 @@ constexpr int32_t BUFFER_LINES = 10;
 constexpr int32_t MAX_BYTES_PER_PIXEL = 4;
 
 // A provider keeps only a span of its extensions.
-constexpr std::array<std::string_view, 1> IMAGE_EXTENSIONS{ ".bin" };
+constexpr std::array<std::string_view, 2> IMAGE_EXTENSIONS{ ".bin", ".svg" };
 constexpr std::array<std::string_view, 1> ANIMATION_EXTENSIONS{ ".json" };
 constexpr std::array<std::string_view, 1> FONT_EXTENSIONS{ ".ttf" };
 
@@ -56,8 +57,11 @@ void FlushCb(lv_display_t* display, const lv_area_t* /*area*/, uint8_t* /*px_map
 } // namespace
 
 void EnsureTestDisplay() {
-    if(!lv_is_initialized())
+    if(!lv_is_initialized()) {
         lv_init();
+        // As UiRendererService does: SVG icons draw their documents, LVGL's decoder draws none.
+        lv_svg_decoder_deinit();
+    }
 
     if(test_display != nullptr)
         return;
@@ -105,7 +109,8 @@ MakeAssetsManager(AssetKind kind, std::shared_ptr<AssetStore> store, std::span<c
         AssetProvider{ .kind = kind,
             .name = is_image ? "images" : (is_font ? "fonts" : "animations"),
             .store = std::move(store),
-            .extensions = is_image ? IMAGE_EXTENSIONS : (is_font ? FONT_EXTENSIONS : ANIMATION_EXTENSIONS),
+            .extensions = is_image ? std::span<const std::string_view>(IMAGE_EXTENSIONS)
+                                   : (is_font ? FONT_EXTENSIONS : ANIMATION_EXTENSIONS),
             .access = static_cast<uint8_t>(
                 ToMask(AssetAccess::READ) | ToMask(AssetAccess::WRITE) | ToMask(AssetAccess::DELETE)
             ),

@@ -3,6 +3,7 @@
 #include <cstring>
 #include <memory>
 
+#include <image/svg/lv_svg_decoder.h>
 #include <lvgl_mem.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/display.h>
@@ -375,6 +376,10 @@ int UiRendererService::Initialize() {
     if(InitializeRotation(display) != 0)
         return -1;
 #endif
+
+    // SVG icons parse and rasterize their documents themselves, within limits. LVGL's own SVG decoder would parse any
+    // image whose data begins like an SVG document again on every redraw, without them.
+    lv_svg_decoder_deinit();
 
     lv_obj_t* screen = lv_screen_active();
     lv_obj_set_style_bg_color(screen, lv_color_black(), LV_PART_MAIN);

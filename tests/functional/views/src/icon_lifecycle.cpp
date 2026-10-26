@@ -206,8 +206,30 @@ WidgetContext LottieContext(WidgetConfiguration& configuration) {
     return WidgetContext{ .assets_manager = views_test::MakeAssetsManager(AssetKind::ANIMATIONS, std::move(store)) };
 }
 
-constexpr std::array NATIVE_ROTATION_ICONS{ IconType::Image, IconType::Rectangle, IconType::TriangleIsosceles,
-    IconType::TriangleRight, IconType::Oval, IconType::Line };
+// Serves "needle.svg", a square document that an SVG icon fits into its WIDTH_PX x HEIGHT_PX.
+WidgetContext SvgContext(WidgetConfiguration& configuration) {
+    auto store = views_test::MakeAssetStore("icon-lifecycle");
+    zassert_true(store->Save(
+        "needle.svg",
+        views_test::TextBytes(
+            R"(<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><rect width="8" height="8"/></svg>)"
+        )
+    ));
+    configuration.properties[WidgetPropertyType::FILE_PATH] = std::pmr::string("needle.svg");
+    return WidgetContext{ .assets_manager = views_test::MakeAssetsManager(AssetKind::IMAGES, std::move(store)) };
+}
+
+constexpr std::array NATIVE_ROTATION_ICONS{ IconType::Image, IconType::Svg, IconType::Rectangle,
+    IconType::TriangleIsosceles, IconType::TriangleRight, IconType::Oval, IconType::Line };
+
+// What a rotation test's icon draws: a 20 x 60 image, a document fitted into 20 x 60, or nothing for a shape.
+WidgetContext RotationContext(IconType type, WidgetConfiguration& configuration) {
+    if(type == IconType::Image)
+        return ImageContext(configuration, 20, 60);
+    if(type == IconType::Svg)
+        return SvgContext(configuration);
+    return {};
+}
 
 std::shared_ptr<WidgetConfiguration> RotationConfiguration(IconType type) {
     auto configuration = Configuration(type);
@@ -251,7 +273,7 @@ ZTEST(icon_lifecycle, test_rotation_retains_signed_angles_anchors_and_rerender) 
         auto configuration = RotationConfiguration(type);
         configuration->properties[WidgetPropertyType::POSITION_X] = 13;
         configuration->properties[WidgetPropertyType::POSITION_Y] = -17;
-        auto context = type == IconType::Image ? ImageContext(*configuration, 20, 60) : WidgetContext{};
+        auto context = RotationContext(type, *configuration);
         TestIcon widget(1, MakeRoot(), context);
         widget.Configure(configuration);
         IWidget& abstract_widget = widget;
@@ -289,7 +311,7 @@ ZTEST(icon_lifecycle, test_rotation_replays_suspended_updates_and_blinking) {
         configuration->properties[WidgetPropertyType::ANIMATION_TYPE] = static_cast<int>(Animation::Type::Blinking);
         configuration->properties[WidgetPropertyType::IS_ANIMATION_ACTIVE] = true;
         configuration->properties[WidgetPropertyType::ANIMATION_DURATION_MS] = 1000;
-        auto context = type == IconType::Image ? ImageContext(*configuration, 20, 60) : WidgetContext{};
+        auto context = RotationContext(type, *configuration);
         TestIcon widget(1, MakeRoot(), context);
         widget.Configure(configuration);
         IWidget* rotation = &widget;
@@ -321,8 +343,11 @@ ZTEST(icon_lifecycle, test_rotation_replays_suspended_updates_and_blinking) {
 ZTEST(icon_lifecycle, test_rotation_resize_preserves_angle_and_resolves_new_bounds) {
     ScopedLvglLock lock;
     for(auto type : NATIVE_ROTATION_ICONS) {
+        // An SVG icon takes a new size at its next render: drawing it is a screen render's work, not a bus worker's.
+        if(type == IconType::Svg)
+            continue;
         auto configuration = RotationConfiguration(type);
-        auto context = type == IconType::Image ? ImageContext(*configuration, 20, 60) : WidgetContext{};
+        auto context = RotationContext(type, *configuration);
         const auto width = type == IconType::Image ? WidgetPropertyType::IMG_WIDTH : WidgetPropertyType::WIDTH_PX;
         const auto height = type == IconType::Image ? WidgetPropertyType::IMG_HEIGHT : WidgetPropertyType::HEIGHT_PX;
         for(auto target : { width, height }) {

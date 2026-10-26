@@ -240,7 +240,7 @@ ZTEST(widget_composition, test_icon_widgets_require_an_implemented_icon_type) {
 
         icon->properties.erase(WidgetPropertyType::ICON_TYPE);
         ExpectError(*screen, { "Widget ID: 9", "ICON_TYPE is required" });
-        for(int value : { static_cast<int>(IconType::None), static_cast<int>(IconType::Svg), 99, -1 }) {
+        for(int value : { static_cast<int>(IconType::None), 99, -1 }) {
             icon->properties[WidgetPropertyType::ICON_TYPE] = value;
             ExpectError(*screen, { "Widget ID: 9", "ICON_TYPE must name an implemented icon type" });
         }
