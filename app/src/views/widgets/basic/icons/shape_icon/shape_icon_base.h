@@ -23,7 +23,6 @@ protected:
     int height_px_ = 32;
     int stroke_px_ = 2;
 
-    static int ReadPixels(const WidgetPropertyStore& store, WidgetPropertyType type, int fallback, bool is_dimension);
     template<typename T>
     static bool UpdateValue(T& target, T value) {
         const bool changed = target != value;

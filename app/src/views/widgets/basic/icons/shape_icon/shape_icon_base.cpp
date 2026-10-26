@@ -1,5 +1,4 @@
 #include <algorithm>
-#include <cmath>
 #include <memory>
 #include <new>
 
@@ -21,9 +20,7 @@ LOG_MODULE_REGISTER(shape_icon_logger);
 
 namespace {
 
-// Keep malformed configuration from becoming LVGL's encoded percentage sizes or
-// an unbounded allocation. Masks use external RAM where the board provides it.
-constexpr int MAX_DIMENSION = 32767;
+// Masks use external RAM where the board provides it.
 constexpr size_t MAX_MASK_BYTES = 4 * 1024 * 1024;
 constexpr int TILE_SIZE = 32;
 constexpr int TILE_PADDING = 2;
@@ -34,19 +31,6 @@ using DrawBuffer = std::unique_ptr<lv_draw_buf_t, decltype(&lv_draw_buf_destroy)
 using DrawDescriptor = std::unique_ptr<lv_draw_vector_dsc_t, decltype(&lv_draw_vector_dsc_delete)>;
 
 } // namespace
-
-int ShapeIconBase::ReadPixels(
-    const WidgetPropertyStore& store,
-    WidgetPropertyType type,
-    int fallback,
-    bool is_dimension
-) {
-    const double value = store.GetAs<double>(type, fallback);
-    if(!std::isfinite(value) || (is_dimension && (value < 0 || value > MAX_DIMENSION)))
-        return is_dimension ? -1 : 0;
-
-    return static_cast<int>(std::clamp(value, 0.0, static_cast<double>(MAX_DIMENSION)));
-}
 
 ShapeIconBase::ShapeIconBase(std::shared_ptr<Frame> parent) :
     IconBase(std::move(parent)),

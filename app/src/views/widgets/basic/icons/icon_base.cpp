@@ -1,3 +1,6 @@
+#include <algorithm>
+#include <cmath>
+
 #include "icon_base.h"
 
 #include "domain/ui_domain/lvgl_lock.h"
@@ -34,6 +37,14 @@ bool IconBase::IsProcessingEligible() const {
 
     // The icon's own part opacity is visual; owner management and ancestors still gate processing.
     return Frame::IsVisibleInHierarchy(parent_->GetObject());
+}
+
+int IconBase::ReadPixels(const WidgetPropertyStore& store, WidgetPropertyType type, int fallback, bool is_dimension) {
+    const double value = store.GetAs<double>(type, fallback);
+    if(!std::isfinite(value) || (is_dimension && (value < 0 || value > MAX_DIMENSION)))
+        return is_dimension ? -1 : 0;
+
+    return static_cast<int>(std::clamp(value, 0.0, static_cast<double>(MAX_DIMENSION)));
 }
 
 void IconBase::Configure(std::shared_ptr<WidgetPropertyStore> properties) {

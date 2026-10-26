@@ -22,6 +22,14 @@ protected:
     // What the owning widget was given, where an icon finds its files and fonts.
     WidgetContext context_;
 
+    // The largest width or height an icon draws: keeps malformed configuration from becoming LVGL's encoded
+    // percentage sizes or an unbounded allocation.
+    static constexpr int MAX_DIMENSION = 32767;
+
+    // A pixel property, safe for any stored or bound number: -1 for a dimension outside 0 to MAX_DIMENSION or not
+    // finite, else (a thickness, a radius) clamped into that range, 0 when not finite.
+    static int ReadPixels(const WidgetPropertyStore& store, WidgetPropertyType type, int fallback, bool is_dimension);
+
 public:
     explicit IconBase(std::shared_ptr<Frame> parent);
     ~IconBase() override = default;
