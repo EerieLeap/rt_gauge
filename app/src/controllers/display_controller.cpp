@@ -68,4 +68,9 @@ std::shared_ptr<DisplayService> DisplayController::GetDisplayService() const {
     return display_service_;
 }
 
+void DisplayController::SetBrightnessSensorChecker(EventBindingChecker check_brightness_sensor) {
+    if(display_configuration_manager_ != nullptr)
+        display_configuration_manager_->SetBrightnessSensorChecker(std::move(check_brightness_sensor));
+}
+
 } // namespace eerie_leap::controllers

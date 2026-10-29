@@ -6,6 +6,7 @@
 
 #include <zephyr/ztest.h>
 
+#include "domain/sensor_domain/event_bus/sensor_event_type.h"
 #include "domain/sensor_domain/event_bus/sensor_payload_type.h"
 #include "domain/ui_domain/configuration/parsers/ui_configuration_cbor_parser.h"
 #include "domain/ui_domain/configuration/parsers/ui_configuration_validator.h"
@@ -216,7 +217,10 @@ ZTEST(widget_composition, test_dial_rejects_inbound_animation_type_bindings_and_
                 .selector_key =
                     std::to_underlying(eerie_leap::domain::sensor_domain::event_bus::SensorPayloadType::SensorId),
                 .selector_value = 1 },
-            .direction = direction } };
+            .direction = direction,
+            // The only event an outbound binding on Sensors may publish.
+            .outbound_event_type =
+                std::to_underlying(eerie_leap::domain::sensor_domain::event_bus::SensorEventType::InputRequested) } };
         ExpectError(*screen, { "Widget ID: 9", "Child index 0, ID 12 (needle)", "inbound ANIMATION_TYPE" });
     }
     needle->bindings[0].direction = PropertyBindingDirection::Out;

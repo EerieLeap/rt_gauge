@@ -52,6 +52,13 @@ public:
     // an outbound one under its outbound event type. Throws std::invalid_argument naming the widget.
     static void ValidateBindings(const UiConfiguration& configuration, const EventBindingChecker& check_binding);
 
+    // Checks the sensor each control drives against the unit applying the configuration: @p check_sensor_input
+    // is asked about every outbound binding on the Sensors channel that publishes InputRequested, under that
+    // event type, and returns why the sensor it selects is no control sensor of the unit, or an empty text.
+    // Throws std::invalid_argument naming the widget.
+    static void
+    ValidateSensorInputs(const UiConfiguration& configuration, const EventBindingChecker& check_sensor_input);
+
     // Checks a screen and invokes the supplied widget-owned child rules once.
     static void Validate(const ScreenConfiguration& configuration, const ChildValidator& validate_children = {});
 };

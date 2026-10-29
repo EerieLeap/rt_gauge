@@ -13,6 +13,7 @@
 
 #include "utilities/memory/memory_resource_manager.h"
 
+#include "domain/sensor_domain/event_bus/sensor_event_type.h"
 #include "domain/ui_domain/configuration/parsers/ui_configuration_validator.h"
 #include "domain/ui_domain/models/property_binding.h"
 #include "domain/ui_domain/models/ui_configuration.h"
@@ -27,6 +28,7 @@ using namespace eerie_leap::utilities::memory;
 using namespace eerie_leap::domain::ui_domain::models;
 using namespace eerie_leap::domain::ui_domain::configuration::parsers;
 
+using eerie_leap::domain::sensor_domain::event_bus::SensorEventType;
 using eerie_leap::subsys::event_bus::EventBinding;
 using eerie_leap::subsys::event_bus::EventChannelId;
 
@@ -117,6 +119,8 @@ PropertyBinding MakeSensorBinding() {
     binding.event.payload_key = 1;
     binding.event.selector_key = 0;
     binding.event.selector_value = std::pmr::string("sensor_1");
+    // What an outbound binding on the Sensors channel may publish, so the binding is valid in every direction.
+    binding.outbound_event_type = std::to_underlying(SensorEventType::InputRequested);
 
     return binding;
 }
@@ -157,6 +161,122 @@ ZTEST(ui_configuration_validator, test_sensors_binding_must_select_a_sensor) {
     auto other_channel = MakeConfiguration();
     AddBinding(*other_channel, binding);
     zassert_true(Validates(*other_channel));
+}
+
+// Only the sensor pipeline asserts DataUpdated; a control asks for a sensor's input with InputRequested.
+ZTEST(ui_configuration_validator, test_an_outbound_sensors_binding_must_publish_input_requested) {
+    for(auto direction : { PropertyBindingDirection::Out, PropertyBindingDirection::InOut }) {
+        auto binding = MakeSensorBinding();
+        binding.direction = direction;
+
+        auto input_requested = MakeConfiguration();
+        binding.outbound_event_type = std::to_underlying(SensorEventType::InputRequested);
+        AddBinding(*input_requested, binding);
+        zassert_true(Validates(*input_requested));
+
+        auto data_updated = MakeConfiguration();
+        binding.outbound_event_type = std::to_underlying(SensorEventType::DataUpdated);
+        AddBinding(*data_updated, binding);
+        zassert_false(Validates(*data_updated));
+
+        // Any other value is refused too, not only the fact.
+        auto unknown = MakeConfiguration();
+        binding.outbound_event_type = std::to_underlying(SensorEventType::InputRequested) + 1;
+        AddBinding(*unknown, binding);
+        zassert_false(Validates(*unknown));
+
+        std::string message;
+        try {
+            UiConfigurationValidator::Validate(*data_updated);
+        } catch(const std::invalid_argument& error) {
+            message = error.what();
+        }
+        zassert_true(message.contains("Screen ID: 0, Widget ID: 0"), "%s", message.c_str());
+        zassert_true(message.contains("must publish InputRequested"), "%s", message.c_str());
+    }
+
+    // An inbound binding publishes nothing.
+    auto binding = MakeSensorBinding();
+    binding.outbound_event_type = std::to_underlying(SensorEventType::DataUpdated);
+    auto inbound = MakeConfiguration();
+    AddBinding(*inbound, binding);
+    zassert_true(Validates(*inbound));
+
+    // Another channel has events of its own.
+    binding = MakeSensorBinding();
+    binding.event.channel = EventChannelId::Settings;
+    binding.direction = PropertyBindingDirection::InOut;
+    binding.outbound_event_type = std::to_underlying(SensorEventType::DataUpdated);
+    auto other_channel = MakeConfiguration();
+    AddBinding(*other_channel, binding);
+    zassert_true(Validates(*other_channel));
+}
+
+ZTEST(ui_configuration_validator, test_sensor_input_check_asks_the_bindings_that_publish_input_requested) {
+    constexpr auto INPUT_REQUESTED = std::to_underlying(SensorEventType::InputRequested);
+
+    auto make = [](PropertyBindingDirection direction, EventChannelId channel, uint32_t outbound_event_type) {
+        auto configuration = MakeConfiguration();
+        auto binding = MakeSensorBinding();
+        binding.event.channel = channel;
+        binding.direction = direction;
+        binding.outbound_event_type = outbound_event_type;
+        AddBinding(*configuration, binding);
+        return configuration;
+    };
+
+    EventBinding last;
+    size_t asked = 0;
+    auto count_asked = [&](const UiConfiguration& configuration) {
+        asked = 0;
+        UiConfigurationValidator::ValidateSensorInputs(configuration, [&](const EventBinding& binding) {
+            ++asked;
+            last = binding;
+
+            return std::string_view();
+        });
+
+        return asked;
+    };
+
+    // The check is asked under the outbound event type, with the binding's own route.
+    for(auto direction : { PropertyBindingDirection::Out, PropertyBindingDirection::InOut }) {
+        zassert_equal(count_asked(*make(direction, EventChannelId::Sensors, INPUT_REQUESTED)), 1U);
+        zassert_equal(last.channel, EventChannelId::Sensors);
+        zassert_equal(last.event_type, INPUT_REQUESTED);
+        zassert_equal(last.payload_key, 1U);
+        zassert_true(std::get<std::pmr::string>(last.selector_value) == "sensor_1");
+    }
+
+    // An inbound binding sends nothing, another channel's events are its own, and DataUpdated is refused when the
+    // configuration loads, not asked about here.
+    zassert_equal(count_asked(*make(PropertyBindingDirection::In, EventChannelId::Sensors, INPUT_REQUESTED)), 0U);
+    zassert_equal(count_asked(*make(PropertyBindingDirection::InOut, EventChannelId::Settings, INPUT_REQUESTED)), 0U);
+    zassert_equal(
+        count_asked(*make(
+            PropertyBindingDirection::InOut, EventChannelId::Sensors, std::to_underlying(SensorEventType::DataUpdated)
+        )),
+        0U
+    );
+
+    // A refusal names the widget.
+    std::string message;
+    try {
+        UiConfigurationValidator::ValidateSensorInputs(
+            *make(PropertyBindingDirection::InOut, EventChannelId::Sensors, INPUT_REQUESTED), [](const EventBinding&) {
+                return std::string_view("names a sensor this unit does not have.");
+            }
+        );
+    } catch(const std::invalid_argument& error) {
+        message = error.what();
+    }
+    zassert_true(message.contains("Screen ID: 0, Widget ID: 0"), "%s", message.c_str());
+    zassert_true(message.contains("Outbound binding names a sensor this unit does not have."), "%s", message.c_str());
+
+    // No checker, no check.
+    UiConfigurationValidator::ValidateSensorInputs(
+        *make(PropertyBindingDirection::InOut, EventChannelId::Sensors, INPUT_REQUESTED), {}
+    );
 }
 
 ZTEST(ui_configuration_validator, test_binding_check_asks_the_inbound_and_outbound_event_types) {

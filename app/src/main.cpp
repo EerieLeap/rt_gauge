@@ -20,6 +20,7 @@
 #include "subsys/device_tree/dt_fs.h"
 #include "subsys/device_tree/dt_gpio.h"
 
+#include "subsys/event_bus/event_binding.h"
 #include "subsys/event_bus/event_binding_subscription.h"
 #include "subsys/event_bus/event_channel_id.h"
 #include "subsys/fs/services/fs_service.h"
@@ -41,6 +42,7 @@
 #include "domain/sensor_domain/models/indicator_input_mode.h"
 #include "domain/sensor_domain/models/sensor.h"
 #include "domain/sensor_domain/models/sensor_type.h"
+#include "domain/sensor_domain/models/sensor_type_traits.h"
 #include "domain/sensor_domain/models/sources/canbus_source.h"
 #include "domain/sensor_domain/services/sensor_events_publisher.h"
 #include "domain/sensor_domain/utilities/sensor_readings_frame.hpp"
@@ -99,6 +101,8 @@ using eerie_leap::domain::logging_domain::control::models::LoggingControlConfigu
 using eerie_leap::domain::sensor_domain::event_bus::SensorEventType;
 using eerie_leap::domain::sensor_domain::event_bus::SensorPayloadType;
 using eerie_leap::subsys::assets::AssetsManager;
+using eerie_leap::subsys::event_bus::EventBinding;
+using eerie_leap::subsys::event_bus::EventBindingChecker;
 using eerie_leap::subsys::event_bus::EventChannelId;
 using eerie_leap::subsys::event_bus::EventData;
 using eerie_leap::subsys::event_bus::SelectorMatches;
@@ -163,6 +167,57 @@ LoggingControlBinding MakeLoggingButtonTrigger() {
     trigger.target_uid = 0; // Every unit that can log.
 
     return trigger;
+}
+
+// The configured sensor a binding's selector names, enabled or not, or null. The selector is judged by the
+// subscription's own rule, as rt_core's MakeSelectorResolver() judges a logging trigger's: a text id or its hash.
+std::shared_ptr<Sensor>
+FindSelectedSensor(const std::shared_ptr<SensorsConfigurationManager>& sensors_manager, const EventBinding& binding) {
+    const auto selector = ToSelectorValue(binding.selector_value);
+    if(!selector.has_value())
+        return nullptr;
+
+    const auto sensors = sensors_manager->Get();
+    if(sensors == nullptr)
+        return nullptr;
+
+    const auto it = std::ranges::find_if(*sensors, [&selector](const auto& sensor) {
+        return SelectorMatches(*selector, EventData(sensor->id_hash));
+    });
+    if(it == sensors->end())
+        return nullptr;
+
+    return *it;
+}
+
+// A client's UI apply: only a control sensor takes the input a control publishes; any other sensor gets its value
+// from its source and would ignore it. The sensors are read at each apply, not kept.
+EventBindingChecker MakeSensorInputChecker(std::shared_ptr<SensorsConfigurationManager> sensors_manager) {
+    return [manager = std::move(sensors_manager)](const EventBinding& binding) -> std::string_view {
+        const auto sensor = FindSelectedSensor(manager, binding);
+        if(sensor == nullptr)
+            return "names a sensor this unit does not have.";
+
+        if(sensor->configuration.GetTraits().source != SensorSourceKind::CONTROL)
+            return "names a sensor that is not a control sensor.";
+
+        return {};
+    };
+}
+
+// A client's display apply: the brightness follows an analog sensor, since an indicator's 0 or 1 is no brightness
+// (a VIRTUAL_ANALOG can map one).
+EventBindingChecker MakeBrightnessSensorChecker(std::shared_ptr<SensorsConfigurationManager> sensors_manager) {
+    return [manager = std::move(sensors_manager)](const EventBinding& binding) -> std::string_view {
+        const auto sensor = FindSelectedSensor(manager, binding);
+        if(sensor == nullptr)
+            return "names a sensor this unit does not have.";
+
+        if(sensor->configuration.GetTraits().value_kind != SensorValueKind::ANALOG)
+            return "names a sensor that is not analog.";
+
+        return {};
+    };
 }
 
 } // namespace
@@ -294,8 +349,17 @@ int main() {
     );
     // TODO: For test purposes only
     // if(sensors_controller->Initialize(SetupTestSensors) != 0)
-    if(sensors_controller->Initialize(SetupTestLoggingButton) != 0)
+    if(sensors_controller->Initialize(SetupTestLoggingButton) != 0) {
         LOG_ERR("Failed to initialize the sensors controller.");
+    } else {
+        // The UI and display controllers are built before this one, so a client's apply of their configurations
+        // checks the sensors it names from here: a control must drive a control sensor, and the brightness follow
+        // an analog one.
+        ui_controller->SetSensorInputChecker(MakeSensorInputChecker(sensors_controller->GetConfigurationManager()));
+        display_controller->SetBrightnessSensorChecker(
+            MakeBrightnessSensorChecker(sensors_controller->GetConfigurationManager())
+        );
+    }
 
     canbus_controller->RegisterDependentService(sensors_controller->GetProcessingService());
 

@@ -15,6 +15,7 @@
 #include "subsys/assets/asset_store.h"
 #include "subsys/assets/assets_manager.h"
 #include "subsys/event_bus/dispatch_guard.h"
+#include "subsys/event_bus/event_binding.h"
 #include "subsys/event_bus/i_scoped_subscription.h"
 #include "subsys/fs/services/i_fs_service.h"
 #include "subsys/threading/work_queue_thread.h"
@@ -58,6 +59,7 @@ using eerie_leap::domain::ui_domain::services::UiInputService;
 using eerie_leap::domain::ui_domain::services::UiRendererService;
 using eerie_leap::subsys::event_bus::AnySubscription;
 using eerie_leap::subsys::event_bus::DispatchGuard;
+using eerie_leap::subsys::event_bus::EventBindingChecker;
 
 using eerie_leap::domain::ui_domain::preview::PatchPlan;
 using eerie_leap::domain::ui_domain::preview::ScreenPatch;
@@ -272,6 +274,15 @@ public:
      * the render work queue, and must not block.
      */
     void SetStateReplay(std::function<void()> replay);
+
+    /**
+     * @brief Sets the check a client's apply of the UI runs on the sensor each control drives: @p check_sensor_input
+     *        returns why the sensor an outbound binding selects is no control sensor of this unit, or an empty text.
+     *
+     * Built after this controller, the sensors are handed over here, once Initialize() has made the configuration
+     * manager. Set before a client's first apply; unset, no sensor is checked.
+     */
+    void SetSensorInputChecker(EventBindingChecker check_sensor_input);
 };
 
 } // namespace eerie_leap::controllers

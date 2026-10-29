@@ -31,6 +31,10 @@ void UiConfigurationManager::RegisterConfigurationUpdatedHandler(ConfigurationUp
     configuration_updated_handler_ = std::move(handler);
 }
 
+void UiConfigurationManager::SetSensorInputChecker(EventBindingChecker check_sensor_input) {
+    check_sensor_input_ = std::move(check_sensor_input);
+}
+
 void UiConfigurationManager::NotifyUpdated() {
     if(!configuration_updated_handler_)
         return;
@@ -72,11 +76,13 @@ PmrUniquePtr<UiConfiguration> UiConfigurationManager::Deserialize(const CborUiCo
 
 void UiConfigurationManager::ValidateApply(const UiConfiguration& configuration) {
     UiConfigurationValidator::ValidateBindings(configuration, check_binding_);
+    UiConfigurationValidator::ValidateSensorInputs(configuration, check_sensor_input_);
 }
 
 void UiConfigurationManager::ValidateConfiguration(const UiConfiguration& configuration) const {
     UiConfigurationValidator::Validate(configuration, validate_children_);
     UiConfigurationValidator::ValidateBindings(configuration, check_binding_);
+    UiConfigurationValidator::ValidateSensorInputs(configuration, check_sensor_input_);
 }
 
 size_t UiConfigurationManager::GetEncodedSize(const UiConfiguration& configuration) {

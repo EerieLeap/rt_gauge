@@ -2,6 +2,9 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <string_view>
+#include <utility>
+#include <variant>
 #include <vector>
 
 #include <zephyr/kernel.h>
@@ -14,8 +17,11 @@
 #include "domain/configuration_domain/services/configuration_service.h"
 #include "domain/display_domain/configuration/display_configuration_manager.h"
 #include "domain/display_domain/models/display_configuration.h"
+#include "domain/sensor_domain/event_bus/sensor_event_type.h"
+#include "domain/sensor_domain/event_bus/sensor_payload_type.h"
 
 #include "subsys/device_tree/dt_fs.h"
+#include "subsys/event_bus/event_binding.h"
 #include "subsys/fs/services/fs_service.h"
 
 using eerie_leap::configuration::cbor::CborSerializer;
@@ -23,7 +29,11 @@ using eerie_leap::configuration::services::CborConfigurationService;
 using eerie_leap::domain::configuration_domain::services::ConfigurationService;
 using eerie_leap::domain::display_domain::configuration::DisplayConfigurationManager;
 using eerie_leap::domain::display_domain::models::DisplayConfiguration;
+using eerie_leap::domain::sensor_domain::event_bus::SensorEventType;
+using eerie_leap::domain::sensor_domain::event_bus::SensorPayloadType;
 using eerie_leap::subsys::device_tree::DtFs;
+using eerie_leap::subsys::event_bus::EventBinding;
+using eerie_leap::subsys::event_bus::EventChannelId;
 using eerie_leap::subsys::fs::services::FsService;
 using eerie_leap::utilities::cbor::CborHelpers;
 
@@ -292,4 +302,89 @@ ZTEST(display_configuration_manager, test_update_own_setting_is_not_reported) {
     zassert_equal(notifications, 0);
 
     configuration_service.RegisterConfigurationStoredHandler(nullptr);
+}
+
+// A client's apply asks about the sensor the brightness follows, as the binding DisplayService subscribes with.
+ZTEST(display_configuration_manager, test_an_apply_asks_the_checker_about_the_brightness_sensor) {
+    auto manager = MakeManager();
+
+    std::vector<EventBinding> asked;
+    manager->SetBrightnessSensorChecker([&asked](const EventBinding& binding) {
+        asked.push_back(binding);
+
+        return std::string_view();
+    });
+
+    zassert_true(manager->Update(MakeConfiguration()), "A save is not checked");
+    zassert_true(asked.empty());
+    const auto cbor = manager->GetCborConfiguration();
+
+    zassert_true(manager->ApplyCborConfiguration(std::span<const uint8_t>(cbor.data(), cbor.size())));
+
+    zassert_equal(asked.size(), 1U);
+    zassert_equal(asked[0].channel, EventChannelId::Sensors);
+    zassert_equal(asked[0].event_type, std::to_underlying(SensorEventType::DataUpdated));
+    zassert_equal(asked[0].payload_key, std::to_underlying(SensorPayloadType::Value));
+    zassert_equal(asked[0].selector_key, std::to_underlying(SensorPayloadType::SensorId));
+    zassert_true(std::get<std::pmr::string>(asked[0].selector_value) == "ambient_light");
+    zassert_equal(manager->Get(true)->brightness, 42);
+}
+
+ZTEST(display_configuration_manager, test_an_apply_is_refused_when_the_checker_refuses_the_brightness_sensor) {
+    auto manager = MakeManager();
+    manager->SetBrightnessSensorChecker([](const EventBinding&) {
+        return std::string_view("names a sensor that is not analog.");
+    });
+
+    zassert_true(manager->Update(MakeConfiguration()), "A save is not checked");
+    const auto cbor = manager->GetCborConfiguration();
+
+    DisplayConfiguration replacement;
+    replacement.brightness = 7;
+    zassert_true(manager->Update(replacement));
+
+    int notifications = 0;
+    manager->RegisterConfigurationUpdatedHandler([&notifications] {
+        notifications++;
+    });
+
+    std::array<char, 160> reason{};
+    zassert_false(manager->ApplyCborConfiguration(std::span<const uint8_t>(cbor.data(), cbor.size()), reason));
+    zassert_str_equal(
+        reason.data(), "Invalid Display configuration. Brightness sensor ID names a sensor that is not analog."
+    );
+    zassert_equal(manager->Get(true)->brightness, 7, "A refused apply stores nothing");
+    zassert_equal(notifications, 0);
+}
+
+// No sensor to follow is nothing to check.
+ZTEST(display_configuration_manager, test_an_apply_without_a_brightness_sensor_does_not_ask_the_checker) {
+    auto manager = MakeManager();
+
+    int asked = 0;
+    manager->SetBrightnessSensorChecker([&asked](const EventBinding&) {
+        asked++;
+
+        return std::string_view("names a sensor this unit does not have.");
+    });
+
+    auto configuration = MakeConfiguration();
+    configuration.brightness_sensor_id.clear();
+    zassert_true(manager->Update(configuration));
+    const auto cbor = manager->GetCborConfiguration();
+
+    zassert_true(manager->ApplyCborConfiguration(std::span<const uint8_t>(cbor.data(), cbor.size())));
+
+    zassert_equal(asked, 0);
+    zassert_true(manager->Get(true)->brightness_sensor_id.empty());
+}
+
+ZTEST(display_configuration_manager, test_an_apply_without_a_brightness_sensor_checker_is_not_checked) {
+    auto manager = MakeManager();
+
+    zassert_true(manager->Update(MakeConfiguration()));
+    const auto cbor = manager->GetCborConfiguration();
+
+    zassert_true(manager->ApplyCborConfiguration(std::span<const uint8_t>(cbor.data(), cbor.size())));
+    zassert_str_equal(manager->Get(true)->brightness_sensor_id.c_str(), "ambient_light");
 }

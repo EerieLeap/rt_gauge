@@ -2,6 +2,7 @@
 
 #include <memory>
 
+#include "subsys/event_bus/event_binding.h"
 #include "subsys/fs/services/i_fs_service.h"
 #include "subsys/threading/work_queue_thread.h"
 
@@ -11,6 +12,7 @@
 
 namespace eerie_leap::controllers {
 
+using eerie_leap::subsys::event_bus::EventBindingChecker;
 using eerie_leap::subsys::fs::services::IFsService;
 using eerie_leap::subsys::threading::WorkQueueThread;
 
@@ -40,6 +42,15 @@ public:
     int Initialize();
 
     std::shared_ptr<DisplayService> GetDisplayService() const;
+
+    /**
+     * @brief Sets the check a client's apply of the display configuration runs on the sensor the brightness
+     *        follows: @p check_brightness_sensor returns why it is no analog sensor of this unit, or an empty text.
+     *
+     * Built after this controller, the sensors are handed over here, once Initialize() has made the configuration
+     * manager. Set before a client's first apply; unset, no sensor is checked.
+     */
+    void SetBrightnessSensorChecker(EventBindingChecker check_brightness_sensor);
 };
 
 } // namespace eerie_leap::controllers

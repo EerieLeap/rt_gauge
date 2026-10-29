@@ -15,6 +15,7 @@
 #include "domain/ui_domain/utilities/widget_property_validator.h"
 
 #include "domain/sensor_domain/event_bus/sensor_event_binding.h"
+#include "domain/sensor_domain/event_bus/sensor_event_type.h"
 
 #include "subsys/event_bus/event_binding.h"
 #include "subsys/event_bus/event_channel_id.h"
@@ -29,6 +30,7 @@ using namespace eerie_leap::domain::ui_domain::utilities;
 // Header only, so the domain checks link without the event bus. Named here because ADL cannot
 // find IsSelectorValue through a ConfigValue, a variant of std types.
 using eerie_leap::domain::sensor_domain::event_bus::SelectsSensor;
+using eerie_leap::domain::sensor_domain::event_bus::SensorEventType;
 using eerie_leap::subsys::event_bus::IsSelectorValue;
 using eerie_leap::subsys::event_bus::IsValidEventChannelId;
 
@@ -642,6 +644,15 @@ void UiConfigurationValidator::ValidateWidgetBindings(const ScreenConfiguration&
                     screen_configuration.id, widget_configuration->id,
                     "Binding on the Sensors channel must select a sensor by its SensorId."
                 );
+
+            if(binding.event.channel == EventChannelId::Sensors
+                && binding.direction != PropertyBindingDirection::In
+                && binding.outbound_event_type != std::to_underlying(SensorEventType::InputRequested))
+                InvalidWidgetConfiguration(
+                    screen_configuration.id, widget_configuration->id,
+                    "Outbound binding on the Sensors channel must publish InputRequested; only the sensor pipeline "
+                    "asserts DataUpdated."
+                );
         }
     }
 }
@@ -675,6 +686,35 @@ void UiConfigurationValidator::ValidateBindings(
                             std::string("Outbound binding ").append(error)
                         );
                 }
+            }
+        }
+    }
+}
+
+void UiConfigurationValidator::ValidateSensorInputs(
+    const UiConfiguration& configuration,
+    const EventBindingChecker& check_sensor_input
+) {
+    if(!check_sensor_input)
+        return;
+
+    for(const auto& screen_configuration : configuration.screen_configurations) {
+        for(const auto& widget_configuration : screen_configuration->widget_configurations) {
+            for(const auto& binding : widget_configuration->bindings) {
+                if(binding.event.channel != EventChannelId::Sensors
+                    || binding.direction == PropertyBindingDirection::In
+                    || binding.outbound_event_type != std::to_underlying(SensorEventType::InputRequested))
+                    continue;
+
+                auto outbound = binding.event;
+                outbound.event_type = binding.outbound_event_type;
+
+                const auto error = check_sensor_input(outbound);
+                if(!error.empty())
+                    InvalidWidgetConfiguration(
+                        screen_configuration->id, widget_configuration->id,
+                        std::string("Outbound binding ").append(error)
+                    );
             }
         }
     }

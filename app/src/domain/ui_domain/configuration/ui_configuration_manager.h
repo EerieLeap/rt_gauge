@@ -32,6 +32,7 @@ private:
     UiConfigurationValidator::ChildValidator validate_children_;
     UiConfigurationCborParser cbor_parser_;
     EventBindingChecker check_binding_;
+    EventBindingChecker check_sensor_input_;
     ConfigurationUpdatedHandler configuration_updated_handler_;
 
     // Reports a stored configuration to the updated handler. A handler that throws is logged: the
@@ -41,7 +42,8 @@ private:
     eerie_memory::PmrUniquePtr<CborUiConfig> Serialize(const UiConfiguration& configuration) override;
     eerie_memory::PmrUniquePtr<UiConfiguration> Deserialize(const CborUiConfig& cbor_config) override;
     bool CreateDefaultConfiguration() override;
-    // A client's apply also has its widget bindings checked against this unit's channels.
+    // A client's apply also has its widget bindings checked against this unit's channels, and the sensors its
+    // controls drive against this unit's sensors.
     void ValidateApply(const UiConfiguration& configuration) override;
     // The base's Update(const UiConfiguration&) copies; callers use the overload that keeps the instance.
     using CborConfigurationManagerBase::Update;
@@ -56,12 +58,19 @@ public:
     // so the screens can be rebuilt from it. Not for UpdateOwnSetting(). Set before the first store.
     void RegisterConfigurationUpdatedHandler(ConfigurationUpdatedHandler handler) override;
 
+    // Checks the sensor each control drives: @p check_sensor_input is given the outbound binding of every widget
+    // binding that publishes InputRequested and returns why the sensor it selects is no control sensor of this
+    // unit, or an empty text. The sensors controller is built after the UI controller, so this comes after the
+    // manager. Set before a client's first apply; unset, no sensor is checked.
+    void SetSensorInputChecker(EventBindingChecker check_sensor_input);
+
     using CborConfigurationManagerBase::ApplyCborConfiguration;
 
     bool ApplyCborConfiguration(std::span<const uint8_t> cbor_data, std::span<char> reason) override;
 
-    // Checks a configuration as an upload is checked (the domain rules, the widgets' own child rules and the
-    // bindings against this unit's channels) and stores nothing. Throws std::invalid_argument naming what is wrong.
+    // Checks a configuration as an upload is checked (the domain rules, the widgets' own child rules, the
+    // bindings against this unit's channels and the sensors its controls drive) and stores nothing. Throws
+    // std::invalid_argument naming what is wrong.
     void ValidateConfiguration(const UiConfiguration& configuration) const;
 
     // The size the configuration has encoded as an upload carries it; 0 if it cannot be encoded. Encodes it, so

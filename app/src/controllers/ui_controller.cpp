@@ -505,6 +505,11 @@ void UiController::SetStateReplay(std::function<void()> replay) {
     state_replay_.swap(slot);
 }
 
+void UiController::SetSensorInputChecker(EventBindingChecker check_sensor_input) {
+    if(ui_configuration_manager_ != nullptr)
+        ui_configuration_manager_->SetSensorInputChecker(std::move(check_sensor_input));
+}
+
 void UiController::ReplayState() {
     std::shared_ptr<const std::function<void()>> replay;
     {

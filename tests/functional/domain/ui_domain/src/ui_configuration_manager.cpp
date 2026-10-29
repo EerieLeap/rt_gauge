@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <eerie_memory.hpp>
@@ -6,6 +7,7 @@
 #include <stdexcept>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 #include <zephyr/kernel.h>
 #include <zephyr/ztest.h>
@@ -14,11 +16,14 @@
 #include "configuration/services/cbor_configuration_service.h"
 
 #include "domain/configuration_domain/services/configuration_service.h"
+#include "domain/sensor_domain/event_bus/sensor_event_type.h"
+#include "domain/sensor_domain/event_bus/sensor_payload_type.h"
 #include "domain/ui_domain/configuration/parsers/ui_configuration_cbor_parser.h"
 #include "domain/ui_domain/configuration/ui_configuration_manager.h"
 #include "domain/ui_domain/models/widget_property.h"
 
 #include "subsys/device_tree/dt_fs.h"
+#include "subsys/event_bus/event_binding.h"
 #include "subsys/fs/services/fs_service.h"
 
 #include "views/widgets/indicators/horizontal_chart_indicator/horizontal_chart_indicator.h"
@@ -30,6 +35,11 @@ using namespace eerie_leap::subsys::fs::services;
 using namespace eerie_leap::domain::ui_domain::configuration;
 using namespace eerie_leap::domain::ui_domain::models;
 using namespace eerie_leap::views::widgets::indicators;
+
+using eerie_leap::domain::sensor_domain::event_bus::SensorEventType;
+using eerie_leap::domain::sensor_domain::event_bus::SensorPayloadType;
+using eerie_leap::subsys::event_bus::EventBinding;
+using eerie_leap::subsys::event_bus::EventBindingChecker;
 
 ZTEST_SUITE(ui_configuration_manager, NULL, NULL, NULL, NULL, NULL);
 
@@ -479,6 +489,193 @@ ZTEST(ui_configuration_manager, test_an_apply_without_a_binding_checker_is_not_c
     );
 
     zassert_true(ui_configuration_manager->Update(CreateManagerTestUiConfiguration()));
+    const auto exported = ui_configuration_manager->GetCborConfiguration();
+
+    zassert_true(ui_configuration_manager->ApplyCborConfiguration(exported));
+}
+
+namespace {
+
+constexpr const char* BUTTON_SENSOR_ID = "screen_button";
+constexpr const char* SLIDER_SENSOR_ID = "screen_dimmer";
+constexpr const char* PLAIN_SENSOR_ID = "gps_speed";
+constexpr const char* MISSING_SENSOR_ID = "no_such_sensor";
+
+// A control that drives a sensor: its press or its position goes out as InputRequested for the sensor it
+// selects, and the sensor's committed value comes back.
+std::shared_ptr<WidgetConfiguration> CreateSensorControl(uint32_t id, WidgetType type, const char* sensor_id) {
+    auto widget = make_shared_pmr<WidgetConfiguration>(Mrm::GetDefaultPmr());
+    widget->type = type;
+    widget->id = id;
+    widget->position_grid.x = 0;
+    widget->position_grid.y = static_cast<int>(id);
+    widget->size_grid.width = 3;
+    widget->size_grid.height = 1;
+
+    PropertyBinding binding;
+    binding.target = WidgetPropertyType::VALUE;
+    binding.event.channel = EventChannelId::Sensors;
+    binding.event.event_type = std::to_underlying(SensorEventType::DataUpdated);
+    binding.event.payload_key = std::to_underlying(SensorPayloadType::Value);
+    binding.event.selector_key = std::to_underlying(SensorPayloadType::SensorId);
+    binding.event.selector_value = std::pmr::string(sensor_id, Mrm::GetDefaultPmr());
+    binding.direction = PropertyBindingDirection::InOut;
+    binding.outbound_event_type = std::to_underlying(SensorEventType::InputRequested);
+    widget->bindings.push_back(std::move(binding));
+
+    return widget;
+}
+
+// A button (widget 0) and a slider (widget 1), each driving the sensor it is given.
+std::shared_ptr<UiConfiguration> CreateControlsTestUiConfiguration(
+    const char* button_sensor_id = BUTTON_SENSOR_ID,
+    const char* slider_sensor_id = SLIDER_SENSOR_ID
+) {
+    auto ui_configuration = make_shared_pmr<UiConfiguration>(Mrm::GetDefaultPmr());
+    ui_configuration->active_screen_group_id = 3;
+
+    auto screen_configuration = make_shared_pmr<ScreenConfiguration>(Mrm::GetDefaultPmr());
+    screen_configuration->id = 8;
+    screen_configuration->screen_group_id = 3;
+    screen_configuration->type = ScreenType::Gauge;
+    screen_configuration->is_visible = true;
+    screen_configuration->grid.snap_enabled = true;
+    screen_configuration->grid.width = 3;
+    screen_configuration->grid.height = 3;
+    screen_configuration->grid.spacing_px = 0;
+
+    auto button = CreateSensorControl(0, WidgetType::ControlButton, button_sensor_id);
+    button->properties[WidgetPropertyType::LABEL] = "LOG";
+    screen_configuration->AddWidget(std::move(button));
+
+    auto slider = CreateSensorControl(1, WidgetType::ControlSlider, slider_sensor_id);
+    slider->properties[WidgetPropertyType::MIN_VALUE] = 10;
+    slider->properties[WidgetPropertyType::MAX_VALUE] = 255;
+    slider->properties[WidgetPropertyType::STEP] = 5;
+    screen_configuration->AddWidget(std::move(slider));
+
+    ui_configuration->screen_configurations.push_back(std::move(screen_configuration));
+
+    return ui_configuration;
+}
+
+// Stands in for the check main.cpp builds over the sensors configuration: the button's and the slider's sensors are
+// control sensors, one more sensor is not, and no other exists. Keeps what it was asked.
+struct FakeSensors {
+    std::vector<EventBinding> asked;
+
+    EventBindingChecker Checker() {
+        return [this](const EventBinding& binding) -> std::string_view {
+            asked.push_back(binding);
+
+            const auto& sensor_id = std::get<std::pmr::string>(binding.selector_value);
+            if(sensor_id == BUTTON_SENSOR_ID || sensor_id == SLIDER_SENSOR_ID)
+                return {};
+
+            if(sensor_id == PLAIN_SENSOR_ID)
+                return "names a sensor that is not a control sensor.";
+
+            return "names a sensor this unit does not have.";
+        };
+    }
+
+    [[nodiscard]] bool WasAsked(const char* sensor_id) const {
+        return std::ranges::any_of(asked, [sensor_id](const EventBinding& binding) {
+            return std::get<std::pmr::string>(binding.selector_value) == sensor_id;
+        });
+    }
+};
+
+} // namespace
+
+// A button drives a control indicator and a slider a control analog, whatever either sensor does with the input.
+ZTEST(ui_configuration_manager, test_an_apply_accepts_the_controls_the_sensor_checker_accepts) {
+    auto fs_service = FormattedFs();
+    FakeSensors sensors;
+    auto ui_configuration_manager = std::make_shared<UiConfigurationManager>(
+        std::make_unique<CborConfigurationService<CborUiConfig>>("ui_config", fs_service)
+    );
+    ui_configuration_manager->SetSensorInputChecker(sensors.Checker());
+
+    zassert_true(ui_configuration_manager->Update(CreateControlsTestUiConfiguration()), "A save is not checked");
+    zassert_true(sensors.asked.empty());
+    const auto exported = ui_configuration_manager->GetCborConfiguration();
+
+    zassert_true(ui_configuration_manager->ApplyCborConfiguration(exported));
+
+    zassert_equal(sensors.asked.size(), 2U, "Each control is asked about once");
+    zassert_true(sensors.WasAsked(BUTTON_SENSOR_ID));
+    zassert_true(sensors.WasAsked(SLIDER_SENSOR_ID));
+    for(const auto& binding : sensors.asked) {
+        zassert_equal(binding.channel, EventChannelId::Sensors);
+        zassert_equal(binding.event_type, std::to_underlying(SensorEventType::InputRequested), "The outbound event");
+        zassert_equal(binding.payload_key, std::to_underlying(SensorPayloadType::Value));
+        zassert_equal(binding.selector_key, std::to_underlying(SensorPayloadType::SensorId));
+    }
+}
+
+ZTEST(ui_configuration_manager, test_an_apply_is_refused_when_the_sensor_checker_refuses_a_control) {
+    struct Case {
+        const char* button_sensor_id;
+        const char* slider_sensor_id;
+        const char* widget;
+        const char* message;
+    };
+    const std::array cases = {
+        Case{ BUTTON_SENSOR_ID, PLAIN_SENSOR_ID, "Screen ID: 8, Widget ID: 1.",
+            "Outbound binding names a sensor that is not a control sensor." },
+        Case{ MISSING_SENSOR_ID, SLIDER_SENSOR_ID, "Screen ID: 8, Widget ID: 0.",
+            "Outbound binding names a sensor this unit does not have." },
+    };
+
+    for(const auto& test_case : cases) {
+        auto fs_service = FormattedFs();
+        FakeSensors sensors;
+        auto ui_configuration_manager = std::make_shared<UiConfigurationManager>(
+            std::make_unique<CborConfigurationService<CborUiConfig>>("ui_config", fs_service)
+        );
+        ui_configuration_manager->SetSensorInputChecker(sensors.Checker());
+
+        zassert_true(ui_configuration_manager->Update(
+            CreateControlsTestUiConfiguration(test_case.button_sensor_id, test_case.slider_sensor_id)
+        ));
+        const auto exported = ui_configuration_manager->GetCborConfiguration();
+        auto stored = CreateManagerTestUiConfiguration();
+        zassert_true(ui_configuration_manager->Update(stored));
+
+        std::array<char, 192> reason{};
+        zassert_false(ui_configuration_manager->ApplyCborConfiguration(exported, reason));
+        zassert_not_null(strstr(reason.data(), test_case.widget), "%s", reason.data());
+        zassert_not_null(strstr(reason.data(), test_case.message), "%s", reason.data());
+        zassert_equal(ui_configuration_manager->Get().get(), stored.get(), "A refused apply stores nothing");
+    }
+}
+
+// A binding that does not publish InputRequested names no sensor to drive; the binding checker has the rest.
+ZTEST(ui_configuration_manager, test_an_apply_does_not_ask_the_sensor_checker_about_other_bindings) {
+    auto fs_service = FormattedFs();
+    FakeSensors sensors;
+    auto ui_configuration_manager = std::make_shared<UiConfigurationManager>(
+        std::make_unique<CborConfigurationService<CborUiConfig>>("ui_config", fs_service)
+    );
+    ui_configuration_manager->SetSensorInputChecker(sensors.Checker());
+
+    zassert_true(ui_configuration_manager->Update(CreateManagerTestUiConfiguration()));
+    const auto exported = ui_configuration_manager->GetCborConfiguration();
+
+    zassert_true(ui_configuration_manager->ApplyCborConfiguration(exported));
+    zassert_true(sensors.asked.empty());
+}
+
+ZTEST(ui_configuration_manager, test_an_apply_without_a_sensor_checker_is_not_checked) {
+    auto fs_service = FormattedFs();
+    auto ui_configuration_manager = std::make_shared<UiConfigurationManager>(
+        std::make_unique<CborConfigurationService<CborUiConfig>>("ui_config", fs_service)
+    );
+
+    zassert_true(
+        ui_configuration_manager->Update(CreateControlsTestUiConfiguration(MISSING_SENSOR_ID, PLAIN_SENSOR_ID))
+    );
     const auto exported = ui_configuration_manager->GetCborConfiguration();
 
     zassert_true(ui_configuration_manager->ApplyCborConfiguration(exported));

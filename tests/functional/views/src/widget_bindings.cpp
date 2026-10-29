@@ -255,6 +255,54 @@ private:
     AnySubscription subscription_;
 };
 
+// Watches what a control publishes to a control sensor.
+class InputRequestProbe {
+public:
+    InputRequestProbe() :
+        state_(std::make_shared<State>()) {
+        k_sem_init(&state_->delivered, 0, K_SEM_MAX_LIMIT);
+
+        subscription_ = CreateScopedSubscription(
+            SensorEventsChannel::GetInstance(), SensorEventType::InputRequested,
+            [state = state_](const SensorEventsChannel::EventMessage& event) {
+                if(const auto* it = event.payload.find(SensorPayloadType::Value); it != event.payload.end())
+                    state->value = std::get<float>(it->second);
+
+                if(const auto* it = event.payload.find(SensorPayloadType::SensorId); it != event.payload.end())
+                    state->sensor_id = std::get<uint32_t>(it->second);
+
+                ++state->calls;
+                k_sem_give(&state->delivered);
+            }
+        );
+    }
+
+    bool WaitForRequest() const {
+        return k_sem_take(&state_->delivered, K_MSEC(DISPATCH_TIMEOUT_MS)) == 0;
+    }
+
+    [[nodiscard]] int Calls() const {
+        return state_->calls;
+    }
+    [[nodiscard]] std::optional<float> Value() const {
+        return state_->value;
+    }
+    [[nodiscard]] std::optional<uint32_t> SensorId() const {
+        return state_->sensor_id;
+    }
+
+private:
+    struct State {
+        int calls = 0;
+        std::optional<float> value;
+        std::optional<uint32_t> sensor_id;
+        k_sem delivered{};
+    };
+
+    std::shared_ptr<State> state_;
+    AnySubscription subscription_;
+};
+
 // Configure -> render -> activate, which is the state a widget is in while events flow.
 std::unique_ptr<ProbeWidget>
 MakeActiveWidget(std::shared_ptr<WidgetConfiguration> configuration, std::shared_ptr<Frame> parent = nullptr) {
@@ -1247,6 +1295,49 @@ ZTEST(widget_bindings, test_hidden_slider_replays_range_and_value_without_publis
     zassert_true(probe.WaitForRequest());
     zassert_equal(lv_slider_get_value(slider_object), 4);
     zassert_within(*probe.Value(), 90.0F, 0.001F);
+}
+
+// A slider drives a control analog: each position goes out as InputRequested for the sensor its binding selects,
+// which the sensor's pipeline takes as its input.
+ZTEST(widget_bindings, test_a_slider_bound_to_a_sensor_publishes_input_requested_with_its_selector) {
+    using eerie_leap::views::widgets::controls::SliderControl;
+
+    auto binding = SensorBinding(WidgetPropertyType::VALUE, SENSOR_ID);
+    binding.direction = PropertyBindingDirection::Out;
+    binding.outbound_event_type = std::to_underlying(SensorEventType::InputRequested);
+
+    auto configuration = MakeConfiguration();
+    configuration->properties[WidgetPropertyType::MIN_VALUE] = 10.0;
+    configuration->properties[WidgetPropertyType::MAX_VALUE] = 255.0;
+    configuration->properties[WidgetPropertyType::STEP] = 5.0;
+    configuration->properties[WidgetPropertyType::VALUE] = 160.0;
+    configuration->bindings.push_back(std::move(binding));
+
+    SliderControl slider(1, MakeRoot(), WidgetContext{});
+    slider.Configure(configuration);
+    zassert_equal(slider.Render(), 0);
+    slider.OnActivated();
+    auto* slider_object = lv_obj_get_child(views_test::WidgetContent(slider), 0);
+    zassert_equal(lv_slider_get_value(slider_object), 30, "The knob stands on the configured value, in steps");
+
+    InputRequestProbe probe;
+    uint32_t key = LV_KEY_RIGHT;
+
+    lv_obj_send_event(slider_object, LV_EVENT_KEY, &key);
+
+    zassert_true(probe.WaitForRequest(), "Expected an input request.");
+    zassert_equal(probe.Calls(), 1);
+    zassert_true(probe.Value().has_value());
+    zassert_within(*probe.Value(), 165.0F, 0.001F);
+    zassert_true(probe.SensorId().has_value());
+    zassert_equal(*probe.SensorId(), StringHelpers::GetHash(SENSOR_ID));
+
+    // Every position the finger passes is sent, not only where it lets go.
+    lv_obj_send_event(slider_object, LV_EVENT_KEY, &key);
+
+    zassert_true(probe.WaitForRequest(), "Expected an input request.");
+    zassert_equal(probe.Calls(), 2);
+    zassert_within(*probe.Value(), 170.0F, 0.001F);
 }
 
 ZTEST(widget_bindings, test_waiting_binding_checks_activity_after_taking_the_lvgl_lock) {
