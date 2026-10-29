@@ -33,7 +33,8 @@ static bool decode_CborDisplayConfig(
         && ((zcbor_uint32_decode(state, (&(*result).brightness))))
         && ((zcbor_bool_decode(state, (&(*result).blanking_enabled))))
         && ((zcbor_uint32_decode(state, (&(*result).screen_timeout_s))))
-        && ((zcbor_uint32_decode(state, (&(*result).theme_id))))) || (zcbor_list_map_end_force_decode(state), false)) && zcbor_list_end_decode(state))));
+        && ((zcbor_uint32_decode(state, (&(*result).theme_id))))
+        && ((zcbor_tstr_decode(state, (&(*result).brightness_sensor_id))))) || (zcbor_list_map_end_force_decode(state), false)) && zcbor_list_end_decode(state))));
 
         log_result(state, res, __func__);
         return res;

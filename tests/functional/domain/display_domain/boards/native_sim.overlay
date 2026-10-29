@@ -1,4 +1,18 @@
 / {
+	/*
+	 * DisplayService drives the panel through the display API; the dummy display accepts every call,
+	 * and sdl_dc stays off so the suite needs no SDL.
+	 */
+	chosen {
+		zephyr,display = &dummy_dc;
+	};
+
+	dummy_dc: dummy_dc {
+		compatible = "zephyr,dummy-dc";
+		height = <240>;
+		width = <320>;
+	};
+
 	aliases {
 		intfs0 = &intfs0;
 	};
@@ -17,6 +31,10 @@
 			automount;
 		};
 	};
+};
+
+&sdl_dc {
+	status = "disabled";
 };
 
 &flashcontroller0 {

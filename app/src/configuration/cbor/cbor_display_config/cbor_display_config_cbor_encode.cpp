@@ -29,11 +29,12 @@ static bool encode_CborDisplayConfig(
 {
         zcbor_log("%s\r\n", __func__);
 
-        bool res = (((zcbor_list_start_encode(state, 5) && ((((zcbor_uint32_encode(state, (&(*input).version))))
+        bool res = (((zcbor_list_start_encode(state, 6) && ((((zcbor_uint32_encode(state, (&(*input).version))))
         && ((zcbor_uint32_encode(state, (&(*input).brightness))))
         && ((zcbor_bool_encode(state, (&(*input).blanking_enabled))))
         && ((zcbor_uint32_encode(state, (&(*input).screen_timeout_s))))
-        && ((zcbor_uint32_encode(state, (&(*input).theme_id))))) || (zcbor_list_map_end_force_encode(state), false)) && zcbor_list_end_encode(state, 5))));
+        && ((zcbor_uint32_encode(state, (&(*input).theme_id))))
+        && ((zcbor_tstr_encode(state, (&(*input).brightness_sensor_id))))) || (zcbor_list_map_end_force_encode(state), false)) && zcbor_list_end_encode(state, 6))));
 
         log_result(state, res, __func__);
         return res;

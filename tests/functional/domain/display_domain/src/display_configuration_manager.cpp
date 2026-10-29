@@ -1,6 +1,7 @@
 #include <array>
 #include <memory>
 #include <span>
+#include <string>
 #include <vector>
 
 #include <zephyr/kernel.h>
@@ -8,6 +9,7 @@
 
 #include "configuration/cbor/cbor_display_config/cbor_display_config.h"
 #include "configuration/services/cbor_configuration_service.h"
+#include "utilities/cbor/cbor_helpers.hpp"
 
 #include "domain/configuration_domain/services/configuration_service.h"
 #include "domain/display_domain/configuration/display_configuration_manager.h"
@@ -23,6 +25,7 @@ using eerie_leap::domain::display_domain::configuration::DisplayConfigurationMan
 using eerie_leap::domain::display_domain::models::DisplayConfiguration;
 using eerie_leap::subsys::device_tree::DtFs;
 using eerie_leap::subsys::fs::services::FsService;
+using eerie_leap::utilities::cbor::CborHelpers;
 
 namespace {
 
@@ -45,6 +48,7 @@ DisplayConfiguration MakeConfiguration() {
     configuration.blanking_enabled = true;
     configuration.screen_timeout_s = 90;
     configuration.theme_id = 4;
+    configuration.brightness_sensor_id = "ambient_light";
 
     return configuration;
 }
@@ -61,6 +65,7 @@ ZTEST(display_configuration_manager, test_an_empty_filesystem_yields_the_default
     zassert_not_null(configuration.get());
     zassert_equal(configuration->brightness, 160);
     zassert_false(configuration->blanking_enabled);
+    zassert_true(configuration->brightness_sensor_id.empty(), "No sensor drives the brightness.");
 }
 
 ZTEST(display_configuration_manager, test_update_round_trips_through_flash) {
@@ -74,6 +79,7 @@ ZTEST(display_configuration_manager, test_update_round_trips_through_flash) {
     zassert_true(stored->blanking_enabled);
     zassert_equal(stored->screen_timeout_s, 90);
     zassert_equal(stored->theme_id, 4);
+    zassert_str_equal(stored->brightness_sensor_id.c_str(), "ambient_light");
 }
 
 ZTEST(display_configuration_manager, test_cbor_configuration_round_trips) {
@@ -95,6 +101,7 @@ ZTEST(display_configuration_manager, test_cbor_configuration_round_trips) {
     zassert_equal(restored->brightness, 42);
     zassert_true(restored->blanking_enabled);
     zassert_equal(restored->screen_timeout_s, 90);
+    zassert_str_equal(restored->brightness_sensor_id.c_str(), "ambient_light");
 }
 
 // A configuration pushed from outside has to reach the driver without a reboot.
@@ -170,6 +177,45 @@ ZTEST(display_configuration_manager, test_a_rejected_configuration_reports_why) 
     );
     zassert_equal(notifications, 0);
     zassert_equal(manager->Get(true)->brightness, 42);
+}
+
+// The sensor a client names has to be a sensor ID, whatever else the unit checks about it.
+ZTEST(display_configuration_manager, test_a_brightness_sensor_id_that_is_not_a_sensor_id_is_rejected) {
+    auto manager = MakeManager();
+    zassert_true(manager->Update(MakeConfiguration()));
+
+    CborSerializer<CborDisplayConfig> serializer;
+    const auto exported = manager->GetCborConfiguration();
+    auto cbor_config = serializer.Deserialize(exported);
+    zassert_not_null(cbor_config.get());
+
+    const std::string sensor_id = "1st_sensor";
+    cbor_config->brightness_sensor_id = CborHelpers::ToZcborString(sensor_id);
+
+    ConfigurationService configuration_service;
+    configuration_service.RegisterCborConfigurationManager(ConfigurationService::Type::Display, manager);
+
+    std::array<char, 160> reason{};
+    zassert_false(configuration_service.ApplyCborConfiguration(
+        ConfigurationService::Type::Display, serializer.Serialize(*cbor_config), reason
+    ));
+    zassert_str_equal(
+        reason.data(),
+        "Invalid Display configuration. Brightness sensor ID must start with a letter or an underscore. Value: "
+        "1st_sensor."
+    );
+    zassert_str_equal(manager->Get(true)->brightness_sensor_id.c_str(), "ambient_light");
+}
+
+ZTEST(display_configuration_manager, test_update_refuses_a_brightness_sensor_id_that_is_not_a_sensor_id) {
+    auto manager = MakeManager();
+    zassert_true(manager->Update(MakeConfiguration()));
+
+    auto configuration = MakeConfiguration();
+    configuration.brightness_sensor_id = "ambient-light";
+
+    zassert_false(manager->Update(configuration));
+    zassert_str_equal(manager->Get(true)->brightness_sensor_id.c_str(), "ambient_light");
 }
 
 ZTEST(display_configuration_manager, test_the_configuration_service_routes_the_display_type) {

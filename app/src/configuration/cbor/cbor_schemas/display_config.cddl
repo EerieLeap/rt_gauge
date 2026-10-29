@@ -3,5 +3,6 @@ CborDisplayConfig = [
     brightness: uint,
     blanking_enabled: bool,
     screen_timeout_s: uint,
-    theme_id: uint
+    theme_id: uint,
+    brightness_sensor_id: tstr              ; the sensor the brightness follows, empty for none
 ]
