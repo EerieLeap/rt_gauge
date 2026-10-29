@@ -25,12 +25,16 @@ jobs:
 
       # native_sim builds 32-bit binaries; the app's native_sim build (not the test suites') also
       # links the SDL display, as in Dockerfile.dev (pkg-config finds the amd64 sdl2.pc, the
-      # -m32 link the i386 library).
+      # -m32 link the i386 library). The i386 SDL goes in after the amd64 one, as in
+      # Dockerfile.dev: asked for in one transaction, APT can take libglib2.0-dev-bin, which only
+      # one architecture can have, for i386 and then fail on the amd64 libglib2.0-dev ("held
+      # broken packages", seen with glib 2.80.0-6ubuntu3.10).
       - name: Install multilib toolchain
         run: |
           sudo dpkg --add-architecture i386
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends gcc-multilib g++-multilib libsdl2-dev libsdl2-dev:i386
+          sudo apt-get install -y --no-install-recommends gcc-multilib g++-multilib libsdl2-dev
+          sudo apt-get install -y --no-install-recommends libsdl2-dev:i386
 
       - name: Set up Python
         uses: actions/setup-python@v7
