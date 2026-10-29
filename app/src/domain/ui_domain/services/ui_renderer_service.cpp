@@ -379,7 +379,9 @@ int UiRendererService::Initialize() {
 
     // SVG icons parse and rasterize their documents themselves, within limits. LVGL's own SVG decoder would parse any
     // image whose data begins like an SVG document again on every redraw, without them.
+#if LV_USE_SVG
     lv_svg_decoder_deinit();
+#endif
 
     lv_obj_t* screen = lv_screen_active();
     lv_obj_set_style_bg_color(screen, lv_color_black(), LV_PART_MAIN);
