@@ -12,10 +12,14 @@ LOG_MODULE_REGISTER(control_base_logger);
 ControlBase::ControlBase(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context, bool consumes_gestures) :
     SettingWidgetBase(id, std::move(parent), std::move(context)) {
 
+    if(consumes_gestures)
+        CaptureGestures();
+}
+
+void ControlBase::CaptureGestures() {
     // Without this a drag over an interactive control would climb to the gesture
     // root and navigate away instead of moving the control.
-    if(consumes_gestures)
-        lv_obj_set_gesture_bubble(container_->GetObject(), false);
+    lv_obj_set_gesture_bubble(container_->GetObject(), false);
 }
 
 ControlBase::~ControlBase() {

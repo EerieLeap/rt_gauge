@@ -12,7 +12,7 @@ namespace eerie_leap::views::widgets::controls {
 using eerie_leap::views::widgets::SettingWidgetBase;
 
 // Adds the interactive half to a setting-bound widget: LVGL event routing and,
-// for the controls that own a drag, gesture capture.
+// for the controls that own their touch area, gesture capture.
 class ControlBase : public SettingWidgetBase {
 private:
     static void EventCb(lv_event_t* e);
@@ -21,9 +21,12 @@ private:
     lv_obj_t* event_object_ = nullptr;
 
 protected:
-    // Only a control that owns a drag may swallow the gesture; anything else
+    // Only a control that owns its touch area may swallow the gesture; anything else
     // would carve a dead zone out of the screen's swipe navigation.
     ControlBase(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context, bool consumes_gestures);
+
+    // What consumes_gestures does, for a control that learns it owns its touch area once it is configured.
+    void CaptureGestures();
 
     // Routes LVGL event codes to OnControlEvent(). A control drives exactly one
     // interactive object, so teardown is a single detach that cannot miss a code.
