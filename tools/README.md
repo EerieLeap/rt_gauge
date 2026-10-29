@@ -417,7 +417,7 @@ The values a bench needs:
 
 | Field | Values |
 | --- | --- |
-| Sensor `type` | `NONE` 0, `PHYSICAL_ANALOG` 1, `VIRTUAL_ANALOG` 2, `PHYSICAL_INDICATOR` 3, `VIRTUAL_INDICATOR` 4, `CANBUS_RAW` 5, `CANBUS_ANALOG` 6, `CANBUS_INDICATOR` 7, `USER_ANALOG` 8, `USER_INDICATOR` 9 |
+| Sensor `type` | `NONE` 0, `PHYSICAL_ANALOG` 1, `VIRTUAL_ANALOG` 2, `PHYSICAL_INDICATOR` 3, `VIRTUAL_INDICATOR` 4, `CANBUS_RAW` 5, `CANBUS_ANALOG` 6, `CANBUS_INDICATOR` 7, `USER_ANALOG` 8, `USER_INDICATOR` 9, `CONTROL_INDICATOR` 10, `CONTROL_ANALOG` 11 (a control gives them their input: no channel, connection string or sampling rate) |
 | Sensor `interpolation_method` | `NONE` 0, `LINEAR` 1, `CUBIC_SPLINE` 2 |
 | Sensor `input_mode` | `Level` 0, `Toggle` 1 |
 | Sensor `sampling_rate_ms` | -1 for none (a source that updates by itself) |
@@ -425,7 +425,7 @@ The values a bench needs:
 | CAN `send_interval_ms` | -1 or 0 for a message the unit only receives |
 | CAN channel `type` | `CLASSICAL_CAN` 1, `CANFD` 2 |
 | Trigger `channel` | `Sensors` 1, `Logging` 2 |
-| Trigger `event_type`, `payload_key` (sensors channel) | `DataUpdated` 0; payload `SensorId` 0, `Value` 1 |
+| Sensors channel `event_type`, `payload_key` (a trigger's or a widget binding's) | `DataUpdated` 0, a sensor's committed value; `InputRequested` 1, a control's input for a control sensor, the `outbound_event_type` of a binding that drives one; payload `SensorId` 0, `Value` 1 |
 | Trigger `target_uid` | CDMP UID of the unit the trigger starts and stops; 0 for every unit that can log (one broadcast) |
 | `sensor_id_hash` (logging configuration) | The 32-bit hash of the sensor id, `StringHelpers::GetHash` in rt_core; see its `smp.md` |
 

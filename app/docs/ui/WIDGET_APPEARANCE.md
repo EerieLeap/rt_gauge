@@ -91,7 +91,7 @@ the selected widget/icon's usable keys.
 | Shapes (including oval) | Active fill or stroke | - | - | Theme accent |
 | Slider | Filled-track pair | Background pair | Knob pair | Pressed/idle; primary/surface/accent |
 | Toggle | Track pair | Knob pair | - | Checked/unchecked; primary/surface track, accent knob |
-| Button | Background pair | Text pair | - | Pressed/released; accent/surface background, primary text |
+| Button | Background pair | Text pair | - | Pressed or checked/released; accent/surface background, primary text |
 | Image / SVG / dial | None | None | None | Original image or document colours |
 
 A label icon is its text alone, like the digital and setting indicators: no
@@ -101,7 +101,7 @@ centered in the icon's box. `COLOR_PRIMARY_ACTIVE` colors and fades the text
 stored value is accepted and ignored.
 
 Basic and arc icon wrappers expose only their selected icon's properties. For
-a button's explicit released and pressed backgrounds:
+a button's explicit released and pressed (or checked) backgrounds:
 
 ```cpp
 widget->properties[WidgetPropertyType::COLOR_PRIMARY_INACTIVE] =
@@ -110,8 +110,10 @@ widget->properties[WidgetPropertyType::COLOR_PRIMARY_ACTIVE] =
     std::pmr::string("#33CC99FF", Mrm::GetExtPmr());
 ```
 
-The button synchronizes its child label's pressed state. The toggle's inactive
-track remains underneath its checked indicator during transitions.
+The button synchronizes its child label's pressed and checked states, and draws
+the active pair for either (a button is checked while its `VALUE` is not 0; see
+[Controls that drive a sensor](#controls-that-drive-a-sensor)). The toggle's
+inactive track remains underneath its checked indicator during transitions.
 
 ## Whole-widget animation
 
@@ -327,6 +329,106 @@ with the same 32 bits, the same selector, and a re-save writes it that way.
 Publish from services rather than accessing LVGL directly; widget dispatch takes
 the LVGL lock before its dispatch guard.
 
+### Controls that drive a sensor
+
+A control publishes through its outbound bindings (`Out` or `InOut`): the binding's channel,
+payload key and selector are the route, and `outbound_event_type` is the event. A slider or a
+toggle publishes its `VALUE` when the user moves it, after storing it (`SetPropertyLocal()`). A
+button holds no state and sends its press with `PublishPropertyLocal()`, the publishing half of
+`SetPropertyLocal()`, which has no gates and no store write, so the release a suspension owes
+still goes out.
+
+- **Press.** A button with an outbound binding on `VALUE` publishes 1 when LVGL marks it pressed
+  and 0 when it is released, loses the press, or has it ended by a suspension (hidden, inactive
+  or zero opacity) or by its teardown, each change once, as a physical button's contact does.
+  The values go out as floats, 1.0 and 0.0. The button never writes `VALUE` itself.
+- **Shown value.** `VALUE` is what an inbound binding writes. The button is checked while it is
+  not 0, drawn with the active pair a press uses, so one `InOut` binding presses with its
+  outbound half and shows the reply with its inbound half, and a press that does not take leaves
+  the button as it was. After a UI rebuild the replay brings the sensor's value back.
+- **Touch area.** LVGL reports a press at touch-down, before it can tell a tap from a swipe, so
+  a button with an outbound binding on `VALUE` captures its gestures as a slider does: no swipe
+  starts on it, and a screen needs room beside it to swipe from. A button without one lets
+  swipes through. A click runs the button's `NAVIGATION_INTENT` either way; a target without an
+  intent navigates nowhere.
+
+To drive a sensor, bind the control on the `Sensors` channel with `InputRequested` as the
+outbound event, selecting a control sensor, `CONTROL_INDICATOR` or `CONTROL_ANALOG` (rt_core
+`docs/sensors.md`, "Control sensors"). The sensor's pipeline asserts `DataUpdated`, the fact the
+inbound half shows.
+
+- A **button** drives a `CONTROL_INDICATOR`, and the sensor's conditioning decides what a press
+  is: `Level` is 1 while the button is held, `Toggle` flips a switch the sensor keeps at each
+  press, and `debounce_ms` makes a press count once it has held that long, so a tap does nothing
+  and a hold acts. A toggle control drives a `Level` one the same way.
+- A **slider** drives a `CONTROL_ANALOG` with its position, a number, on every drag tick. A
+  sensor publishes no range, so the slider takes `MIN_VALUE`, `MAX_VALUE` and `STEP` from its
+  own properties and sends nothing without one. `InOut` suits a sensor in the slider's units:
+  the slider then shows the committed value once the finger lifts. A sensor whose expression
+  maps the position to other units replies in those units, so bind its slider `Out` only.
+- Any sensor can be shown: `VALUE` bound inbound from `Sensors` / `DataUpdated` / `Value` lights
+  a button while an indicator is on, whether a GPIO, CAN, expression or control one. The GPIO
+  `logging_button` can be shown on the screen, never flipped from it.
+
+**Apply checks.** Every UI load refuses an outbound binding on the `Sensors` channel that
+publishes anything but `InputRequested`, since only the pipeline asserts `DataUpdated`. A
+client's UI apply also refuses a binding that publishes `InputRequested` for a sensor that is
+not a control sensor (`CONTROL_INDICATOR` or `CONTROL_ANALOG`) in the sensors configuration the
+unit runs, and a client's display apply refuses a `brightness_sensor_id` that does not name an
+analog sensor. They run when the UI or the display configuration is applied. A later sensors
+apply is not checked against them: a binding left without its control sensor stays inert, and a
+brightness whose sensor it takes away keeps its last value until a manual change.
+
+### Brightness that follows a sensor
+
+The display configuration names the sensor the brightness follows, `brightness_sensor_id`, next
+to the `brightness` it stores; empty means none. `DisplayService` subscribes to that sensor's
+`DataUpdated` / `Value` and applies each value as it applies a request: clamped to 10 through
+255, with `Changed` published on the Settings channel when the brightness moved, so a widget
+bound to `display.brightness` shows it. The sensor's expression maps its units to the
+brightness's, and a bias on an ambient light sensor is a sensor too: follow a `VIRTUAL_ANALOG`
+such as `ambient_light * 2 + screen_dimmer`, where `screen_dimmer` is a slider's control analog.
+
+The latest change wins, and only a manual one is saved. A manual change is a person setting the
+brightness: a widget bound to `display.brightness` sends `ChangeRequested`, or a client writes
+the display configuration. It applies at once and becomes the stored brightness, which the unit
+starts with until the sensor's first value. The sensor's next value replaces the brightness on
+the panel, never the stored one, so a sensor that changes all the time costs no flash write. If
+the sensor goes away, the panel keeps the last followed value until a manual change.
+
+Examples, written with the names of the numbers that a stored configuration holds:
+
+```
+# An on-screen logging button.
+sensors:          { id: "screen_logging_button", type: CONTROL_INDICATOR, input_mode: Toggle }
+logging control:  { triggers: [ { channel: Sensors, event_type: DataUpdated, payload_key: Value,
+                                  selector_key: SensorId, selector_value: "screen_logging_button" } ] }
+button:           properties: { LABEL: "LOG" }
+                  bindings:   [ { target: VALUE, direction: InOut, event_type: DataUpdated,
+                                  outbound_event_type: InputRequested, channel: Sensors, payload_key: Value,
+                                  selector_key: SensorId, selector_value: "screen_logging_button" } ]
+
+# A slider whose position is a sensor, and the brightness following it.
+sensors:          { id: "screen_dimmer", type: CONTROL_ANALOG }
+slider:           properties: { MIN_VALUE: 10, MAX_VALUE: 255, STEP: 5 }
+                  bindings:   [ { target: VALUE, direction: InOut, event_type: DataUpdated,
+                                  outbound_event_type: InputRequested, channel: Sensors, payload_key: Value,
+                                  selector_key: SensorId, selector_value: "screen_dimmer" } ]
+display:          { brightness: 160, brightness_sensor_id: "screen_dimmer", ... }
+```
+
+Each press flips the logging switch, the trigger starts or stops logging, and the button is lit
+while the switch is on. The sensor alone changes that: with `debounce_ms: 1000` the button has
+to be held a second to start or stop logging, and with `input_mode: Level` the sensor is on only
+while the button is held, so logging runs only then. With `direction: Out` the button drives the
+switch without showing it. `NAVIGATION_INTENT: CloseOverlay` on the same button also closes the
+overlay it sits on.
+
+Dragging the slider sets `screen_dimmer`, and the brightness follows it without a write to
+flash; the stored 160 is what the unit starts with until the slider first moves. Either sensor is
+a sensor like any other: widgets bound to it show it, a CAN message with a signal named after it
+sends it, and BLE live data and expressions read it.
+
 ### Binding a widget's box
 
 A root widget's position and size can be bound too, by four properties in the
@@ -368,7 +470,9 @@ accept booleans or numeric 0/1; direct configuration/store values require boolea
 Restoration waits for **all** rendering gates to open, then applies retained
 properties without another source event. Hidden updates coalesce; charts do not
 reconstruct every hidden sample. Updates rejected during explicit inactivity
-are never replayed. Inactive controls cannot publish, navigate, or change values.
+are never replayed. Inactive controls cannot publish, navigate, or change
+values; the one exception is a button's release, which a suspension that cuts a
+press short still sends.
 
 Persisted IDs 0-33 and CBOR version 1/layout are unchanged. Opacity is ID 34;
 the six colors are IDs 35-40; animation type, requested active, and duration are
