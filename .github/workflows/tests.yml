@@ -25,16 +25,22 @@ jobs:
 
       # native_sim builds 32-bit binaries; the app's native_sim build (not the test suites') also
       # links the SDL display, as in Dockerfile.dev (pkg-config finds the amd64 sdl2.pc, the
-      # -m32 link the i386 library). The i386 SDL goes in after the amd64 one, as in
-      # Dockerfile.dev: asked for in one transaction, APT can take libglib2.0-dev-bin, which only
-      # one architecture can have, for i386 and then fail on the amd64 libglib2.0-dev ("held
-      # broken packages", seen with glib 2.80.0-6ubuntu3.10).
+      # -m32 build the i386 config header and library). The i386 side is the SDL library plus
+      # libsdl2-dev:i386's files, unpacked rather than installed: its dependencies, the i386
+      # development packages of glib, X11, Wayland and the rest, which the -lSDL2 link never
+      # uses, do not resolve on the runner (libglib2.0-dev:i386 asks for an i386
+      # libglib2.0-dev-bin next to the amd64 one: "held broken packages").
       - name: Install multilib toolchain
         run: |
           sudo dpkg --add-architecture i386
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends gcc-multilib g++-multilib libsdl2-dev
-          sudo apt-get install -y --no-install-recommends libsdl2-dev:i386
+          sudo apt-get install -y --no-install-recommends gcc-multilib g++-multilib libsdl2-dev libsdl2-2.0-0:i386
+          cd "$RUNNER_TEMP"
+          apt-get download libsdl2-dev:i386
+          sudo dpkg-deb -x libsdl2-dev_*_i386.deb /
+          # The unpacked libSDL2.so points at the installed library of the same version.
+          test -e /usr/lib/i386-linux-gnu/libSDL2.so
+          test -e /usr/include/i386-linux-gnu/SDL2/_real_SDL_config.h
 
       - name: Set up Python
         uses: actions/setup-python@v7
