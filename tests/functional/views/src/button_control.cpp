@@ -656,7 +656,7 @@ ZTEST(button_control, test_a_bound_button_captures_its_gestures_and_an_unbound_o
 
     struct Case {
         std::optional<PropertyBindingDirection> direction;
-        bool captures_gestures;
+        bool captures_gestures = false;
     };
     const std::array cases = { Case{ std::nullopt, false }, Case{ PropertyBindingDirection::In, false },
         Case{ PropertyBindingDirection::Out, true }, Case{ PropertyBindingDirection::InOut, true } };
