@@ -486,7 +486,6 @@ void WidgetBase::NotifyPropertyChanged(WidgetPropertyType type, const ConfigValu
 }
 
 void WidgetBase::SetPropertyLocal(WidgetPropertyType type, const ConfigValue& value) {
-    static constexpr auto CALLER = GetCallerName();
     ScopedLvglLock lvgl_guard;
 
     if(WidgetPropertyValidator::IsStructuralProperty(type))
@@ -497,6 +496,13 @@ void WidgetBase::SetPropertyLocal(WidgetPropertyType type, const ConfigValue& va
 
     if(WidgetPropertyValidator::IsAnchorProperty(type))
         NotifyPropertyChanged(type, value, properties_->GetEffect(type));
+
+    PublishPropertyLocal(type, value);
+}
+
+void WidgetBase::PublishPropertyLocal(WidgetPropertyType type, const ConfigValue& value) {
+    static constexpr auto CALLER = GetCallerName();
+    ScopedLvglLock lvgl_guard;
 
     for(const auto& binding : outbound_bindings_) {
         if(binding.target != type)

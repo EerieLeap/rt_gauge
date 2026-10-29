@@ -100,6 +100,11 @@ protected:
     // loop back through the owner. Structural properties throw std::invalid_argument.
     void SetPropertyLocal(WidgetPropertyType type, const ConfigValue& value);
 
+    // The publishing half of SetPropertyLocal(): sends the value on the property's outbound bindings and
+    // nothing else - no gates, no store write. A widget calls it alone to send what is not its own state: a
+    // button's press, and the release that a press cut short still owes, which it may send while suspended.
+    void PublishPropertyLocal(WidgetPropertyType type, const ConfigValue& value);
+
     // Declares what this widget understands, base class first. Replay applies VALUE last, after
     // the derived formatting and range properties it may depend on.
     virtual void RegisterProperties(WidgetPropertyStore& store) const;

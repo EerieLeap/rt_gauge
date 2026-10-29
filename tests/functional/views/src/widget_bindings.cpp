@@ -117,6 +117,9 @@ public:
     void WriteLocal(WidgetPropertyType type, const ConfigValue& value) {
         SetPropertyLocal(type, value);
     }
+    void PublishLocal(WidgetPropertyType type, const ConfigValue& value) {
+        PublishPropertyLocal(type, value);
+    }
     std::shared_ptr<WidgetPropertyStore> GetStore() const {
         return properties_;
     }
@@ -875,6 +878,59 @@ ZTEST(widget_bindings, test_user_input_publishes_on_an_outbound_binding) {
     zassert_within(*probe.Value(), 55.0F, 0.001F);
     zassert_true(probe.SettingId().has_value());
     zassert_equal(*probe.SettingId(), StringHelpers::GetHash(SETTING_ID));
+}
+
+// What a widget sends that is not its own state: the store and the widget are left alone.
+ZTEST(widget_bindings, test_publishing_locally_sends_on_an_outbound_binding_without_writing_the_store) {
+    auto configuration = MakeConfiguration();
+    configuration->bindings.push_back(SettingBinding(PropertyBindingDirection::InOut));
+    configuration->properties[WidgetPropertyType::VALUE] = 7.0;
+
+    auto widget = MakeActiveWidget(std::move(configuration));
+
+    ChangeRequestProbe probe;
+
+    widget->PublishLocal(WidgetPropertyType::VALUE, ConfigValue{ 55.0 });
+
+    zassert_true(probe.WaitForRequest(), "Expected a change request.");
+    zassert_equal(probe.Calls(), 1);
+    zassert_true(probe.Value().has_value());
+    zassert_within(*probe.Value(), 55.0F, 0.001F);
+    zassert_true(probe.SettingId().has_value());
+    zassert_equal(*probe.SettingId(), StringHelpers::GetHash(SETTING_ID));
+
+    zassert_equal(widget->ReadNumber(WidgetPropertyType::VALUE), 7.0);
+    zassert_true(widget->notified.empty());
+
+    // A property with no outbound binding has nowhere to go.
+    widget->PublishLocal(WidgetPropertyType::LABEL, ConfigValue{ std::pmr::string("Go") });
+
+    zassert_true(probe.WaitForNoRequest());
+}
+
+// SetPropertyLocal() keeps its gates; the publishing half has none, which is how a release that a suspension
+// owes still goes out.
+ZTEST(widget_bindings, test_publishing_locally_still_sends_while_suspended) {
+    for(auto target : { WidgetPropertyType::IS_ACTIVE, WidgetPropertyType::IS_VISIBLE, WidgetPropertyType::OPACITY }) {
+        auto configuration = MakeConfiguration();
+        configuration->bindings.push_back(SettingBinding(PropertyBindingDirection::InOut));
+        configuration->bindings.push_back(SensorBinding(target, SENSOR_ID));
+        configuration->properties[WidgetPropertyType::VALUE] = 7.0;
+
+        auto widget = MakeActiveWidget(std::move(configuration));
+        ChangeRequestProbe probe;
+
+        PublishSensor(SENSOR_ID, 0);
+        zassert_false(widget->IsProcessingEligible());
+
+        widget->WriteLocal(WidgetPropertyType::VALUE, ConfigValue{ 55.0 });
+        zassert_true(probe.WaitForNoRequest());
+
+        widget->PublishLocal(WidgetPropertyType::VALUE, ConfigValue{ 0.0 });
+        zassert_true(probe.WaitForRequest());
+        zassert_within(*probe.Value(), 0.0F, 0.001F);
+        zassert_equal(widget->ReadNumber(WidgetPropertyType::VALUE), 7.0);
+    }
 }
 
 ZTEST(widget_bindings, test_a_hidden_group_tracks_updates_and_replays_on_activation) {
