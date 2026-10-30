@@ -16,7 +16,7 @@ public:
     // Bumped whenever the CBOR layout changes; a stored config that does not
     // match is rejected so defaults are regenerated instead of decoding a
     // field-shifted layout into the current struct.
-    static constexpr uint32_t CONFIGURATION_VERSION = 2;
+    static constexpr uint32_t CONFIGURATION_VERSION = 1;
 
     DisplayConfigurationCborParser() = default;
 
