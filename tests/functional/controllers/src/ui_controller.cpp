@@ -342,6 +342,58 @@ AssetsManager& Assets() {
     return *fixture.assets_manager;
 }
 
+// A finger on the display, read by LVGL only when a test asks, so the renderer thread's timers stay out of a swipe.
+struct Touch {
+    lv_point_t point{};
+    lv_indev_state_t state = LV_INDEV_STATE_RELEASED;
+};
+
+void ReadTouch(lv_indev_t* indev, lv_indev_data_t* data) {
+    const auto* touch = static_cast<const Touch*>(lv_indev_get_user_data(indev));
+    data->point = touch->point;
+    data->state = touch->state;
+}
+
+// Drags a finger down the middle of the display, further than LVGL's gesture limit, and lifts it. False if there was
+// no input device to do it with.
+bool SwipeDown() {
+    constexpr int32_t STEP_PX = 20;
+    constexpr int32_t STEPS = 6;
+
+    Touch touch;
+
+    ScopedLvglLock lvgl_guard;
+
+    // A press finds objects where the last frame laid them out. The renderer sleeps until LVGL's next timer, and with
+    // no input device in the suite there is none after its first frame, so a frame is drawn here.
+    lv_refr_now(nullptr);
+
+    lv_indev_t* indev = lv_indev_create();
+    if(indev == nullptr)
+        return false;
+
+    lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
+    lv_indev_set_mode(indev, LV_INDEV_MODE_EVENT);
+    lv_indev_set_read_cb(indev, ReadTouch);
+    lv_indev_set_user_data(indev, &touch);
+
+    const int32_t x = lv_display_get_horizontal_resolution(nullptr) / 2;
+    const int32_t top = lv_display_get_vertical_resolution(nullptr) / 4;
+
+    touch.state = LV_INDEV_STATE_PRESSED;
+    for(int32_t step = 0; step <= STEPS; ++step) {
+        touch.point = { .x = x, .y = top + (step * STEP_PX) };
+        lv_indev_read(indev);
+    }
+
+    touch.state = LV_INDEV_STATE_RELEASED;
+    lv_indev_read(indev);
+
+    lv_indev_delete(indev);
+
+    return true;
+}
+
 } // namespace
 
 ZTEST_SUITE(ui_controller, NULL, Setup, Reset, Reset, Teardown);
@@ -500,6 +552,19 @@ ZTEST(ui_controller, test_closing_with_no_overlay_open_is_refused) {
 
     zassert_false(Navigation().IsOverlayActive());
     zassert_true(Navigation().GetActiveGroupId().has_value());
+}
+
+// An overlay is drawn on the top layer, apart from the screen groups, so its swipes have to be taken there.
+ZTEST(ui_controller, test_a_swipe_down_on_an_overlay_closes_it) {
+    zassert_equal(Navigation().ShowOverlay(CONFIGURED_OVERLAY_ID), 0);
+    k_msleep(SETTLE_MS);
+    zassert_true(Navigation().IsOverlayActive());
+
+    zassert_true(SwipeDown(), "Expected an input device to swipe with.");
+    k_msleep(SETTLE_MS);
+
+    zassert_false(Navigation().IsOverlayActive(), "Expected the swipe to close the overlay.");
+    zassert_equal(*Navigation().GetActiveGroupId(), FIRST_GROUP_ID);
 }
 
 // The kinds go with the controller, which the suite above keeps to its end, so this one builds its own.

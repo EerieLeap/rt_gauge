@@ -19,8 +19,8 @@ UiInputService::UiInputService(std::shared_ptr<NavigationService> navigation_ser
 }
 
 UiInputService::~UiInputService() {
-    if(root_ != nullptr)
-        lv_obj_remove_event_cb_with_user_data(root_, GestureCb, this);
+    for(lv_obj_t* root : roots_)
+        lv_obj_remove_event_cb_with_user_data(root, GestureCb, this);
 }
 
 std::optional<size_t> UiInputService::ToIndex(lv_dir_t direction) {
@@ -39,17 +39,24 @@ std::optional<size_t> UiInputService::ToIndex(lv_dir_t direction) {
 }
 
 int UiInputService::Initialize(lv_obj_t* root) {
+    const int res = AddRoot(root);
+    if(res != 0)
+        return res;
+
+    LOG_INF("UI input service initialized.");
+
+    return 0;
+}
+
+int UiInputService::AddRoot(lv_obj_t* root) {
     if(root == nullptr || navigation_service_ == nullptr)
         return -EINVAL;
 
-    root_ = root;
-
     // lv_obj_create() sets GESTURE_BUBBLE on every child; LVGL walks up while that
     // flag is set, so the gesture target must be the first object without it.
-    lv_obj_set_gesture_bubble(root_, false);
-    lv_obj_add_event_cb(root_, GestureCb, LV_EVENT_GESTURE, this);
-
-    LOG_INF("UI input service initialized.");
+    lv_obj_set_gesture_bubble(root, false);
+    lv_obj_add_event_cb(root, GestureCb, LV_EVENT_GESTURE, this);
+    roots_.push_back(root);
 
     return 0;
 }

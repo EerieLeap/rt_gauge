@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <vector>
 
 #include <lvgl.h>
 
@@ -34,7 +35,8 @@ private:
     // Off while a UI preview pins the screen: the gestures then do nothing, and the controls stay live.
     std::atomic<bool> is_navigation_enabled_ = true;
 
-    lv_obj_t* root_ = nullptr;
+    // Every object the gestures are taken on.
+    std::vector<lv_obj_t*> roots_;
     uint32_t last_gesture_tick_ = 0;
 
     static std::optional<size_t> ToIndex(lv_dir_t direction);
@@ -49,6 +51,14 @@ public:
     UiInputService& operator=(const UiInputService&) = delete;
 
     int Initialize(lv_obj_t* root);
+
+    /**
+     * @brief Takes the gestures on @p root too. LVGL sends a gesture to the nearest object, from the pressed one up
+     *        through its parents, that does not bubble it, so a layer apart from the first root's, such as the
+     *        overlays' top layer, needs a root of its own.
+     */
+    int AddRoot(lv_obj_t* root);
+
     void SetGestureMapping(lv_dir_t direction, NavigationIntent intent, uint32_t argument = 0);
 
     /**

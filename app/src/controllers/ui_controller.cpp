@@ -253,6 +253,10 @@ int UiController::Initialize() {
     if(ui_input_service_->Initialize(main_view_->GetContainer()->GetObject()) != 0)
         LOG_ERR("Failed to initialize the UI input service.");
 
+    // The overlays are drawn on the top layer, apart from the main view, so a swipe on one never reaches the view.
+    if(overlay_host_ != nullptr && ui_input_service_->AddRoot(overlay_host_->GetContainer()->GetObject()) != 0)
+        LOG_ERR("Failed to take the swipes on the overlays.");
+
     ConfigureGestures();
 
 #ifdef CONFIG_EERIE_LEAP_UI_PREVIEW

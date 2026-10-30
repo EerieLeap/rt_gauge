@@ -115,7 +115,7 @@ private:
     std::shared_ptr<FontCache> font_cache_;
     std::shared_ptr<NavigationService> navigation_service_;
 
-    // Declared before ui_input_service_, which detaches from the view's LVGL object on teardown.
+    // Declared before ui_input_service_, which detaches from their LVGL objects on teardown.
     std::unique_ptr<MainView> main_view_;
     std::unique_ptr<OverlayHost> overlay_host_;
     std::shared_ptr<UiInputService> ui_input_service_;
