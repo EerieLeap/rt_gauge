@@ -423,7 +423,7 @@ int main() {
     const auto management_controller = std::make_shared<ManagementController>(
         configuration_service, config_work_queue_thread,
         canbus_com_service != nullptr ? canbus_com_service->GetNetworkInfo() : nullptr,
-        sensors_controller->GetCapabilities(), nullptr, assets_manager, SettingId::ALL
+        sensors_controller->GetCapabilities(), nullptr, assets_manager, SettingId::ALL, time_service
     );
     const bool is_management_ready = management_controller->Initialize() == 0;
     if(!is_management_ready)
