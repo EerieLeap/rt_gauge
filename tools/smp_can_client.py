@@ -3187,9 +3187,18 @@ def command_logging_status(client: SmpClient, args: argparse.Namespace) -> None:
         reason = response.get("reason", 0)
         print(f"reason: {LOGGING_REASONS.get(reason, f'unknown({reason})')}")
     if "since_ms" in response:
+        # since_ms is on the unit's clock (not real time), so the age is measured on that clock too.
         since_ms = response["since_ms"]
-        elapsed = format_duration(time.time() - since_ms / 1000)
-        print(f"since: {format_utc_ms(since_ms)} ({elapsed} ago)")
+        try:
+            now = client.read(Group.DEVICE, DeviceCommand.TIME)
+        except SmpError:
+            now = None      # No TIME (an older unit, or no time service): the age is unknown.
+        if now is None:
+            print(f"since: {format_utc_ms(since_ms)} (unit clock)")
+        else:
+            print(f"since: {format_utc_ms(since_ms)} (unit clock; {format_duration((now['now_ms'] - since_ms) / 1000)} ago)")
+            if "wall_ms" in now:
+                print(f"started: {format_utc_ms(since_ms + now['wall_ms'] - now['now_ms'])}")
     if "file" in response:
         print(f"file: {response['file']}")
     if "bytes" in response:

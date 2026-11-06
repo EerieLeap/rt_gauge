@@ -212,6 +212,8 @@ class FakeUnit:
         if group == 70 and command == 2 and self.log is not None and body["name"] == self.log.name:
             reply = self.log.read(body)
             return self._error(70, reply["err"]) if "err" in reply else reply
+        if (group, command) == (71, 0):
+            return {"active": 1, "since_ms": self.clock_ms - 125000, "file": "log_0001.mf4", "bytes": 2048}
         if group == 1 and command == 0:
             return self._state(body) if op == 2 else self._images()
         if group == 1 and command == 5:
@@ -1446,6 +1448,20 @@ class FollowTest(ClientCase):
 
 
 class TimeTest(ClientCase):
+    def test_logging_status_age_is_on_the_unit_clock(self) -> None:
+        out, _ = run(client.command_logging_status, self.smp)
+        self.assertIn("(unit clock; 2 min ago)", out)
+        self.assertNotIn("started:", out)
+        self.unit.wall_offset_ms = 5000000000
+        out, _ = run(client.command_logging_status, self.smp)
+        self.assertIn(f"started: {client.format_utc_ms(self.unit.clock_ms - 125000 + 5000000000)}", out)
+
+    def test_logging_status_without_time_has_no_age(self) -> None:
+        self.unit.has_time = False
+        out, _ = run(client.command_logging_status, self.smp)
+        self.assertIn("(unit clock)", out)
+        self.assertNotIn("ago", out)
+
     def test_unset_clock_says_so(self) -> None:
         out, _ = run(client.command_time, self.smp, time_command=None)
         self.assertIn(f"now_ms: {self.unit.clock_ms}  ({client.format_unix_ms(self.unit.clock_ms)}", out)
