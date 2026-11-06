@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Self-test of the image, dfu and Bluetooth parts of smp_can_client.py, against simulated units.
+"""Self-test of the image, dfu, log following, clock and Bluetooth parts of smp_can_client.py, against simulated units.
 
 `FakeUnit` answers the SMP requests of the firmware update plan the way Zephyr's img_mgmt and rt_core's dfu group
 do (offsets, resumption by sha, the identity check, test/confirm flags, a swap on reset, self-confirmation or a
@@ -29,6 +29,7 @@ import threading
 import time
 import types
 import unittest
+import zlib
 from pathlib import Path
 from unittest import mock
 
@@ -65,6 +66,56 @@ def build_image(size: int = 3000, *, version=(0, 0, 2, 0), product: int = PRODUC
     return signed + struct.pack("<HH", 0x6907, 4 + len(entries)) + entries
 
 
+class FakeLog:
+    """A log file the unit writes: it grows, then the writer closes it and rewrites the first bytes."""
+
+    CHUNK = 100
+
+    def __init__(self, name: str = "log_0001.mf4", size: int = 250) -> None:
+        self.name = name
+        self.content = bytearray(b"UNFINALIZED" + bytes(range(256)) * 4)[:size]
+        self.closed = False
+        self.followed = False       # A request with growing:true was served while the file was open.
+        self.changed_mode = "error" # "error": CHANGED at off > 0 after the close; "silent": the file is just served.
+        self.requests: list[dict] = []
+        self.changed_sent = 0
+        self.before_request: dict[int, object] = {}     # Request number (1-based) -> a call made before it is served.
+
+    def append(self, count: int) -> None:
+        self.content += bytes((len(self.content) + index) % 251 for index in range(count))
+
+    def close(self) -> None:
+        self.content[:11] = b"FINALIZED!!"
+        self.closed = True
+
+    def read(self, body: dict) -> dict:
+        """The answer to an assets READ, or {"err": rc}."""
+        self.requests.append(body)
+        hook = self.before_request.get(len(self.requests))
+        if hook is not None:
+            hook()
+        growing = bool(body.get("growing"))
+        offset = body["off"]
+        if not self.closed and not growing:
+            return {"err": 7}
+        if self.closed and growing and offset > 0 and self.followed and self.changed_mode == "error":
+            self.changed_sent += 1
+            self.followed = False
+            return {"err": 17}
+        if offset > len(self.content):
+            return {"err": 10, "len": len(self.content)}
+        data = bytes(self.content[offset:offset + self.CHUNK])
+        reply: dict = {"off": offset, "data": data}
+        if offset == 0:
+            reply["len"] = len(self.content)
+        if offset + len(data) == len(self.content):
+            reply["crc"] = zlib.crc32(self.content)
+        if not self.closed:
+            reply["growing"] = True
+            self.followed = self.followed or growing
+        return reply
+
+
 class FakeUnit:
     """The unit side of the update: os, device, img_mgmt (group 1) and dfu (group 72)."""
 
@@ -93,6 +144,12 @@ class FakeUnit:
         self.auto_revert = True                     # False: a ConsoleServer reverts it, as a watchdog would.
         self.reboots = 0
         self.silent_after_reset = 4
+        self.log: FakeLog | None = None
+        self.has_time = True
+        self.clock_ms = 1761106217000               # The unit's clock, fixed (it never steps).
+        self.wall_offset_ms: int | None = None
+        self.drop_set_time = 0                      # SET_TIME requests it never answers.
+        self.set_times: list[int] = []
 
     @staticmethod
     def _slot(version, content: bytes, **flags) -> dict:
@@ -113,6 +170,9 @@ class FakeUnit:
         op = packet[0] & 7
         body = cbor2.loads(packet[8:8 + length]) if length else {}
         self.max_request = max(self.max_request, len(packet))
+        if (group, command) == (65, 2) and self.drop_set_time > 0:
+            self.drop_set_time -= 1
+            return []
 
         if group == 1 and command == 1:
             self.upload_requests += 1
@@ -147,6 +207,11 @@ class FakeUnit:
             return {"product": self.product, "revision": 1, "features": 0, "hw": 1,
                     "sw": major << 24 | minor << 16 | patch, "build": self.build, "board": self.board,
                     "cdmp_id": 5, "uid": self.uid, "status": 1}
+        if group == 65 and command in (1, 2) and self.has_time:
+            return self._time(command, body)
+        if group == 70 and command == 2 and self.log is not None and body["name"] == self.log.name:
+            reply = self.log.read(body)
+            return self._error(70, reply["err"]) if "err" in reply else reply
         if group == 1 and command == 0:
             return self._state(body) if op == 2 else self._images()
         if group == 1 and command == 5:
@@ -157,6 +222,17 @@ class FakeUnit:
         if group == 72 and command == 0 and self.has_dfu:
             return self._dfu_status()
         return {"rc": client.MGMT_ERR_ENOTSUP}
+
+    def _time(self, command: int, body: dict) -> dict:
+        if command == 2:
+            if not 1577836800000 <= body["wall_ms"] < 4102444800000:     # 2020-01-01 to 2100-01-01
+                return {"rc": 3}
+            self.set_times.append(body["wall_ms"])
+            self.wall_offset_ms = body["wall_ms"] - self.clock_ms
+        reply = {"now_ms": self.clock_ms, "uptime_ms": 4321, "boot_id": 7}
+        if self.wall_offset_ms is not None:
+            reply["wall_ms"] = self.clock_ms + self.wall_offset_ms
+        return reply
 
     def _images(self) -> dict:
         images = []
@@ -1252,6 +1328,169 @@ class ReassemblerTest(unittest.TestCase):
         self.assertEqual(reassembler.accept(bytes([4]) + self.packet(), 0.1), [(4, self.packet())])
 
 
+class FollowTest(ClientCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.log = self.unit.log = FakeLog()
+        self.path = self.tmp / "copy.mf4"
+        self.steps: list = []
+        patcher = mock.patch.object(client, "wait", side_effect=self.wait)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def wait(self, seconds: float) -> None:
+        self.assertTrue(self.steps, "the client kept waiting for a file that is not changing")
+        self.steps.pop(0)()
+
+    def get(self, **options):
+        defaults = dict(kind=4, name=self.log.name, file=self.path, resume=False, growing=False, follow=False,
+                        interval=0.0, in_flight=1)
+        return run(client.command_assets_get, self.smp, **(defaults | options))
+
+    def test_a_growing_file_is_refused_without_the_key(self) -> None:
+        with self.assertRaisesRegex(client.SmpError, "in use"):
+            self.get()
+
+    def test_growing_saves_the_synced_part(self) -> None:
+        out, _ = self.get(growing=True)
+        self.assertEqual(self.path.read_bytes(), bytes(self.log.content))
+        self.assertIn("still being written", out)
+        self.assertIn("250 B", out)
+        self.assertTrue(all(request.get("growing") for request in self.log.requests))
+        self.assertEqual(len(self.log.requests), 3)     # 100 + 100 + 50
+
+    def test_growing_with_pipelining(self) -> None:
+        self.get(growing=True, in_flight=3)
+        self.assertEqual(self.path.read_bytes(), bytes(self.log.content))
+
+    def test_an_empty_file_is_a_copy_too(self) -> None:
+        self.log.content = bytearray()
+        out, _ = self.get(growing=True)
+        self.assertEqual(self.path.read_bytes(), b"")
+        self.assertIn("still being written", out)
+
+    def test_a_closed_file_is_not_called_growing(self) -> None:
+        self.log.close()
+        out, _ = self.get(growing=True)
+        self.assertEqual(self.path.read_bytes(), bytes(self.log.content))
+        self.assertNotIn("still being written", out)
+
+    def test_follow_reads_on_and_rereads_the_closed_file_after_changed(self) -> None:
+        for in_flight in (1, 3):
+            with self.subTest(in_flight=in_flight):
+                self.log.__init__()
+                self.steps = [lambda: self.log.append(300), lambda: self.log.append(10), self.log.close]
+                out, _ = self.get(follow=True, in_flight=in_flight)
+                self.assertEqual(self.path.read_bytes(), bytes(self.log.content))
+                self.assertTrue(self.path.read_bytes().startswith(b"FINALIZED!!"))
+                self.assertEqual(self.log.changed_sent, 1)
+                self.assertIn("(+300 B), still being written", out)
+                self.assertIn("(+10 B), still being written", out)
+                self.assertIn("closed; reading it again", out)
+                self.assertNotIn("is still being written", out)
+                self.assertEqual(self.steps, [])
+
+    def test_follow_continues_from_its_own_length(self) -> None:
+        self.steps = [lambda: self.log.append(120), self.log.close]
+        self.get(follow=True)
+        offsets = [request["off"] for request in self.log.requests]
+        self.assertEqual(offsets[:5], [0, 100, 200, 250, 350])     # The second pass starts at its own length.
+        self.assertEqual(offsets.count(0), 2)                      # Then the closed file is read again.
+
+    def test_follow_rereads_after_an_answer_without_growing(self) -> None:
+        self.log.changed_mode = "silent"
+        self.steps = [lambda: self.log.append(40), self.log.close]
+        out, _ = self.get(follow=True)
+        self.assertEqual(self.path.read_bytes(), bytes(self.log.content))
+        self.assertEqual(self.log.changed_sent, 0)
+        self.assertIn("closed; reading it again", out)
+
+    def test_follow_of_a_closed_file_is_one_read(self) -> None:
+        self.log.close()
+        out, _ = self.get(follow=True)
+        self.assertEqual(self.path.read_bytes(), bytes(self.log.content))
+        self.assertNotIn("still being written", out)
+
+    def test_changed_is_named(self) -> None:
+        self.get(growing=True)
+        self.log.close()
+        with self.assertRaisesRegex(client.SmpError, "changed"):
+            self.get(growing=True, resume=True)
+
+    def test_a_close_inside_the_first_pass_reads_the_file_again(self) -> None:
+        for in_flight in (1, 3):
+            for mode in ("error", "silent"):
+                with self.subTest(in_flight=in_flight, mode=mode):
+                    self.log.__init__()
+                    self.log.changed_mode = mode
+                    self.log.before_request[2] = self.log.close     # The second chunk is served from the closed file.
+                    self.steps = []
+                    out, _ = self.get(follow=True, in_flight=in_flight)
+                    self.assertEqual(self.path.read_bytes(), bytes(self.log.content))
+                    self.assertTrue(self.path.read_bytes().startswith(b"FINALIZED!!"))
+                    self.assertIn("closed; reading it again", out)
+
+    def test_a_file_that_grows_during_a_pass_is_read_to_its_new_end(self) -> None:
+        for in_flight in (1, 3):
+            with self.subTest(in_flight=in_flight):
+                self.log.__init__()
+                self.log.before_request[2] = lambda: self.log.append(130)
+                self.steps = []
+                self.get(growing=True, in_flight=in_flight)
+                self.assertEqual(self.path.read_bytes(), bytes(self.log.content))
+                self.assertGreater(len(self.log.content), 250)
+
+    def test_a_listed_growing_file_is_marked(self) -> None:
+        self.assertIn("growing", client.format_asset_entry({"name": "a.mf4", "size": 5, "growing": True}))
+        self.assertNotIn("growing", client.format_asset_entry({"name": "a.mf4", "size": 5}))
+
+
+class TimeTest(ClientCase):
+    def test_unset_clock_says_so(self) -> None:
+        out, _ = run(client.command_time, self.smp, time_command=None)
+        self.assertIn(f"now_ms: {self.unit.clock_ms}  ({client.format_unix_ms(self.unit.clock_ms)}", out)
+        self.assertIn("uptime_ms: 4321", out)
+        self.assertIn("boot_id: 7", out)
+        self.assertIn("wall_ms: not set", out)
+
+    def test_set_takes_the_pc_clock(self) -> None:
+        before_ms = time.time() * 1000
+        out, _ = run(client.command_time, self.smp, time_command="set", wall_ms=None)
+        after_ms = time.time() * 1000
+        wall_ms = self.unit.clock_ms + self.unit.wall_offset_ms
+        self.assertTrue(before_ms - 1 <= wall_ms <= after_ms + 1000, (before_ms, wall_ms, after_ms))
+        self.assertIn("set wall_ms", out)
+        self.assertIn(f"wall_ms: {wall_ms}  (", out)
+        out, _ = run(client.command_time, self.smp, time_command=None)
+        self.assertNotIn("not set", out)
+
+    def test_set_with_a_given_time(self) -> None:
+        out, _ = run(client.command_time, self.smp, time_command="set", wall_ms=1893456000123)
+        self.assertEqual(self.unit.clock_ms + self.unit.wall_offset_ms, 1893456000123)
+        self.assertIn("2030-01-01T00:00:00.123Z", out)
+
+    def test_a_time_before_2020_is_refused(self) -> None:
+        for wall_ms in (1000, 4102444800000):
+            with self.assertRaisesRegex(RuntimeError, "EINVAL.*2020-01-01"):
+                run(client.command_time, self.smp, time_command="set", wall_ms=wall_ms)
+        self.assertIsNone(self.unit.wall_offset_ms)
+
+    def test_an_unanswered_set_is_made_again_with_a_fresh_time(self) -> None:
+        self.unit.drop_set_time = 1
+        out, _ = run(client.command_time, self.smp, time_command="set", wall_ms=None)
+        self.assertEqual(len(self.unit.set_times), 1)       # The first never reached the unit; one request, not a resend.
+        self.assertIn("difference from this PC:", out)
+        self.unit.drop_set_time = 3
+        with self.assertRaises(TimeoutError):
+            run(client.command_time, self.smp, time_command="set", wall_ms=None)
+
+    def test_a_unit_without_a_time_service_says_so(self) -> None:
+        self.unit.has_time = False
+        for options in (dict(time_command=None), dict(time_command="set", wall_ms=None)):
+            with self.assertRaisesRegex(RuntimeError, "no time service"):
+                run(client.command_time, self.smp, **options)
+
+
 class ArgumentTest(unittest.TestCase):
     def parse(self, *argv: str) -> argparse.Namespace:
         with contextlib.redirect_stderr(io.StringIO()) as err:
@@ -1281,6 +1520,26 @@ class ArgumentTest(unittest.TestCase):
         args = self.parse("image", "info", "file.bin")
         self.assertTrue(client.is_offline(args))
         self.assertFalse(client.is_offline(self.parse("--serial", "/dev/null", "image", "list")))
+
+    def test_get_options(self) -> None:
+        args = self.parse("--serial", "/dev/null", "assets", "get", "logs", "a.mf4")
+        self.assertEqual((args.growing, args.follow, args.interval), (False, False, None))
+        args = self.parse("--serial", "/dev/null", "assets", "get", "logs", "a.mf4", "--growing")
+        self.assertEqual((args.growing, args.follow), (True, False))
+        args = self.parse("--serial", "/dev/null", "assets", "get", "logs", "a.mf4", "--follow")
+        self.assertEqual((args.growing, args.follow, args.interval), (True, True, client.DEFAULT_FOLLOW_INTERVAL_S))
+        args = self.parse("--serial", "/dev/null", "assets", "get", "logs", "a.mf4", "--follow", "--interval", "0.5")
+        self.assertEqual(args.interval, 0.5)
+        self.assertIn("--interval needs --follow",
+                      self.rejected("--serial", "/dev/null", "assets", "get", "logs", "a", "--interval", "1"))
+        self.assertIn("cannot --resume",
+                      self.rejected("--serial", "/dev/null", "assets", "get", "logs", "a", "--follow", "--resume"))
+
+    def test_time_commands(self) -> None:
+        self.assertIsNone(self.parse("--serial", "/dev/null", "time").time_command)
+        args = self.parse("--serial", "/dev/null", "time", "set")
+        self.assertEqual((args.time_command, args.wall_ms), ("set", None))
+        self.assertEqual(self.parse("--serial", "/dev/null", "time", "set", "--wall-ms", "5").wall_ms, 5)
 
     def test_update_options(self) -> None:
         args = self.parse("--serial", "/dev/null", "image", "update", "f.bin", "--no-reset", "--timeout-s", "120")

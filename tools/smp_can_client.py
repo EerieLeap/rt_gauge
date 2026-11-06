@@ -83,7 +83,7 @@ import types
 import zlib
 from enum import IntEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, Iterator
+from typing import TYPE_CHECKING, Callable, Iterator, NamedTuple
 
 import cbor2
 
@@ -223,6 +223,7 @@ IMAGE_POLL_FALLBACK_S = 60.0
 IMAGE_POST_BOOT_POLL_S = 30.0
 
 DEFAULT_ASSET_IN_FLIGHT = 2
+DEFAULT_FOLLOW_INTERVAL_S = 5.0     # assets get --follow: the wait between two asks for more bytes.
 MAX_ASSET_IN_FLIGHT = 255
 # How often a download that is stuck at one byte asks for it before it gives up.
 MAX_ASSET_RESTARTS = 16
@@ -296,11 +297,13 @@ ASSETS_ERRORS = {
     14: "I/O error",
     15: "no memory",
     16: "built in: the file is part of the firmware and cannot be replaced, renamed or deleted",
+    17: "changed: the file was closed after the copy began, so the bytes the copy holds are not the file's",
 }
 ASSETS_BAD_OFFSET = 10
 ASSETS_BAD_TOKEN = 11
 ASSETS_BUSY = 12
 ASSETS_NOT_FOUND = 4
+ASSETS_CHANGED = 17
 
 # Zephyr's img_mgmt_err_code_t (img_mgmt.h), by number. Group 1 reports them as SMP v2 {group, rc}.
 IMG_ERROR_NAMES = (
@@ -339,6 +342,8 @@ GROUP_ERRORS = {Group.CONFIG: CONFIG_ERRORS, Group.ASSETS: ASSETS_ERRORS, Group.
                 Group.DFU: DFU_ERRORS}
 # MCUmgr's MGMT_ERR_ENOTSUP, which a unit answers at the top level for a group it does not serve.
 MGMT_ERR_ENOTSUP = 8
+MGMT_ERR_EINVAL = 3
+TIME_SET_ATTEMPTS = 3
 MISSING_GROUP_HINTS = {
     Group.ASSETS: "the unit has no assets group (older firmware)",
     Group.IMG: "the unit has no image management (built without DFU)",
@@ -354,6 +359,12 @@ class AssetsCommand(IntEnum):
     DELETE = 4
     STAT = 5
     RENAME = 6
+
+
+class DeviceCommand(IntEnum):
+    INFO = 0
+    TIME = 1
+    SET_TIME = 2
 
 
 ASSET_KINDS = {"images": 0, "animations": 1, "sensor_scripts": 2, "can_scripts": 3, "logs": 4, "fonts": 5}
@@ -1525,10 +1536,16 @@ class AssetDownload:
 
     MAX_STRAY_RESPONSES = 16
 
-    def __init__(self, start: int) -> None:
+    def __init__(self, start: int, growing_mode: bool = False) -> None:
+        # In growing mode the file may grow during the pass: the end only moves up, and the CRC32 that
+        # counts is the one of the chunk that reaches the end.
+        self.growing_mode = growing_mode
+        self.saw_growing = False                # Some answer said the writer has the file open.
+        self.stale = False                      # ... and a later one did not: the file was closed meanwhile.
         self.written = start                    # The bytes before it are all there.
         self.length: int | None = None          # The size of the asset, once known.
         self.crc: int | None = None             # CRC32 of the whole asset, from its last chunk.
+        self.growing = False                    # The last chunk said the writer still has the file open.
         self._chunk_size = 0
         self._next = start                      # The first offset not asked for yet.
         self._chunks: dict[int, bytes] = {}     # Arrived, but not yet next in line.
@@ -1550,13 +1567,26 @@ class AssetDownload:
             return
 
         data = response["data"]
+        end = offset + len(data)
         is_last = "crc" in response
+        if self.growing_mode:
+            if response.get("growing"):
+                self.saw_growing = True
+            elif self.saw_growing:
+                self.stale = True
         if "len" in response:
             self.set_length(response["len"])
+        if self.growing_mode and self.length is not None and end > self.length:
+            self.set_length(end)
+        if is_last and self.growing_mode and self.length is not None and end < self.length:
+            is_last = False        # The CRC32 of an end the file has outgrown.
         if is_last:
             self.crc = response["crc"]
-            self.set_length(offset + len(data))
+            self.growing = bool(response.get("growing"))
+            self.set_length(end)
         elif not data:
+            if "crc" in response:
+                return
             raise RuntimeError(f"empty chunk at offset {offset}")
 
         if self._chunk_size == 0 and data:
@@ -1569,6 +1599,10 @@ class AssetDownload:
 
     def set_length(self, length: int) -> None:
         if self.length is not None and self.length != length:
+            if self.growing_mode:
+                if length > self.length:
+                    self.length, self.crc = length, None
+                return
             raise RuntimeError(f"the asset changed during the download: {self.length} B, then {length} B")
         self.length = length
 
@@ -1606,9 +1640,23 @@ class AssetDownload:
         return ready
 
 
+class Downloaded(NamedTuple):
+    length: int
+    crc: int
+    start: int          # The offset the download began at (the size of the local file it continued).
+    growing: bool       # The unit still had the file open: the copy is what it had synced.
+    stale: bool = False # With stale_ok: the file was closed during or since the copy; read it again.
+
+
 def download_asset(client: SmpClient, kind: int, name: str, path: Path, *, resume: bool, in_flight: int,
-                   progress: Progress) -> tuple[int, int, int]:
-    """Downloads an asset into @p path and checks its CRC32. Returns the size, the CRC32 and the offset it began at.
+                   progress: Progress, growing: bool = False, stale_ok: bool = False) -> Downloaded:
+    """Downloads an asset into @p path and checks its CRC32. Returns the size, the CRC32, the offset it began at
+    and whether the file is still growing.
+
+    With @p growing every request asks for the file being written, and the copy ends where the writer's
+    synced bytes end; a resumed copy of such a file continues from its length, and the unit answers CHANGED
+    when the writer has closed the file since (the copy's first bytes are then stale). With @p stale_ok a
+    resumed copy that the unit answers as closed is returned unchecked, for the caller to read again.
 
     The first request goes alone, to learn the chunk size, and the rest follow at consecutive offsets,
     @p in_flight at a time. A resumed download asks for the bytes after the local file's, and the file
@@ -1621,7 +1669,10 @@ def download_asset(client: SmpClient, kind: int, name: str, path: Path, *, resum
     start = path.stat().st_size if resume and path.is_file() else 0
 
     def body(offset: int) -> dict:
-        return {"kind": kind, "name": name, "off": offset}
+        request = {"kind": kind, "name": name, "off": offset}
+        if growing:
+            request["growing"] = True
+        return request
 
     try:
         # The unit reads the file up to the offset before it answers a resumed download.
@@ -1635,7 +1686,7 @@ def download_asset(client: SmpClient, kind: int, name: str, path: Path, *, resum
     if first["off"] != start:
         raise RuntimeError(f"asked for offset {start}, got offset {first['off']}")
 
-    download = AssetDownload(start)
+    download = AssetDownload(start, growing_mode=growing)
     download.accept(start, first)
     pipeline = SmpPipeline(client)
     asked: set[int] = set()     # The offsets in flight.
@@ -1651,7 +1702,7 @@ def download_asset(client: SmpClient, kind: int, name: str, path: Path, *, resum
             for data in download.take_ready():
                 file.write(data)
             progress.update(download.written, download.length)
-            if download.is_complete:
+            if download.is_complete or (stale_ok and download.stale):
                 break
 
             while pipeline.outstanding < in_flight and (offset := download.next_offset()) is not None:
@@ -1677,6 +1728,9 @@ def download_asset(client: SmpClient, kind: int, name: str, path: Path, *, resum
             else:
                 raise completion.error
 
+    if stale_ok and growing and (download.stale or (start and not download.growing)):
+        return Downloaded(download.length or 0, download.crc or 0, start, False, True)
+
     size = path.stat().st_size
     crc = file_crc32(path)
     if size != download.length or crc != download.crc:
@@ -1684,7 +1738,47 @@ def download_asset(client: SmpClient, kind: int, name: str, path: Path, *, resum
                 if start else "the asset may have changed during the download")
         raise RuntimeError(f"CRC mismatch: {path} holds {size} B with crc {crc:#010x}, the unit reports "
                            f"{download.length} B with crc {download.crc:#010x}; {hint}. The file was kept")
-    return download.length, crc, start
+    return Downloaded(download.length, crc, start, download.growing)
+
+
+def follow_asset(client: SmpClient, kind: int, name: str, path: Path, *, in_flight: int, interval_s: float,
+                 progress: Progress, on_pass: Callable[[Downloaded | None], None] | None = None) -> Downloaded:
+    """Follows a file being written until the writer closes it, and returns the CRC-checked copy of the closed file.
+
+    Each pass reads from the length of the copy to the end the writer has synced; then the client waits
+    @p interval_s and asks again. The tool does not parse the file, so when it learns the file was closed
+    (the unit answers CHANGED, or answers without `growing`) a copy that was begun while the file grew is
+    read again from 0: the closing rewrites bytes of the header. @p on_pass gets each pass's result, and None
+    when the copy is about to be read again.
+    """
+    resume = False
+    restarts = 0
+    while True:
+        try:
+            result = download_asset(client, kind, name, path, resume=resume, in_flight=in_flight, progress=progress,
+                                    growing=True, stale_ok=True)
+        except SmpError as error:
+            if not error.is_assets_error(ASSETS_CHANGED):
+                raise
+            result = None           # It grew, and it was closed meanwhile.
+        if result is None or result.stale:
+            restarts += 1
+            if restarts > MAX_ASSET_RESTARTS:
+                raise RuntimeError(f"{name} keeps changing; gave up after {MAX_ASSET_RESTARTS} reads from the start")
+            resume = False          # The bytes taken while it grew are not the closed file's: read it again.
+            if on_pass is not None:
+                on_pass(None)
+            continue
+        if on_pass is not None:
+            on_pass(result)
+        if not result.growing:
+            return result           # Read whole and closed: it is the file.
+        resume = True
+        wait(interval_s)
+
+
+def wait(seconds: float) -> None:
+    time.sleep(seconds)
 
 
 def upload_asset(client: SmpClient, kind: int, name: str, data: bytes, crc: int, chunk_size: int,
@@ -2887,6 +2981,9 @@ def format_asset_entry(entry: dict) -> str:
     # builtin (fonts kind): a file in the firmware's flash, read-only.
     if entry.get("builtin"):
         line += "  built in"
+    # growing (logs kind): the file the writer has open; its size is what the unit has synced.
+    if entry.get("growing"):
+        line += "  growing"
     # end_ms (logs kind): when the file was last written, Unix ms UTC.
     if "end_ms" in entry:
         line += f"  end {format_utc_ms(entry['end_ms'])}"
@@ -2919,16 +3016,51 @@ def command_assets_get(client: SmpClient, args: argparse.Namespace) -> None:
 
     progress = Progress(args.name)
     start_s = time.monotonic()
-    try:
-        length, crc, start = download_asset(client, args.kind, args.name, path, resume=args.resume,
-                                            in_flight=in_flight, progress=progress)
-    finally:
-        progress.finish()
+    if args.follow:
+        result = follow_file(client, args, path, in_flight, progress)
+    else:
+        try:
+            result = download_asset(client, args.kind, args.name, path, resume=args.resume, in_flight=in_flight,
+                                    progress=progress, growing=args.growing)
+        finally:
+            progress.finish()
     elapsed_s = max(time.monotonic() - start_s, 1e-9)
 
+    length, crc, start, growing = result.length, result.crc, result.start, result.growing
     resumed = f", resumed at {start} B" if start else ""
     print(f"read {args.name}: {length} B to {path}, crc {crc:#010x}; {length - start} B in {elapsed_s:.2f} s "
           f"({(length - start) / elapsed_s / 1024:.1f} KB/s{resumed})")
+    if growing:
+        print(f"{args.name} is still being written: the copy holds the {length} B the unit had synced "
+              f"(--follow reads on until it is closed)")
+
+
+def follow_file(client: SmpClient, args: argparse.Namespace, path: Path, in_flight: int,
+                progress: Progress) -> Downloaded:
+    """assets get --follow: prints what each pass added, and returns the closed file's copy."""
+    seen = 0
+
+    def report(result: Downloaded | None) -> None:
+        nonlocal seen
+        if result is None:
+            print(f"{args.name}: closed; reading it again from the start", flush=True)
+            seen = 0
+        elif result.growing and result.length != seen:
+            print(f"{args.name}: {result.length} B (+{result.length - seen} B), still being written", flush=True)
+            seen = result.length
+
+    try:
+        result = follow_asset(client, args.kind, args.name, path, in_flight=in_flight, interval_s=args.interval,
+                              progress=progress, on_pass=report)
+    except KeyboardInterrupt:
+        progress.finish()
+        print(f"stopped: {path} holds {path.stat().st_size if path.is_file() else 0} B of {args.name}, "
+              f"which was still being written (the copy is not final)",
+              file=sys.stderr)
+        raise SystemExit(130) from None
+    finally:
+        progress.finish()
+    return result
 
 
 def command_assets_put(client: SmpClient, args: argparse.Namespace) -> None:
@@ -2976,6 +3108,75 @@ ASSETS_HANDLERS = {
 
 def command_assets(client: SmpClient, args: argparse.Namespace) -> None:
     ASSETS_HANDLERS[args.assets_command](client, args)
+
+
+def format_unix_ms(unix_ms: int) -> str:
+    moment = datetime.datetime.fromtimestamp(unix_ms / 1000, datetime.timezone.utc)
+    return moment.strftime("%Y-%m-%dT%H:%M:%S.") + f"{moment.microsecond // 1000:03d}Z"
+
+
+def read_time(client: SmpClient) -> dict:
+    try:
+        return client.read(Group.DEVICE, DeviceCommand.TIME)
+    except SmpError as error:
+        if error.is_missing_group():
+            raise RuntimeError("the unit has no time service (older firmware, or built without one)") from None
+        raise
+
+
+def print_time(response: dict) -> None:
+    print(f"now_ms: {response['now_ms']}  ({format_unix_ms(response['now_ms'])}, the unit's clock)")
+    print(f"uptime_ms: {response['uptime_ms']}")
+    print(f"boot_id: {response['boot_id']}")
+    if "wall_ms" in response:
+        print(f"wall_ms: {response['wall_ms']}  ({format_unix_ms(response['wall_ms'])})")
+    else:
+        print("wall_ms: not set (the clock was not set since the unit started; see `time set`)")
+
+
+def command_time(client: SmpClient, args: argparse.Namespace) -> None:
+    if args.time_command == "set":
+        command_time_set(client, args)
+        return
+    print_time(read_time(client))
+
+
+def command_time_set(client: SmpClient, args: argparse.Namespace) -> None:
+    """Sets the unit's real time: --wall-ms as given, or the PC's clock plus half the round trip of a TIME request.
+
+    The unit takes the time it receives as the time it arrives, so the transit is added.
+    """
+    # SET_TIME goes once: a resend would carry a time that is old by then, and a late answer to the first
+    # would mean the unit applied both. A request without an answer is made again with a fresh time.
+    for attempt in range(TIME_SET_ATTEMPTS):
+        wall_ms = args.wall_ms
+        if wall_ms is None:
+            start_s = time.monotonic()
+            read_time(client)
+            half_trip_ms = (time.monotonic() - start_s) * 500
+            wall_ms = round(time.time() * 1000 + half_trip_ms)
+        try:
+            response = client.write(Group.DEVICE, DeviceCommand.SET_TIME, {"wall_ms": wall_ms}, retries=0)
+            break
+        except TimeoutError:
+            if attempt == TIME_SET_ATTEMPTS - 1:
+                raise
+        except SmpError as error:
+            if error.is_missing_group():
+                raise RuntimeError("the unit has no time service (older firmware, or built without one)") from None
+            if error.group is None and error.rc == MGMT_ERR_EINVAL:
+                raise RuntimeError(f"the unit refused {wall_ms} (EINVAL): it takes a time from 2020-01-01 "
+                                   f"to 2100-01-01") from None
+            raise
+    print(f"set wall_ms {wall_ms}  ({format_unix_ms(wall_ms)})")
+    print_time(response)
+    if args.wall_ms is None:
+        # What the unit reports now against this PC, less half the round trip of the read.
+        start_s = time.monotonic()
+        answer = read_time(client)
+        half_trip_ms = (time.monotonic() - start_s) * 500
+        if "wall_ms" in answer:
+            print(f"difference from this PC: {answer['wall_ms'] - (time.time() * 1000 - half_trip_ms):+.0f} ms")
 
 
 def command_logging_status(client: SmpClient, args: argparse.Namespace) -> None:
@@ -3480,6 +3681,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     commands.add_parser("echo", help="os echo").add_argument("text")
     commands.add_parser("params", help="os mcumgr params: buffer size and count")
     commands.add_parser("info", help="device info")
+    time_ = commands.add_parser("time", help="the unit's clock; `time set` sets its real time")
+    time_commands = time_.add_subparsers(dest="time_command")
+    time_set = time_commands.add_parser("set", help="set the real time: this PC's clock plus half the round trip")
+    time_set.add_argument("--wall-ms", type=int, default=None, metavar="MS",
+                          help="Unix time in ms to set instead of this PC's clock (the unit refuses a time before 2020)")
     commands.add_parser("devices", help="network devices, as the unit sees them")
     reset = commands.add_parser("reset", help="os reset: restart the unit")
     reset.add_argument("--timeout-s", type=float, default=DEFAULT_UPDATE_TIMEOUT_S, metavar="N",
@@ -3519,6 +3725,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
                            help=f"requests outstanding at once (default: {DEFAULT_ASSET_IN_FLIGHT}); fewer than the "
                                 "unit's packet count, and each waits --timeout once per request in flight")
     asset_get.add_argument("--resume", action="store_true", help="continue a partial local file from its size")
+    asset_get.add_argument("--growing", action="store_true",
+                           help="read a file the unit is writing (a log): saves the part it has synced and says "
+                                "when the file is still growing")
+    asset_get.add_argument("--follow", action="store_true",
+                           help="read a file the unit is writing until it is closed: ask again from the copy's "
+                                "length every --interval; implies --growing; ends with a CRC-checked copy of the "
+                                "closed file (read again from the start if it was closed after the copy began)")
+    asset_get.add_argument("--interval", type=float, default=None, metavar="S",
+                           help=f"--follow: seconds between two asks for more bytes (default: "
+                                f"{DEFAULT_FOLLOW_INTERVAL_S:g})")
     asset_put = assets_commands.add_parser("put", help="upload a file")
     asset_put.add_argument("kind", type=parse_asset_kind, help="asset kind, a name or a number")
     asset_put.add_argument("name", help="the asset's name on the unit")
@@ -3583,6 +3799,17 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
     if args.command == "assets" and args.assets_command == "get" and not 1 <= args.in_flight <= MAX_ASSET_IN_FLIGHT:
         parser.error(f"--in-flight must be 1-{MAX_ASSET_IN_FLIGHT}")
+    if args.command == "assets" and args.assets_command == "get":
+        if args.interval is not None and not args.follow:
+            parser.error("--interval needs --follow")
+        if args.interval is not None and args.interval < 0:
+            parser.error("--interval must not be negative")
+        if args.follow and args.resume:
+            parser.error("--follow reads the file from the start and cannot --resume")
+        if args.follow:
+            args.growing = True
+            if args.interval is None:
+                args.interval = DEFAULT_FOLLOW_INTERVAL_S
     if (args.command == "image" and args.image_command in ("upload", "update") and args.in_flight is not None
             and not 1 <= args.in_flight <= MAX_ASSET_IN_FLIGHT):
         parser.error(f"--in-flight must be 1-{MAX_ASSET_IN_FLIGHT}")
@@ -3624,6 +3851,7 @@ HANDLERS = {
     "echo": command_echo,
     "params": command_params,
     "info": command_info,
+    "time": command_time,
     "devices": command_devices,
     "reset": command_reset,
     "config-list": command_config_list,

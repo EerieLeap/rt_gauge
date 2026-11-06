@@ -118,6 +118,8 @@ carry on. Not tested against a radio yet: this checkout's tests use a stand-in f
 | `config-encode TYPE DESCRIPTION OUTPUT`, `config-decode TYPE INPUT [OUTPUT]` | none | The same conversion offline, between a description and a CBOR file. |
 | `assets kinds`, `assets ls KIND` | any | The asset kinds the unit serves, and the files of one (see [Assets](#assets)). |
 | `assets get KIND NAME [FILE] [--in-flight N] [--resume]` | any | Downloads a file and checks its CRC32. |
+| `assets get KIND NAME [FILE] --growing`, `--follow [--interval S]` | any | Reads a file the unit is still writing (a log): the part it has synced, or on until the writer closes it (see [Following a log](#following-a-log)). |
+| `time`, `time set [--wall-ms MS]` | any | The unit's clock (`device` group `TIME`), or sets its real time (see [Clock](#clock)). |
 | `assets put KIND NAME FILE` | any | Uploads a file under the name NAME. |
 | `assets rm KIND NAME` | any | Deletes a file. |
 | `logging status` | any | Whether the unit logs (`logging` group 71), why not, and the session's start, file and size. |
@@ -183,6 +185,7 @@ group answers every `assets` command with `MCUmgr error 8 (the unit has no asset
 python3 tools/smp_can_client.py --channel can0 --target 1 assets kinds
 python3 tools/smp_can_client.py --channel can0 --target 1 assets ls logs
 python3 tools/smp_can_client.py --channel can0 --target 1 assets get logs log_data_0001.mf4 --resume
+python3 tools/smp_can_client.py --ble EerieLeap assets get logs log_data_0002.mf4 --follow --interval 2
 python3 tools/smp_can_client.py --serial /dev/ttyACM0 assets put images logo.bin ./logo.bin
 python3 tools/smp_can_client.py --serial /dev/ttyACM0 assets rm images logo.bin
 ```
@@ -219,6 +222,36 @@ At the end `get` prints the size, the CRC32 and the rate. Over CAN the rate is s
 the data, not by the client: its stored `smp_bus_share_percent` (25 % of the bus by default) caps the bus
 time its SMP frames use, and the bus does the rest. Raising `--in-flight` does not raise it past that cap.
 
+#### Following a log
+
+The log the unit is writing is refused by plain `get` and `stat` (`in use`, group 70 error 7). Two options of
+`get` ask for it with `growing: true` in every request:
+
+- `--growing` saves what the writer has synced so far. The first answer carries that size (`len`), the chunk that
+  reaches it the CRC32 of everything up to it, as for any file, and every answer says `growing`. When it is
+  done `get` says the file is still being written. `--resume` continues such a copy from its length.
+- `--follow` implies `--growing` and reads on: it reads to the current end, waits `--interval S` seconds (5 by
+  default), asks again from the length of its copy, and prints what each pass added, until the file is closed. It
+  works with `--in-flight 1` and with the pipelining `get` has. It cannot be combined with `--resume`.
+
+The file may grow while a pass runs: the end only moves up, and the copy ends at the chunk whose CRC32 reaches it.
+
+Closing a log rewrites a few bytes at its start (the identifier and the unfinalized flags of the header, the data
+block's length, the cycle counts). So a copy begun while the file grew is not the closed file. When the writer has
+closed the file, the unit answers a request at an offset above 0 that would continue the copy with `CHANGED`
+(group 70 error 17), or answers without `growing` after answers that had it (in any pass, the first included); `--follow` then reads the whole file again from 0 (the tool
+does not parse the MDF file) and ends with a CRC-checked copy of the closed file. The unit reads the file once
+to extend its CRC32 for that, which takes about a second per 10 MB of the card. Without `--follow`, a
+`--growing --resume` of a file closed meanwhile fails with `CHANGED`: download it again without `--resume`.
+`^C` stops a `--follow` and keeps the copy, which is not final.
+
+`assets ls` marks the file being written `growing`; its size is what the unit has synced.
+
+```shell
+python3 tools/smp_can_client.py --channel can0 --target 1 assets get logs log_data_0002.mf4 --growing
+python3 tools/smp_can_client.py --ble EerieLeap --route 3 assets get logs log_data_0002.mf4 --follow --in-flight 1
+```
+
 #### Uploading
 
 `put` sends the file in chunks that fit the unit's packet (`params` `buf_size`, less an allowance for the
@@ -244,6 +277,26 @@ that takes no uploads (`DENIED`) fails with the unit's reason, and so does a CRC
 
 `rm` deletes a file. A delete whose answer was lost and that is sent again meets `NOT_FOUND`, which the client
 takes for done; a first request that meets it fails.
+
+### Clock
+
+The `device` group's `TIME` and `SET_TIME` read and set the unit's real time. `time` prints `now_ms` (the
+unit's own clock, which never steps: the readings and the log file names are on it), `uptime_ms`, `boot_id`
+and `wall_ms`, real time as the unit knows it, each time also as ISO 8601 UTC. Until something sets the clock
+the answer has no `wall_ms` and the command says `not set`; a unit forgets it at every power-on.
+
+`time set` sets it to this PC's clock plus half the round trip of a `TIME` request sent just before (the
+unit takes the time it receives as the time it arrives), and prints what it set and the unit's answer.
+`--wall-ms MS` sets Unix time in milliseconds as given instead. `SET_TIME` is sent once (a resend would carry
+a time that is old by then): when no answer comes, the client measures again and sends a fresh request, up to
+3 times. After a set from the PC's clock it reads `TIME` again and prints the difference from this PC. The unit
+refuses a time outside 2020-01-01 to 2100-01-01 (`EINVAL`), which the client explains. A unit without a time
+service answers `ENOTSUP`, which the client reports as such.
+
+```shell
+python3 tools/smp_can_client.py --ble EerieLeap --route 3 time
+python3 tools/smp_can_client.py --ble EerieLeap --route 3 time set
+```
 
 ### Firmware images
 
