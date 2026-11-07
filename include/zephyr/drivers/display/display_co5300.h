@@ -43,6 +43,9 @@ struct co5300_stats {
 	uint32_t post_cycles_max;
 	uint32_t post_cycles_max_lifted;
 	uint32_t post_hist[5];         /* delay < 10 us, < 100 us, < 1 ms, < 10 ms, >= 10 ms */
+	uint32_t te_waits;             /* frame starts that waited for the TE edge (CONFIG_ELCO5300_TE_SYNC) */
+	uint32_t te_timeouts;          /* ... that gave up after the timeout */
+	uint64_t te_wait_cycles;       /* time spent waiting, summed */
 	uint32_t other_cmds;           /* command transactions outside display_write() (brightness, blanking, ...) */
 };
 

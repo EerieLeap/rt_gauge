@@ -10,6 +10,18 @@ config ELCO5300
 	help
 	  Enable support for the CO5300 QSPI display controller.
 
+config ELCO5300_TE_SYNC
+	bool "Start frames on the panel's tearing-effect edge"
+	depends on ELCO5300
+	help
+	  Enable the TE output (mode 1) and let a write that starts a frame
+	  wait for the edge that begins a panel scan (the te-gpios property is
+	  required). The write then stays behind the scan, so full-frame
+	  updates do not tear. When a frame takes longer than one scan the
+	  next frame waits for the following edge and the frame rate drops to
+	  60/n FPS. The wait is skipped while the display is blanked, for
+	  later areas of the same frame, and after repeated TE timeouts.
+
 config ELCO5300_STATS
 	bool "CO5300 bench counters"
 	depends on ELCO5300

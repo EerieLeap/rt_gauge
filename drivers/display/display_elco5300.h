@@ -131,6 +131,9 @@
 #define CO5300_PIXFMT_18BIT_RGB666 0x66 // 18-bit RGB666 pixel format
 #define CO5300_PIXFMT_24BIT_RGB888 0x77 // 24-bit RGB888 pixel format
 
+#define CO5300_TE_TIMEOUT_MS 20  // a bit over one 60 Hz scan
+#define CO5300_TE_MAX_TIMEOUTS 5 // consecutive timeouts before frames stop waiting
+
 /* Driver configuration structure */
 struct co5300_config {
 	const struct device* mspi_bus;
@@ -158,6 +161,15 @@ struct co5300_data {
 	uint16_t caset_end;
 	bool configured;
 	struct gpio_callback te_gpio_cb_data;
+#ifdef CONFIG_ELCO5300_TE_SYNC
+	struct gpio_callback te_sync_cb_data;
+	struct k_sem te_sem;            /* given by the TE edge that starts a scan, limit 1 */
+	bool te_sync;                   /* TE sync is armed (te-gpios present and set up) */
+	bool blanked;                   /* blanking_on() ran; no TE wait */
+	bool frame_start;               /* the next write starts a frame (flush thread only) */
+	volatile bool te_seen;          /* an edge came since the last time the wait looked */
+	uint8_t te_timeouts_in_row;     /* flush thread only */
+#endif
 #ifdef CONFIG_ELCO5300_STATS
 	struct co5300_stats stats;
 	struct k_spinlock stats_lock;

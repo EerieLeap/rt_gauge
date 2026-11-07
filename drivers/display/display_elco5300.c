@@ -18,7 +18,15 @@ int co5300_te_gpio_register_callback(const struct device *dev, gpio_callback_han
 	const struct co5300_config *config = dev->config;
 	struct co5300_data *data = dev->data;
 
-	int ret = gpio_pin_interrupt_configure_dt(&config->te_gpio, GPIO_INT_EDGE_TO_ACTIVE);
+	int ret = 0;
+
+#ifdef CONFIG_ELCO5300_TE_SYNC
+	/* With TE sync the pin already runs on the scan-start edge; the user handler shares it. */
+	if (!data->te_sync)
+#endif
+	{
+		ret = gpio_pin_interrupt_configure_dt(&config->te_gpio, GPIO_INT_EDGE_TO_ACTIVE);
+	}
 	if (ret != 0) {
 		LOG_ERR("Error %d: failed to configure interrupt on %s pin %d\n",
 			ret, config->te_gpio.port->name, config->te_gpio.pin);
@@ -32,6 +40,63 @@ int co5300_te_gpio_register_callback(const struct device *dev, gpio_callback_han
 
 	return 0;
 }
+
+#ifdef CONFIG_ELCO5300_TE_SYNC
+/* ISR context: the TE line fell, a scan starts. */
+static void co5300_te_isr(const struct device *port, struct gpio_callback *cb, uint32_t pins) {
+	struct co5300_data *data = CONTAINER_OF(cb, struct co5300_data, te_sync_cb_data);
+
+	ARG_UNUSED(port);
+	ARG_UNUSED(pins);
+	data->te_seen = true;
+	k_sem_give(&data->te_sem);
+}
+
+/* Blocks until the TE edge that starts a scan, when this write starts a frame. Takes no lock.
+ * Runs on the flush thread, the only caller of co5300_write(). */
+static void co5300_te_wait(struct co5300_data *data, const struct display_buffer_descriptor *desc) {
+	bool frame_start = data->frame_start;
+
+	data->frame_start = !desc->frame_incomplete;
+	if (!data->te_sync || !frame_start || data->blanked) {
+		return;
+	}
+
+	if (data->te_seen) {
+		data->te_seen = false;
+		data->te_timeouts_in_row = 0;
+	} else if (data->te_timeouts_in_row >= CO5300_TE_MAX_TIMEOUTS) {
+		return; /* the line is dead; wait again only after an interrupt was seen */
+	}
+
+	uint32_t t0 = k_cycle_get_32();
+
+	k_sem_reset(&data->te_sem);
+	int ret = k_sem_take(&data->te_sem, K_MSEC(CO5300_TE_TIMEOUT_MS));
+
+	if (ret != 0) {
+		if (++data->te_timeouts_in_row == CO5300_TE_MAX_TIMEOUTS) {
+			LOG_WRN("No TE edge for %d frames, frames start without it until one comes",
+				CO5300_TE_MAX_TIMEOUTS);
+		}
+	} else {
+		data->te_timeouts_in_row = 0;
+	}
+#ifdef CONFIG_ELCO5300_STATS
+	uint32_t spent = k_cycle_get_32() - t0;
+	k_spinlock_key_t key = k_spin_lock(&data->stats_lock);
+
+	data->stats.te_waits++;
+	data->stats.te_wait_cycles += spent;
+	if (ret != 0) {
+		data->stats.te_timeouts++;
+	}
+	k_spin_unlock(&data->stats_lock, key);
+#else
+	ARG_UNUSED(t0);
+#endif
+}
+#endif /* CONFIG_ELCO5300_TE_SYNC */
 
 static void co5300_get_capabilities(const struct device *dev, struct display_capabilities *capabilities) {
 	const struct co5300_data *data = dev->data;
@@ -283,6 +348,10 @@ static int co5300_blanking_off(const struct device *dev) {
 
 	LOG_DBG("Turning display blanking off");
 	co5300_forget_window(data);
+#ifdef CONFIG_ELCO5300_TE_SYNC
+	data->blanked = false;
+	data->frame_start = true;
+#endif
 
 	uint8_t cmd = CO5300_C_SLPOUT;
 	ret = co5300_transmit(dev, MSPI_IO_MODE_SINGLE, &cmd, NULL, 0, false);
@@ -310,6 +379,10 @@ static int co5300_blanking_on(const struct device *dev) {
 
 	LOG_DBG("Turning display blanking on");
 	co5300_forget_window(data);
+#ifdef CONFIG_ELCO5300_TE_SYNC
+	data->blanked = true;
+	data->frame_start = true;
+#endif
 
 	uint8_t cmd = CO5300_C_DISPOFF;
 	ret = co5300_transmit(dev, MSPI_IO_MODE_SINGLE, &cmd, NULL, 0, false);
@@ -522,6 +595,10 @@ static int co5300_write(const struct device *dev, const uint16_t x, const uint16
 	co5300_stats_write_enter(data, desc, start);
 #endif
 
+#ifdef CONFIG_ELCO5300_TE_SYNC
+	co5300_te_wait(data, desc);
+#endif
+
 	ret = co5300_lock(data);
 	if (ret < 0) {
 		return ret;
@@ -558,7 +635,8 @@ static int co5300_configure_display(const struct device *dev) {
 
 	// Tearing effect on
 	cmd = CO5300_WC_TEARON;
-	ret = co5300_transmit(dev, MSPI_IO_MODE_SINGLE, &cmd, NULL, 0, false);
+	uint8_t tear_mode = 0x00; // M = 0: V-blanking information only, high in the porch, low while scanning
+	ret = co5300_transmit(dev, MSPI_IO_MODE_SINGLE, &cmd, &tear_mode, 1, false);
 	if (ret < 0)
 		return ret;
 
@@ -642,6 +720,22 @@ static int co5300_init(const struct device *dev) {
 			LOG_ERR("Failed to configure TE GPIO (%d)", ret);
 			return ret;
 		}
+#ifdef CONFIG_ELCO5300_TE_SYNC
+		/* TE mode 1 (M = 0): high in the V-porch, low while the panel scans; the scan starts on the
+		 * falling edge, which is the inactive edge of the active-high te-gpios. */
+		k_sem_init(&data->te_sem, 0, 1);
+		data->frame_start = true;
+		gpio_init_callback(&data->te_sync_cb_data, co5300_te_isr, BIT(config->te_gpio.pin));
+		ret = gpio_add_callback(config->te_gpio.port, &data->te_sync_cb_data);
+		if (ret == 0) {
+			ret = gpio_pin_interrupt_configure_dt(&config->te_gpio, GPIO_INT_EDGE_TO_INACTIVE);
+		}
+		if (ret < 0) {
+			LOG_ERR("Failed to set up TE sync (%d)", ret);
+			return ret;
+		}
+		data->te_sync = true;
+#endif
 	}
 
 	ret = gpio_pin_configure_dt(&config->reset_gpio, GPIO_OUTPUT_INACTIVE);

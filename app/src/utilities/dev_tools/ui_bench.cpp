@@ -273,6 +273,9 @@ void PrintStats(const shell* sh) {
             sh, "co5300.post_hist=%u,%u,%u,%u,%u", s.post_hist[0], s.post_hist[1], s.post_hist[2], s.post_hist[3],
             s.post_hist[4]
         );
+        KV("co5300.te_waits", s.te_waits);
+        KV("co5300.te_timeouts", s.te_timeouts);
+        KV("co5300.te_wait_us", CyclesToUs(s.te_wait_cycles));
         KV("co5300.other_cmds", s.other_cmds);
     }
     #endif
