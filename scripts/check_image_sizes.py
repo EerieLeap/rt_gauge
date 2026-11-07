@@ -13,6 +13,10 @@ It fails (exit status 1) when
 * the application's signed image (zephyr.signed.bin) does not fit slot0_partition minus the swap
   trailer (CONFIG_MCUBOOT_UPDATE_FOOTER_SIZE, which sysbuild takes from MCUboot's configuration);
   an image above that size is built but MCUboot cannot swap it;
+* an image with PSRAM (CONFIG_ESP_SPIRAM) places more in external RAM than CONFIG_ESP_SPIRAM_SIZE:
+  from the start of ext_dram_seg to _ext_ram_end in zephyr.map. That covers the copied text and
+  rodata, the static data (the display buffers, the LVGL pool) and the SPIRAM heap; the linker's
+  own overflow check does not count the copies;
 * slot0_partition and slot1_partition differ in size, or MCUboot and the application disagree on any
   partition (the two are built from different devicetrees: app/boards/partitions/ is meant to be
   the one table both include).
@@ -29,6 +33,8 @@ from pathlib import Path
 # <label>: partition@<address> { ... reg = < offset size >; ... }, in the generated zephyr.dts.
 PARTITION_RE = re.compile(r"^\s*(\w+_partition):\s*partition@[0-9a-fA-F]+\s*\{(.*?)^\s*\};", re.MULTILINE | re.DOTALL)
 REG_RE = re.compile(r"\breg\s*=\s*<\s*(0x[0-9a-fA-F]+|\d+)\s+(0x[0-9a-fA-F]+|\d+)\s*>")
+EXT_DRAM_RE = re.compile(r"^ext_dram_seg\s+(0x[0-9a-fA-F]+)\s+", re.MULTILINE)
+EXT_RAM_END_RE = re.compile(r"^\s+(0x[0-9a-fA-F]+)\s+_ext_ram_end\s*=", re.MULTILINE)
 CONFIG_RE = re.compile(r"^(CONFIG_\w+)=(.*)$", re.MULTILINE)
 
 
@@ -57,6 +63,19 @@ def read_config(build_dir: Path) -> dict[str, str]:
             for key, value in CONFIG_RE.findall(path.read_text()):
                 config.setdefault(key, value.strip().strip('"'))
     return config
+
+
+def read_psram_use(build_dir: Path) -> tuple[int, int] | None:
+    """(ext_dram_seg origin, _ext_ram_end) from the image's linker map, None when the map lacks either."""
+    map_file = build_dir / "zephyr" / "zephyr.map"
+    if not map_file.is_file():
+        return None
+    text = map_file.read_text(errors="replace")
+    origin = EXT_DRAM_RE.search(text)
+    end = EXT_RAM_END_RE.search(text)
+    if not origin or not end:
+        return None
+    return int(origin.group(1), 0), int(end.group(1), 0)
 
 
 def fmt(value: int) -> str:
@@ -152,6 +171,23 @@ def main() -> int:
                 f"the signed application ({fmt(sizes['application'])}) does not fit slot0_partition minus the swap "
                 f"trailer ({fmt(app_limit)}): MCUboot could not swap it"
             )
+    if app_config.get("CONFIG_ESP_SPIRAM") != "y":
+        print("  PSRAM check skipped: the application has no CONFIG_ESP_SPIRAM")
+    else:
+        psram_size = int(app_config.get("CONFIG_ESP_SPIRAM_SIZE", "0"), 0)
+        psram = read_psram_use(app_dir)
+        if psram is None:
+            print("  PSRAM check skipped: zephyr.map has no ext_dram_seg or _ext_ram_end")
+        elif psram_size == 0:
+            failures.append("CONFIG_ESP_SPIRAM is set but CONFIG_ESP_SPIRAM_SIZE is 0 or missing")
+        else:
+            psram_used = psram[1] - psram[0]
+            print(line("PSRAM", "zephyr.map", psram_used, "CONFIG_ESP_SPIRAM_SIZE", psram_size))
+            if psram_used > psram_size:
+                failures.append(
+                    f"the static data in PSRAM ({fmt(psram_used)}, up to _ext_ram_end) exceeds "
+                    f"CONFIG_ESP_SPIRAM_SIZE ({fmt(psram_size)}): shrink the image or the LVGL pool"
+                )
     print(f"  (CONFIG_ROM_END_OFFSET {rom_end_offset:#x}, CONFIG_MCUBOOT_UPDATE_FOOTER_SIZE {footer:#x})")
 
     if failures:
