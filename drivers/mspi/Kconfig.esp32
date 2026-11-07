@@ -11,10 +11,19 @@ config MSPI_ESP32
 if MSPI_ESP32
 
 config MSPI_DMA_MAX_BUFFER_SIZE
-	int "MSPI DMA buffer size (Byte)"
+	int "MSPI DMA bounce buffer size (Byte)"
 	default 4092
 	help
-	  Set the size of each buffer used by MSPI DMA.
+	  Size of the driver's bounce buffer, and nothing else. Data the DMA
+	  can reach (4-byte aligned internal RAM) is sent straight from the
+	  caller's buffer, in hardware transactions of up to 32,768 bytes
+	  (2^18 bits, or what the GDMA descriptor table holds if smaller). Data
+	  it cannot reach, such as PSRAM, is copied through the bounce buffer
+	  and sent in pieces of this many bytes (at most one hardware
+	  transaction). A packet longer than one transaction is split by the
+	  driver with CE held, and the command and address go out with the
+	  first piece only; callers need not chunk. Transfers of at most 64
+	  bytes go through the SPI data registers and never use the buffer.
 
 config MSPI_ESP32_INTERRUPT
 	bool "ESP32 MSPI interrupt mode"

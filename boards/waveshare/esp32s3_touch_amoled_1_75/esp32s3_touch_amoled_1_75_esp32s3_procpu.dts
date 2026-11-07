@@ -58,7 +58,8 @@
 		dma-enabled;
 		dma-host = <0>; /* GDMA slot for SPI2 */
 		dmas = <&dma 0>, <&dma 1>;
-		dma-names = "tx", "rx";
+		/* The GDMA driver numbers channels pair * 2 + 0 for RX and + 1 for TX. */
+		dma-names = "rx", "tx";
 		duplex = "MSPI_HALF_DUPLEX";
 
 		clock-frequency = <80000000>;

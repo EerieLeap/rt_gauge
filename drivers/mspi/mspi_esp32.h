@@ -83,6 +83,7 @@ struct mspi_esp32_data {
 
 	uint32_t clock_source_hz;
 	uint32_t clock_frequency;
+	int logged_real_freq;	/* last effective clock reported at LOG_INF */
 
 #ifdef SOC_GDMA_SUPPORTED
 	gdma_hal_context_t hal_gdma;

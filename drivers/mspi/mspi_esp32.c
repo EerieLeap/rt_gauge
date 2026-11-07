@@ -47,6 +47,38 @@ LOG_MODULE_REGISTER(mspi_esp32, CONFIG_MSPI_LOG_LEVEL);
 #define SPI_DMA_RX 0
 #define SPI_DMA_TX 1
 
+/* A data phase of at most this many bytes goes through the SPI data registers, without DMA. */
+#define MSPI_ESP32_REG_MAX_BYTES (SPI_LL_CPU_MAX_BIT_LEN / 8)
+
+/*
+ * Most bytes one hardware transaction can carry: the SPI's transaction length
+ * register (SPI_LL_DMA_MAX_BIT_LEN bits) or, if smaller, what the GDMA driver's
+ * descriptor table holds (CONFIG_DMA_ESP32_MAX_DESCRIPTOR_NUM descriptors of
+ * 4092 bytes). On the ESP32-S3 with the default 16 descriptors that is 32,768
+ * bytes (2^18 bits), nine descriptors. The legacy ESP32 / ESP32-S2 path uses a
+ * single descriptor of at most 4092 bytes.
+ */
+#ifdef SOC_GDMA_SUPPORTED
+#ifndef DMA_DESCRIPTOR_BUFFER_MAX_SIZE_4B_ALIGNED
+#define DMA_DESCRIPTOR_BUFFER_MAX_SIZE_4B_ALIGNED (4095 - 3)
+#endif
+#ifdef CONFIG_DMA_ESP32_MAX_DESCRIPTOR_NUM
+#define MSPI_ESP32_DMA_DESC_BYTES                                                                  \
+	(CONFIG_DMA_ESP32_MAX_DESCRIPTOR_NUM * DMA_DESCRIPTOR_BUFFER_MAX_SIZE_4B_ALIGNED)
+#else
+#define MSPI_ESP32_DMA_DESC_BYTES (16 * DMA_DESCRIPTOR_BUFFER_MAX_SIZE_4B_ALIGNED)
+#endif
+#else
+#define MSPI_ESP32_DMA_DESC_BYTES 4092
+#endif
+
+#define MSPI_ESP32_HW_MAX_BYTES                                                                    \
+	ROUND_DOWN(MIN(SPI_LL_DMA_MAX_BIT_LEN / 8, MSPI_ESP32_DMA_DESC_BYTES), 4)
+
+BUILD_ASSERT(MSPI_ESP32_HW_MAX_BYTES >= 4, "no DMA descriptors for a transaction");
+BUILD_ASSERT(MSPI_ESP32_HW_MAX_BYTES * 8 <= SPI_LL_DMA_MAX_BIT_LEN,
+	     "a transaction would exceed the SPI's length register");
+
 /* --------------------------------------------------------------------------
  * Helpers
  * --------------------------------------------------------------------------
@@ -175,6 +207,14 @@ static int update_timing_config(const struct mspi_esp32_config *config,
 
 	LOG_DBG("timing: dummy_bits=%d", timing_conf->timing_dummy);
 
+	if (timing_conf->real_freq != data->logged_real_freq) {
+		data->logged_real_freq = timing_conf->real_freq;
+		LOG_INF("ESP32 MSPI (peripheral %u): %u Hz requested, %d Hz effective "
+			"(source %u Hz)",
+			config->peripheral_id, clock_frequency, timing_conf->real_freq,
+			data->clock_source_hz);
+	}
+
 	return 0;
 }
 
@@ -206,8 +246,13 @@ static int mspi_gdma_config(const struct device *dev, uint8_t dir, uint8_t *buf,
 	}
 
 	if (dma_status.busy) {
-		LOG_ERR("DMA channel %d is busy", dma_channel);
-		return -EBUSY;
+		/* A finished or abandoned transfer left it running: reset it before giving up. */
+		dma_stop(cfg->dma_dev, dma_channel);
+		err = dma_get_status(cfg->dma_dev, dma_channel, &dma_status);
+		if (err || dma_status.busy) {
+			LOG_ERR("DMA channel %d is busy", dma_channel);
+			return -EBUSY;
+		}
 	}
 
 	if (*configured) {
@@ -330,17 +375,6 @@ static void mspi_dma_tx_start(const struct device *dev, uint8_t *buf, size_t len
  * --------------------------------------------------------------------------
  */
 
-static void transfer_clear_fifo(spi_hal_context_t *hal)
-{
-	for (size_t i = 0; i < ARRAY_SIZE(hal->hw->data_buf); ++i) {
-#ifdef CONFIG_SOC_SERIES_ESP32C6
-		hal->hw->data_buf[i].val = 0;
-#else
-		hal->hw->data_buf[i] = 0;
-#endif
-	}
-}
-
 static void transfer_setup_cmd_addr(const struct mspi_xfer *xfer,
 				    const struct mspi_xfer_packet *packet,
 				    spi_hal_trans_config_t *tc)
@@ -366,6 +400,11 @@ static void transfer_setup_cmd_addr(const struct mspi_xfer *xfer,
  */
 static bool dma_reachable(const void *buf, size_t len)
 {
+	/* The GDMA bursts in words. */
+	if (!IS_ALIGNED(buf, 4)) {
+		return false;
+	}
+
 	if (esp_ptr_dma_capable(buf)) {
 		return true;
 	}
@@ -485,98 +524,6 @@ static uint8_t *bounce_buf_get(const struct device *dev)
 	return data->bounce_buf;
 }
 
-/*
- * Wire the data phase into tc, through the device's bounce buffer when the
- * caller's buffer cannot be handed to the hardware directly.
- *
- * Since a packet is either TX or RX, only one buffer is ever needed.
- * Returns the bounce buffer when it is used, otherwise NULL; on error ret is
- * set to a negative errno.
- *
- * When dma_enabled and dir == MSPI_RX the same buffer doubles as the TX
- * zero-fill required by the hardware.
- */
-static uint8_t *transfer_prepare_data(const struct device *dev,
-				      const struct mspi_xfer_packet *packet,
-				      spi_hal_trans_config_t *tc, size_t dma_len,
-				      size_t *dma_buf_len, int *ret)
-{
-	const struct mspi_esp32_config *config = dev->config;
-	uint8_t *buffer = NULL;
-	*dma_buf_len = ROUND_UP(dma_len, config->dma_buf_size_alignment);
-
-	*ret = 0;
-
-	if (packet->num_bytes == 0) {
-		LOG_DBG("transfer: no data phase (num_bytes=0)");
-		return NULL;
-	}
-
-	int bit_len = (int)(dma_len << 3);
-
-	if (packet->dir == MSPI_TX) {
-		uint8_t *src = packet->data_buf;
-		bool need_bounce = config->dma_enabled && !dma_reachable(src, dma_len);
-
-		if (need_bounce) {
-			buffer = bounce_buf_get(dev);
-			if (!buffer) {
-				*ret = -ENOMEM;
-				return NULL;
-			}
-#ifdef CONFIG_MSPI_ESP32_STATS
-			uint32_t copy_start = k_cycle_get_32();
-#endif
-			memcpy(buffer, src, dma_len);
-#ifdef CONFIG_MSPI_ESP32_STATS
-			stats_bounce((struct mspi_esp32_data *)dev->data, dma_len,
-				     k_cycle_get_32() - copy_start);
-#endif
-			src = buffer;
-		} else {
-			LOG_DBG("TX buf %p ok (non-DMA path)", src);
-		}
-
-		tc->send_buffer = src;
-		tc->tx_bitlen = bit_len;
-		tc->rx_bitlen = bit_len;
-
-	} else { /* MSPI_RX */
-		uint8_t *dst = packet->data_buf;
-		bool need_bounce = config->dma_enabled || !esp_ptr_dma_capable((uint32_t *)dst) ||
-				   ((uintptr_t)dst % 4 != 0) ||
-				   (dma_len % config->dma_buf_size_alignment != 0);
-
-		if (need_bounce) {
-			*dma_buf_len = ROUND_UP(dma_len, config->dma_buf_size_alignment);
-			buffer = bounce_buf_get(dev);
-			if (!buffer) {
-				*ret = -ENOMEM;
-				return NULL;
-			}
-			memset(buffer, 0, *dma_buf_len);
-			dst = buffer;
-		} else {
-			LOG_DBG("RX buf %p ok (non-DMA path)", dst);
-		}
-
-		tc->rcv_buffer = dst;
-		tc->rx_bitlen = bit_len;
-
-		/*
-		 * DMA RX-only: hardware also needs a TX buffer (zero-filled).
-		 * Reuse the same bounce buffer by pointing send_buffer at it;
-		 * it was zeroed above.
-		 */
-		if (config->dma_enabled && !tc->send_buffer) {
-			tc->send_buffer = dst;
-			tc->tx_bitlen = bit_len;
-		}
-	}
-
-	return buffer;
-}
-
 #ifdef SOC_GDMA_SUPPORTED
 
 static int transfer_start_gdma(const struct device *dev, spi_hal_context_t *hal,
@@ -586,20 +533,17 @@ static int transfer_start_gdma(const struct device *dev, spi_hal_context_t *hal,
 
 	/*
 	 * GDMA reads/writes physical RAM directly and bypasses the CPU data
-	 * cache. Buffers can live in cached PSRAM, so without explicit cache
-	 * maintenance the peripheral may read stale TX data, or the CPU may
-	 * read stale RX data after the transfer — an intermittent-corruption
-	 * bug that only shows up under cache pressure.
+	 * cache. The cache maintenance for buffers in cached PSRAM (flush before
+	 * TX, flush and invalidate before RX) is done by the GDMA driver when it
+	 * binds the buffer in dma_reload()/dma_config(); internal RAM needs none.
 	 */
 	if (tc->rcv_buffer) {
-		sys_cache_data_flush_and_invd_range(tc->rcv_buffer, dma_buf_len);
 		res = mspi_gdma_config(dev, SPI_DMA_RX, tc->rcv_buffer, dma_buf_len);
 		if (res) {
 			return res;
 		}
 	}
 	if (tc->send_buffer) {
-		sys_cache_data_flush_range(tc->send_buffer, dma_buf_len);
 		res = mspi_gdma_config(dev, SPI_DMA_TX, tc->send_buffer, dma_buf_len);
 		if (res) {
 			return res;
@@ -742,15 +686,274 @@ static void transfer_post_gdma(const struct device *dev, spi_hal_trans_config_t 
 #ifdef SOC_GDMA_SUPPORTED
 	if (tc->rcv_buffer) {
 		mspi_gdma_stop(dev, SPI_DMA_RX);
-		LOG_DBG("transfer: cache invalidate RX buf=%p len=%zu", tc->rcv_buffer,
-			dma_buf_len);
-		/* Force the CPU to re-read the data the DMA just wrote. */
-		sys_cache_data_invd_range(tc->rcv_buffer, dma_buf_len);
+		if (!esp_ptr_dma_capable(tc->rcv_buffer)) {
+			/* Force the CPU to re-read the data the DMA just wrote. */
+			sys_cache_data_invd_range(tc->rcv_buffer, dma_buf_len);
+		}
 	}
-	if (tc->send_buffer) {
-		mspi_gdma_stop(dev, SPI_DMA_TX);
+	/*
+	 * A finished TX transfer leaves its channel idle and dma_reload() resets
+	 * the channel at the start of the next one, so there is nothing to stop.
+	 */
+#else
+	ARG_UNUSED(dev);
+	ARG_UNUSED(tc);
+	ARG_UNUSED(dma_buf_len);
+#endif
+}
+
+/*
+ * Bring the SPI and its DMA channels back to a state in which the next
+ * transfer works, after a transaction timed out or could not be started.
+ *
+ * The GDMA channels are stopped (which resets them) so that mspi_gdma_config()
+ * does not find them busy, the SPI state machine and its FIFOs are reset,
+ * and the device registers are marked for reprogramming.
+ */
+static void IRAM_ATTR transfer_recover(const struct device *dev)
+{
+	const struct mspi_esp32_config *config = dev->config;
+	struct mspi_esp32_data *data = dev->data;
+	spi_dev_t *hw = config->spi;
+
+	spi_ll_disable_int(hw);
+
+#ifdef SOC_GDMA_SUPPORTED
+	if (config->dma_enabled) {
+		if (data->rx_dma_configured) {
+			mspi_gdma_stop(dev, SPI_DMA_RX);
+		}
+		if (data->tx_dma_configured) {
+			mspi_gdma_stop(dev, SPI_DMA_TX);
+		}
 	}
 #endif
+
+	/* Resets the SPI clock, CS and data lines and the transaction state machine. */
+	spi_ll_slave_reset(hw);
+	spi_ll_dma_tx_enable(hw, 0);
+	spi_ll_dma_rx_enable(hw, 0);
+	spi_ll_dma_tx_fifo_reset(hw);
+	spi_ll_dma_rx_fifo_reset(hw);
+	spi_ll_cpu_tx_fifo_reset(hw);
+	spi_ll_cpu_rx_fifo_reset(hw);
+	spi_ll_infifo_full_clr(hw);
+	spi_ll_outfifo_empty_clr(hw);
+	spi_ll_clear_int_stat(hw);
+
+	if (spi_ll_get_running_cmd(hw) != 0) {
+		LOG_ERR("SPI is still busy after the recovery reset");
+	}
+
+	/* Do not trust the device-level registers after a reset. */
+	data->dev_hw_dirty = true;
+	k_sem_reset(&data->xfer_sem);
+}
+
+/*
+ * Start the transaction configured by spi_hal_setup_trans() and poll for its
+ * completion for at most bound_us. Used for the data-register path, whose
+ * transactions take a few microseconds: sleeping on the interrupt would cost
+ * more than the transaction itself.
+ */
+static int IRAM_ATTR transfer_start_and_poll(const struct device *dev, uint32_t bound_us)
+{
+	const struct mspi_esp32_config *config = dev->config;
+	struct mspi_esp32_data *data = dev->data;
+	spi_hal_context_t *hal = &data->hal;
+	uint32_t bound_cyc = k_us_to_cyc_ceil32(bound_us);
+
+	/* The completion interrupt stays off for polled transactions. */
+	spi_ll_disable_int(config->spi);
+
+	uint32_t start = k_cycle_get_32();
+
+	spi_hal_user_start(hal);
+
+	while (!spi_hal_usr_is_done(hal)) {
+		if ((k_cycle_get_32() - start) > bound_cyc) {
+			/* The thread may have been preempted for longer than the bound. */
+			if (spi_hal_usr_is_done(hal)) {
+				break;
+			}
+			LOG_ERR("Polled transfer timed out after %u us", bound_us);
+			return -ETIMEDOUT;
+		}
+	}
+
+	spi_ll_clear_int_stat(config->spi);
+
+	return 0;
+}
+
+/*
+ * Upper bound for a polled transaction: 1 ms plus twice the time its command,
+ * address, dummy and data bits take on a single line at the configured clock.
+ */
+static uint32_t reg_poll_bound_us(const struct mspi_esp32_data *data,
+				  const spi_hal_trans_config_t *tc, size_t data_bits)
+{
+	uint32_t freq = (uint32_t)data->dev_config.timing_conf.real_freq;
+	uint64_t bits = (uint64_t)tc->cmd_bits + tc->addr_bits + tc->dummy_bits + data_bits +
+			data->dev_config.timing_conf.timing_dummy;
+
+	if (freq == 0) {
+		freq = 1000000;
+	}
+
+	return 1000 + (uint32_t)(2 * bits * 1000000ULL / freq);
+}
+
+/*
+ * One hardware transaction: len bytes of the packet starting at offset off.
+ *
+ * Data of at most 64 bytes (and every command without data) goes through the
+ * SPI data registers; the rest through GDMA, from the caller's buffer when
+ * `direct`, otherwise through the bounce buffer. The command and address phases
+ * go out only with the first piece; keep_ce leaves CE asserted after this one.
+ */
+static int IRAM_ATTR transfer_piece(const struct device *dev, const struct mspi_xfer *xfer,
+				    const struct mspi_xfer_packet *packet, size_t off, size_t len,
+				    bool first, bool keep_ce, bool direct, uint32_t timeout_ms)
+{
+	struct mspi_esp32_data *data = dev->data;
+	const struct mspi_esp32_config *config = dev->config;
+	spi_hal_context_t *hal = &data->hal;
+	const spi_hal_dev_config_t *hal_dev = &data->dev_config;
+	const bool tx = (packet->dir == MSPI_TX);
+	uint8_t *buf = packet->data_buf ? (uint8_t *)packet->data_buf + off : NULL;
+	/* spi_ll_write_buffer() copies whole words: pad the payload with zeros. */
+	uint32_t words[MSPI_ESP32_REG_MAX_BYTES / 4] = {0};
+	spi_hal_trans_config_t tc = {0};
+	uint8_t *bounce = NULL;
+	size_t dma_buf_len = 0;
+	bool use_dma = false;
+	int res = 0;
+
+	if (len * 8 > SPI_LL_DMA_MAX_BIT_LEN) {
+		LOG_ERR("Transaction of %zu bytes exceeds the hardware limit", len);
+		return -EMSGSIZE;
+	}
+
+	/*
+	 * No dummy cycles are requested here: for a read the HAL adds the timing
+	 * compensation itself (spi_hal_setup_trans()), and a write needs none.
+	 */
+	tc.dummy_bits = 0;
+	tc.line_mode = data->trans_config.line_mode;
+	tc.cs_keep_active = keep_ce;
+
+	if (first) {
+		transfer_setup_cmd_addr(xfer, packet, &tc);
+	}
+
+	if (len == 0) {
+		/* Command and address only. */
+	} else if (tx && len <= sizeof(words)) {
+		memcpy(words, buf, len);
+		tc.send_buffer = (const uint8_t *)words;
+		tc.tx_bitlen = len * 8;
+		tc.rx_bitlen = len * 8;
+	} else if (!tx && !config->dma_enabled) {
+		/* Without DMA a read is limited to the data registers; transfer() splits to fit. */
+		tc.rcv_buffer = buf;
+		tc.rx_bitlen = len * 8;
+	} else {
+		use_dma = true;
+		dma_buf_len = ROUND_UP(len, config->dma_buf_size_alignment);
+
+		if (tx) {
+			uint8_t *src = buf;
+
+			if (!direct) {
+				bounce = bounce_buf_get(dev);
+				if (!bounce) {
+					return -ENOMEM;
+				}
+#ifdef CONFIG_MSPI_ESP32_STATS
+				uint32_t copy_start = k_cycle_get_32();
+#endif
+				memcpy(bounce, buf, len);
+#ifdef CONFIG_MSPI_ESP32_STATS
+				stats_bounce(data, len, k_cycle_get_32() - copy_start);
+#endif
+				src = bounce;
+			}
+
+			tc.send_buffer = src;
+			tc.tx_bitlen = len * 8;
+			tc.rx_bitlen = len * 8;
+		} else {
+			bounce = bounce_buf_get(dev);
+			if (!bounce) {
+				return -ENOMEM;
+			}
+			memset(bounce, 0, dma_buf_len);
+
+			tc.rcv_buffer = bounce;
+			tc.rx_bitlen = len * 8;
+
+			/*
+			 * Half duplex reads only need the RX channel. Sending the zeroed
+			 * bounce buffer would add a DOUT phase ahead of DIN. Full duplex
+			 * clocks data out while it clocks data in, so it needs a TX buffer.
+			 */
+			if (!hal_dev->half_duplex) {
+				tc.send_buffer = bounce;
+				tc.tx_bitlen = len * 8;
+			}
+		}
+	}
+
+	if (use_dma) {
+#ifdef SOC_GDMA_SUPPORTED
+		res = transfer_start_gdma(dev, hal, &tc, dma_buf_len);
+#else
+		res = transfer_start_intdma(dev, hal, hal_dev, &tc, dma_buf_len);
+#endif
+		if (res != 0) {
+			transfer_recover(dev);
+			return res;
+		}
+
+		spi_hal_setup_trans(hal, hal_dev, &tc);
+	} else {
+		/* The data registers carry this transaction: no DMA, whatever ran before. */
+		spi_ll_dma_tx_enable(hal->hw, 0);
+		spi_ll_dma_rx_enable(hal->hw, 0);
+
+		spi_hal_setup_trans(hal, hal_dev, &tc);
+		spi_hal_push_tx_buffer(hal, &tc);
+		spi_hal_enable_data_line(hal->hw, tc.send_buffer != NULL, tc.rcv_buffer != NULL);
+	}
+
+#ifdef CONFIG_MSPI_ESP32_STATS
+	uint32_t stats_start = stats_begin(data, use_dma, len);
+#endif
+	if (use_dma) {
+		res = transfer_start_and_wait(dev, timeout_ms);
+	} else {
+		res = transfer_start_and_poll(dev, reg_poll_bound_us(data, &tc, len * 8));
+	}
+#ifdef CONFIG_MSPI_ESP32_STATS
+	stats_end(data, stats_start, res == -ETIMEDOUT, tc.cs_keep_active);
+#endif
+	if (res != 0) {
+		transfer_recover(dev);
+		return res;
+	}
+
+	if (use_dma) {
+		transfer_post_gdma(dev, &tc, dma_buf_len);
+		/* Copy the bounce buffer back to the caller's RX buffer. */
+		if (bounce && !tx && buf) {
+			memcpy(buf, bounce, len);
+		}
+	} else {
+		spi_hal_fetch_result(hal);
+	}
+
+	return 0;
 }
 
 /* --------------------------------------------------------------------------
@@ -758,92 +961,63 @@ static void transfer_post_gdma(const struct device *dev, spi_hal_trans_config_t 
  * --------------------------------------------------------------------------
  */
 
+/*
+ * One packet, as one or more hardware transactions with CE held in between.
+ *
+ * A packet in DMA-reachable memory goes out in transactions of up to
+ * MSPI_ESP32_HW_MAX_BYTES; one that needs the bounce buffer in pieces of the
+ * bounce buffer's size. Data-register transactions carry at most 64 bytes.
+ */
 static int IRAM_ATTR transfer(const struct device *dev, const struct mspi_xfer *xfer,
 			      size_t packet_index)
 {
-	struct mspi_esp32_data *data = dev->data;
 	const struct mspi_esp32_config *config = dev->config;
-	spi_hal_context_t *hal = &data->hal;
-	const spi_hal_dev_config_t *hal_dev = &data->dev_config;
-
 	const struct mspi_xfer_packet *packet = &xfer->packets[packet_index];
-
-	if (packet->num_bytes > CONFIG_MSPI_DMA_MAX_BUFFER_SIZE) {
-		LOG_ERR("Packet %zu: %u bytes exceeds MSPI_DMA_MAX_BUFFER_SIZE (%u); "
-			"caller must chunk large transfers",
-			packet_index, packet->num_bytes,
-			(unsigned int)CONFIG_MSPI_DMA_MAX_BUFFER_SIZE);
-		return -EMSGSIZE;
-	}
-
 	const uint32_t timeout_ms = xfer->timeout ? xfer->timeout : config->transfer_timeout;
+	const bool keep_ce_after = xfer->hold_ce || (packet_index < (xfer->num_packet - 1));
+	const size_t total = packet->num_bytes;
+	const size_t align = config->dma_buf_size_alignment;
+	bool direct = false;
+	size_t max_piece;
 
-	spi_hal_trans_config_t tc = {0};
-	/*
-	 * These dummy cycles exist purely to give the master extra settling
-	 * time before it samples MISO on a read — ESP-IDF's own
-	 * spi_hal_setup_trans() only ever applies its equivalent compensation
-	 * when trans->rcv_buffer is set. Applying them unconditionally (as the
-	 * upstream spi_esp32_spim.c reference driver also does) wastes bus
-	 * time on every TX-only transaction.
-	 */
-	tc.dummy_bits = (packet->dir == MSPI_RX) ? data->trans_config.dummy_bits : 0;
-	tc.line_mode = data->trans_config.line_mode;
-	tc.cs_keep_active = xfer->hold_ce || (packet_index < (xfer->num_packet - 1));
-
-	uint8_t *tmp = NULL;
-	int res = 0;
-
-	transfer_clear_fifo(hal);
-	transfer_setup_cmd_addr(xfer, packet, &tc);
-
-	size_t dma_len = MIN(packet->num_bytes, CONFIG_MSPI_DMA_MAX_BUFFER_SIZE);
-	size_t dma_buf_len = 0;
-
-	tmp = transfer_prepare_data(dev, packet, &tc, dma_len, &dma_buf_len, &res);
-	if (res != 0) {
-		goto cleanup;
+	if (total != 0 && packet->data_buf == NULL) {
+		LOG_ERR("Packet %zu: %zu bytes without a buffer", packet_index, total);
+		return -EINVAL;
 	}
 
-	if (config->dma_enabled) {
-#ifdef SOC_GDMA_SUPPORTED
-		res = transfer_start_gdma(dev, hal, &tc, dma_buf_len);
-#else
-		res = transfer_start_intdma(dev, hal, hal_dev, &tc, dma_buf_len);
-#endif
-		if (res != 0) {
-			goto cleanup;
-		}
-	}
-
-	spi_hal_setup_trans(hal, hal_dev, &tc);
-
-#ifdef CONFIG_MSPI_ESP32_STATS
-	uint32_t stats_start = stats_begin(data, config->dma_enabled, packet->num_bytes);
-#endif
-	res = transfer_start_and_wait(dev, timeout_ms);
-#ifdef CONFIG_MSPI_ESP32_STATS
-	stats_end(data, stats_start, res == -ETIMEDOUT, tc.cs_keep_active);
-#endif
-	if (res != 0) {
-		goto cleanup;
-	}
-
-	if (config->dma_enabled) {
-		transfer_post_gdma(dev, &tc, dma_buf_len);
+	if (!config->dma_enabled) {
+		max_piece = MSPI_ESP32_REG_MAX_BYTES;
+	} else if (packet->dir == MSPI_TX && total > 0 && dma_reachable(packet->data_buf, total)) {
+		direct = true;
+		max_piece = ROUND_DOWN(MSPI_ESP32_HW_MAX_BYTES, align);
 	} else {
-		spi_hal_fetch_result(hal);
+		max_piece = ROUND_DOWN(MIN((size_t)CONFIG_MSPI_DMA_MAX_BUFFER_SIZE,
+					   (size_t)MSPI_ESP32_HW_MAX_BYTES),
+				       align);
 	}
 
-	/* Copy bounce buffer back to caller's RX buffer */
-	if (tmp && packet->dir == MSPI_RX && packet->data_buf) {
-		memcpy(packet->data_buf, tmp, MIN(packet->num_bytes, dma_len));
+	/* Every piece but a data-register one is at least one alignment unit. */
+	if (max_piece == 0) {
+		return -EINVAL;
 	}
+
+	size_t off = 0;
+
+	do {
+		size_t len = MIN(total - off, max_piece);
+		bool last = (off + len == total);
+		int res = transfer_piece(dev, xfer, packet, off, len, off == 0,
+					 !last || keep_ce_after, direct, timeout_ms);
+
+		if (res != 0) {
+			return res;
+		}
+		off += len;
+	} while (off < total);
 
 	LOG_DBG("%s[%zu]: success", __func__, packet_index);
 
-cleanup:
-	return res;
+	return 0;
 }
 
 /* --------------------------------------------------------------------------
@@ -937,7 +1111,11 @@ static int IRAM_ATTR update_transfer_config(const struct device *dev)
 			.addr_length = 0,
 		};
 
-		transfer(dev, &dummy_xfer, 0);
+		int ret = transfer(dev, &dummy_xfer, 0);
+
+		if (ret != 0) {
+			return ret;
+		}
 	}
 #endif
 

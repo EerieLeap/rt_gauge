@@ -29,7 +29,15 @@ properties:
   clock-frequency:
     type: int
     default: 80000000
-    description: Maximum controller clock in Hz. Default is 80 MHz.
+    description: |
+      Maximum controller clock in Hz. Default is 80 MHz.
+      The SPI makes its clock from the 80 MHz source divided by an integer
+      of 2 or more, so on the ESP32-S3 SPI2 and SPI3 can run at 80 MHz (any
+      request above 60 MHz), 40, 26.67, 20, 16, 13.33, 11.43, 10 MHz and so
+      on down. The driver picks the nearest one to a device's requested
+      frequency and logs the effective clock at LOG_INF when it changes.
+      A request between two of them gets the nearest (30 MHz runs at
+      26.67 MHz): ask for an exact quotient.
 
   interrupts:
     description: Interrupt specifier for the SPI peripheral
@@ -68,6 +76,12 @@ properties:
       Route signals through IO_MUX instead of the GPIO matrix.
       Required for frequencies above ~20 MHz.  Only valid for the
       dedicated IO_MUX pins of the selected peripheral; see TRM.
+
+      Has no effect on the ESP32-S3 in this driver: the signal routing is
+      chosen by the pinctrl state, and this flag only tells
+      spi_hal_cal_clock_conf() whether to add the GPIO matrix delay to its
+      estimate of the extra dummy cycles a read needs. Writes are not
+      affected.
 
   transfer-timeout:
     type: int
