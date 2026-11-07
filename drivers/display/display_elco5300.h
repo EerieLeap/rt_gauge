@@ -8,6 +8,10 @@
 
 #include <zephyr/drivers/mspi.h>
 #include <zephyr/drivers/display.h>
+#ifdef CONFIG_ELCO5300_STATS
+#include <zephyr/drivers/display/display_co5300.h>
+#include <zephyr/spinlock.h>
+#endif
 
 #define SPI_WRITE_TIMEOUT 100
 
@@ -156,4 +160,20 @@ struct co5300_data {
 	struct mspi_dev_cfg dev_cfg;
 	bool configured;
 	struct gpio_callback te_gpio_cb_data;
+#ifdef CONFIG_ELCO5300_STATS
+	struct co5300_stats stats;
+	struct k_spinlock stats_lock;
+	bool post_pending;	/* co5300_stats_mark_post() waits for the next write */
+	bool post_lifted;
+	uint32_t post_stamp;
+#endif
+};
+
+/* Transaction classes for the bench counters; OTHER is everything outside display_write(). */
+enum co5300_stat_kind {
+	CO5300_STAT_OTHER,
+	CO5300_STAT_CASET,
+	CO5300_STAT_PASET,
+	CO5300_STAT_RAMWR,
+	CO5300_STAT_PIXEL,
 };

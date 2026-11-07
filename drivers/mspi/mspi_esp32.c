@@ -383,6 +383,94 @@ static bool dma_reachable(const void *buf, size_t len)
 	return false;
 }
 
+/* --------------------------------------------------------------------------
+ * Bench counters (CONFIG_MSPI_ESP32_STATS)
+ * --------------------------------------------------------------------------
+ */
+
+#ifdef CONFIG_MSPI_ESP32_STATS
+void mspi_esp32_stats_get(const struct device *controller, struct mspi_esp32_stats *out)
+{
+	struct mspi_esp32_data *data = controller->data;
+	k_spinlock_key_t key = k_spin_lock(&data->stats_lock);
+
+	*out = data->stats;
+	k_spin_unlock(&data->stats_lock, key);
+}
+
+void mspi_esp32_stats_reset(const struct device *controller)
+{
+	struct mspi_esp32_data *data = controller->data;
+	k_spinlock_key_t key = k_spin_lock(&data->stats_lock);
+
+	memset(&data->stats, 0, sizeof(data->stats));
+	data->gap_pending = false;
+	k_spin_unlock(&data->stats_lock, key);
+}
+
+/* Called right before the hardware is started; returns the start stamp. */
+static uint32_t stats_begin(struct mspi_esp32_data *data, bool dma, size_t num_bytes)
+{
+	uint32_t now = k_cycle_get_32();
+	k_spinlock_key_t key = k_spin_lock(&data->stats_lock);
+
+	data->stats.transactions++;
+	if (dma) {
+		data->stats.dma_transactions++;
+	} else {
+		data->stats.reg_transactions++;
+	}
+	if (num_bytes <= 64) {
+		data->stats.short_transactions++;
+	}
+	if (data->gap_pending) {
+		uint32_t gap = now - data->gap_stamp;
+
+		data->stats.gaps++;
+		data->stats.gap_cycles += gap;
+		if (gap > data->stats.gap_cycles_max) {
+			data->stats.gap_cycles_max = gap;
+		}
+		data->gap_pending = false;
+	}
+	k_spin_unlock(&data->stats_lock, key);
+	return now;
+}
+
+/* Called when the transaction is over; keep_ce stamps its end for the next gap. */
+static void stats_end(struct mspi_esp32_data *data, uint32_t start, bool timeout, bool keep_ce)
+{
+	uint32_t now = k_cycle_get_32();
+	k_spinlock_key_t key = k_spin_lock(&data->stats_lock);
+
+	data->stats.wait_cycles += now - start;
+	if (timeout) {
+		data->stats.timeouts++;
+	}
+	data->gap_pending = keep_ce && !timeout;
+	data->gap_stamp = now;
+	k_spin_unlock(&data->stats_lock, key);
+}
+
+static void stats_bounce(struct mspi_esp32_data *data, size_t bytes, uint32_t cycles)
+{
+	k_spinlock_key_t key = k_spin_lock(&data->stats_lock);
+
+	data->stats.bounce_copies++;
+	data->stats.bounce_bytes += bytes;
+	data->stats.bounce_cycles += cycles;
+	k_spin_unlock(&data->stats_lock, key);
+}
+
+static void stats_ce_released(struct mspi_esp32_data *data)
+{
+	k_spinlock_key_t key = k_spin_lock(&data->stats_lock);
+
+	data->gap_pending = false;
+	k_spin_unlock(&data->stats_lock, key);
+}
+#endif /* CONFIG_MSPI_ESP32_STATS */
+
 /* Kept for the device's lifetime: allocating per packet churned the system heap on every frame. */
 static uint8_t *bounce_buf_get(const struct device *dev)
 {
@@ -436,7 +524,14 @@ static uint8_t *transfer_prepare_data(const struct device *dev,
 				*ret = -ENOMEM;
 				return NULL;
 			}
+#ifdef CONFIG_MSPI_ESP32_STATS
+			uint32_t copy_start = k_cycle_get_32();
+#endif
 			memcpy(buffer, src, dma_len);
+#ifdef CONFIG_MSPI_ESP32_STATS
+			stats_bounce((struct mspi_esp32_data *)dev->data, dma_len,
+				     k_cycle_get_32() - copy_start);
+#endif
 			src = buffer;
 		} else {
 			LOG_DBG("TX buf %p ok (non-DMA path)", src);
@@ -723,7 +818,13 @@ static int IRAM_ATTR transfer(const struct device *dev, const struct mspi_xfer *
 
 	spi_hal_setup_trans(hal, hal_dev, &tc);
 
+#ifdef CONFIG_MSPI_ESP32_STATS
+	uint32_t stats_start = stats_begin(data, config->dma_enabled, packet->num_bytes);
+#endif
 	res = transfer_start_and_wait(dev, timeout_ms);
+#ifdef CONFIG_MSPI_ESP32_STATS
+	stats_end(data, stats_start, res == -ETIMEDOUT, tc.cs_keep_active);
+#endif
 	if (res != 0) {
 		goto cleanup;
 	}
@@ -975,6 +1076,9 @@ static int IRAM_ATTR mspi_esp32_transceive(const struct device *dev,
 		int cs_ret = cs_gpio_set(data, config, false);
 
 		data->cs_active = false;
+#ifdef CONFIG_MSPI_ESP32_STATS
+		stats_ce_released(data);
+#endif
 
 		if (cs_ret != 0) {
 			LOG_ERR("Failed to de-assert CS: %d", cs_ret);

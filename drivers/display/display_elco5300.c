@@ -54,7 +54,104 @@ static void co5300_get_capabilities(const struct device *dev, struct display_cap
 	capabilities->current_orientation = data->orientation;
 }
 
-static int co5300_transmit(const struct device *dev, enum mspi_io_mode io_mode, const uint8_t *cmd, const void *tx_data, size_t tx_len, bool hold_ce) {
+#ifdef CONFIG_ELCO5300_STATS
+void co5300_stats_get(const struct device *dev, struct co5300_stats *out) {
+	struct co5300_data *data = dev->data;
+	k_spinlock_key_t key = k_spin_lock(&data->stats_lock);
+
+	*out = data->stats;
+	k_spin_unlock(&data->stats_lock, key);
+}
+
+void co5300_stats_reset(const struct device *dev) {
+	struct co5300_data *data = dev->data;
+	k_spinlock_key_t key = k_spin_lock(&data->stats_lock);
+
+	memset(&data->stats, 0, sizeof(data->stats));
+	data->post_pending = false;
+	k_spin_unlock(&data->stats_lock, key);
+}
+
+void co5300_stats_mark_post(const struct device *dev, uint32_t cycles, bool lifted) {
+	struct co5300_data *data = dev->data;
+	k_spinlock_key_t key = k_spin_lock(&data->stats_lock);
+
+	data->post_stamp = cycles;
+	data->post_lifted = lifted;
+	data->post_pending = true;
+	k_spin_unlock(&data->stats_lock, key);
+}
+
+/* display_write() entry: counts the write and turns a pending post stamp into one sample. */
+static void co5300_stats_write_enter(struct co5300_data *data, const struct display_buffer_descriptor *desc, uint32_t now) {
+	k_spinlock_key_t key = k_spin_lock(&data->stats_lock);
+
+	data->stats.writes++;
+	if (!desc->frame_incomplete) {
+		data->stats.frames++;
+	}
+	if (data->post_pending) {
+		uint32_t delay = now - data->post_stamp;
+		uint32_t us = k_cyc_to_us_floor32(delay);
+
+		data->stats.post_samples++;
+		data->stats.post_cycles += delay;
+		if (delay > data->stats.post_cycles_max) {
+			data->stats.post_cycles_max = delay;
+		}
+		if (data->post_lifted) {
+			data->stats.post_lifted++;
+			if (delay > data->stats.post_cycles_max_lifted) {
+				data->stats.post_cycles_max_lifted = delay;
+			}
+		}
+		data->stats.post_hist[us < 10 ? 0 : us < 100 ? 1 : us < 1000 ? 2 : us < 10000 ? 3 : 4]++;
+		data->post_pending = false;
+	}
+	k_spin_unlock(&data->stats_lock, key);
+}
+
+static void co5300_stats_write_exit(struct co5300_data *data, uint32_t start) {
+	uint32_t spent = k_cycle_get_32() - start;
+	k_spinlock_key_t key = k_spin_lock(&data->stats_lock);
+
+	data->stats.write_cycles += spent;
+	if (spent > data->stats.write_cycles_max) {
+		data->stats.write_cycles_max = spent;
+	}
+	k_spin_unlock(&data->stats_lock, key);
+}
+
+/* One transaction, counted after the lock is taken. */
+static void co5300_stats_transaction(struct co5300_data *data, enum co5300_stat_kind kind, size_t tx_len) {
+	k_spinlock_key_t key = k_spin_lock(&data->stats_lock);
+
+	switch (kind) {
+	case CO5300_STAT_OTHER:
+		data->stats.other_cmds++;
+		break;
+	case CO5300_STAT_CASET:
+		data->stats.caset++;
+		break;
+	case CO5300_STAT_PASET:
+		data->stats.paset++;
+		break;
+	case CO5300_STAT_RAMWR:
+		data->stats.ramwr++;
+		break;
+	case CO5300_STAT_PIXEL:
+		data->stats.pixel_transfers++;
+		data->stats.pixel_bytes += tx_len;
+		break;
+	}
+	if (kind != CO5300_STAT_OTHER) {
+		data->stats.lock_takes++;
+	}
+	k_spin_unlock(&data->stats_lock, key);
+}
+#endif /* CONFIG_ELCO5300_STATS */
+
+static int co5300_transmit_kind(const struct device *dev, enum mspi_io_mode io_mode, const uint8_t *cmd, const void *tx_data, size_t tx_len, bool hold_ce, enum co5300_stat_kind kind) {
 	struct co5300_config *config = dev->config;
 	struct co5300_data *data = dev->data;
 	int ret = 0;
@@ -62,6 +159,11 @@ static int co5300_transmit(const struct device *dev, enum mspi_io_mode io_mode, 
 	ret = k_mutex_lock(&data->lock, K_FOREVER);
 	if (ret < 0)
 		return ret;
+#ifdef CONFIG_ELCO5300_STATS
+	co5300_stats_transaction(data, kind, tx_len);
+#else
+	ARG_UNUSED(kind);
+#endif
 
 	config->mspi_dev_config.io_mode = io_mode;
 	mspi_dev_config(config->mspi_bus, &config->dev_id,
@@ -113,6 +215,10 @@ static int co5300_transmit(const struct device *dev, enum mspi_io_mode io_mode, 
 
 	k_mutex_unlock(&data->lock);
 	return ret;
+}
+
+static int co5300_transmit(const struct device *dev, enum mspi_io_mode io_mode, const uint8_t *cmd, const void *tx_data, size_t tx_len, bool hold_ce) {
+	return co5300_transmit_kind(dev, io_mode, cmd, tx_data, tx_len, hold_ce, CO5300_STAT_OTHER);
 }
 
 static int co5300_reset(const struct device *dev) {
@@ -260,7 +366,7 @@ static int co5300_set_window(const struct device *dev, uint16_t x, uint16_t y, u
 	tx_data[1] = sys_cpu_to_be16(x_normalized + width - 1U);
 
 	uint8_t cmd = CO5300_W_CASET;
-	ret = co5300_transmit(dev, MSPI_IO_MODE_SINGLE, &cmd, tx_data, 4U, false);
+	ret = co5300_transmit_kind(dev, MSPI_IO_MODE_SINGLE, &cmd, tx_data, 4U, false, CO5300_STAT_CASET);
 	if (ret < 0) {
 		return ret;
 	}
@@ -270,12 +376,12 @@ static int co5300_set_window(const struct device *dev, uint16_t x, uint16_t y, u
 	tx_data[1] = sys_cpu_to_be16(y_normalized + height - 1U);
 
 	cmd = CO5300_W_PASET;
-	ret = co5300_transmit(dev, MSPI_IO_MODE_SINGLE, &cmd, tx_data, 4U, false);
+	ret = co5300_transmit_kind(dev, MSPI_IO_MODE_SINGLE, &cmd, tx_data, 4U, false, CO5300_STAT_PASET);
 
 	return ret;
 }
 
-static int co5300_write(const struct device *dev, const uint16_t x, const uint16_t y,
+static int co5300_write_inner(const struct device *dev, const uint16_t x, const uint16_t y,
 	const struct display_buffer_descriptor *desc, const void *buf) {
 
 	const struct co5300_config *config = dev->config;
@@ -292,7 +398,7 @@ static int co5300_write(const struct device *dev, const uint16_t x, const uint16
 	}
 
 	uint8_t cmd = CO5300_W_RAMWR;
-	ret = co5300_transmit(dev, MSPI_IO_MODE_SINGLE, &cmd, NULL, 0, false);
+	ret = co5300_transmit_kind(dev, MSPI_IO_MODE_SINGLE, &cmd, NULL, 0, false, CO5300_STAT_RAMWR);
 	if (ret < 0) {
 		return ret;
 	}
@@ -313,7 +419,7 @@ static int co5300_write(const struct device *dev, const uint16_t x, const uint16
 		}
 
 		cmd = CO5300_C_QUAD_1_1_4;
-		ret = co5300_transmit(dev, MSPI_IO_MODE_QUAD_1_1_4, first_send ? &cmd : NULL, tx_data, chunk_size, !is_last_send);
+		ret = co5300_transmit_kind(dev, MSPI_IO_MODE_QUAD_1_1_4, first_send ? &cmd : NULL, tx_data, chunk_size, !is_last_send, CO5300_STAT_PIXEL);
 		if (ret < 0) {
 			LOG_ERR("Failed to send pixel data chunk: %d", ret);
 			return ret;
@@ -326,6 +432,22 @@ static int co5300_write(const struct device *dev, const uint16_t x, const uint16
 
 	return ret;
 }
+
+#ifdef CONFIG_ELCO5300_STATS
+static int co5300_write(const struct device *dev, const uint16_t x, const uint16_t y,
+	const struct display_buffer_descriptor *desc, const void *buf) {
+	struct co5300_data *data = dev->data;
+	uint32_t start = k_cycle_get_32();
+
+	co5300_stats_write_enter(data, desc, start);
+	int ret = co5300_write_inner(dev, x, y, desc, buf);
+	co5300_stats_write_exit(data, start);
+
+	return ret;
+}
+#else
+#define co5300_write co5300_write_inner
+#endif
 
 static int co5300_configure_display(const struct device *dev) {
 	const struct co5300_config *config = dev->config;

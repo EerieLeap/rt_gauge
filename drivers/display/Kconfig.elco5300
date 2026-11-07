@@ -9,3 +9,11 @@ config ELCO5300
 	depends on DT_HAS_CHIPONE_ELCO5300_ENABLED
 	help
 	  Enable support for the CO5300 QSPI display controller.
+
+config ELCO5300_STATS
+	bool "CO5300 bench counters"
+	depends on ELCO5300
+	depends on SHELL
+	help
+	  Bench counters read by the app's ui_bench shell command; adds a few
+	  cycles per transaction.

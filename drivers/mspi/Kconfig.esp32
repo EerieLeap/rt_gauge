@@ -43,4 +43,11 @@ config MSPI_ESP32_PSRAM_DMA
 	  Only enable this if the bus clock is low enough that PSRAM can sustain
 	  it, and verify the resulting data.
 
+config MSPI_ESP32_STATS
+	bool "ESP32 MSPI bench counters"
+	depends on SHELL
+	help
+	  Bench counters read by the app's ui_bench shell command; adds a few
+	  cycles per transaction.
+
 endif # MSPI_ESP32

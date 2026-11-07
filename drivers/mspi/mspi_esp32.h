@@ -8,6 +8,10 @@
 #define ZEPHYR_DRIVERS_MSPI_ESP32_H_
 
 #include <zephyr/drivers/mspi.h>
+#ifdef CONFIG_MSPI_ESP32_STATS
+#include <zephyr/drivers/mspi/mspi_esp32.h>
+#include <zephyr/spinlock.h>
+#endif
 
 #include <zephyr/drivers/pinctrl.h>
 #include <hal/spi_hal.h>
@@ -85,6 +89,13 @@ struct mspi_esp32_data {
 #else
 	lldesc_t dma_desc_tx;
 	lldesc_t dma_desc_rx;
+#endif
+
+#ifdef CONFIG_MSPI_ESP32_STATS
+	struct mspi_esp32_stats stats;
+	struct k_spinlock stats_lock;
+	bool gap_pending;	/* a transaction ended with CE kept asserted */
+	uint32_t gap_stamp;	/* k_cycle_get_32() at its end */
 #endif
 };
 
