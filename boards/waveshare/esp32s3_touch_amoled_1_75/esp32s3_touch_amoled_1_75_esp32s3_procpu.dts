@@ -73,8 +73,6 @@
 			compatible = "chipone,elco5300";
 			reg = <0>;
 			status = "okay";
-			/* Should be less than or equal to CONFIG_MSPI_DMA_MAX_BUFFER_SIZE */
-            max-buf-size = <10240>;
 
 			// MSPI device properties
 			mspi-max-frequency = <40000000>;
@@ -89,7 +87,6 @@
 			width = <466>;
 			height = <466>;
             x-offset = <6>;
-			write-only;
 		};
 	};
 

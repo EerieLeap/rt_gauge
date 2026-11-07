@@ -315,11 +315,15 @@ int DisplayService::ApplyBrightness(uint8_t value) const {
     if(!is_initialized_)
         return -ENODEV;
 
-    // LVGL's flush callback reaches the same panel from the renderer thread
-    // while it holds this lock, so every driver call here has to take it too.
+#ifndef CONFIG_LV_Z_FLUSH_THREAD
+    // Without the flush thread LVGL flushes inside lv_timer_handler() under its
+    // lock, so every driver call here has to take it too. With the thread the
+    // driver serializes whole operations itself, and holding the lock would
+    // stall rendering for the area in flight.
     // Zephyr's k_mutex is recursive, so a control widget calling in from inside
     // lv_timer_handler() re-locks harmlessly.
     ScopedLvglLock lvgl_guard;
+#endif
 
     const int res = display_set_brightness(DtDisplay::Get(), value);
 
@@ -338,7 +342,10 @@ int DisplayService::ApplyBlanking(bool enabled) const {
     if(!is_initialized_)
         return -ENODEV;
 
+#ifndef CONFIG_LV_Z_FLUSH_THREAD
+    // See ApplyBrightness(): the driver's own lock covers the flush thread.
     ScopedLvglLock lvgl_guard;
+#endif
 
     const int res = enabled ? display_blanking_on(DtDisplay::Get()) : display_blanking_off(DtDisplay::Get());
 

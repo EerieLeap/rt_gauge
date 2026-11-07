@@ -29,10 +29,10 @@ int co5300_te_gpio_register_callback(const struct device *dev, gpio_callback_han
 struct co5300_stats {
 	uint32_t writes;               /* display_write() calls */
 	uint32_t frames;               /* writes with desc->frame_incomplete == false */
-	uint32_t lock_takes;           /* data->lock acquisitions made inside display_write() */
+	uint32_t lock_takes;           /* data->lock acquisitions made inside display_write() (one per write) */
 	uint32_t caset;                /* CASET command transactions */
 	uint32_t paset;                /* PASET (RASET) command transactions */
-	uint32_t ramwr;                /* single-line RAMWR transactions without pixel data */
+	uint32_t ramwr;                /* always 0: the first pixel transaction carries the memory write command */
 	uint32_t pixel_transfers;      /* pixel mspi_transceive() calls */
 	uint64_t pixel_bytes;
 	uint64_t write_cycles;         /* k_cycle_get_32() cycles spent inside display_write(), summed */
