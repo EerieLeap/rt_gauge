@@ -1,0 +1,200 @@
+--- a/src/widgets/image/lv_image.c
++++ b/src/widgets/image/lv_image.c
+@@ -40,6 +40,8 @@
+ static void scale_update(lv_obj_t * obj, int32_t scale_x, int32_t scale_y);
+ static void update_align(lv_obj_t * obj);
+ static void reset_image_attributes(lv_obj_t * obj);
++static bool image_is_opaque(lv_image_t * img);
++static bool image_covers_area(lv_obj_t * obj, const lv_area_t * area);
+ 
+ #if LV_USE_OBSERVER
+     static void image_src_observer_cb(lv_observer_t * observer, lv_subject_t * subject);
+@@ -246,6 +248,7 @@
+     img->w        = header.w;
+     img->h        = header.h;
+     img->cf       = header.cf;
++    img->alpha_state = LV_IMAGE_ALPHA_STATE_UNKNOWN;
+ 
+     lv_obj_refresh_self_size(obj);
+ 
+@@ -681,6 +684,7 @@
+     img->src       = NULL;
+     img->src_type  = LV_IMAGE_SRC_UNKNOWN;
+     img->cf        = LV_COLOR_FORMAT_UNKNOWN;
++    img->alpha_state = LV_IMAGE_ALPHA_STATE_UNKNOWN;
+     img->w         = lv_obj_get_width(obj);
+     img->h         = lv_obj_get_height(obj);
+     img->rotation     = 0;
+@@ -811,7 +815,7 @@
+         }
+ 
+         /*Non true color format might have "holes"*/
+-        if(lv_color_format_has_alpha(img->cf)) {
++        if(lv_color_format_has_alpha(img->cf) && !image_is_opaque(img)) {
+             info->res = LV_COVER_RES_NOT_COVER;
+             return;
+         }
+@@ -853,6 +857,10 @@
+             info->res = LV_COVER_RES_NOT_COVER;
+             return;
+         }
++
++        /*The base class judged only the background of the widget (a transparent one never covers).
++         *If the pixels of the image themselves surely cover the area then say so.*/
++        if(image_covers_area(obj, info->area)) info->res = LV_COVER_RES_COVER;
+     }
+     else if(code == LV_EVENT_DRAW_MAIN) {
+ 
+@@ -881,7 +889,9 @@
+             draw_dsc.antialias = img->antialias;
+             draw_dsc.blend_mode = img->blend_mode;
+             draw_dsc.bitmap_mask_src = img->bitmap_mask_src;
+-            draw_dsc.src = img->src;
++            /*An opaque RGB565A8 source is drawn through its RGB565 view, see `image_is_opaque`*/
++            if(img->cf == LV_COLOR_FORMAT_RGB565A8 && image_is_opaque(img)) draw_dsc.src = &img->opaque_dsc;
++            else draw_dsc.src = img->src;
+ 
+             lv_area_set(&draw_dsc.image_area, obj->coords.x1,
+                         obj->coords.y1,
+@@ -1044,6 +1054,109 @@
+     }
+ }
+ 
++/**
++ * Tell if the source is a variable RGB565A8 or AL88 image whose alpha bytes are all 0xFF.
++ *
++ * Such an image is drawn as if it had no alpha channel: it can cover the area below it
++ * (the `LV_EVENT_COVER_CHECK` of an image with alpha always says "not cover", so everything
++ * below is drawn first) and, for RGB565A8, it is drawn from an RGB565 view of the same data
++ * (`opaque_dsc`), which skips the blending through the A8 mask. The scan runs once per
++ * source and its result is cached in `alpha_state`; `lv_image_set_src()` resets it.
++ * The data of the source must not change after that without a new `lv_image_set_src()`.
++ * `opaque_dsc` is used only as `src` of the main draw task, never returned to the user.
++ */
++static bool image_is_opaque(lv_image_t * img)
++{
++    if(img->alpha_state != LV_IMAGE_ALPHA_STATE_UNKNOWN) return img->alpha_state == LV_IMAGE_ALPHA_STATE_OPAQUE;
++
++    img->alpha_state = LV_IMAGE_ALPHA_STATE_HAS_ALPHA;
++
++    if(img->src_type != LV_IMAGE_SRC_VARIABLE || img->src == NULL || img->bitmap_mask_src != NULL) return false;
++
++    const lv_image_dsc_t * dsc = img->src;
++    lv_color_format_t cf = (lv_color_format_t)dsc->header.cf;
++    if(cf != LV_COLOR_FORMAT_RGB565A8 && cf != LV_COLOR_FORMAT_AL88) return false;
++    if(dsc->header.flags & (LV_IMAGE_FLAGS_COMPRESSED | LV_IMAGE_FLAGS_CUSTOM_DRAW)) return false;
++
++    uint32_t w = dsc->header.w;
++    uint32_t h = dsc->header.h;
++    if(w == 0 || h == 0 || dsc->data == NULL) return false;
++
++    uint32_t stride = dsc->header.stride;
++    if(stride == 0) stride = lv_draw_buf_width_to_stride(w, cf);
++
++    uint32_t x;
++    uint32_t y;
++    if(cf == LV_COLOR_FORMAT_RGB565A8) {
++        /*The RGB565 plane is followed by the A8 plane with half of the stride (as in lv_draw_sw_img.c)*/
++        uint32_t a8_stride = stride / 2;
++        if(stride < w * 2 || a8_stride < w) return false;
++        if((uint64_t)(stride + a8_stride) * h > dsc->data_size) return false;
++
++        for(y = 0; y < h; y++) {
++            const uint8_t * a8 = dsc->data + (size_t)stride * h + (size_t)a8_stride * y;
++            for(x = 0; x < w; x++) {
++                if(a8[x] != 0xFF) return false;
++            }
++        }
++    }
++    else {
++        if(stride < w * 2) return false;
++        if((uint64_t)stride * h > dsc->data_size) return false;
++
++        for(y = 0; y < h; y++) {
++            const uint8_t * row = dsc->data + (size_t)stride * y;
++            for(x = 0; x < w; x++) {
++                if(row[x * 2 + 1] != 0xFF) return false;
++            }
++        }
++    }
++
++    if(cf == LV_COLOR_FORMAT_RGB565A8) {
++        img->opaque_dsc = *dsc;
++        img->opaque_dsc.header.cf = LV_COLOR_FORMAT_RGB565;
++        img->opaque_dsc.header.stride = stride;
++        img->opaque_dsc.header.flags &= ~(LV_IMAGE_FLAGS_ALLOCATED | LV_IMAGE_FLAGS_MODIFIABLE);
++        img->opaque_dsc.data_size = stride * h;
++    }
++
++    img->alpha_state = LV_IMAGE_ALPHA_STATE_OPAQUE;
++    return true;
++}
++
++/**
++ * Tell if the image pixels, drawn by `LV_EVENT_DRAW_MAIN`, surely cover `area`.
++ * `lv_obj_event_base()` answers `LV_EVENT_COVER_CHECK` from the background of the widget only,
++ * so an image with a transparent background would never cover anything, even if it is opaque.
++ * Every condition makes sure the image area is exactly `obj->coords` and all of its pixels are opaque.
++ */
++static bool image_covers_area(lv_obj_t * obj, const lv_area_t * area)
++{
++    lv_image_t * img = (lv_image_t *)obj;
++
++    if(img->src_type != LV_IMAGE_SRC_VARIABLE && img->src_type != LV_IMAGE_SRC_FILE) return false;
++    if(img->src == NULL || img->bitmap_mask_src != NULL) return false;
++    if(lv_color_format_has_alpha(img->cf) && !image_is_opaque(img)) return false;
++
++    if(lv_obj_get_style_image_opa_internal(obj, LV_PART_MAIN) != LV_OPA_COVER) return false;
++    if(lv_obj_get_style_opa_internal(obj, LV_PART_MAIN) != LV_OPA_COVER) return false;
++    if(img->blend_mode != LV_BLEND_MODE_NORMAL) return false;
++    if(lv_obj_get_style_blend_mode_internal(obj, LV_PART_MAIN) != LV_BLEND_MODE_NORMAL) return false;
++
++    /*With these the image area is `obj->coords` (the aligned area is the same size) or tiles it*/
++    if(img->rotation != 0 || img->scale_x != LV_SCALE_NONE || img->scale_y != LV_SCALE_NONE) return false;
++    if(img->align >= _LV_IMAGE_ALIGN_AUTO_TRANSFORM) return false;
++    if(img->offset.x != 0 || img->offset.y != 0) return false;
++    if(img->w != lv_obj_get_width(obj) || img->h != lv_obj_get_height(obj)) return false;
++
++    if(lv_obj_get_style_transform_width_internal(obj, LV_PART_MAIN) != 0) return false;
++    if(lv_obj_get_style_transform_height_internal(obj, LV_PART_MAIN) != 0) return false;
++
++    /*The image is clipped with the radius of the widget*/
++    int32_t radius = lv_obj_get_style_radius_internal(obj, LV_PART_MAIN);
++    return lv_area_is_in(area, &obj->coords, radius);
++}
++
+ static void reset_image_attributes(lv_obj_t * obj)
+ {
+     LV_ASSERT(obj != NULL);
+@@ -1056,6 +1169,7 @@
+     img->w = 0;
+     img->h = 0;
+     img->cf = LV_COLOR_FORMAT_UNKNOWN;
++    img->alpha_state = LV_IMAGE_ALPHA_STATE_UNKNOWN;
+     lv_obj_refresh_self_size(obj);
+ }
+ 
+--- a/src/widgets/image/lv_image_private.h
++++ b/src/widgets/image/lv_image_private.h
+@@ -27,6 +27,12 @@
+  *      TYPEDEFS
+  **********************/
+ 
++typedef enum {
++    LV_IMAGE_ALPHA_STATE_UNKNOWN = 0, /**< Not scanned yet*/
++    LV_IMAGE_ALPHA_STATE_HAS_ALPHA,   /**< Not an opaque RGB565A8/AL88 variable image*/
++    LV_IMAGE_ALPHA_STATE_OPAQUE,      /**< RGB565A8/AL88 variable image with all alpha bytes 0xFF*/
++} lv_image_alpha_state_t;
++
+ /**
+  * Data of image
+  */
+@@ -46,6 +52,8 @@
+     uint32_t antialias : 1; /**< Apply anti-aliasing in transformations (rotate, zoom)*/
+     uint32_t align: 4;      /**< Image size mode when image size and object size is different. See lv_image_align_t*/
+     uint32_t blend_mode: 4; /**< Element of `lv_blend_mode_t`*/
++    uint32_t alpha_state: 2; /**< Cached alpha scan of the source, see `lv_image_alpha_state_t`*/
++    lv_image_dsc_t opaque_dsc; /**< RGB565 view of an opaque RGB565A8 source, valid if `alpha_state` is opaque*/
+ };
+ 
+ /**********************
