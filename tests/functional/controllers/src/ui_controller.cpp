@@ -364,8 +364,8 @@ bool SwipeDown() {
 
     ScopedLvglLock lvgl_guard;
 
-    // A press finds objects where the last frame laid them out. The renderer sleeps until LVGL's next timer, and with
-    // no input device in the suite there is none after its first frame, so a frame is drawn here.
+    // A press finds objects where the last frame laid them out. The renderer draws on its own after an invalidation,
+    // but not necessarily before this runs, and the press needs the layout of the last frame, so one is drawn here.
     lv_refr_now(nullptr);
 
     lv_indev_t* indev = lv_indev_create();
@@ -565,6 +565,46 @@ ZTEST(ui_controller, test_a_swipe_down_on_an_overlay_closes_it) {
 
     zassert_false(Navigation().IsOverlayActive(), "Expected the swipe to close the overlay.");
     zassert_equal(*Navigation().GetActiveGroupId(), FIRST_GROUP_ID);
+}
+
+void CountRefresh(lv_event_t* e) {
+    static_cast<std::atomic<int>*>(lv_event_get_user_data(e))->fetch_add(1);
+}
+
+// The renderer used to sleep for what lv_timer_handler() returned, and for good when no timer was due, so a change
+// made from another thread waited out the sleep or was never drawn.
+ZTEST(ui_controller, test_a_change_from_another_thread_is_drawn_without_a_forced_refresh) {
+    std::atomic<int> refreshes = 0;
+    lv_display_t* display = nullptr;
+
+    {
+        ScopedLvglLock lvgl_guard;
+        display = lv_display_get_default();
+        zassert_not_null(display);
+        lv_display_add_event_cb(display, CountRefresh, LV_EVENT_REFR_READY, &refreshes);
+    }
+
+    // Let a frame in flight finish, so that the next one is the one this test asks for.
+    k_msleep(SETTLE_MS);
+    const int before = refreshes.load();
+
+    {
+        ScopedLvglLock lvgl_guard;
+        lv_obj_invalidate(lv_screen_active());
+    }
+
+    const int64_t deadline = k_uptime_get() + (5 * LV_DEF_REFR_PERIOD);
+    while(refreshes.load() == before && k_uptime_get() < deadline)
+        k_msleep(1);
+
+    const int after = refreshes.load();
+
+    {
+        ScopedLvglLock lvgl_guard;
+        lv_display_remove_event_cb_with_user_data(display, CountRefresh, &refreshes);
+    }
+
+    zassert_true(after > before, "Expected the renderer to draw an invalidation from another thread.");
 }
 
 // The kinds go with the controller, which the suite above keeps to its end, so this one builds its own.
