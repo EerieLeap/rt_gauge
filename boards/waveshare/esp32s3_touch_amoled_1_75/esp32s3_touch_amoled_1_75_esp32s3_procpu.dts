@@ -82,8 +82,8 @@
 			reset-gpios = <&gpio1 7 GPIO_ACTIVE_HIGH>; // Reset pin
 
 			// Display properties
-			// pixel-format = <PANEL_PIXEL_FORMAT_RGB_565>;
-            pixel-format = <PANEL_PIXEL_FORMAT_L_8>;
+			// Big-endian RGB565: LVGL renders RGB565_SWAPPED, no swap pass.
+			pixel-format = <PANEL_PIXEL_FORMAT_RGB_565X>;
 			width = <466>;
 			height = <466>;
             x-offset = <6>;

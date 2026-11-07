@@ -40,7 +40,7 @@ static void co5300_get_capabilities(const struct device *dev, struct display_cap
 	memset(capabilities, 0, sizeof(struct display_capabilities));
 
 	/* Exactly what co5300_set_pixel_format() accepts. */
-	capabilities->supported_pixel_formats = PIXEL_FORMAT_L_8 | PIXEL_FORMAT_RGB_565 | PIXEL_FORMAT_RGB_888;
+	capabilities->supported_pixel_formats = PIXEL_FORMAT_L_8 | PIXEL_FORMAT_RGB_565X | PIXEL_FORMAT_RGB_888;
 	capabilities->current_pixel_format = data->pixel_format;
 
 	/* Only 0 and 180 degrees exist, so the resolution is never swapped. */
@@ -336,14 +336,15 @@ static int co5300_set_pixel_format_locked(const struct device *dev, const enum d
 	if (pixel_format == PIXEL_FORMAT_L_8) {
 		bytes_per_pixel = 1U;
 		tx_data = CO5300_PIXFMT_8BIT_GRAY256;
-	} else if (pixel_format == PIXEL_FORMAT_RGB_565) {
+	} else if (pixel_format == PIXEL_FORMAT_RGB_565X) {
+		/* The panel reads big-endian RGB565; the little-endian PIXEL_FORMAT_RGB_565 would show swapped colours. */
 		bytes_per_pixel = 2U;
 		tx_data = CO5300_PIXFMT_16BIT_RGB565;
 	} else if (pixel_format == PIXEL_FORMAT_RGB_888) {
 		bytes_per_pixel = 3U;
 		tx_data = CO5300_PIXFMT_24BIT_RGB888;
 	} else {
-		LOG_ERR("Unsupported pixel format");
+		LOG_ERR("Unsupported pixel format 0x%x (supported: L_8, RGB_565X, RGB_888)", (unsigned int)pixel_format);
 		return -ENOTSUP;
 	}
 
