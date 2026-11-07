@@ -421,6 +421,13 @@ ZTEST(ui_controller, test_the_controller_registers_the_image_animation_and_font_
         Assets(), AssetKind::FONTS, "fonts", "ui_assets/fonts", { ".ttf" }, CONFIG_EERIE_LEAP_UI_FONT_MAX_SIZE
     );
 
+    // Only the images are raw pixels, in the firmware's colour format (AL88 or RGB565A8).
+    zassert_equal(
+        Assets().Find(AssetKind::IMAGES)->pixel_format, static_cast<uint32_t>(LV_COLOR_FORMAT_NATIVE_WITH_ALPHA)
+    );
+    zassert_equal(Assets().Find(AssetKind::ANIMATIONS)->pixel_format, 0U);
+    zassert_equal(Assets().Find(AssetKind::FONTS)->pixel_format, 0U);
+
     zassert_equal(Assets().GetProviders().size(), 3U, "Expected no kind but those of the UI.");
     zassert_not_equal(
         Assets().Find(AssetKind::IMAGES)->store.get(), Assets().Find(AssetKind::ANIMATIONS)->store.get(),

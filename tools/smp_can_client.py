@@ -1438,13 +1438,22 @@ def format_access(access: int) -> str:
     return "".join(letter if access & bit else "-" for letter, bit in (("R", 1), ("W", 2), ("D", 4)))
 
 
+LVGL_COLOR_FORMATS = {0x14: "RGB565A8", 0x15: "AL88"}
+
+
+def format_pixel_format(number: int) -> str:
+    name = LVGL_COLOR_FORMATS.get(number)
+    return f"{name} ({number:#04x})" if name else f"{number:#04x}"
+
+
 def format_kind(entry: dict) -> str:
     maximum = f"{entry['max']} B" if entry["max"] else "none"
     # free and used are sent only while the volume is mounted; free is a hint, WRITE stays the authority.
+    pixels = f"  fmt {format_pixel_format(entry['fmt'])}" if entry.get("fmt") else ""
     space = f"  free {entry['free']} B  used {entry['used']} B" if "free" in entry else ""
     return (f"kind {entry['kind']}  {entry['name']}  dir {entry['dir']}  access {format_access(entry['access'])}  "
             f"max {maximum}  ext {' '.join(entry['ext']) or '-'}  avail {'yes' if entry['avail'] else 'no'}"
-            f"{space}")
+            f"{pixels}{space}")
 
 
 def asset_write_overhead(name: str) -> int:
