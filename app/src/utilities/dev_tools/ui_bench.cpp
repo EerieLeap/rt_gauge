@@ -386,6 +386,113 @@ int CmdTrace(const shell* sh, size_t argc, char** argv) {
     #endif
 }
 
+const char* CoverName(lv_cover_res_t res) {
+    switch(res) {
+        case LV_COVER_RES_COVER:
+            return "COVER";
+        case LV_COVER_RES_NOT_COVER:
+            return "NOT_COVER";
+        case LV_COVER_RES_MASKED:
+            return "MASKED";
+        default:
+            return "?";
+    }
+}
+
+// Mirrors lv_refr_get_top_obj() (core/lv_refr.c), printing every object it visits. Keep the two in step.
+lv_obj_t* CoverWalk(const shell* sh, const lv_area_t* area, lv_obj_t* obj, int depth) {
+    const lv_obj_class_t* cls = lv_obj_get_class(obj);
+    const char* name = cls != nullptr && cls->name != nullptr ? cls->name : "?";
+    const int32_t child_count = static_cast<int32_t>(lv_obj_get_child_count(obj));
+    const int indent = depth * 2;
+
+    const char* reject = nullptr;
+    if(!lv_area_is_in(area, &obj->coords, 0))
+        reject = "area not inside coords";
+    else if(lv_obj_is_hidden(obj))
+        reject = "hidden";
+    else if(lv_obj_get_layer_type(obj) != LV_LAYER_TYPE_NONE)
+        reject = "layer type";
+    else if(lv_obj_get_style_opa_internal(obj, LV_PART_MAIN) < LV_OPA_MAX)
+        reject = "opa below max";
+
+    const int layer_type = static_cast<int>(lv_obj_get_layer_type(obj));
+    const int opa = static_cast<int>(lv_obj_get_style_opa_internal(obj, LV_PART_MAIN));
+
+    if(reject != nullptr) {
+        shell_print(
+            sh, "%*s%s coords=%d,%d,%d,%d opa=%d layer=%d children=%d -> skipped (%s)", indent, "", name,
+            static_cast<int>(obj->coords.x1), static_cast<int>(obj->coords.y1), static_cast<int>(obj->coords.x2),
+            static_cast<int>(obj->coords.y2), opa, layer_type, static_cast<int>(child_count), reject
+        );
+        return nullptr;
+    }
+
+    lv_cover_check_info_t info;
+    info.res = LV_COVER_RES_COVER;
+    info.area = area;
+    lv_obj_send_event(obj, LV_EVENT_COVER_CHECK, &info);
+
+    shell_print(
+        sh, "%*s%s coords=%d,%d,%d,%d opa=%d layer=%d cover=%s children=%d", indent, "", name,
+        static_cast<int>(obj->coords.x1), static_cast<int>(obj->coords.y1), static_cast<int>(obj->coords.x2),
+        static_cast<int>(obj->coords.y2), opa, layer_type, CoverName(info.res), static_cast<int>(child_count)
+    );
+
+    if(info.res == LV_COVER_RES_MASKED)
+        return nullptr;
+
+    lv_obj_t* found = nullptr;
+    for(int32_t i = child_count - 1; i >= 0; --i) {
+        found = CoverWalk(sh, area, lv_obj_get_child(obj, i), depth + 1);
+        if(found != nullptr)
+            break;
+    }
+
+    if(found == nullptr && info.res == LV_COVER_RES_COVER)
+        found = obj;
+
+    return found;
+}
+
+int CmdCover(const shell* sh, size_t argc, char** argv) {
+    lv_display_t* display = lv_display_get_default();
+
+    lv_area_t area;
+    lv_area_set(
+        &area, 0, 0, lv_display_get_horizontal_resolution(display) - 1, lv_display_get_vertical_resolution(display) - 1
+    );
+
+    if(argc == 5) {
+        area.x1 = static_cast<int32_t>(strtol(argv[1], nullptr, 10));
+        area.y1 = static_cast<int32_t>(strtol(argv[2], nullptr, 10));
+        area.x2 = static_cast<int32_t>(strtol(argv[3], nullptr, 10));
+        area.y2 = static_cast<int32_t>(strtol(argv[4], nullptr, 10));
+    } else if(argc != 1) {
+        shell_print(sh, "usage: ui_bench cover [x1 y1 x2 y2]");
+        return -EINVAL;
+    }
+
+    ScopedLvglLock lvgl_guard;
+
+    shell_print(sh, "area=%d,%d,%d,%d", (int)area.x1, (int)area.y1, (int)area.x2, (int)area.y2);
+
+    lv_obj_t* top = CoverWalk(sh, &area, lv_screen_active(), 0);
+    if(top != nullptr) {
+        const lv_obj_class_t* cls = lv_obj_get_class(top);
+        shell_print(
+            sh, "draws from: %s coords=%d,%d,%d,%d", cls != nullptr ? cls->name : "?", (int)top->coords.x1,
+            (int)top->coords.y1, (int)top->coords.x2, (int)top->coords.y2
+        );
+    } else {
+        shell_print(sh, "draws from: none (bottom layer, then the active screen)");
+    }
+
+    shell_print(sh, "layer_top children=%d", (int)lv_obj_get_child_count(lv_display_get_layer_top(display)));
+    shell_print(sh, "layer_bottom children=%d", (int)lv_obj_get_child_count(lv_display_get_layer_bottom(display)));
+    return 0;
+}
+
 int CmdHeap(const shell* sh, size_t argc, char** argv) {
     ARG_UNUSED(sh);
     ARG_UNUSED(argc);
@@ -401,6 +508,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
     SHELL_CMD_ARG(stats, NULL, "stats [reset]: counters since the last reset", CmdStats, 1, 1),
     SHELL_CMD_ARG(run, NULL, "run <warmup_ms> <window_ms>: full mode, warm up, reset, measure, print", CmdRun, 3, 0),
     SHELL_CMD_ARG(trace, NULL, "trace [on|off]: LVGL profiler switch, or dump", CmdTrace, 1, 1),
+    SHELL_CMD_ARG(cover, NULL, "cover [x1 y1 x2 y2]: the top-object search LVGL runs for an area", CmdCover, 1, 4),
     SHELL_CMD_ARG(heap, NULL, "heap: heap statistics", CmdHeap, 1, 0),
     SHELL_SUBCMD_SET_END
 );
