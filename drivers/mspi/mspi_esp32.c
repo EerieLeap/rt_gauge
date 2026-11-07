@@ -35,6 +35,7 @@
 #if defined(CONFIG_MSPI_ESP32_PSRAM_DMA) && defined(SOC_GDMA_SUPPORTED) &&                         \
 	defined(SOC_PSRAM_DMA_CAPABLE)
 #include <esp_cache.h>
+#include <hal/gdma_ll.h>
 #define MSPI_ESP32_PSRAM_DMA 1
 #endif
 
@@ -391,15 +392,20 @@ static void transfer_setup_cmd_addr(const struct mspi_xfer *xfer,
 }
 
 /*
- * Can the DMA engine be pointed straight at this buffer?
+ * Can the DMA engine be pointed straight at this TX buffer?
  *
- * Internal DRAM always works. GDMA also reaches PSRAM on SoCs advertising
- * SOC_PSRAM_DMA_CAPABLE, but only for a cache-line aligned address and length:
- * the cache maintenance around the transfer rounds outwards, so a partial line
- * at either end would write back or discard data the CPU still owns.
+ * Internal DRAM always works. GDMA also reads PSRAM on SoCs advertising
+ * SOC_PSRAM_DMA_CAPABLE (CONFIG_MSPI_ESP32_PSRAM_DMA), when the buffer starts on
+ * a data cache line: the GDMA driver writes the cache back over whole lines, so
+ * a line shared with a neighbour would be written back with the neighbour's
+ * data. The length needs no alignment, a partial last line is only read.
+ * A receive buffer in PSRAM always takes the bounce buffer, since discarding
+ * the cache over a partly covered line would lose the CPU's data.
  */
 static bool dma_reachable(const void *buf, size_t len)
 {
+	ARG_UNUSED(len);
+
 	/* The GDMA bursts in words. */
 	if (!IS_ALIGNED(buf, 4)) {
 		return false;
@@ -410,13 +416,13 @@ static bool dma_reachable(const void *buf, size_t len)
 	}
 
 #ifdef MSPI_ESP32_PSRAM_DMA
-	if (esp_ptr_dma_ext_capable(buf)) {
-		size_t line = esp_cache_get_line_size_by_addr(buf);
+	if (esp_ptr_external_ram(buf) && esp_ptr_dma_ext_capable(buf)) {
+		/* CONFIG_DCACHE_LINE_SIZE is 16 on the S3 while the cache can run 32 or 64. */
+		size_t line = MAX((size_t)esp_cache_get_line_size_by_addr(buf),
+				  (size_t)CONFIG_DCACHE_LINE_SIZE);
 
-		return line != 0 && IS_ALIGNED(buf, line) && IS_ALIGNED(len, line);
+		return IS_ALIGNED(buf, line);
 	}
-#else
-	ARG_UNUSED(len);
 #endif
 
 	return false;
@@ -501,6 +507,20 @@ static void stats_bounce(struct mspi_esp32_data *data, size_t bytes, uint32_t cy
 	k_spin_unlock(&data->stats_lock, key);
 }
 
+#ifdef MSPI_ESP32_PSRAM_DMA
+/* A DMA transaction that read straight from PSRAM, and whether the TX FIFO ran dry. */
+static void stats_psram(struct mspi_esp32_data *data, bool underrun)
+{
+	k_spinlock_key_t key = k_spin_lock(&data->stats_lock);
+
+	data->stats.psram_transactions++;
+	if (underrun) {
+		data->stats.psram_underruns++;
+	}
+	k_spin_unlock(&data->stats_lock, key);
+}
+#endif
+
 static void stats_ce_released(struct mspi_esp32_data *data)
 {
 	k_spinlock_key_t key = k_spin_lock(&data->stats_lock);
@@ -526,6 +546,30 @@ static uint8_t *bounce_buf_get(const struct device *dev)
 
 #ifdef SOC_GDMA_SUPPORTED
 
+#ifdef MSPI_ESP32_PSRAM_DMA
+/*
+ * Let the TX channel read PSRAM in blocks of up to 64 B instead of the reset
+ * value of 16 B, which the PSRAM controller serves much slower. The setting is
+ * the channel's out_ext_mem_bk_size; Zephyr's GDMA driver has no API for it, so
+ * this reaches into the GDMA's registers. A block must not cross the buffer's
+ * start alignment, hence the largest size the address allows. The channel reset
+ * of dma_reload()/dma_stop() only resets the FSM and FIFO and should keep the
+ * register, but it is written before every PSRAM transaction anyway.
+ */
+static void mspi_gdma_tx_psram_burst(const struct device *dev, const void *buf)
+{
+	const struct mspi_esp32_config *cfg = dev->config;
+	uint32_t burst = GDMA_LL_MAX_BURST_SIZE_PSRAM;
+
+	while (burst > 16 && !IS_ALIGNED(buf, burst)) {
+		burst >>= 1;
+	}
+
+	/* Zephyr numbers the channels of a pair 2n (RX) and 2n + 1 (TX). */
+	gdma_ll_tx_set_burst_size(GDMA_LL_GET_HW(0), cfg->dma_tx_ch / 2, burst);
+}
+#endif
+
 static int transfer_start_gdma(const struct device *dev, spi_hal_context_t *hal,
 			       spi_hal_trans_config_t *tc, size_t dma_buf_len)
 {
@@ -549,6 +593,12 @@ static int transfer_start_gdma(const struct device *dev, spi_hal_context_t *hal,
 			return res;
 		}
 	}
+
+#ifdef MSPI_ESP32_PSRAM_DMA
+	if (tc->send_buffer && esp_ptr_external_ram(tc->send_buffer)) {
+		mspi_gdma_tx_psram_burst(dev, tc->send_buffer);
+	}
+#endif
 
 	/* Enable RX DMA path first (same order as SPI driver) */
 	if (tc->rcv_buffer) {
@@ -851,7 +901,7 @@ static int IRAM_ATTR transfer_piece(const struct device *dev, const struct mspi_
 		/* Command and address only. */
 	} else if (tx && len <= sizeof(words)) {
 		memcpy(words, buf, len);
-		tc.send_buffer = (const uint8_t *)words;
+		tc.send_buffer = (uint8_t *)words;
 		tc.tx_bitlen = len * 8;
 		tc.rx_bitlen = len * 8;
 	} else if (!tx && !config->dma_enabled) {
@@ -930,6 +980,9 @@ static int IRAM_ATTR transfer_piece(const struct device *dev, const struct mspi_
 #ifdef CONFIG_MSPI_ESP32_STATS
 	uint32_t stats_start = stats_begin(data, use_dma, len);
 #endif
+#ifdef MSPI_ESP32_PSRAM_DMA
+	const bool from_psram = use_dma && tx && esp_ptr_external_ram(tc.send_buffer);
+#endif
 	if (use_dma) {
 		res = transfer_start_and_wait(dev, timeout_ms);
 	} else {
@@ -942,6 +995,25 @@ static int IRAM_ATTR transfer_piece(const struct device *dev, const struct mspi_
 		transfer_recover(dev);
 		return res;
 	}
+
+#ifdef MSPI_ESP32_PSRAM_DMA
+	if (from_psram) {
+		/*
+		 * The GDMA could not keep the TX FIFO full (PSRAM is shared with the
+		 * CPU), so the SPI sent stale bytes: the frame is corrupt.
+		 */
+		bool underrun = hal->hw->dma_int_raw.outfifo_empty_err != 0;
+
+#ifdef CONFIG_MSPI_ESP32_STATS
+		stats_psram(data, underrun);
+#endif
+		if (underrun) {
+			LOG_ERR("TX FIFO underrun reading %zu B from PSRAM", len);
+			transfer_recover(dev);
+			return -EIO;
+		}
+	}
+#endif
 
 	if (use_dma) {
 		transfer_post_gdma(dev, &tc, dma_buf_len);

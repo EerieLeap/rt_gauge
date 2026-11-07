@@ -294,6 +294,8 @@ void PrintStats(const shell* sh) {
         KV("mspi.gaps", s.gaps);
         KV("mspi.gap_us", CyclesToUs(s.gap_cycles));
         KV("mspi.gap_us_max", CyclesToUs(s.gap_cycles_max));
+        KV("mspi.psram_transactions", s.psram_transactions);
+        KV("mspi.psram_underruns", s.psram_underruns);
     }
     #endif
 }

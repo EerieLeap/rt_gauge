@@ -29,6 +29,8 @@ struct mspi_esp32_stats {
 	uint32_t gaps;                 /* transaction starts that followed a transaction which left CE asserted */
 	uint64_t gap_cycles;           /* end of the earlier one to the start of the next, summed */
 	uint32_t gap_cycles_max;
+	uint32_t psram_transactions;   /* DMA transactions read straight from PSRAM (CONFIG_MSPI_ESP32_PSRAM_DMA) */
+	uint32_t psram_underruns;      /* ... of which the TX FIFO ran dry; each failed its transfer with -EIO */
 };
 
 /** @brief Consistent snapshot of the counters. */
