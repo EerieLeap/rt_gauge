@@ -18,6 +18,9 @@
 #include "domain/ui_domain/lvgl_lock.h"
 #include "subsys/device_tree/dt_display.h"
 #include "utilities/memory/memory_resource_manager.h"
+#ifdef CONFIG_EERIE_LEAP_UI_BENCH
+    #include "utilities/dev_tools/ui_bench.h"
+#endif
 
 #include "ui_renderer_service.h"
 
@@ -386,6 +389,10 @@ int UiRendererService::Initialize() {
     lv_obj_t* screen = lv_screen_active();
     lv_obj_set_style_bg_color(screen, lv_color_black(), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, LV_PART_MAIN);
+
+#ifdef CONFIG_EERIE_LEAP_UI_BENCH
+    eerie_leap::utilities::dev_tools::UiBench::Install(lv_display_get_default(), PRIORITY);
+#endif
 
     return 0;
 }
