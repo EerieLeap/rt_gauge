@@ -11,10 +11,19 @@ config MSPI_ESP32
 if MSPI_ESP32
 
 config MSPI_DMA_MAX_BUFFER_SIZE
-	int "MSPI DMA buffer size (Byte)"
+	int "MSPI DMA bounce buffer size (Byte)"
 	default 4092
 	help
-	  Set the size of each buffer used by MSPI DMA.
+	  Size of the driver's bounce buffer, and nothing else. Data the DMA
+	  can reach (4-byte aligned internal RAM) is sent straight from the
+	  caller's buffer, in hardware transactions of up to 32,768 bytes
+	  (2^18 bits, or what the GDMA descriptor table holds if smaller). Data
+	  it cannot reach, such as PSRAM, is copied through the bounce buffer
+	  and sent in pieces of this many bytes (at most one hardware
+	  transaction). A packet longer than one transaction is split by the
+	  driver with CE held, and the command and address go out with the
+	  first piece only; callers need not chunk. Transfers of at most 64
+	  bytes go through the SPI data registers and never use the buffer.
 
 config MSPI_ESP32_INTERRUPT
 	bool "ESP32 MSPI interrupt mode"
@@ -31,16 +40,50 @@ config MSPI_ESP32_PSRAM_DMA
 	bool "Transfer directly out of PSRAM buffers"
 	depends on ESP_SPIRAM
 	help
-	  Hand cache-line aligned PSRAM buffers straight to the DMA instead of
-	  copying them into internal RAM first.
+	  Hand a PSRAM buffer to be sent straight to the DMA instead of copying
+	  it into internal RAM first. The buffer must start on a data cache line
+	  (the larger of CONFIG_DCACHE_LINE_SIZE and the SoC's cache line, 32 B
+	  by default on the S3) and on a word; its length is free. Such a packet
+	  goes out in transactions of up to 32 KB with CE held, and the TX channel
+	  reads PSRAM in blocks of up to 64 B (the largest block the buffer's
+	  alignment allows; 64 B-aligned buffers are the fast case, see
+	  CONFIG_LV_Z_VDB_ALIGN). Buffers that do not qualify, and every receive
+	  buffer, still use the bounce buffer.
 
 	  This removes the copy, but the DMA must then feed the transmit FIFO
 	  straight from PSRAM at the full bus rate. PSRAM bandwidth is shared
 	  with instruction fetch and any other external-RAM traffic, so when it
-	  cannot keep up the FIFO underruns and the transfer is silently
-	  corrupted. The intermediate copy otherwise decouples the two rates.
+	  cannot keep up the FIFO underruns. The SPI master then ends the
+	  transaction early (SPI_MST_REMPTY_ERR_END_EN, which resets to 1 and
+	  which neither this driver nor the HAL clears), so the panel receives a
+	  truncated piece. The driver checks the SPI's out-FIFO-empty error after
+	  every such transaction and fails the transfer with -EIO when it is set,
+	  without sending the rest of the packet; the CO5300 display driver
+	  re-sends the whole area. With CONFIG_MSPI_ESP32_STATS the counters
+	  psram_transactions and psram_underruns show how often.
 
 	  Only enable this if the bus clock is low enough that PSRAM can sustain
-	  it, and verify the resulting data.
+	  it, and check psram_underruns on the bench.
+
+config MSPI_ESP32_FAULT_INJECT_PERIOD
+	int "Bench only: fail every Nth direct-PSRAM DMA packet (0 = off)"
+	default 0
+	depends on MSPI_ESP32_PSRAM_DMA
+	help
+	  For bench builds only, never for a shipped build. With N > 0, the
+	  first piece of every Nth direct-PSRAM packet is treated as an underrun
+	  after it completes (the same log, transfer_recover() and -EIO as a
+	  real one), which exercises the recovery and the CO5300 driver's
+	  re-send. The re-send is a new packet, so it succeeds for N >= 2; N = 1
+	  fails every write, re-sends included. 0 turns the injection off and
+	  compiles it away. Injected faults are counted apart from real ones
+	  (injected_faults, with CONFIG_MSPI_ESP32_STATS).
+
+config MSPI_ESP32_STATS
+	bool "ESP32 MSPI bench counters"
+	depends on SHELL
+	help
+	  Bench counters read by the app's ui_bench shell command; adds a few
+	  cycles per transaction.
 
 endif # MSPI_ESP32

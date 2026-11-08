@@ -18,7 +18,15 @@ int co5300_te_gpio_register_callback(const struct device *dev, gpio_callback_han
 	const struct co5300_config *config = dev->config;
 	struct co5300_data *data = dev->data;
 
-	int ret = gpio_pin_interrupt_configure_dt(&config->te_gpio, GPIO_INT_EDGE_TO_ACTIVE);
+	int ret = 0;
+
+#ifdef CONFIG_ELCO5300_TE_SYNC
+	/* With TE sync the pin already runs on the scan-start edge; the user handler shares it. */
+	if (!data->te_sync)
+#endif
+	{
+		ret = gpio_pin_interrupt_configure_dt(&config->te_gpio, GPIO_INT_EDGE_TO_ACTIVE);
+	}
 	if (ret != 0) {
 		LOG_ERR("Error %d: failed to configure interrupt on %s pin %d\n",
 			ret, config->te_gpio.port->name, config->te_gpio.pin);
@@ -33,39 +41,246 @@ int co5300_te_gpio_register_callback(const struct device *dev, gpio_callback_han
 	return 0;
 }
 
+#ifdef CONFIG_ELCO5300_TE_SYNC
+/* ISR context: the TE line fell, a scan starts. */
+static void co5300_te_isr(const struct device *port, struct gpio_callback *cb, uint32_t pins) {
+	struct co5300_data *data = CONTAINER_OF(cb, struct co5300_data, te_sync_cb_data);
+
+	ARG_UNUSED(port);
+	ARG_UNUSED(pins);
+	data->te_seen = true;
+	k_sem_give(&data->te_sem);
+}
+
+/* Blocks until the TE edge that starts a scan, when this write starts a frame. Takes no lock.
+ * Runs on the flush thread, the only caller of co5300_write(). */
+static void co5300_te_wait(struct co5300_data *data, const struct display_buffer_descriptor *desc) {
+	bool frame_start = data->frame_start;
+
+	data->frame_start = !desc->frame_incomplete;
+	if (!data->te_sync || !frame_start || data->blanked) {
+		return;
+	}
+
+	if (data->te_seen) {
+		data->te_seen = false;
+		data->te_timeouts_in_row = 0;
+	} else if (data->te_timeouts_in_row >= CO5300_TE_MAX_TIMEOUTS) {
+		return; /* the line is dead; wait again only after an interrupt was seen */
+	}
+
+	uint32_t t0 = k_cycle_get_32();
+
+	k_sem_reset(&data->te_sem);
+	int ret = k_sem_take(&data->te_sem, K_MSEC(CO5300_TE_TIMEOUT_MS));
+
+	if (ret != 0) {
+		if (++data->te_timeouts_in_row == CO5300_TE_MAX_TIMEOUTS) {
+			LOG_WRN("No TE edge for %d frames, frames start without it until one comes",
+				CO5300_TE_MAX_TIMEOUTS);
+		}
+	} else {
+		data->te_timeouts_in_row = 0;
+	}
+#ifdef CONFIG_ELCO5300_STATS
+	uint32_t spent = k_cycle_get_32() - t0;
+	k_spinlock_key_t key = k_spin_lock(&data->stats_lock);
+
+	data->stats.te_waits++;
+	data->stats.te_wait_cycles += spent;
+	if (ret != 0) {
+		data->stats.te_timeouts++;
+	}
+	k_spin_unlock(&data->stats_lock, key);
+#else
+	ARG_UNUSED(t0);
+#endif
+}
+#endif /* CONFIG_ELCO5300_TE_SYNC */
+
 static void co5300_get_capabilities(const struct device *dev, struct display_capabilities *capabilities) {
 	const struct co5300_data *data = dev->data;
 	const struct co5300_config *config = dev->config;
 
 	memset(capabilities, 0, sizeof(struct display_capabilities));
 
-	capabilities->supported_pixel_formats = PIXEL_FORMAT_RGB_565 | PIXEL_FORMAT_RGB_888;
+	/* Exactly what co5300_set_pixel_format() accepts. */
+	capabilities->supported_pixel_formats = PIXEL_FORMAT_L_8 | PIXEL_FORMAT_RGB_565X | PIXEL_FORMAT_RGB_888;
 	capabilities->current_pixel_format = data->pixel_format;
 
-	if (data->orientation == DISPLAY_ORIENTATION_NORMAL ||
-		data->orientation == DISPLAY_ORIENTATION_ROTATED_180) {
-		capabilities->x_resolution = config->width;
-		capabilities->y_resolution = config->height;
-	} else {
-		capabilities->x_resolution = config->height;
-		capabilities->y_resolution = config->width;
-	}
+	/* Only 0 and 180 degrees exist, so the resolution is never swapped. */
+	capabilities->x_resolution = config->width;
+	capabilities->y_resolution = config->height;
 
 	capabilities->current_orientation = data->orientation;
 }
 
-static int co5300_transmit(const struct device *dev, enum mspi_io_mode io_mode, const uint8_t *cmd, const void *tx_data, size_t tx_len, bool hold_ce) {
-	struct co5300_config *config = dev->config;
+#ifdef CONFIG_ELCO5300_STATS
+void co5300_stats_get(const struct device *dev, struct co5300_stats *out) {
+	struct co5300_data *data = dev->data;
+	k_spinlock_key_t key = k_spin_lock(&data->stats_lock);
+
+	*out = data->stats;
+	k_spin_unlock(&data->stats_lock, key);
+}
+
+void co5300_stats_reset(const struct device *dev) {
+	struct co5300_data *data = dev->data;
+	k_spinlock_key_t key = k_spin_lock(&data->stats_lock);
+
+	memset(&data->stats, 0, sizeof(data->stats));
+	data->post_pending = false;
+	k_spin_unlock(&data->stats_lock, key);
+}
+
+void co5300_stats_mark_post(const struct device *dev, uint32_t cycles, bool lifted) {
+	struct co5300_data *data = dev->data;
+	k_spinlock_key_t key = k_spin_lock(&data->stats_lock);
+
+	data->post_stamp = cycles;
+	data->post_lifted = lifted;
+	data->post_pending = true;
+	k_spin_unlock(&data->stats_lock, key);
+}
+
+/* display_write() entry: counts the write and turns a pending post stamp into one sample. */
+static void co5300_stats_write_enter(struct co5300_data *data, const struct display_buffer_descriptor *desc, uint32_t now) {
+	k_spinlock_key_t key = k_spin_lock(&data->stats_lock);
+
+	data->stats.writes++;
+	if (!desc->frame_incomplete) {
+		data->stats.frames++;
+	}
+	if (data->post_pending) {
+		uint32_t delay = now - data->post_stamp;
+		uint32_t us = k_cyc_to_us_floor32(delay);
+
+		data->stats.post_samples++;
+		data->stats.post_cycles += delay;
+		if (delay > data->stats.post_cycles_max) {
+			data->stats.post_cycles_max = delay;
+		}
+		if (data->post_lifted) {
+			data->stats.post_lifted++;
+			if (delay > data->stats.post_cycles_max_lifted) {
+				data->stats.post_cycles_max_lifted = delay;
+			}
+		}
+		data->stats.post_hist[us < 10 ? 0 : us < 100 ? 1 : us < 1000 ? 2 : us < 10000 ? 3 : 4]++;
+		data->post_pending = false;
+	}
+	k_spin_unlock(&data->stats_lock, key);
+}
+
+static void co5300_stats_write_exit(struct co5300_data *data, uint32_t start) {
+	uint32_t spent = k_cycle_get_32() - start;
+	k_spinlock_key_t key = k_spin_lock(&data->stats_lock);
+
+	data->stats.write_cycles += spent;
+	if (spent > data->stats.write_cycles_max) {
+		data->stats.write_cycles_max = spent;
+	}
+	k_spin_unlock(&data->stats_lock, key);
+}
+
+/* One transaction; the caller holds data->lock. */
+static void co5300_stats_transaction(struct co5300_data *data, enum co5300_stat_kind kind, size_t tx_len) {
+	k_spinlock_key_t key = k_spin_lock(&data->stats_lock);
+
+	switch (kind) {
+	case CO5300_STAT_OTHER:
+		data->stats.other_cmds++;
+		break;
+	case CO5300_STAT_CASET:
+		data->stats.caset++;
+		break;
+	case CO5300_STAT_PASET:
+		data->stats.paset++;
+		break;
+	case CO5300_STAT_RAMWR:
+		data->stats.ramwr++;
+		break;
+	case CO5300_STAT_PIXEL:
+		data->stats.pixel_transfers++;
+		data->stats.pixel_bytes += tx_len;
+		break;
+	}
+	k_spin_unlock(&data->stats_lock, key);
+}
+
+/* A re-send of an area after a failed pixel write. */
+static void co5300_stats_count_retry(struct co5300_data *data) {
+	k_spinlock_key_t key = k_spin_lock(&data->stats_lock);
+
+	data->stats.write_retries++;
+	k_spin_unlock(&data->stats_lock, key);
+}
+
+static void co5300_stats_count_failure(struct co5300_data *data) {
+	k_spinlock_key_t key = k_spin_lock(&data->stats_lock);
+
+	data->stats.write_failures++;
+	k_spin_unlock(&data->stats_lock, key);
+}
+
+/* One data->lock acquisition by display_write(). */
+static void co5300_stats_lock_take(struct co5300_data *data) {
+	k_spinlock_key_t key = k_spin_lock(&data->stats_lock);
+
+	data->stats.lock_takes++;
+	k_spin_unlock(&data->stats_lock, key);
+}
+#endif /* CONFIG_ELCO5300_STATS */
+
+static int co5300_lock(struct co5300_data *data) {
+	return k_mutex_lock(&data->lock, K_FOREVER);
+}
+
+static void co5300_unlock(struct co5300_data *data) {
+	k_mutex_unlock(&data->lock);
+}
+
+/* The panel forgets nothing on its own, but the cached column range is only valid while the
+ * memory-write state it was sent for is: drop it after errors, blanking, reset, orientation and
+ * pixel format changes. */
+static void co5300_forget_window(struct co5300_data *data) {
+	data->caset_valid = false;
+}
+
+/* Switches the bus IO mode only when it changes. The caller holds data->lock. */
+static int co5300_set_io_mode(const struct device *dev, enum mspi_io_mode io_mode) {
+	const struct co5300_config *config = dev->config;
+	struct co5300_data *data = dev->data;
+
+	if (data->io_mode_valid && data->mspi_dev_config.io_mode == io_mode) {
+		return 0;
+	}
+
+	data->mspi_dev_config.io_mode = io_mode;
+	int ret = mspi_dev_config(config->mspi_bus, &config->dev_id,
+		MSPI_DEVICE_CONFIG_IO_MODE, &data->mspi_dev_config);
+	data->io_mode_valid = (ret == 0);
+
+	return ret;
+}
+
+/* One transaction. The caller holds data->lock for the whole operation. */
+static int co5300_transmit_kind(const struct device *dev, enum mspi_io_mode io_mode, const uint8_t *cmd, const void *tx_data, size_t tx_len, bool hold_ce, enum co5300_stat_kind kind) {
+	const struct co5300_config *config = dev->config;
 	struct co5300_data *data = dev->data;
 	int ret = 0;
 
-	ret = k_mutex_lock(&data->lock, K_FOREVER);
-	if (ret < 0)
-		return ret;
+#ifdef CONFIG_ELCO5300_STATS
+	co5300_stats_transaction(data, kind, tx_len);
+#else
+	ARG_UNUSED(kind);
+#endif
 
-	config->mspi_dev_config.io_mode = io_mode;
-	mspi_dev_config(config->mspi_bus, &config->dev_id,
-		MSPI_DEVICE_CONFIG_IO_MODE, &config->mspi_dev_config);
+	ret = co5300_set_io_mode(dev, io_mode);
+	if (ret < 0) {
+		LOG_ERR("Failed to set IO mode: %d", ret);
+		return ret;
+	}
 
 	struct mspi_xfer_packet packet = {
 		.dir = MSPI_TX,
@@ -107,16 +322,24 @@ static int co5300_transmit(const struct device *dev, enum mspi_io_mode io_mode, 
 	}
 
 	ret = mspi_transceive(config->mspi_bus, &config->dev_id, &xfer);
-	if (ret < 0) {
+	/* A pixel failure is logged once by co5300_write() (it retries); each line is printed
+	 * synchronously on the flush thread's small stack. */
+	if (ret < 0 && kind != CO5300_STAT_PIXEL) {
 		LOG_ERR("Failed to send qspi packet: %d", ret);
+		co5300_forget_window(data);
 	}
 
-	k_mutex_unlock(&data->lock);
 	return ret;
+}
+
+static int co5300_transmit(const struct device *dev, enum mspi_io_mode io_mode, const uint8_t *cmd, const void *tx_data, size_t tx_len, bool hold_ce) {
+	return co5300_transmit_kind(dev, io_mode, cmd, tx_data, tx_len, hold_ce, CO5300_STAT_OTHER);
 }
 
 static int co5300_reset(const struct device *dev) {
 	const struct co5300_config *config = dev->config;
+
+	co5300_forget_window(dev->data);
 
 	if (config->reset_gpio.port) {
 		gpio_pin_set_dt(&config->reset_gpio, 0);
@@ -133,42 +356,69 @@ static int co5300_reset(const struct device *dev) {
 }
 
 static int co5300_blanking_off(const struct device *dev) {
+	struct co5300_data *data = dev->data;
+	int ret = co5300_lock(data);
+
+	if (ret < 0) {
+		return ret;
+	}
+
 	LOG_DBG("Turning display blanking off");
+	co5300_forget_window(data);
+#ifdef CONFIG_ELCO5300_TE_SYNC
+	data->blanked = false;
+	data->frame_start = true;
+#endif
 
 	uint8_t cmd = CO5300_C_SLPOUT;
-	int ret = co5300_transmit(dev, MSPI_IO_MODE_SINGLE, &cmd, NULL, 0, false);
-	if (ret < 0)
-		return ret;
-	k_sleep(K_MSEC(CO5300_SLPOUT_DELAY));
-
-	cmd = CO5300_C_DISPON;
 	ret = co5300_transmit(dev, MSPI_IO_MODE_SINGLE, &cmd, NULL, 0, false);
-	if (ret < 0)
-		return ret;
-	k_sleep(K_MSEC(10));
+	if (ret == 0) {
+		k_sleep(K_MSEC(CO5300_SLPOUT_DELAY));
 
-	return 0;
+		cmd = CO5300_C_DISPON;
+		ret = co5300_transmit(dev, MSPI_IO_MODE_SINGLE, &cmd, NULL, 0, false);
+	}
+	if (ret == 0) {
+		k_sleep(K_MSEC(10));
+	}
+
+	co5300_unlock(data);
+	return ret;
 }
 
 static int co5300_blanking_on(const struct device *dev) {
+	struct co5300_data *data = dev->data;
+	int ret = co5300_lock(data);
+
+	if (ret < 0) {
+		return ret;
+	}
+
 	LOG_DBG("Turning display blanking on");
+	co5300_forget_window(data);
+#ifdef CONFIG_ELCO5300_TE_SYNC
+	data->blanked = true;
+	data->frame_start = true;
+#endif
 
 	uint8_t cmd = CO5300_C_DISPOFF;
-	int ret = co5300_transmit(dev, MSPI_IO_MODE_SINGLE, &cmd, NULL, 0, false);
-	if (ret < 0)
-		return ret;
-	k_sleep(K_MSEC(CO5300_SLPIN_DELAY));
-
-	cmd = CO5300_C_SLPIN;
 	ret = co5300_transmit(dev, MSPI_IO_MODE_SINGLE, &cmd, NULL, 0, false);
-	if (ret < 0)
-		return ret;
-	k_sleep(K_MSEC(CO5300_SLPIN_DELAY));
+	if (ret == 0) {
+		k_sleep(K_MSEC(CO5300_SLPIN_DELAY));
 
-	return 0;
+		cmd = CO5300_C_SLPIN;
+		ret = co5300_transmit(dev, MSPI_IO_MODE_SINGLE, &cmd, NULL, 0, false);
+	}
+	if (ret == 0) {
+		k_sleep(K_MSEC(CO5300_SLPIN_DELAY));
+	}
+
+	co5300_unlock(data);
+	return ret;
 }
 
-static int co5300_set_pixel_format(const struct device *dev, const enum display_pixel_format pixel_format) {
+/* The caller holds data->lock. */
+static int co5300_set_pixel_format_locked(const struct device *dev, const enum display_pixel_format pixel_format) {
 	struct co5300_data *data = dev->data;
 	uint8_t tx_data;
 	uint8_t bytes_per_pixel;
@@ -176,16 +426,19 @@ static int co5300_set_pixel_format(const struct device *dev, const enum display_
 	if (pixel_format == PIXEL_FORMAT_L_8) {
 		bytes_per_pixel = 1U;
 		tx_data = CO5300_PIXFMT_8BIT_GRAY256;
-	} else if (pixel_format == PIXEL_FORMAT_RGB_565) {
+	} else if (pixel_format == PIXEL_FORMAT_RGB_565X) {
+		/* The panel reads big-endian RGB565; the little-endian PIXEL_FORMAT_RGB_565 would show swapped colours. */
 		bytes_per_pixel = 2U;
 		tx_data = CO5300_PIXFMT_16BIT_RGB565;
 	} else if (pixel_format == PIXEL_FORMAT_RGB_888) {
 		bytes_per_pixel = 3U;
 		tx_data = CO5300_PIXFMT_24BIT_RGB888;
 	} else {
-		LOG_ERR("Unsupported pixel format");
+		LOG_ERR("Unsupported pixel format 0x%x (supported: L_8, RGB_565X, RGB_888)", (unsigned int)pixel_format);
 		return -ENOTSUP;
 	}
+
+	co5300_forget_window(data);
 
 	uint8_t cmd = CO5300_W_PIXFMT;
 	int ret = co5300_transmit(dev, MSPI_IO_MODE_SINGLE, &cmd, &tx_data, 1U, false);
@@ -201,7 +454,22 @@ static int co5300_set_pixel_format(const struct device *dev, const enum display_
 	return 0;
 }
 
-static int co5300_set_orientation(const struct device *dev, const enum display_orientation orientation) {
+static int co5300_set_pixel_format(const struct device *dev, const enum display_pixel_format pixel_format) {
+	struct co5300_data *data = dev->data;
+	int ret = co5300_lock(data);
+
+	if (ret < 0) {
+		return ret;
+	}
+
+	ret = co5300_set_pixel_format_locked(dev, pixel_format);
+	co5300_unlock(data);
+
+	return ret;
+}
+
+/* The caller holds data->lock. */
+static int co5300_set_orientation_locked(const struct device *dev, const enum display_orientation orientation) {
 	struct co5300_data *data = dev->data;
 	uint8_t tx_data = CO5300_MADCTL_RGB;
 
@@ -209,19 +477,18 @@ static int co5300_set_orientation(const struct device *dev, const enum display_o
 	case DISPLAY_ORIENTATION_NORMAL:
 		/* No additional flags needed */
 		break;
-	case DISPLAY_ORIENTATION_ROTATED_90:
-		tx_data |= CO5300_MADCTL_X_AXIS_FLIP;
-		break;
 	case DISPLAY_ORIENTATION_ROTATED_180:
-		tx_data |= CO5300_MADCTL_X_AXIS_FLIP | CO5300_MADCTL_Y_AXIS_FLIP;
-		break;
-	case DISPLAY_ORIENTATION_ROTATED_270:
-		tx_data |= CO5300_MADCTL_Y_AXIS_FLIP;
+		/* co5300_set_window() adds the same offsets as at normal. A panel mirrored over the
+		 * controller's 480 columns but 466 wide may need another x-offset here (unverified). */
+		tx_data |= CO5300_MADCTL_MX | CO5300_MADCTL_MY;
 		break;
 	default:
+		/* The controller has no row/column exchange, so 90 and 270 do not exist. */
 		LOG_ERR("Unsupported orientation: %d", orientation);
 		return -ENOTSUP;
 	}
+
+	co5300_forget_window(data);
 
 	uint8_t cmd = CO5300_W_MADCTL;
 	int ret = co5300_transmit(dev, MSPI_IO_MODE_SINGLE, &cmd, &tx_data, 1U, false);
@@ -233,100 +500,164 @@ static int co5300_set_orientation(const struct device *dev, const enum display_o
 
 	LOG_DBG("Orientation set to %d", orientation);
 
+	return 0;
+}
+
+static int co5300_set_orientation(const struct device *dev, const enum display_orientation orientation) {
+	struct co5300_data *data = dev->data;
+	int ret = co5300_lock(data);
+
+	if (ret < 0) {
+		return ret;
+	}
+
+	ret = co5300_set_orientation_locked(dev, orientation);
+	co5300_unlock(data);
+
 	return ret;
 }
 
 static int co5300_set_brightness(const struct device *dev, const uint8_t brightness) {
+	struct co5300_data *data = dev->data;
+	int ret = co5300_lock(data);
+
+	if (ret < 0) {
+		return ret;
+	}
+
 	uint8_t cmd = CO5300_W_WDBRIGHTNESSVALNOR;
-	int ret = co5300_transmit(dev, MSPI_IO_MODE_SINGLE, &cmd, &brightness, 1U, false);
+	ret = co5300_transmit(dev, MSPI_IO_MODE_SINGLE, &cmd, &brightness, 1U, false);
+	co5300_unlock(data);
 
 	return ret;
 }
 
+/* Sends CASET when the column range changed and PASET always: the datasheet allows a memory write
+ * only after CASET, RASET or MADCTL. The caller holds data->lock. */
 static int co5300_set_window(const struct device *dev, uint16_t x, uint16_t y, uint16_t width, uint16_t height) {
-    const struct co5300_config *config = dev->config;
+	const struct co5300_config *config = dev->config;
+	struct co5300_data *data = dev->data;
 
-	struct display_capabilities capabilities;
-	co5300_get_capabilities(dev, &capabilities);
-	if (x > capabilities.x_resolution || y > capabilities.y_resolution) {
+	if (x > config->width || y > config->height) {
 		return -EINVAL;
 	}
 
 	uint16_t tx_data[2];
 	int ret = 0;
 
-    uint16_t x_normalized = x + config->x_offset;
-	tx_data[0] = sys_cpu_to_be16(x_normalized);
-	tx_data[1] = sys_cpu_to_be16(x_normalized + width - 1U);
+	uint16_t x_normalized = x + config->x_offset;
+	uint16_t x_start = sys_cpu_to_be16(x_normalized);
+	uint16_t x_end = sys_cpu_to_be16(x_normalized + width - 1U);
 
-	uint8_t cmd = CO5300_W_CASET;
-	ret = co5300_transmit(dev, MSPI_IO_MODE_SINGLE, &cmd, tx_data, 4U, false);
-	if (ret < 0) {
-		return ret;
+	if (!data->caset_valid || data->caset_start != x_start || data->caset_end != x_end) {
+		tx_data[0] = x_start;
+		tx_data[1] = x_end;
+
+		uint8_t cmd = CO5300_W_CASET;
+		ret = co5300_transmit_kind(dev, MSPI_IO_MODE_SINGLE, &cmd, tx_data, 4U, false, CO5300_STAT_CASET);
+		if (ret < 0) {
+			return ret;
+		}
+
+		data->caset_start = x_start;
+		data->caset_end = x_end;
+		data->caset_valid = true;
 	}
 
-    uint16_t y_normalized = y + config->y_offset;
+	uint16_t y_normalized = y + config->y_offset;
 	tx_data[0] = sys_cpu_to_be16(y_normalized);
 	tx_data[1] = sys_cpu_to_be16(y_normalized + height - 1U);
 
-	cmd = CO5300_W_PASET;
-	ret = co5300_transmit(dev, MSPI_IO_MODE_SINGLE, &cmd, tx_data, 4U, false);
+	uint8_t cmd = CO5300_W_PASET;
+	ret = co5300_transmit_kind(dev, MSPI_IO_MODE_SINGLE, &cmd, tx_data, 4U, false, CO5300_STAT_PASET);
 
 	return ret;
 }
 
-static int co5300_write(const struct device *dev, const uint16_t x, const uint16_t y,
+/* The caller holds data->lock. The quad packet's 0x32 / 0x002C00 header is the memory
+ * write command, so there is no separate RAMWR. */
+static int co5300_write_locked(const struct device *dev, const uint16_t x, const uint16_t y,
 	const struct display_buffer_descriptor *desc, const void *buf) {
 
-	const struct co5300_config *config = dev->config;
 	const struct co5300_data *data = dev->data;
 	int ret = 0;
-
-	if(desc->width == 0U || desc->height == 0U) {
-		return -EINVAL;
-	}
 
 	ret = co5300_set_window(dev, x, y, desc->width, desc->height);
 	if (ret < 0) {
 		return ret;
 	}
 
-	uint8_t cmd = CO5300_W_RAMWR;
-	ret = co5300_transmit(dev, MSPI_IO_MODE_SINGLE, &cmd, NULL, 0, false);
+	/* One quad packet for the whole area; the MSPI driver splits it into hardware transactions. */
+	uint8_t cmd = CO5300_C_QUAD_1_1_4;
+	size_t total_len = (size_t)desc->height * desc->width * data->bytes_per_pixel;
+
+	ret = co5300_transmit_kind(dev, MSPI_IO_MODE_QUAD_1_1_4, &cmd, buf, total_len, false, CO5300_STAT_PIXEL);
+	return ret;
+}
+
+/* Extra attempts after a pixel write fails with -EIO (PSRAM underrun) or -ETIMEDOUT. The MSPI
+ * driver stops the packet there and LVGL never redraws the area (partial mode), so the panel
+ * would keep a truncated piece. */
+#define CO5300_WRITE_RETRIES 2
+
+static int co5300_write(const struct device *dev, const uint16_t x, const uint16_t y,
+	const struct display_buffer_descriptor *desc, const void *buf) {
+	struct co5300_data *data = dev->data;
+	int ret;
+
+	if (desc->width == 0U || desc->height == 0U) {
+		return -EINVAL;
+	}
+
+#ifdef CONFIG_ELCO5300_STATS
+	uint32_t start = k_cycle_get_32();
+
+	co5300_stats_write_enter(data, desc, start);
+#endif
+
+#ifdef CONFIG_ELCO5300_TE_SYNC
+	co5300_te_wait(data, desc);
+#endif
+
+	ret = co5300_lock(data);
 	if (ret < 0) {
 		return ret;
 	}
+#ifdef CONFIG_ELCO5300_STATS
+	co5300_stats_lock_take(data);
+#endif
 
-	const uint8_t *tx_data = (const uint8_t *)buf;
-	int total_len = desc->height * desc->width * data->bytes_per_pixel;
-	int remaining = total_len;
-	bool first_send = true;
-	bool is_last_send = false;
-
-	while (remaining > 0) {
-		int chunk_size = 0;
-		if (remaining <= config->max_buf_size) {
-			is_last_send = true;
-			chunk_size = remaining;
-		} else {
-			chunk_size = config->max_buf_size;
-		}
-
-		cmd = CO5300_C_QUAD_1_1_4;
-		ret = co5300_transmit(dev, MSPI_IO_MODE_QUAD_1_1_4, first_send ? &cmd : NULL, tx_data, chunk_size, !is_last_send);
-		if (ret < 0) {
-			LOG_ERR("Failed to send pixel data chunk: %d", ret);
-			return ret;
-		}
-
-		tx_data += chunk_size;
-		remaining -= chunk_size;
-		first_send = false;
+	/* The buffer stays valid until we return, so the whole area (window and packet) can be re-sent. */
+	ret = co5300_write_locked(dev, x, y, desc, buf);
+	for (int attempt = 0; (ret == -EIO || ret == -ETIMEDOUT) && attempt < CO5300_WRITE_RETRIES; attempt++) {
+		LOG_WRN("Pixel write failed (%d), re-sending the area (%d/%d)", ret, attempt + 1,
+			CO5300_WRITE_RETRIES);
+		co5300_forget_window(data);
+#ifdef CONFIG_ELCO5300_STATS
+		co5300_stats_count_retry(data);
+#endif
+		ret = co5300_write_locked(dev, x, y, desc, buf);
 	}
+	if (ret < 0) {
+		co5300_forget_window(data);
+		if (ret == -EIO || ret == -ETIMEDOUT) {
+			LOG_ERR("Pixel write failed on every attempt (%d): the area is left incomplete", ret);
+#ifdef CONFIG_ELCO5300_STATS
+			co5300_stats_count_failure(data);
+#endif
+		}
+	}
+
+	co5300_unlock(data);
+
+#ifdef CONFIG_ELCO5300_STATS
+	co5300_stats_write_exit(data, start);
+#endif
 
 	return ret;
 }
 
+/* The caller holds data->lock. */
 static int co5300_configure_display(const struct device *dev) {
 	const struct co5300_config *config = dev->config;
 	int ret = 0;
@@ -340,7 +671,8 @@ static int co5300_configure_display(const struct device *dev) {
 
 	// Tearing effect on
 	cmd = CO5300_WC_TEARON;
-	ret = co5300_transmit(dev, MSPI_IO_MODE_SINGLE, &cmd, NULL, 0, false);
+	uint8_t tear_mode = 0x00; // M = 0: V-blanking information only, high in the porch, low while scanning
+	ret = co5300_transmit(dev, MSPI_IO_MODE_SINGLE, &cmd, &tear_mode, 1, false);
 	if (ret < 0)
 		return ret;
 
@@ -351,7 +683,7 @@ static int co5300_configure_display(const struct device *dev) {
 	if (ret < 0)
 		return ret;
 
-	ret = co5300_set_pixel_format(dev, config->pixel_format);
+	ret = co5300_set_pixel_format_locked(dev, config->pixel_format);
 	if (ret < 0)
 		return ret;
 
@@ -383,7 +715,7 @@ static int co5300_configure_display(const struct device *dev) {
 	if (ret < 0)
 		return ret;
 
-	ret = co5300_set_orientation(dev, config->orientation);
+	ret = co5300_set_orientation_locked(dev, config->orientation);
 	if (ret < 0)
 		return ret;
 
@@ -402,19 +734,21 @@ static int co5300_init(const struct device *dev) {
 		return -ENODEV;
 	}
 
+	k_mutex_init(&data->lock);
+
 	ret = mspi_dev_config(config->mspi_bus, &config->dev_id,
 		MSPI_DEVICE_CONFIG_IO_MODE |
 		MSPI_DEVICE_CONFIG_CPP |
 		MSPI_DEVICE_CONFIG_CE_NUM |
 		MSPI_DEVICE_CONFIG_CE_POL |
 		MSPI_DEVICE_CONFIG_FREQUENCY,
-		&config->mspi_dev_config);
+		&data->mspi_dev_config);
 	if (ret < 0) {
 		LOG_ERR("Failed to configure device: %d", ret);
 		return ret;
 	}
-
-	k_mutex_init(&data->lock);
+	data->io_mode_valid = true;
+	co5300_forget_window(data);
 
 	if (config->te_gpio.port) {
 		ret = gpio_pin_configure_dt(&config->te_gpio, GPIO_INPUT);
@@ -422,6 +756,22 @@ static int co5300_init(const struct device *dev) {
 			LOG_ERR("Failed to configure TE GPIO (%d)", ret);
 			return ret;
 		}
+#ifdef CONFIG_ELCO5300_TE_SYNC
+		/* TE mode 1 (M = 0): high in the V-porch, low while the panel scans; the scan starts on the
+		 * falling edge, which is the inactive edge of the active-high te-gpios. */
+		k_sem_init(&data->te_sem, 0, 1);
+		data->frame_start = true;
+		gpio_init_callback(&data->te_sync_cb_data, co5300_te_isr, BIT(config->te_gpio.pin));
+		ret = gpio_add_callback(config->te_gpio.port, &data->te_sync_cb_data);
+		if (ret == 0) {
+			ret = gpio_pin_interrupt_configure_dt(&config->te_gpio, GPIO_INT_EDGE_TO_INACTIVE);
+		}
+		if (ret < 0) {
+			LOG_ERR("Failed to set up TE sync (%d)", ret);
+			return ret;
+		}
+		data->te_sync = true;
+#endif
 	}
 
 	ret = gpio_pin_configure_dt(&config->reset_gpio, GPIO_OUTPUT_INACTIVE);
@@ -430,15 +780,22 @@ static int co5300_init(const struct device *dev) {
 		return ret;
 	}
 
+	ret = co5300_lock(data);
+	if (ret < 0) {
+		return ret;
+	}
+
 	ret = co5300_reset(dev);
 	if (ret < 0) {
 		LOG_ERR("Failed to reset display: %d", ret);
+		co5300_unlock(data);
 		return ret;
 	}
 
 	data->configured = true;
 
 	ret = co5300_configure_display(dev);
+	co5300_unlock(data);
 	if (ret < 0) {
 		LOG_ERR("Failed to configure display: %d", ret);
 		return ret;
@@ -471,15 +828,11 @@ static DEVICE_API(display, co5300_api) = {
         .x_offset = DT_INST_PROP(inst, x_offset),                       \
 		.y_offset = DT_INST_PROP(inst, y_offset),                       \
 		.pixel_format = DT_INST_PROP(inst, pixel_format),               \
-		.write_only = DT_INST_PROP(inst, write_only),                   \
 		.orientation = DT_INST_ENUM_IDX(inst, orientation),             \
-		.display_invert = DT_INST_PROP(inst, display_invert),           \
-		.color_invert = DT_INST_PROP(inst, color_invert),               \
-		.sram_size = DT_INST_PROP(inst, sram_size),          			\
-		.max_buf_size = DT_INST_PROP(inst, max_buf_size),				\
-		.mspi_dev_config = MSPI_DEVICE_CONFIG_DT_INST(inst),			\
+		};                                                                  \
+	static struct co5300_data co5300_data_##inst = {                    \
+		.mspi_dev_config = MSPI_DEVICE_CONFIG_DT_INST(inst),            \
 	};                                                                  \
-	static struct co5300_data co5300_data_##inst;                       \
                                                                         \
 	DEVICE_DT_INST_DEFINE(inst, &co5300_init, NULL,                     \
 		&co5300_data_##inst,                                            \

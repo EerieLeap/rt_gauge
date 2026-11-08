@@ -300,7 +300,9 @@ void UiController::RegisterAssets() {
             .store = images_store_,
             .extensions = IMAGE_EXTENSIONS,
             .access = ACCESS,
-            .max_size = CONFIG_EERIE_LEAP_UI_IMAGE_MAX_SIZE }
+            .max_size = CONFIG_EERIE_LEAP_UI_IMAGE_MAX_SIZE,
+            // The raw .bin files carry no header: their pixels are in the firmware's colour format.
+            .pixel_format = static_cast<uint32_t>(LV_COLOR_FORMAT_NATIVE_WITH_ALPHA) }
     );
     if(!images_registered_)
         LOG_ERR("Failed to register the image assets, the registry has them already.");

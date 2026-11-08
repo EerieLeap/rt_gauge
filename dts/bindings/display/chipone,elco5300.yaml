@@ -18,15 +18,6 @@ properties:
     description: |
       Reset GPIO pin. Set high to reset the display
 
-  write-only:
-    type: boolean
-    description: |
-      Only writes to display controller, do not perform reads.
-      If all controllers are write-only, read functions will be
-      optimized out for size.
-      It can also be used as an alternative to half duplex when
-      only one data line is connected.
-
   orientation:
     type: string
     default: "normal"
@@ -35,7 +26,7 @@ properties:
       - "90"
       - "180"
       - "270"
-    description: Display orientation (CW) in degrees.
+    description: Display orientation (CW) in degrees. Only "normal" and "180" are supported by the driver. At 180 the x-offset and y-offset are applied unchanged; a panel mirrored over 480 columns (466 wide) may need another x-offset there (unverified).
 
   x-offset:
     type: int
@@ -46,27 +37,3 @@ properties:
     type: int
     default: 0
     description: The row offset in pixels of the display
-
-  display-invert:
-    type: boolean
-    description: |
-      Display inversion mode. Every bit is inverted from the frame memory to
-      the display.
-
-  color-invert:
-    type: boolean
-    description: |
-      Enable color inversion.
-
-  sram-size:
-    type: int
-    default: 230400
-    description: |
-      Total SRAM size in bytes. CO5300 has 230.4KB (230400 bytes) of internal SRAM.
-
-  max-buf-size:
-    type: int
-    default: 4092
-    description: |
-      Maximum number of pixels that are sent in one transfer.
-      Valid range is [8, 12276].

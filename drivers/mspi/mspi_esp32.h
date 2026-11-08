@@ -8,6 +8,10 @@
 #define ZEPHYR_DRIVERS_MSPI_ESP32_H_
 
 #include <zephyr/drivers/mspi.h>
+#ifdef CONFIG_MSPI_ESP32_STATS
+#include <zephyr/drivers/mspi/mspi_esp32.h>
+#include <zephyr/spinlock.h>
+#endif
 
 #include <zephyr/drivers/pinctrl.h>
 #include <hal/spi_hal.h>
@@ -79,12 +83,24 @@ struct mspi_esp32_data {
 
 	uint32_t clock_source_hz;
 	uint32_t clock_frequency;
+	int logged_real_freq;	/* last effective clock reported at LOG_INF */
 
 #ifdef SOC_GDMA_SUPPORTED
 	gdma_hal_context_t hal_gdma;
 #else
 	lldesc_t dma_desc_tx;
 	lldesc_t dma_desc_rx;
+#endif
+
+#if defined(CONFIG_MSPI_ESP32_FAULT_INJECT_PERIOD) && CONFIG_MSPI_ESP32_FAULT_INJECT_PERIOD > 0
+	uint32_t fault_inject_count;	/* direct-PSRAM packets seen, for the bench fault injection */
+#endif
+
+#ifdef CONFIG_MSPI_ESP32_STATS
+	struct mspi_esp32_stats stats;
+	struct k_spinlock stats_lock;
+	bool gap_pending;	/* a transaction ended with CE kept asserted */
+	uint32_t gap_stamp;	/* k_cycle_get_32() at its end */
 #endif
 };
 

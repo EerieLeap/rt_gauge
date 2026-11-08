@@ -18,6 +18,9 @@
 #include "domain/ui_domain/lvgl_lock.h"
 #include "subsys/device_tree/dt_display.h"
 #include "utilities/memory/memory_resource_manager.h"
+#ifdef CONFIG_EERIE_LEAP_UI_BENCH
+    #include "utilities/dev_tools/ui_bench.h"
+#endif
 
 #include "ui_renderer_service.h"
 
@@ -347,6 +350,8 @@ UiRendererService::UiRendererService() {
     thread_ = std::make_unique<Thread>(
         "ui_renderer_service", this, UiRendererService::STACK_SIZE, UiRendererService::PRIORITY, false
     );
+
+    k_sem_init(&wake_, 0, 1);
 }
 
 UiRendererService::~UiRendererService() {
@@ -387,10 +392,25 @@ int UiRendererService::Initialize() {
     lv_obj_set_style_bg_color(screen, lv_color_black(), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, LV_PART_MAIN);
 
+#ifdef CONFIG_EERIE_LEAP_UI_BENCH
+    eerie_leap::utilities::dev_tools::UiBench::Install(lv_display_get_default(), PRIORITY);
+#endif
+
     return 0;
 }
 
+void UiRendererService::ResumeCb(void* data) {
+    // Runs on whichever thread resumed a timer, normally under the LVGL lock.
+    k_sem_give(&static_cast<UiRendererService*>(data)->wake_);
+}
+
 void UiRendererService::Start() {
+    {
+        const ScopedLvglLock lvgl_guard;
+        lv_timer_handler_set_resume_cb(ResumeCb, this);
+        resume_registered_ = true;
+    }
+
     running_ = true;
     thread_->Start();
 
@@ -399,7 +419,16 @@ void UiRendererService::Start() {
 
 void UiRendererService::Stop() {
     running_ = false;
+    // A renderer parked with no timer due only wakes for this.
+    k_sem_give(&wake_);
     thread_->Join();
+
+    if(resume_registered_) {
+        // LVGL must not call into a destroyed service.
+        const ScopedLvglLock lvgl_guard;
+        lv_timer_handler_set_resume_cb(nullptr, nullptr);
+        resume_registered_ = false;
+    }
 }
 
 void UiRendererService::ThreadEntry() {
@@ -408,11 +437,20 @@ void UiRendererService::ThreadEntry() {
 }
 
 void UiRendererService::Render() {
+    // A resume during the handler leaves the semaphore given, so the take below returns at once and the loop runs
+    // again. A resume between the previous take and here is covered by the handler about to run.
+    k_sem_reset(&wake_);
+
+    // Stop() clears the flag before giving the semaphore: a give the reset above swallowed leaves the flag visible here.
+    if(!running_)
+        return;
+
     LvglLock::GetInstance().Lock();
     const uint32_t sleep_ms = lv_timer_handler();
     LvglLock::GetInstance().Unlock();
 
-    k_msleep(MIN(sleep_ms, INT32_MAX));
+    const k_timeout_t timeout = sleep_ms == LV_NO_TIMER_READY ? K_FOREVER : K_MSEC(MIN(sleep_ms, INT32_MAX));
+    k_sem_take(&wake_, timeout);
 }
 
 } // namespace eerie_leap::domain::ui_domain::services

@@ -58,7 +58,8 @@
 		dma-enabled;
 		dma-host = <0>; /* GDMA slot for SPI2 */
 		dmas = <&dma 0>, <&dma 1>;
-		dma-names = "tx", "rx";
+		/* The GDMA driver numbers channels pair * 2 + 0 for RX and + 1 for TX. */
+		dma-names = "rx", "tx";
 		duplex = "MSPI_HALF_DUPLEX";
 
 		clock-frequency = <80000000>;
@@ -72,8 +73,6 @@
 			compatible = "chipone,elco5300";
 			reg = <0>;
 			status = "okay";
-			/* Should be less than or equal to CONFIG_MSPI_DMA_MAX_BUFFER_SIZE */
-            max-buf-size = <10240>;
 
 			// MSPI device properties
 			mspi-max-frequency = <40000000>;
@@ -83,12 +82,11 @@
 			reset-gpios = <&gpio1 7 GPIO_ACTIVE_HIGH>; // Reset pin
 
 			// Display properties
-			// pixel-format = <PANEL_PIXEL_FORMAT_RGB_565>;
-            pixel-format = <PANEL_PIXEL_FORMAT_L_8>;
+			// Big-endian RGB565: LVGL renders RGB565_SWAPPED, no swap pass.
+			pixel-format = <PANEL_PIXEL_FORMAT_RGB_565X>;
 			width = <466>;
 			height = <466>;
             x-offset = <6>;
-			write-only;
 		};
 	};
 

@@ -8,6 +8,10 @@
 
 #include <zephyr/drivers/mspi.h>
 #include <zephyr/drivers/display.h>
+#ifdef CONFIG_ELCO5300_STATS
+#include <zephyr/drivers/display/display_co5300.h>
+#include <zephyr/spinlock.h>
+#endif
 
 #define SPI_WRITE_TIMEOUT 100
 
@@ -114,8 +118,8 @@
 #define CO5300_W_PAGESET 0xFE // Set Page
 
 // Flip
-#define CO5300_MADCTL_X_AXIS_FLIP 0x02 // Flip Horizontal
-#define CO5300_MADCTL_Y_AXIS_FLIP 0x05 // Flip Vertical
+#define CO5300_MADCTL_MY 0x80 // Row address order (vertical flip)
+#define CO5300_MADCTL_MX 0x40 // Column address order (horizontal flip)
 
 // Color Order
 #define CO5300_MADCTL_RGB 0x00                      // Red-Green-Blue pixel order
@@ -127,11 +131,13 @@
 #define CO5300_PIXFMT_18BIT_RGB666 0x66 // 18-bit RGB666 pixel format
 #define CO5300_PIXFMT_24BIT_RGB888 0x77 // 24-bit RGB888 pixel format
 
+#define CO5300_TE_TIMEOUT_MS 20  // a bit over one 60 Hz scan
+#define CO5300_TE_MAX_TIMEOUTS 5 // consecutive timeouts before frames stop waiting
+
 /* Driver configuration structure */
 struct co5300_config {
 	const struct device* mspi_bus;
 	struct mspi_dev_id dev_id;
-	struct mspi_dev_cfg mspi_dev_config;
 	const struct gpio_dt_spec te_gpio;
 	const struct gpio_dt_spec reset_gpio;
 	uint16_t height;
@@ -139,21 +145,45 @@ struct co5300_config {
     uint16_t x_offset;
     uint16_t y_offset;
 	uint8_t pixel_format;
-	bool write_only;
 	uint8_t orientation;
-	bool display_invert;
-	bool color_invert;
-	uint32_t sram_size;
-	int max_buf_size;
 };
 
 /* Display data struct */
 struct co5300_data {
-	struct k_mutex lock;
+	struct k_mutex lock; /* one operation (command sequence or whole write) at a time */
 	uint8_t bytes_per_pixel;
 	enum display_pixel_format pixel_format;
 	enum display_orientation orientation;
-	struct mspi_dev_cfg dev_cfg;
+	struct mspi_dev_cfg mspi_dev_config; /* current bus configuration, written only under lock */
+	bool io_mode_valid;                  /* mspi_dev_config.io_mode is what the bus runs */
+	bool caset_valid;                    /* caset_start/end are what the panel holds */
+	uint16_t caset_start;                /* big-endian, as sent */
+	uint16_t caset_end;
 	bool configured;
 	struct gpio_callback te_gpio_cb_data;
+#ifdef CONFIG_ELCO5300_TE_SYNC
+	struct gpio_callback te_sync_cb_data;
+	struct k_sem te_sem;            /* given by the TE edge that starts a scan, limit 1 */
+	bool te_sync;                   /* TE sync is armed (te-gpios present and set up) */
+	bool blanked;                   /* blanking_on() ran; no TE wait */
+	bool frame_start;               /* the next write starts a frame (flush thread only) */
+	volatile bool te_seen;          /* an edge came since the last time the wait looked */
+	uint8_t te_timeouts_in_row;     /* flush thread only */
+#endif
+#ifdef CONFIG_ELCO5300_STATS
+	struct co5300_stats stats;
+	struct k_spinlock stats_lock;
+	bool post_pending;	/* co5300_stats_mark_post() waits for the next write */
+	bool post_lifted;
+	uint32_t post_stamp;
+#endif
+};
+
+/* Transaction classes for the bench counters; OTHER is everything outside display_write(). RAMWR is no longer sent. */
+enum co5300_stat_kind {
+	CO5300_STAT_OTHER,
+	CO5300_STAT_CASET,
+	CO5300_STAT_PASET,
+	CO5300_STAT_RAMWR,
+	CO5300_STAT_PIXEL,
 };

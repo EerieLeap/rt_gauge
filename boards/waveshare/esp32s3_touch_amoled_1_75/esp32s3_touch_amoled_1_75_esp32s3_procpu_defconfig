@@ -10,7 +10,9 @@ CONFIG_CLOCK_CONTROL=y
 CONFIG_INPUT=y
 CONFIG_INPUT_CST92XX_INTERRUPT=n
 
-# The display's max-buf-size; also the size of the MSPI driver's bounce buffer.
+# Size of the MSPI driver's bounce buffer only: data the DMA cannot reach (PSRAM) is copied through it
+# and sent in pieces of this size. Internal-RAM data goes out as hardware transactions of up to
+# 32,768 bytes, and the driver splits longer packets itself, so this is not a limit on a packet.
 CONFIG_MSPI_DMA_MAX_BUFFER_SIZE=10240
 
 CONFIG_DISPLAY=y

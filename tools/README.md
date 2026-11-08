@@ -156,13 +156,28 @@ name, never by a path. `KIND` is a name or a number, as in the table; what a uni
 access, size cap and extensions) is what `assets kinds` prints, one line per kind:
 
 ```
-kind 0  images  dir ui_assets/images  access RWD  max 4194304 B  ext .bin .svg  avail yes
+kind 0  images  dir ui_assets/images  access RWD  max 4194304 B  ext .bin .svg  avail yes  fmt RGB565A8 (0x14)
 kind 4  logs  dir logs  access R-D  max none  ext .mf4  avail yes
 ```
 
 `access` shows R (download), W (upload) and D (delete) for what the kind allows and `-` for what it does
 not (`R-D`: logs can be downloaded and deleted, not uploaded), `max` is the largest upload (`none` for a
-kind that takes none) and `avail` says whether the volume is mounted now.
+kind that takes none) and `avail` says whether the volume is mounted now. `fmt` appears for a kind of raw pixel
+files, the LVGL colour format they must be in (`RGB565A8` 0x14 on a 16-bit build, `AL88` 0x15 on an 8-bit one; unknown
+numbers are printed in hex).
+
+A raw `.bin` image of a unit has no header, so its pixels follow the firmware's colour depth. To make one,
+convert the picture with `LVGLImage.py` (`pip install pypng lz4`) in the format `assets kinds` reports, then strip
+the 12-byte LVGL image header it writes first:
+
+```shell
+python3 tools/LVGLImage.py --ofmt BIN --cf RGB565A8 -o ./out logo.png   # 16-bit unit; --cf AL88 for an 8-bit one
+tail -c +13 ./out/logo.bin > logo_unit.bin
+python3 tools/smp_can_client.py --serial /dev/ttyACM0 assets put images logo.bin ./logo_unit.bin
+```
+
+When a unit's firmware changes its colour depth, the images it holds are in the old format: encode them again and
+upload them again.
 
 | Number | Name | Served by |
 | --- | --- | --- |

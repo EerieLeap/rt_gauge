@@ -1537,6 +1537,14 @@ class ArgumentTest(unittest.TestCase):
         self.assertTrue(client.is_offline(args))
         self.assertFalse(client.is_offline(self.parse("--serial", "/dev/null", "image", "list")))
 
+    def test_kinds_print_the_pixel_format_of_a_raw_image_kind(self) -> None:
+        entry = {"kind": 0, "name": "images", "dir": "ui_assets/images", "access": 7, "max": 4096,
+                 "ext": [".bin", ".svg"], "avail": True}
+        self.assertNotIn("fmt", client.format_kind(entry))
+        self.assertIn("avail yes  fmt RGB565A8 (0x14)", client.format_kind(entry | {"fmt": 0x14}))
+        self.assertIn("fmt AL88 (0x15)", client.format_kind(entry | {"fmt": 0x15, "free": 1, "used": 2}))
+        self.assertIn("fmt 0x2a", client.format_kind(entry | {"fmt": 0x2A}))
+
     def test_get_options(self) -> None:
         args = self.parse("--serial", "/dev/null", "assets", "get", "logs", "a.mf4")
         self.assertEqual((args.growing, args.follow, args.interval), (False, False, None))

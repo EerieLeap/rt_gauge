@@ -103,6 +103,14 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(eerie_leap_round_gauge)
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/lvgl_vector.cmake)
+
+# LVGL (with the ThorVG sources lvgl_vector.cmake adds to the same target) at -O2; the rest keeps the
+# board's -Og. An interface library places the flag after the global -Og, a plain target option would lose.
+if(TARGET modules__lvgl)
+    add_library(gauge_speed_opts INTERFACE)
+    target_compile_options(gauge_speed_opts INTERFACE -O2)
+    target_link_libraries(modules__lvgl PRIVATE gauge_speed_opts)
+endif()
 include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/builtin_fonts.cmake)
 
 # Enable compile_commands.json

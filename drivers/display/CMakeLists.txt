@@ -1,3 +1,8 @@
 zephyr_library()
 zephyr_library_sources_ifdef(CONFIG_ELCO5300 display_elco5300.c)
 zephyr_library_sources_ifdef(CONFIG_WAVESHARE_HX8394 display_waveshare_hx8394.c)
+
+# The CO5300 flush path at -O2 although the board builds at -Og (not the P4's HX8394 driver).
+if(CONFIG_ELCO5300)
+    set_source_files_properties(display_elco5300.c PROPERTIES COMPILE_OPTIONS -O2)
+endif()

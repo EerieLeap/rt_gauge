@@ -22,9 +22,15 @@ private:
 
     std::atomic<bool> running_ = false;
 
+    // Given whenever LVGL resumes a timer (an invalidation resumes the refresh timer), so the renderer sleeps on it
+    // instead of for the period lv_timer_handler() returned. Taken with a timeout of K_FOREVER when no timer is due.
+    k_sem wake_{};
+    bool resume_registered_ = false;
+
     void ThreadEntry() override;
 
-    static void Render();
+    void Render();
+    static void ResumeCb(void* data);
     static void DisplayInvalidateCb(lv_event_t* e);
 
 public:

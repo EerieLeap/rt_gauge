@@ -13,3 +13,7 @@ tests:
   functional.views.no_builtin_fonts:
     extra_configs:
       - CONFIG_EERIE_LEAP_UI_BUILTIN_FONTS=n
+  # LVGL renders big-endian RGB565, the S3 AMOLED's format.
+  functional.views.rgb565_swapped:
+    extra_configs:
+      - CONFIG_LV_COLOR_FORMAT_RGB565_SWAPPED=y

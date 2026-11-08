@@ -43,6 +43,14 @@ source "Kconfig.zephyr"
 		  The buffer a session allocates in external RAM when it begins, in bytes. 65536 is
 		  the largest UI configuration a unit stores.
 
+	config EERIE_LEAP_UI_BENCH
+		bool "UI bench probes"
+		default n
+		depends on SHELL
+		help
+		  Bench-only display probes and the ui_bench shell command (refresh and flush counters,
+		  driver statistics, full-screen invalidation, LVGL profiler). Never for a shipped build.
+
 	config EERIE_LEAP_UI_IMAGE_MAX_SIZE
 		int "Largest image upload"
 		default 4194304

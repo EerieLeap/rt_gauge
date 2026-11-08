@@ -48,7 +48,7 @@ checks, any image whose data begins like an SVG document.
 
 The document is parsed and rasterized when the icon renders. ThorVG draws
 it into an ARGB8888 buffer in external RAM (4 bytes a pixel), which is then converted from
-premultiplied to straight alpha, the only alpha the L8 and AL88 targets blend. A plain
+premultiplied to straight alpha, the only alpha the targets blend (the S3 renders big-endian RGB565, and the icon's ARGB8888 pixels blend into it). A plain
 `lv_image` shows the result, so a redraw costs what an image's does, and the parsed
 document is freed right after it is drawn. ThorVG's 8-bit blending leaves fully covered
 pixels at alpha 254.
