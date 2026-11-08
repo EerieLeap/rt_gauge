@@ -910,6 +910,16 @@ static int IRAM_ATTR transfer_piece(const struct device *dev, const struct mspi_
 		/* Without DMA a read is limited to the data registers; transfer() splits to fit. */
 		tc.rcv_buffer = buf;
 		tc.rx_bitlen = len * 8;
+
+		/*
+		 * Full duplex programs the data length from tx_bitlen (the S3's
+		 * spi_ll_set_mosi_bitlen() ignores 0), so clock out the zeroed words,
+		 * as the DMA read below does. Half duplex needs no TX phase.
+		 */
+		if (!hal_dev->half_duplex) {
+			tc.send_buffer = (uint8_t *)words;
+			tc.tx_bitlen = len * 8;
+		}
 	} else {
 		use_dma = true;
 		dma_buf_len = ROUND_UP(len, config->dma_buf_size_alignment);
