@@ -1000,7 +1000,10 @@ static int IRAM_ATTR transfer_piece(const struct device *dev, const struct mspi_
 	if (from_psram) {
 		/*
 		 * The GDMA could not keep the TX FIFO full (PSRAM is shared with the
-		 * CPU), so the SPI sent stale bytes: the frame is corrupt.
+		 * CPU). SPI_MST_REMPTY_ERR_END_EN resets to 1 and nothing here or in the
+		 * HAL clears it, so the SPI ended the transaction early: the panel got a
+		 * truncated piece. The rest of the packet is not sent; the display
+		 * driver re-sends the area.
 		 */
 		bool underrun = hal->hw->dma_int_raw.outfifo_empty_err != 0;
 

@@ -208,6 +208,21 @@ static void co5300_stats_transaction(struct co5300_data *data, enum co5300_stat_
 	k_spin_unlock(&data->stats_lock, key);
 }
 
+/* A re-send of an area after a failed pixel write. */
+static void co5300_stats_count_retry(struct co5300_data *data) {
+	k_spinlock_key_t key = k_spin_lock(&data->stats_lock);
+
+	data->stats.write_retries++;
+	k_spin_unlock(&data->stats_lock, key);
+}
+
+static void co5300_stats_count_failure(struct co5300_data *data) {
+	k_spinlock_key_t key = k_spin_lock(&data->stats_lock);
+
+	data->stats.write_failures++;
+	k_spin_unlock(&data->stats_lock, key);
+}
+
 /* One data->lock acquisition by display_write(). */
 static void co5300_stats_lock_take(struct co5300_data *data) {
 	k_spinlock_key_t key = k_spin_lock(&data->stats_lock);
@@ -307,7 +322,9 @@ static int co5300_transmit_kind(const struct device *dev, enum mspi_io_mode io_m
 	}
 
 	ret = mspi_transceive(config->mspi_bus, &config->dev_id, &xfer);
-	if (ret < 0) {
+	/* A pixel failure is logged once by co5300_write() (it retries); each line is printed
+	 * synchronously on the flush thread's small stack. */
+	if (ret < 0 && kind != CO5300_STAT_PIXEL) {
 		LOG_ERR("Failed to send qspi packet: %d", ret);
 		co5300_forget_window(data);
 	}
@@ -573,12 +590,13 @@ static int co5300_write_locked(const struct device *dev, const uint16_t x, const
 	size_t total_len = (size_t)desc->height * desc->width * data->bytes_per_pixel;
 
 	ret = co5300_transmit_kind(dev, MSPI_IO_MODE_QUAD_1_1_4, &cmd, buf, total_len, false, CO5300_STAT_PIXEL);
-	if (ret < 0) {
-		LOG_ERR("Failed to send pixel data: %d", ret);
-	}
-
 	return ret;
 }
+
+/* Extra attempts after a pixel write fails with -EIO (PSRAM underrun) or -ETIMEDOUT. The MSPI
+ * driver stops the packet there and LVGL never redraws the area (partial mode), so the panel
+ * would keep a truncated piece. */
+#define CO5300_WRITE_RETRIES 2
 
 static int co5300_write(const struct device *dev, const uint16_t x, const uint16_t y,
 	const struct display_buffer_descriptor *desc, const void *buf) {
@@ -607,9 +625,25 @@ static int co5300_write(const struct device *dev, const uint16_t x, const uint16
 	co5300_stats_lock_take(data);
 #endif
 
+	/* The buffer stays valid until we return, so the whole area (window and packet) can be re-sent. */
 	ret = co5300_write_locked(dev, x, y, desc, buf);
+	for (int attempt = 0; (ret == -EIO || ret == -ETIMEDOUT) && attempt < CO5300_WRITE_RETRIES; attempt++) {
+		LOG_WRN("Pixel write failed (%d), re-sending the area (%d/%d)", ret, attempt + 1,
+			CO5300_WRITE_RETRIES);
+		co5300_forget_window(data);
+#ifdef CONFIG_ELCO5300_STATS
+		co5300_stats_count_retry(data);
+#endif
+		ret = co5300_write_locked(dev, x, y, desc, buf);
+	}
 	if (ret < 0) {
 		co5300_forget_window(data);
+		if (ret == -EIO || ret == -ETIMEDOUT) {
+			LOG_ERR("Pixel write failed on every attempt (%d): the area is left incomplete", ret);
+#ifdef CONFIG_ELCO5300_STATS
+			co5300_stats_count_failure(data);
+#endif
+		}
 	}
 
 	co5300_unlock(data);

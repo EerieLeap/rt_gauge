@@ -276,6 +276,8 @@ void PrintStats(const shell* sh) {
         KV("co5300.te_waits", s.te_waits);
         KV("co5300.te_timeouts", s.te_timeouts);
         KV("co5300.te_wait_us", CyclesToUs(s.te_wait_cycles));
+        KV("co5300.write_retries", s.write_retries);
+        KV("co5300.write_failures", s.write_failures);
         KV("co5300.other_cmds", s.other_cmds);
     }
     #endif

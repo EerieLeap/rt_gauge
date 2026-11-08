@@ -53,11 +53,14 @@ config MSPI_ESP32_PSRAM_DMA
 	  This removes the copy, but the DMA must then feed the transmit FIFO
 	  straight from PSRAM at the full bus rate. PSRAM bandwidth is shared
 	  with instruction fetch and any other external-RAM traffic, so when it
-	  cannot keep up the FIFO underruns and the SPI would send stale bytes.
-	  The driver checks the SPI's out-FIFO-empty error after every such
-	  transaction and fails the transfer with -EIO when it is set (the frame
-	  is corrupt and has to be drawn again); with CONFIG_MSPI_ESP32_STATS
-	  the counters psram_transactions and psram_underruns show how often.
+	  cannot keep up the FIFO underruns. The SPI master then ends the
+	  transaction early (SPI_MST_REMPTY_ERR_END_EN, which resets to 1 and
+	  which neither this driver nor the HAL clears), so the panel receives a
+	  truncated piece. The driver checks the SPI's out-FIFO-empty error after
+	  every such transaction and fails the transfer with -EIO when it is set,
+	  without sending the rest of the packet; the CO5300 display driver
+	  re-sends the whole area. With CONFIG_MSPI_ESP32_STATS the counters
+	  psram_transactions and psram_underruns show how often.
 
 	  Only enable this if the bus clock is low enough that PSRAM can sustain
 	  it, and check psram_underruns on the bench.

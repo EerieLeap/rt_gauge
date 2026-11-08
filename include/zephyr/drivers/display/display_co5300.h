@@ -46,6 +46,8 @@ struct co5300_stats {
 	uint32_t te_waits;             /* frame starts that waited for the TE edge (CONFIG_ELCO5300_TE_SYNC) */
 	uint32_t te_timeouts;          /* ... that gave up after the timeout */
 	uint64_t te_wait_cycles;       /* time spent waiting, summed */
+	uint32_t write_retries;        /* display_write() re-sends after -EIO / -ETIMEDOUT; they also count in caset, paset, pixel_transfers and pixel_bytes */
+	uint32_t write_failures;       /* writes that failed on every attempt */
 	uint32_t other_cmds;           /* command transactions outside display_write() (brightness, blanking, ...) */
 };
 
