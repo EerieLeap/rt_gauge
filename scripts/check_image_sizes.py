@@ -14,15 +14,16 @@ It fails (exit status 1) when
   trailer (CONFIG_MCUBOOT_UPDATE_FOOTER_SIZE, which sysbuild takes from MCUboot's configuration);
   an image above that size is built but MCUboot cannot swap it;
 * an image with PSRAM (CONFIG_ESP_SPIRAM) places more in external RAM than CONFIG_ESP_SPIRAM_SIZE:
-  from the start of ext_dram_seg to _ext_ram_end in zephyr.map. That covers the copied text and
-  rodata, the static data (the display buffers, the LVGL pool) and the SPIRAM heap; the linker's
-  own overflow check does not count the copies;
+  from the start of ext_dram_seg to _ext_ram_end in the linker map (<kernel bin name>.map). That
+  covers the copied text and rodata, the static data (the display buffers, the LVGL pool) and the
+  SPIRAM heap; the linker's own overflow check does not count the copies. A missing map or symbol
+  fails the check;
 * slot0_partition and slot1_partition differ in size, or MCUboot and the application disagree on any
   partition (the two are built from different devicetrees: app/boards/partitions/ is meant to be
   the one table both include).
 
-Both margins are printed whether or not the check passes. The sizes come from the images' build
-directories (zephyr/zephyr.dts and zephyr/.config), nothing else is needed.
+The margins are printed whether or not the check passes. The sizes come from the images' build
+directories (zephyr/zephyr.dts, zephyr/.config and, for PSRAM, the linker map), nothing else is needed.
 """
 
 import argparse
@@ -65,16 +66,16 @@ def read_config(build_dir: Path) -> dict[str, str]:
     return config
 
 
-def read_psram_use(build_dir: Path) -> tuple[int, int] | None:
-    """(ext_dram_seg origin, _ext_ram_end) from the image's linker map, None when the map lacks either."""
-    map_file = build_dir / "zephyr" / "zephyr.map"
+def read_psram_use(map_file: Path) -> tuple[int, int]:
+    """(ext_dram_seg origin, _ext_ram_end) from the image's linker map; ValueError names what is missing."""
     if not map_file.is_file():
-        return None
+        raise ValueError(f"{map_file} not found: the linker map is missing")
     text = map_file.read_text(errors="replace")
     origin = EXT_DRAM_RE.search(text)
     end = EXT_RAM_END_RE.search(text)
-    if not origin or not end:
-        return None
+    missing = [name for name, found in (("ext_dram_seg", origin), ("_ext_ram_end", end)) if not found]
+    if missing:
+        raise ValueError(f"{map_file} has no {' or '.join(missing)} symbol")
     return int(origin.group(1), 0), int(end.group(1), 0)
 
 
@@ -175,14 +176,17 @@ def main() -> int:
         print("  PSRAM check skipped: the application has no CONFIG_ESP_SPIRAM")
     else:
         psram_size = int(app_config.get("CONFIG_ESP_SPIRAM_SIZE", "0"), 0)
-        psram = read_psram_use(app_dir)
-        if psram is None:
-            print("  PSRAM check skipped: zephyr.map has no ext_dram_seg or _ext_ram_end")
-        elif psram_size == 0:
+        map_file = app_dir / "zephyr" / f"{app_config.get('CONFIG_KERNEL_BIN_NAME', 'zephyr')}.map"
+        try:
+            psram = read_psram_use(map_file)
+        except ValueError as error:
+            failures.append(f"PSRAM check impossible: {error}")
+            psram = None
+        if psram is not None and psram_size == 0:
             failures.append("CONFIG_ESP_SPIRAM is set but CONFIG_ESP_SPIRAM_SIZE is 0 or missing")
-        else:
+        elif psram is not None:
             psram_used = psram[1] - psram[0]
-            print(line("PSRAM", "zephyr.map", psram_used, "CONFIG_ESP_SPIRAM_SIZE", psram_size))
+            print(line("PSRAM", map_file.name, psram_used, "CONFIG_ESP_SPIRAM_SIZE", psram_size))
             if psram_used > psram_size:
                 failures.append(
                     f"the static data in PSRAM ({fmt(psram_used)}, up to _ext_ram_end) exceeds "
