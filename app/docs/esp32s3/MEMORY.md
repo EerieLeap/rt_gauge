@@ -80,9 +80,11 @@ and it replaces the stock `partitions_0x0_amp_16M` table completely (no APP CPU 
 - **Speed**: 3-4× slower than internal DRAM
 - **Use for**: Large buffers, LVGL framebuffers, heap allocations
 - **Cannot use for**: stacks, time-critical data, or DMA in general. The one exception is the display: the GDMA reads
-  the frame buffers from PSRAM (`CONFIG_MSPI_ESP32_PSRAM_DMA`). The buffer starts on a cache line (64 B, `LV_Z_VDB_ALIGN`),
-  the driver writes the data cache back per transaction, the GDMA reads external memory in 64-byte blocks, and a
-  transaction that the PSRAM could not feed in time (underrun) fails with `-EIO`.
+  the frame buffers from PSRAM (`CONFIG_MSPI_ESP32_PSRAM_DMA`). The buffer starts on a cache line (64 B, the data
+  cache's line with `CONFIG_ESP32S3_DATA_CACHE_LINE_64B`, and `LV_Z_VDB_ALIGN`), the driver writes the data cache back
+  per transaction, the GDMA reads external memory in 64-byte blocks, and each transaction starts after ESP-IDF's EDMA
+  setup wait. A transaction that the PSRAM could not feed in time (underrun) ends early and fails with `-EIO`; the
+  CO5300 driver then sends the whole area again.
 - **Place data here**: `EXT_RAM_BSS_ATTR uint8_t big_buffer[1MB];`
 
 **Important**: SPIRAM shares virtual address space with drom0. Usable SPIRAM = Total - drom0_size (rounded to 64KB pages)
@@ -92,7 +94,8 @@ and it replaces the stock `partitions_0x0_amp_16M` table completely (no APP CPU 
   heap share PSRAM with the text/rodata copies the linker's overflow check does not count.
 - The margin is small: 48,816 B in the display bench build (8,339,792 of 8,388,608 B). `scripts/check_image_sizes.py`
   fails the build when the PSRAM runs out, so check its PSRAM line after adding code or buffers.
-- Keep `LV_DRAW_BUF_ALIGN` at its default: it rounds a frame up past the 434,312 B buffer (see `CLAUDE.md`, display path).
+- Keep `LV_DRAW_BUF_ALIGN` at its default: LVGL rounds draw-buffer sizes up to it, a 466x466 RGB565 frame (434,312 B)
+  is not a multiple of 64, so the full-screen `lv_draw_buf_reshape()` fails and a later draw writes through NULL.
 
 ### rtc_iram_seg (RTC Fast RAM)
 - **Size**: 8 KB
