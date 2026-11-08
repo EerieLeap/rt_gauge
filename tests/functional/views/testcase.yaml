@@ -2,6 +2,9 @@ common:
   tags:
     - functional
     - views
+  # Twister ends a run after this many seconds of wall-clock time (60 by default). On qemu_cortex_a9 the
+  # suite's ~22 s of emulated time took 59 s on a CI runner, whose 4 vCPUs Twister shares with other builds.
+  timeout: 300
   # Rendering suite: only platforms the application supports (see app/boards).
   platform_allow:
     - native_sim
