@@ -478,6 +478,8 @@ static int co5300_set_orientation_locked(const struct device *dev, const enum di
 		/* No additional flags needed */
 		break;
 	case DISPLAY_ORIENTATION_ROTATED_180:
+		/* co5300_set_window() adds the same offsets as at normal. A panel mirrored over the
+		 * controller's 480 columns but 466 wide may need another x-offset here (unverified). */
 		tx_data |= CO5300_MADCTL_MX | CO5300_MADCTL_MY;
 		break;
 	default:

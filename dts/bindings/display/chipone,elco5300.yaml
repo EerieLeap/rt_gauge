@@ -26,7 +26,7 @@ properties:
       - "90"
       - "180"
       - "270"
-    description: Display orientation (CW) in degrees. Only "normal" and "180" are supported by the driver.
+    description: Display orientation (CW) in degrees. Only "normal" and "180" are supported by the driver. At 180 the x-offset and y-offset are applied unchanged; a panel mirrored over 480 columns (466 wide) may need another x-offset there (unverified).
 
   x-offset:
     type: int
