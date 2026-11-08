@@ -38,6 +38,9 @@ if(RT_GAUGE_TEST_LVGL)
         list(APPEND EXTRA_DTC_OVERLAY_FILE "${CMAKE_CURRENT_LIST_DIR}/lvgl_display.overlay")
     endif()
     list(APPEND EXTRA_CONF_FILE "${CMAKE_CURRENT_LIST_DIR}/lvgl_headless.conf")
+    # ZEPHYR_LVGL_MODULE_DIR is not defined before find_package(Zephyr); same path as app/CMakeLists.txt.
+    include(${RT_GAUGE_DIR}/cmake/lvgl_patches.cmake)
+    rt_gauge_apply_lvgl_patches("$ENV{ZEPHYR_BASE}/../modules/lib/gui/lvgl")
 endif()
 
 set(CMAKE_CXX_STANDARD 23)
