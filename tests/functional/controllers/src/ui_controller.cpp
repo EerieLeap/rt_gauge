@@ -600,7 +600,7 @@ ZTEST(ui_controller, test_a_change_from_another_thread_is_drawn_without_a_forced
         lv_obj_invalidate(lv_screen_active());
     }
 
-    const int64_t deadline = k_uptime_get() + (5 * LV_DEF_REFR_PERIOD);
+    const int64_t deadline = k_uptime_get() + (int64_t{ 5 } * LV_DEF_REFR_PERIOD);
     while(refreshes.load() == before && k_uptime_get() < deadline)
         k_msleep(1);
 

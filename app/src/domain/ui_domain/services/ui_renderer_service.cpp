@@ -406,7 +406,7 @@ void UiRendererService::ResumeCb(void* data) {
 
 void UiRendererService::Start() {
     {
-        ScopedLvglLock lvgl_guard;
+        const ScopedLvglLock lvgl_guard;
         lv_timer_handler_set_resume_cb(ResumeCb, this);
         resume_registered_ = true;
     }
@@ -425,7 +425,7 @@ void UiRendererService::Stop() {
 
     if(resume_registered_) {
         // LVGL must not call into a destroyed service.
-        ScopedLvglLock lvgl_guard;
+        const ScopedLvglLock lvgl_guard;
         lv_timer_handler_set_resume_cb(nullptr, nullptr);
         resume_registered_ = false;
     }
