@@ -92,6 +92,10 @@ struct mspi_esp32_data {
 	lldesc_t dma_desc_rx;
 #endif
 
+#if defined(CONFIG_MSPI_ESP32_FAULT_INJECT_PERIOD) && CONFIG_MSPI_ESP32_FAULT_INJECT_PERIOD > 0
+	uint32_t fault_inject_count;	/* direct-PSRAM packets seen, for the bench fault injection */
+#endif
+
 #ifdef CONFIG_MSPI_ESP32_STATS
 	struct mspi_esp32_stats stats;
 	struct k_spinlock stats_lock;

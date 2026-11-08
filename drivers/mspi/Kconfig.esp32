@@ -65,6 +65,20 @@ config MSPI_ESP32_PSRAM_DMA
 	  Only enable this if the bus clock is low enough that PSRAM can sustain
 	  it, and check psram_underruns on the bench.
 
+config MSPI_ESP32_FAULT_INJECT_PERIOD
+	int "Bench only: fail every Nth direct-PSRAM DMA packet (0 = off)"
+	default 0
+	depends on MSPI_ESP32_PSRAM_DMA
+	help
+	  For bench builds only, never for a shipped build. With N > 0, the
+	  first piece of every Nth direct-PSRAM packet is treated as an underrun
+	  after it completes (the same log, transfer_recover() and -EIO as a
+	  real one), which exercises the recovery and the CO5300 driver's
+	  re-send. The re-send is a new packet, so it succeeds for N >= 2; N = 1
+	  fails every write, re-sends included. 0 turns the injection off and
+	  compiles it away. Injected faults are counted apart from real ones
+	  (injected_faults, with CONFIG_MSPI_ESP32_STATS).
+
 config MSPI_ESP32_STATS
 	bool "ESP32 MSPI bench counters"
 	depends on SHELL

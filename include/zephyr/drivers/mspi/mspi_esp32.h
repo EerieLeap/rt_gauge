@@ -30,7 +30,8 @@ struct mspi_esp32_stats {
 	uint64_t gap_cycles;           /* end of the earlier one to the start of the next, summed */
 	uint32_t gap_cycles_max;
 	uint32_t psram_transactions;   /* DMA transactions read straight from PSRAM (CONFIG_MSPI_ESP32_PSRAM_DMA) */
-	uint32_t psram_underruns;      /* ... of which the TX FIFO ran dry; each failed its transfer with -EIO */
+	uint32_t psram_underruns;      /* ... of which the TX FIFO ran dry (real ones only); each failed its transfer with -EIO */
+	uint32_t injected_faults;      /* pieces failed on purpose (CONFIG_MSPI_ESP32_FAULT_INJECT_PERIOD), not in psram_underruns */
 };
 
 /** @brief Consistent snapshot of the counters. */

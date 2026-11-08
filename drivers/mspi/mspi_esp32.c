@@ -509,12 +509,14 @@ static void stats_bounce(struct mspi_esp32_data *data, size_t bytes, uint32_t cy
 
 #ifdef MSPI_ESP32_PSRAM_DMA
 /* A DMA transaction that read straight from PSRAM, and whether the TX FIFO ran dry. */
-static void stats_psram(struct mspi_esp32_data *data, bool underrun)
+static void stats_psram(struct mspi_esp32_data *data, bool underrun, bool injected)
 {
 	k_spinlock_key_t key = k_spin_lock(&data->stats_lock);
 
 	data->stats.psram_transactions++;
-	if (underrun) {
+	if (injected) {
+		data->stats.injected_faults++;
+	} else if (underrun) {
 		data->stats.psram_underruns++;
 	}
 	k_spin_unlock(&data->stats_lock, key);
@@ -1006,9 +1008,21 @@ static int IRAM_ATTR transfer_piece(const struct device *dev, const struct mspi_
 		 * driver re-sends the area.
 		 */
 		bool underrun = hal->hw->dma_int_raw.outfifo_empty_err != 0;
+		bool injected = false;
 
+#if defined(CONFIG_MSPI_ESP32_FAULT_INJECT_PERIOD) && CONFIG_MSPI_ESP32_FAULT_INJECT_PERIOD > 0
+		/* Bench only: fail the first piece of every Nth packet as if it had underrun. A
+		 * re-send is a new packet, so it succeeds for N >= 2. */
+		if (off == 0 && ++data->fault_inject_count >= CONFIG_MSPI_ESP32_FAULT_INJECT_PERIOD) {
+			data->fault_inject_count = 0;
+			injected = !underrun;
+			underrun = true;
+		}
+#endif
 #ifdef CONFIG_MSPI_ESP32_STATS
-		stats_psram(data, underrun);
+		stats_psram(data, underrun, injected);
+#else
+		ARG_UNUSED(injected);
 #endif
 		if (underrun) {
 			LOG_ERR("TX FIFO underrun reading %zu B from PSRAM", len);
