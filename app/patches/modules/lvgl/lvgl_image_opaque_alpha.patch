@@ -45,18 +45,20 @@
      }
      else if(code == LV_EVENT_DRAW_MAIN) {
  
-@@ -881,7 +889,9 @@
-             draw_dsc.antialias = img->antialias;
+@@ -882,6 +890,12 @@
              draw_dsc.blend_mode = img->blend_mode;
              draw_dsc.bitmap_mask_src = img->bitmap_mask_src;
--            draw_dsc.src = img->src;
-+            /*An opaque RGB565A8 source is drawn through its RGB565 view, see `image_is_opaque`*/
+             draw_dsc.src = img->src;
++#if !(defined(LV_USE_PPA_IMG) && LV_USE_PPA_IMG)
++            /*An opaque RGB565A8 source is drawn through its RGB565 view, see `image_is_opaque`.
++             *Not with the ESP32-P4 PPA: it accepts an RGB565 source and reads it by DMA, but nothing
++             *writes the data cache back for an image source, so fresh pixels could be stale.*/
 +            if(img->cf == LV_COLOR_FORMAT_RGB565A8 && image_is_opaque(img)) draw_dsc.src = &img->opaque_dsc;
-+            else draw_dsc.src = img->src;
++#endif
  
              lv_area_set(&draw_dsc.image_area, obj->coords.x1,
                          obj->coords.y1,
-@@ -1044,6 +1054,109 @@
+@@ -1044,6 +1058,112 @@
      }
  }
  
@@ -144,6 +146,9 @@
 +    if(img->src == NULL || img->bitmap_mask_src != NULL) return false;
 +    if(lv_color_format_has_alpha(img->cf) && !image_is_opaque(img)) return false;
 +
++    /*The renderer makes the pixels of the color key transparent*/
++    if(lv_obj_get_style_image_colorkey_internal(obj, LV_PART_MAIN) != NULL) return false;
++
 +    if(lv_obj_get_style_image_opa_internal(obj, LV_PART_MAIN) != LV_OPA_COVER) return false;
 +    if(lv_obj_get_style_opa_internal(obj, LV_PART_MAIN) != LV_OPA_COVER) return false;
 +    if(img->blend_mode != LV_BLEND_MODE_NORMAL) return false;
@@ -166,7 +171,7 @@
  static void reset_image_attributes(lv_obj_t * obj)
  {
      LV_ASSERT(obj != NULL);
-@@ -1056,6 +1169,7 @@
+@@ -1056,6 +1176,7 @@
      img->w = 0;
      img->h = 0;
      img->cf = LV_COLOR_FORMAT_UNKNOWN;
