@@ -26,6 +26,7 @@
 #include <zephyr/logging/log.h>
 #include <soc.h>
 #include <esp_memory_utils.h>
+#include <esp_rom_sys.h>
 
 #ifdef SOC_GDMA_SUPPORTED
 #include <zephyr/drivers/dma.h>
@@ -989,11 +990,24 @@ static int IRAM_ATTR transfer_piece(const struct device *dev, const struct mspi_
 		spi_hal_enable_data_line(hal->hw, tc.send_buffer != NULL, tc.rcv_buffer != NULL);
 	}
 
-#ifdef CONFIG_MSPI_ESP32_STATS
-	uint32_t stats_start = stats_begin(data, use_dma, len);
-#endif
 #ifdef MSPI_ESP32_PSRAM_DMA
 	const bool from_psram = use_dma && tx && esp_ptr_external_ram(tc.send_buffer);
+
+	if (from_psram) {
+		/*
+		 * ESP-IDF's spi_master.c (spi_new_trans()) waits here, on chips without
+		 * SPI_LL_SUPPORT_FD_TX_WAIT_DMA (the S3), for the GDMA to pass the first
+		 * data from PSRAM to the SPI before the user start: "Delay here is
+		 * required for EDMA to pass data from PSRAM to GPSPI". Its
+		 * SPI_EDMA_SETUP_TIME_US(spi_speed) is spi_speed * 1 / 50000 /
+		 * CONFIG_SPIRAM_SPEED + 1 us, spi_speed in Hz and the PSRAM speed in MHz.
+		 */
+		esp_rom_delay_us((uint32_t)data->dev_config.timing_conf.real_freq / 50000U /
+					 CONFIG_SPIRAM_SPEED + 1U);
+	}
+#endif
+#ifdef CONFIG_MSPI_ESP32_STATS
+	uint32_t stats_start = stats_begin(data, use_dma, len);
 #endif
 	if (use_dma) {
 		res = transfer_start_and_wait(dev, timeout_ms);
