@@ -405,9 +405,6 @@ ZTEST(gauge_draw_sw, test_a_full_screen_image_refresh_leaves_the_corners_alone) 
     lv_display_delete(disp);
 }
 
-// A nearly opaque image is drawn through a layer of strips as wide as the screen (466x26, never the
-// display's height), blended by the same hook into the layer's buffer. Their corners must reach the frame.
-// This does not isolate the destination-buffer guard (case a and the canvas case do).
 // The clipped copy on the fallback path: the source starts 1 byte (odd address) or 2 bytes (other 4-byte
 // phase than the destination) off, so the row is copied by lv_memcpy and lv_draw_rgb565_swap.
 ZTEST(gauge_draw_sw, test_the_clipped_copy_is_exact_on_the_fallback_path) {
@@ -474,6 +471,9 @@ ZTEST(gauge_draw_sw, test_the_corners_are_skipped_in_both_buffers_of_a_double_bu
     lv_display_delete(disp);
 }
 
+// A nearly opaque image is drawn through a layer of strips as wide as the screen (466x26, never the
+// display's height), blended by the same hook into the layer's buffer. Their corners must reach the frame.
+// This does not isolate the destination-buffer guard (the direct-call case and the canvas case do).
 ZTEST(gauge_draw_sw, test_a_layered_full_width_image_keeps_its_corners) {
     views_test::EnsureTestDisplay();
     constexpr uint16_t RED = 0xF800;

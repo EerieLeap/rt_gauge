@@ -42,6 +42,11 @@ file(GLOB_RECURSE APP_SRC_VIEWS
 set(APP_SRC_UTILITIES ${APP_SRC_DIR}/utilities/memory/scoped_new_resource.cpp)
 
 file(GLOB_RECURSE TEST_SOURCES src/*.c src/*.cpp)
+# The blend hook's test compiles only where the hook does: the compile databases the lint step merges keep the first
+# entry of a file, and an entry from a build without the hook would hide the test's body from clang-tidy.
+if(NOT CONFIG_LV_DRAW_SW_ASM_CUSTOM)
+  list(FILTER TEST_SOURCES EXCLUDE REGEX "gauge_draw_sw\\.cpp$")
+endif()
 
 # Add all source files to the app target
 target_sources(app PRIVATE
