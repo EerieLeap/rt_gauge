@@ -77,7 +77,7 @@ static inline struct co5300_te_decision co5300_te_window_decide(const struct co5
 	    in->y0 > in->y1 || in->y1 >= in->panel_h || in->w_min_us > in->w_max_us) {
 		return out;
 	}
-	/* A stale edge (flash operations, a stopped scan): the age says nothing about the phase. */
+	/* A stale edge (a stopped scan, interrupts held off for long): the age says nothing about the phase. */
 	if ((uint64_t)in->age_us > (uint64_t)in->s_us + in->s_us / 10) {
 		return out;
 	}

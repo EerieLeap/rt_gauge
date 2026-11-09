@@ -54,5 +54,8 @@ config ELCO5300_STATS
 	depends on ELCO5300
 	depends on SHELL
 	help
-	  Bench counters read by the app's ui_bench shell command; adds a few
-	  cycles per transaction.
+	  Bench counters and controls for the app's ui_bench shell command:
+	  the write and TE counters, the per-write audit of the window rule,
+	  the TE interrupt and window switches and the scan line calibration
+	  (TE mode 3). Adds a few cycles per transaction and write; never for
+	  a shipped build.

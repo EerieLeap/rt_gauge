@@ -135,7 +135,7 @@ static void co5300_te_isr(const struct device *port, struct gpio_callback *cb, u
 #endif
 
 	if (te->have_level && te->level == level) {
-		/* Interrupts masked during flash or cache operations merge edges. */
+		/* Interrupts masked during a long cache maintenance operation merge edges. */
 #ifdef CONFIG_ELCO5300_STATS
 		te->coalesced++;
 #endif
