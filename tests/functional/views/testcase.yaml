@@ -23,3 +23,4 @@ tests:
       # The gauge's blend hook (lvgl_hooks/), which the S3 board turns on.
       - CONFIG_LV_DRAW_SW_ASM_CUSTOM=y
       - CONFIG_LV_DRAW_SW_ASM_CUSTOM_INCLUDE="lvgl_hooks/gauge_draw_sw.h"
+      - CONFIG_GAUGE_ROUND_PANEL_CLIP=y

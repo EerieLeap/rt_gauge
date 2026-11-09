@@ -537,8 +537,7 @@ void RunFormat(size_t index, const Target& target) {
         lv_draw_buf_t* background = &background_buf;
         const uint32_t stride = static_cast<uint32_t>(size) * target.px_size;
         zassert_equal(
-            lv_draw_buf_init(buf, size, size, target.cf, stride, canvas_pixels, sizeof(canvas_pixels)),
-            LV_RESULT_OK
+            lv_draw_buf_init(buf, size, size, target.cf, stride, canvas_pixels, sizeof(canvas_pixels)), LV_RESULT_OK
         );
         zassert_equal(
             lv_draw_buf_init(background, size, size, target.cf, stride, background_pixels, sizeof(background_pixels)),
