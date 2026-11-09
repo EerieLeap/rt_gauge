@@ -8,9 +8,9 @@
 
 #include <zephyr/drivers/mspi.h>
 #include <zephyr/drivers/display.h>
+#include <zephyr/spinlock.h>
 #ifdef CONFIG_ELCO5300_STATS
 #include <zephyr/drivers/display/display_co5300.h>
-#include <zephyr/spinlock.h>
 #endif
 
 #define SPI_WRITE_TIMEOUT 100
@@ -148,6 +148,50 @@ struct co5300_config {
 	uint8_t orientation;
 };
 
+#ifdef CONFIG_ELCO5300_TE_SYNC
+/* Intervals within this many percent of the estimate are accepted. */
+#define CO5300_TE_ACCEPT_PCT 3
+/* Consecutive agreeing intervals before the estimate counts as valid, and consecutive rejected
+ * ones after which it is dropped and seeded again. */
+#define CO5300_TE_SEED_COUNT 8
+#define CO5300_TE_REJECT_LIMIT 8
+
+/* The TE edge state. The ISR writes it and threads read it, always under lock: the 64-bit stamps
+ * are not atomic on Xtensa. */
+struct co5300_te {
+	struct k_spinlock lock;
+	bool have_level;      /* level is the previous sample's */
+	bool level;
+	bool have_fall;       /* fall_cycles is a falling edge since the interrupt was (re)armed */
+	bool have_rise;
+	uint32_t fall_seq;    /* falling edges seen, counts scan starts */
+	uint64_t fall_cycles; /* last falling edge (a scan starts) */
+	uint64_t rise_cycles; /* last rising edge (the porch starts) */
+	uint64_t s_cycles;    /* scan period estimate, EWMA of the falling-edge intervals */
+	bool s_valid;
+	uint8_t s_agree;      /* consecutive agreeing intervals while seeding */
+	uint8_t s_rejects;    /* consecutive rejected intervals */
+#ifdef CONFIG_ELCO5300_STATS
+	uint32_t falls;
+	uint32_t rises;
+	uint32_t coalesced;
+	uint32_t iv_count;
+	uint64_t iv_min;
+	uint64_t iv_max;
+	uint32_t tvdl_count;
+	uint64_t tvdl_sum;
+	uint64_t tvdl_max;
+	uint32_t tvdh_count;
+	uint64_t tvdh_sum;
+	uint64_t tvdh_max;
+	struct co5300_te_sample *cap_buf; /* the capture is armed while this is set */
+	size_t cap_count;
+	size_t cap_n;
+	struct k_sem cap_sem;
+#endif
+};
+#endif
+
 /* Display data struct */
 struct co5300_data {
 	struct k_mutex lock; /* one operation (command sequence or whole write) at a time */
@@ -162,7 +206,9 @@ struct co5300_data {
 	bool configured;
 	struct gpio_callback te_gpio_cb_data;
 #ifdef CONFIG_ELCO5300_TE_SYNC
+	const struct device *dev;       /* the ISR finds te-gpios through it */
 	struct gpio_callback te_sync_cb_data;
+	struct co5300_te te;            /* edge state shared by the ISR and threads, under te.lock */
 	struct k_sem te_sem;            /* given by the TE edge that starts a scan, limit 1 */
 	bool te_sync;                   /* TE sync is armed (te-gpios present and set up) */
 	bool blanked;                   /* blanking_on() ran; no TE wait */
