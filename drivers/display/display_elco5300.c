@@ -42,53 +42,64 @@ int co5300_te_gpio_register_callback(const struct device *dev, gpio_callback_han
 }
 
 #ifdef CONFIG_ELCO5300_TE_SYNC
-/* Feeds the scan period estimator with the interval that ended at a falling edge. Called under
- * te.lock. An interval counts only within CO5300_TE_ACCEPT_PCT of the estimate; the estimate is
- * valid after CO5300_TE_SEED_COUNT agreeing intervals in a row, and dropped after
- * CO5300_TE_REJECT_LIMIT rejected ones in a row. Rejected intervals never touch it. */
-static void co5300_te_feed(struct co5300_te *te, uint64_t interval) {
-	uint64_t tol = te->s_cycles / 100 * CO5300_TE_ACCEPT_PCT;
-	bool agrees = te->s_cycles != 0 && interval + tol >= te->s_cycles && interval <= te->s_cycles + tol;
+/* Feeds an interval estimator with one interval, called under te.lock. An interval counts only
+ * within CO5300_TE_ACCEPT_PCT of the estimate; the estimate is valid after CO5300_TE_SEED_COUNT
+ * agreeing intervals in a row, and dropped after CO5300_TE_REJECT_LIMIT rejected ones in a row.
+ * Rejected intervals never touch it. Returns true when the interval was accepted. */
+static bool co5300_est_feed(struct co5300_est *est, uint64_t interval) {
+	uint64_t tol = est->cycles / 100 * CO5300_TE_ACCEPT_PCT;
+	bool agrees = est->cycles != 0 && interval + tol >= est->cycles && interval <= est->cycles + tol;
 
-	if (!te->s_valid && !agrees) {
+	if (!est->valid && !agrees) {
 		/* Seeding: start over from this interval. */
-		te->s_cycles = interval;
-		te->s_agree = 1;
-		te->s_rejects = 0;
-		return;
+		est->cycles = interval;
+		est->agree = 1;
+		est->rejects = 0;
+		return false;
 	}
 
 	if (!agrees) {
-		if (++te->s_rejects >= CO5300_TE_REJECT_LIMIT) {
-			te->s_valid = false;
-			te->s_cycles = interval;
-			te->s_agree = 1;
-			te->s_rejects = 0;
+		if (++est->rejects >= CO5300_TE_REJECT_LIMIT) {
+			est->valid = false;
+			est->cycles = interval;
+			est->agree = 1;
+			est->rejects = 0;
 		}
-		return;
+		return false;
 	}
 
-	te->s_rejects = 0;
-	if (interval >= te->s_cycles) {
-		te->s_cycles += (interval - te->s_cycles) / 16;
+	est->rejects = 0;
+	if (interval >= est->cycles) {
+		est->cycles += (interval - est->cycles) / 16;
 	} else {
-		te->s_cycles -= (te->s_cycles - interval) / 16;
+		est->cycles -= (est->cycles - interval) / 16;
 	}
-	if (!te->s_valid && ++te->s_agree >= CO5300_TE_SEED_COUNT) {
-		te->s_valid = true;
+	if (!est->valid && ++est->agree >= CO5300_TE_SEED_COUNT) {
+		est->valid = true;
 	}
-#ifdef CONFIG_ELCO5300_STATS
-	if (te->s_valid) {
-		if (te->iv_count == 0 || interval < te->iv_min) {
-			te->iv_min = interval;
-		}
-		if (te->iv_count == 0 || interval > te->iv_max) {
-			te->iv_max = interval;
-		}
-		te->iv_count++;
-	}
-#endif
+	return true;
 }
+
+#if defined(CONFIG_ELCO5300_STATS) || defined(CONFIG_ELCO5300_TE_WINDOW)
+/* Forgets the previous sample, after the interrupt was off or the capture ran: the next edge
+ * has no neighbour to be compared with. Called under te.lock. */
+static void co5300_te_forget_edges(struct co5300_te *te) {
+	te->have_level = false;
+	te->have_fall = false;
+	te->have_rise = false;
+}
+#endif
+
+#ifdef CONFIG_ELCO5300_TE_WINDOW
+
+/* Forgets the edges and the estimates (blanking: the scan stops and starts again), so the
+ * window rule restarts from fresh edges. Called under te.lock. */
+static void co5300_te_reset(struct co5300_te *te) {
+	co5300_te_forget_edges(te);
+	memset(&te->s, 0, sizeof(te->s));
+	memset(&te->tvdl, 0, sizeof(te->tvdl));
+}
+#endif
 
 /* ISR context: a TE edge. Low: the panel starts a scan; high: the porch starts. */
 static void co5300_te_isr(const struct device *port, struct gpio_callback *cb, uint32_t pins) {
@@ -136,7 +147,21 @@ static void co5300_te_isr(const struct device *port, struct gpio_callback *cb, u
 
 	if (!level) {
 		if (te->have_fall) {
-			co5300_te_feed(te, now - te->fall_cycles);
+			uint64_t interval = now - te->fall_cycles;
+			bool accepted = co5300_est_feed(&te->s, interval);
+#ifdef CONFIG_ELCO5300_STATS
+			if (accepted && te->s.valid) {
+				if (te->iv_count == 0 || interval < te->iv_min) {
+					te->iv_min = interval;
+				}
+				if (te->iv_count == 0 || interval > te->iv_max) {
+					te->iv_max = interval;
+				}
+				te->iv_count++;
+			}
+#else
+			ARG_UNUSED(accepted);
+#endif
 		}
 #ifdef CONFIG_ELCO5300_STATS
 		if (te->have_rise) {
@@ -155,6 +180,9 @@ static void co5300_te_isr(const struct device *port, struct gpio_callback *cb, u
 		te->fall_seq++;
 		give = true;
 	} else {
+		if (te->have_fall) {
+			(void)co5300_est_feed(&te->tvdl, now - te->fall_cycles);
+		}
 #ifdef CONFIG_ELCO5300_STATS
 		if (te->have_fall) {
 			uint64_t tvdl = now - te->fall_cycles;
@@ -178,12 +206,9 @@ static void co5300_te_isr(const struct device *port, struct gpio_callback *cb, u
 	}
 }
 
-/* Blocks until the TE edge that starts a scan, when this write starts a frame. Takes no lock.
- * Runs on the flush thread, the only caller of co5300_write(). */
-static void co5300_te_wait(struct co5300_data *data, const struct display_buffer_descriptor *desc) {
-	bool frame_start = data->frame_start;
-
-	data->frame_start = !desc->frame_incomplete;
+/* The edge rule: blocks until the TE edge that starts a scan, when this write starts a frame.
+ * Takes no lock. Runs on the flush thread, the only caller of co5300_write(). */
+static void co5300_te_edge_rule(struct co5300_data *data, bool frame_start) {
 	if (!data->te_sync || !frame_start || data->blanked) {
 		return;
 	}
@@ -256,8 +281,8 @@ void co5300_stats_get(const struct device *dev, struct co5300_stats *out) {
 	out->te_falls = te->falls;
 	out->te_rises = te->rises;
 	out->te_coalesced = te->coalesced;
-	out->te_s_cycles = te->s_valid ? te->s_cycles : 0;
-	out->te_s_valid = te->s_valid;
+	out->te_s_cycles = te->s.valid ? te->s.cycles : 0;
+	out->te_s_valid = te->s.valid;
 	out->te_iv_count = te->iv_count;
 	out->te_iv_min = te->iv_min;
 	out->te_iv_max = te->iv_max;
@@ -269,6 +294,16 @@ void co5300_stats_get(const struct device *dev, struct co5300_stats *out) {
 	out->te_tvdh_max = te->tvdh_max;
 	k_spin_unlock(&te->lock, key);
 #endif
+#ifdef CONFIG_ELCO5300_TE_WINDOW
+	const struct co5300_config *config = dev->config;
+	uint32_t frame_bytes = (uint32_t)config->width * config->height * data->bytes_per_pixel;
+
+	/* Plain 32-bit reads of what the flush thread updates: good enough for a bench print. */
+	co5300_te_wbounds_get(&data->wbounds, frame_bytes, co5300_te_ns_per_byte(data->mspi_dev_config.freq),
+		&out->te_win_wmin_us, &out->te_win_wmax_us);
+	out->te_win_margin_us = CONFIG_ELCO5300_TE_WINDOW_MARGIN_US;
+	out->te_win_on = data->te_window_on;
+#endif
 }
 
 void co5300_stats_reset(const struct device *dev) {
@@ -277,6 +312,9 @@ void co5300_stats_reset(const struct device *dev) {
 
 	memset(&data->stats, 0, sizeof(data->stats));
 	data->post_pending = false;
+#ifdef CONFIG_ELCO5300_TE_WINDOW
+	data->last_full_valid = false;
+#endif
 	k_spin_unlock(&data->stats_lock, key);
 
 #ifdef CONFIG_ELCO5300_TE_SYNC
@@ -437,6 +475,285 @@ static void co5300_stats_lock_take(struct co5300_data *data) {
 }
 #endif /* CONFIG_ELCO5300_STATS */
 
+#ifdef CONFIG_ELCO5300_TE_WINDOW
+
+#ifdef CONFIG_ELCO5300_STATS
+#define CO5300_WIN_STAT_ADD(data, field, n)                                                                        \
+	do {                                                                                                           \
+		k_spinlock_key_t stat_key_ = k_spin_lock(&(data)->stats_lock);                                             \
+		(data)->stats.field += (n);                                                                                \
+		k_spin_unlock(&(data)->stats_lock, stat_key_);                                                             \
+	} while (0)
+#else
+#define CO5300_WIN_STAT_ADD(data, field, n) ARG_UNUSED(data)
+#endif
+
+/* Rounds of decide-then-wait before the write starts anyway. */
+#define CO5300_WIN_MAX_WAITS 4
+/* The kernel wakes a k_usleep() on 100 us ticks, up to a tick late: sleep short, spin the rest. */
+#define CO5300_WIN_SPIN_US 150U
+
+/* Blanking stops and restarts the scan: the window rule starts from fresh edges and estimates. */
+static void co5300_te_restart(struct co5300_data *data) {
+	k_spinlock_key_t key = k_spin_lock(&data->te.lock);
+
+	co5300_te_reset(&data->te);
+	k_spin_unlock(&data->te.lock, key);
+}
+
+/* One reading of the TE state, in microseconds. */
+struct co5300_te_snap {
+	uint32_t age_us;  /* since the last falling edge */
+	uint32_t s_us;
+	uint32_t tvdl_us;
+	uint32_t seq;     /* falling edges seen */
+	bool valid;       /* an edge and both estimates are valid */
+};
+
+static uint32_t co5300_us32(uint64_t cycles) {
+	uint64_t us = k_cyc_to_us_floor64(cycles);
+
+	return us > UINT32_MAX ? UINT32_MAX : (uint32_t)us;
+}
+
+static void co5300_te_snapshot(struct co5300_data *data, struct co5300_te_snap *snap) {
+	struct co5300_te *te = &data->te;
+	k_spinlock_key_t key = k_spin_lock(&te->lock);
+	uint64_t now = k_cycle_get_64();
+	uint64_t age = now > te->fall_cycles ? now - te->fall_cycles : 0;
+	uint64_t s = te->s.cycles;
+	uint64_t tvdl = te->tvdl.cycles;
+
+	snap->valid = te->have_fall && te->s.valid && te->tvdl.valid;
+	snap->seq = te->fall_seq;
+	k_spin_unlock(&te->lock, key);
+
+	snap->age_us = co5300_us32(age);
+	snap->s_us = co5300_us32(s);
+	snap->tvdl_us = co5300_us32(tvdl);
+}
+
+/* The area's rows exist on the panel and the panel scans in the normal direction (T-5). */
+static bool co5300_te_geometry_ok(const struct device *dev, const struct display_buffer_descriptor *desc, uint16_t y) {
+	const struct co5300_config *config = dev->config;
+	const struct co5300_data *data = dev->data;
+
+	return data->orientation == DISPLAY_ORIENTATION_NORMAL && (uint32_t)y + desc->height <= config->height;
+}
+
+static uint32_t co5300_area_bytes(const struct co5300_data *data, const struct display_buffer_descriptor *desc) {
+	return (uint32_t)desc->height * desc->width * data->bytes_per_pixel;
+}
+
+/* Waits us microseconds: sleeps most of it, spins the rest. */
+static void co5300_win_wait(uint32_t us) {
+	uint64_t deadline = k_cycle_get_64() + k_us_to_cyc_ceil64(us);
+
+	if (us > CO5300_WIN_SPIN_US) {
+		k_usleep(us - CO5300_WIN_SPIN_US);
+	}
+	while (k_cycle_get_64() < deadline) {
+	}
+}
+
+/* The window rule for one write attempt of the area at row y. Returns true when it placed the start
+ * (the caller starts now); false when the edge rule has to decide: no timing, no tear-free start. */
+static bool co5300_te_window_gate(const struct device *dev, const struct display_buffer_descriptor *desc, uint16_t y) {
+	const struct co5300_config *config = dev->config;
+	struct co5300_data *data = dev->data;
+
+	if (!data->te_sync || data->blanked || !data->te_window_on) {
+		return false;
+	}
+
+	uint32_t bytes = co5300_area_bytes(data, desc);
+	uint32_t w_min;
+	uint32_t w_max;
+
+	co5300_te_wbounds_get(&data->wbounds, bytes, co5300_te_ns_per_byte(data->mspi_dev_config.freq), &w_min, &w_max);
+
+	bool geometry = co5300_te_geometry_ok(dev, desc, y);
+	bool waited = false;
+	uint64_t spent = 0;
+	bool placed = false;
+
+	for (int round = 0; round <= CO5300_WIN_MAX_WAITS; round++) {
+		struct co5300_te_snap snap;
+
+		co5300_te_snapshot(data, &snap);
+
+		struct co5300_te_window_in in = {
+			.age_us = snap.age_us,
+			.s_us = snap.s_us,
+			.tvdl_us = snap.tvdl_us,
+			.panel_h = config->height,
+			.y0 = y,
+			.y1 = (uint16_t)(y + desc->height - 1U),
+			.w_min_us = w_min,
+			.w_max_us = w_max,
+			.margin_us = CONFIG_ELCO5300_TE_WINDOW_MARGIN_US,
+			.valid = snap.valid && geometry,
+		};
+		struct co5300_te_decision dec = co5300_te_window_decide(&in);
+
+		if (dec.action == CO5300_TE_FALLBACK) {
+			CO5300_WIN_STAT_ADD(data, te_win_fallbacks, 1U);
+			break;
+		}
+		if (dec.action == CO5300_TE_START_NOW) {
+			if (!waited) {
+				CO5300_WIN_STAT_ADD(data, te_win_starts_now, 1U);
+			}
+			placed = true;
+			break;
+		}
+		if (round == CO5300_WIN_MAX_WAITS) {
+			CO5300_WIN_STAT_ADD(data, te_win_forced, 1U);
+			placed = true;
+			break;
+		}
+
+		uint64_t t0 = k_cycle_get_64();
+
+		waited = true;
+		if (dec.action == CO5300_TE_WAIT) {
+			CO5300_WIN_STAT_ADD(data, te_win_waits, 1U);
+			co5300_win_wait(dec.wait_us);
+		} else {
+			struct co5300_te_snap again;
+
+			CO5300_WIN_STAT_ADD(data, te_win_edge_waits, 1U);
+			/* An edge between the snapshot and the reset is seen in the sequence number. */
+			k_sem_reset(&data->te_sem);
+			co5300_te_snapshot(data, &again);
+			if (again.seq == snap.seq) {
+				int ret = k_sem_take(&data->te_sem, K_USEC(snap.s_us + snap.s_us / 4U));
+
+				if (ret != 0) {
+					CO5300_WIN_STAT_ADD(data, te_win_edge_timeouts, 1U);
+					if (++data->te_timeouts_in_row == CO5300_TE_MAX_TIMEOUTS) {
+						LOG_WRN("No TE edge for %d waits, the edge rule takes over", CO5300_TE_MAX_TIMEOUTS);
+					}
+				} else {
+					data->te_timeouts_in_row = 0;
+				}
+			}
+		}
+		spent += k_cycle_get_64() - t0;
+	}
+
+#ifdef CONFIG_ELCO5300_STATS
+	CO5300_WIN_STAT_ADD(data, te_win_wait_cycles, spent);
+#else
+	ARG_UNUSED(spent);
+#endif
+	return placed;
+}
+
+#ifdef CONFIG_ELCO5300_STATS
+/* What the audit needs from the start of one attempt. */
+struct co5300_audit {
+	bool valid;
+	uint32_t phase_us;
+	uint32_t s_us;
+	uint32_t t0_us;
+	uint32_t t1_us;
+	uint32_t w_max_us;  /* the bound the rule used for this start */
+	uint32_t margin_us;
+};
+
+/* Called right after the attempt's wait (either rule): records the start phase and the rows' times. */
+static void co5300_te_audit_begin(const struct device *dev, const struct display_buffer_descriptor *desc, uint16_t y,
+				  struct co5300_audit *au) {
+	const struct co5300_config *config = dev->config;
+	struct co5300_data *data = dev->data;
+	struct co5300_te_snap snap;
+
+	au->valid = false;
+	if (!data->te_sync || data->blanked || !co5300_te_geometry_ok(dev, desc, y)) {
+		return;
+	}
+	co5300_te_snapshot(data, &snap);
+	if (!snap.valid || snap.s_us == 0 || snap.age_us > snap.s_us + snap.s_us / 10U) {
+		return;
+	}
+
+	au->valid = true;
+	au->s_us = snap.s_us;
+	au->phase_us = snap.age_us % snap.s_us;
+	au->t0_us = co5300_te_row_time(snap.tvdl_us, config->height, y);
+	au->t1_us = co5300_te_row_time(snap.tvdl_us, config->height, y + desc->height - 1U);
+	au->margin_us = CONFIG_ELCO5300_TE_WINDOW_MARGIN_US;
+
+	uint32_t w_min_unused;
+
+	co5300_te_wbounds_get(&data->wbounds, co5300_area_bytes(data, desc),
+			      co5300_te_ns_per_byte(data->mspi_dev_config.freq), &w_min_unused, &au->w_max_us);
+
+	uint32_t bin = (uint32_t)((uint64_t)au->phase_us * CO5300_W_HIST_BINS / au->s_us);
+
+	k_spinlock_key_t key = k_spin_lock(&data->stats_lock);
+
+	data->stats.te_win_phase_hist[bin < CO5300_W_HIST_BINS ? bin : CO5300_W_HIST_BINS - 1U]++;
+	k_spin_unlock(&data->stats_lock, key);
+}
+
+/* A successful attempt of cycles length: did a scan see it torn? */
+static void co5300_te_audit_end(struct co5300_data *data, const struct co5300_audit *au, uint32_t cycles, bool resend) {
+	if (!au->valid) {
+		return;
+	}
+	if (co5300_te_audit_late(au->phase_us, k_cyc_to_us_floor32(cycles), au->s_us, au->t0_us, au->t1_us,
+				 au->w_max_us, au->margin_us)) {
+		if (resend) {
+			CO5300_WIN_STAT_ADD(data, te_win_late_resend, 1U);
+		} else {
+			CO5300_WIN_STAT_ADD(data, te_win_late, 1U);
+		}
+	}
+}
+
+/* The end of a full-frame write: scans since the previous one's end, from the falling-edge count. */
+static void co5300_te_frame_end(struct co5300_data *data) {
+	uint32_t seq;
+	k_spinlock_key_t key = k_spin_lock(&data->te.lock);
+
+	seq = data->te.fall_seq;
+	k_spin_unlock(&data->te.lock, key);
+
+	key = k_spin_lock(&data->stats_lock);
+	if (data->last_full_valid) {
+		uint32_t n = seq - data->last_full_seq;
+
+		/* No falling edge since the last frame (TE off, a capture, a lost edge): no scan count. */
+		if (n >= 1U) {
+			data->stats.te_win_scans_hist[n >= 5U ? 4U : n - 1U]++;
+		}
+	}
+	data->last_full_valid = true;
+	data->last_full_seq = seq;
+	k_spin_unlock(&data->stats_lock, key);
+}
+#endif /* CONFIG_ELCO5300_STATS */
+
+#endif /* CONFIG_ELCO5300_TE_WINDOW */
+
+#ifdef CONFIG_ELCO5300_TE_SYNC
+/* One write attempt's wait: the window rule, and the edge rule where it hands over. */
+static void co5300_te_gate(const struct device *dev, const struct display_buffer_descriptor *desc, uint16_t y,
+			   bool frame_start) {
+#ifdef CONFIG_ELCO5300_TE_WINDOW
+	if (co5300_te_window_gate(dev, desc, y)) {
+		return;
+	}
+#else
+	ARG_UNUSED(desc);
+	ARG_UNUSED(y);
+#endif
+	co5300_te_edge_rule(dev->data, frame_start);
+}
+#endif
+
 static int co5300_lock(struct co5300_data *data) {
 	return k_mutex_lock(&data->lock, K_FOREVER);
 }
@@ -573,6 +890,9 @@ static int co5300_blanking_off(const struct device *dev) {
 #ifdef CONFIG_ELCO5300_TE_SYNC
 	data->blanked = false;
 	data->frame_start = true;
+#ifdef CONFIG_ELCO5300_TE_WINDOW
+	co5300_te_restart(data);
+#endif
 #endif
 
 	uint8_t cmd = CO5300_C_SLPOUT;
@@ -604,6 +924,9 @@ static int co5300_blanking_on(const struct device *dev) {
 #ifdef CONFIG_ELCO5300_TE_SYNC
 	data->blanked = true;
 	data->frame_start = true;
+#ifdef CONFIG_ELCO5300_TE_WINDOW
+	co5300_te_restart(data);
+#endif
 #endif
 
 	uint8_t cmd = CO5300_C_DISPOFF;
@@ -821,17 +1144,31 @@ static int co5300_write(const struct device *dev, const uint16_t x, const uint16
 #endif
 
 #ifdef CONFIG_ELCO5300_TE_SYNC
-	co5300_te_wait(data, desc);
+	bool frame_start = data->frame_start;
+
+	data->frame_start = !desc->frame_incomplete;
+	co5300_te_gate(dev, desc, y, frame_start);
 #endif
 
-#ifdef CONFIG_ELCO5300_STATS
-	uint32_t w_start = k_cycle_get_32();
+#if defined(CONFIG_ELCO5300_TE_WINDOW) && defined(CONFIG_ELCO5300_STATS)
+	struct co5300_audit audit;
+#endif
+#if defined(CONFIG_ELCO5300_STATS) || defined(CONFIG_ELCO5300_TE_WINDOW)
+	uint32_t w_cycles = 0;
 #endif
 
 	ret = co5300_lock(data);
 	if (ret < 0) {
 		return ret;
 	}
+	/* After the lock: the wait for the mutex (blanking holds it for 130 or 240 ms) is not write time,
+	 * and the audit's start is the first pixel's, not the request's. */
+#if defined(CONFIG_ELCO5300_TE_WINDOW) && defined(CONFIG_ELCO5300_STATS)
+	co5300_te_audit_begin(dev, desc, y, &audit);
+#endif
+#if defined(CONFIG_ELCO5300_STATS) || defined(CONFIG_ELCO5300_TE_WINDOW)
+	uint32_t w_start = k_cycle_get_32();
+#endif
 #ifdef CONFIG_ELCO5300_STATS
 	co5300_stats_lock_take(data);
 	bool resent = false;
@@ -839,6 +1176,19 @@ static int co5300_write(const struct device *dev, const uint16_t x, const uint16
 
 	/* The buffer stays valid until we return, so the whole area (window and packet) can be re-sent. */
 	ret = co5300_write_locked(dev, x, y, desc, buf);
+#if defined(CONFIG_ELCO5300_STATS) || defined(CONFIG_ELCO5300_TE_WINDOW)
+	w_cycles = k_cycle_get_32() - w_start;
+#endif
+#ifdef CONFIG_ELCO5300_TE_WINDOW
+	if (ret == 0) {
+		/* Only a first attempt that succeeded teaches the bounds. */
+		co5300_te_wbounds_update(&data->wbounds, co5300_area_bytes(data, desc),
+			co5300_te_ns_per_byte(data->mspi_dev_config.freq), k_cyc_to_us_floor32(w_cycles));
+#ifdef CONFIG_ELCO5300_STATS
+		co5300_te_audit_end(data, &audit, w_cycles, false);
+#endif
+	}
+#endif
 	for (int attempt = 0; (ret == -EIO || ret == -ETIMEDOUT) && attempt < CO5300_WRITE_RETRIES; attempt++) {
 		LOG_WRN("Pixel write failed (%d), re-sending the area (%d/%d)", ret, attempt + 1,
 			CO5300_WRITE_RETRIES);
@@ -847,11 +1197,23 @@ static int co5300_write(const struct device *dev, const uint16_t x, const uint16
 		co5300_stats_count_retry(data);
 		resent = true;
 #endif
-		ret = co5300_write_locked(dev, x, y, desc, buf);
-	}
+#ifdef CONFIG_ELCO5300_TE_WINDOW
+		/* A re-send starts at whatever phase the failure left: the rule places it too. */
+		co5300_te_gate(dev, desc, y, frame_start);
 #ifdef CONFIG_ELCO5300_STATS
-	uint32_t w_cycles = k_cycle_get_32() - w_start;
+		co5300_te_audit_begin(dev, desc, y, &audit);
 #endif
+		uint32_t r_start = k_cycle_get_32();
+#endif
+		ret = co5300_write_locked(dev, x, y, desc, buf);
+#if defined(CONFIG_ELCO5300_TE_WINDOW) && defined(CONFIG_ELCO5300_STATS)
+		if (ret == 0) {
+			co5300_te_audit_end(data, &audit, k_cycle_get_32() - r_start, true);
+		}
+#elif defined(CONFIG_ELCO5300_TE_WINDOW)
+		ARG_UNUSED(r_start);
+#endif
+	}
 	if (ret < 0) {
 		co5300_forget_window(data);
 		if (ret == -EIO || ret == -ETIMEDOUT) {
@@ -866,14 +1228,19 @@ static int co5300_write(const struct device *dev, const uint16_t x, const uint16
 
 #ifdef CONFIG_ELCO5300_STATS
 	if (ret == 0) {
+		const struct co5300_config *config = dev->config;
+		bool full = (uint32_t)desc->width * desc->height == (uint32_t)config->width * config->height;
+
 		if (resent) {
 			co5300_stats_count_resent(data);
 		} else {
-			const struct co5300_config *config = dev->config;
-			bool full = (uint32_t)desc->width * desc->height == (uint32_t)config->width * config->height;
-
 			co5300_stats_write_w(data, full, w_cycles);
 		}
+#ifdef CONFIG_ELCO5300_TE_WINDOW
+		if (full) {
+			co5300_te_frame_end(data);
+		}
+#endif
 	}
 	co5300_stats_write_exit(data, start);
 #endif
@@ -883,13 +1250,6 @@ static int co5300_write(const struct device *dev, const uint16_t x, const uint16
 
 #if defined(CONFIG_ELCO5300_STATS) && defined(CONFIG_ELCO5300_TE_SYNC)
 
-/* Forgets the previous sample, after the interrupt was off or the capture ran: the next edge
- * has no neighbour to be compared with. Called under te.lock. */
-static void co5300_te_forget_edges(struct co5300_te *te) {
-	te->have_level = false;
-	te->have_fall = false;
-	te->have_rise = false;
-}
 int co5300_te_irq_enable(const struct device *dev, bool enable) {
 	const struct co5300_config *config = dev->config;
 	struct co5300_data *data = dev->data;
@@ -909,6 +1269,18 @@ int co5300_te_irq_enable(const struct device *dev, bool enable) {
 	}
 	return ret;
 }
+
+#ifdef CONFIG_ELCO5300_TE_WINDOW
+int co5300_te_window_enable(const struct device *dev, bool enable) {
+	struct co5300_data *data = dev->data;
+
+	if (!data->te_sync) {
+		return -ENOTSUP;
+	}
+	data->te_window_on = enable;
+	return 0;
+}
+#endif
 
 int co5300_te_set_scanline(const struct device *dev, uint16_t line) {
 	struct co5300_data *data = dev->data;
@@ -1124,6 +1496,10 @@ static int co5300_init(const struct device *dev) {
 #endif
 		data->dev = dev;
 		data->frame_start = true;
+#ifdef CONFIG_ELCO5300_TE_WINDOW
+		data->te_window_on = true;
+		co5300_te_wbounds_init(&data->wbounds);
+#endif
 		gpio_init_callback(&data->te_sync_cb_data, co5300_te_isr, BIT(config->te_gpio.pin));
 		ret = gpio_add_callback(config->te_gpio.port, &data->te_sync_cb_data);
 		if (ret == 0) {

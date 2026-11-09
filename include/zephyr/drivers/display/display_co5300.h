@@ -80,6 +80,25 @@ struct co5300_stats {
 	uint32_t te_tvdh_count;        /* rise to fall */
 	uint64_t te_tvdh_sum;
 	uint64_t te_tvdh_max;
+
+#ifdef CONFIG_ELCO5300_TE_WINDOW
+	/* The window rule (CONFIG_ELCO5300_TE_WINDOW). Rule decisions count per write attempt. */
+	uint32_t te_win_starts_now;    /* started without any wait */
+	uint32_t te_win_waits;         /* timed waits */
+	uint32_t te_win_edge_waits;    /* waits for an edge */
+	uint32_t te_win_edge_timeouts; /* ... that timed out */
+	uint32_t te_win_fallbacks;     /* attempts handed to the edge rule */
+	uint32_t te_win_forced;        /* starts after 4 decisions without a clear start */
+	uint64_t te_win_wait_cycles;   /* time spent in the rule's waits */
+	uint32_t te_win_phase_hist[CO5300_W_HIST_BINS]; /* start phase over S, eight bins, every attempt with timing */
+	uint32_t te_win_late;          /* first attempts the audit found torn */
+	uint32_t te_win_late_resend;   /* re-sent attempts the audit found torn */
+	uint32_t te_win_scans_hist[5]; /* scans a full frame stayed up: 1, 2, 3, 4, 5 or more */
+	uint32_t te_win_margin_us;
+	uint32_t te_win_wmax_us;       /* current write time bounds of the frame class */
+	uint32_t te_win_wmin_us;
+	bool te_win_on;                /* the runtime switch */
+#endif
 };
 
 /** @brief Consistent snapshot of the counters. */
@@ -130,6 +149,15 @@ int co5300_te_capture_start(const struct device *dev, struct co5300_te_sample *b
  * @retval 0 the capture is full, -ETIMEDOUT it was disarmed with fewer (call it only after a start).
  */
 int co5300_te_capture_wait(const struct device *dev, k_timeout_t timeout, size_t *got);
+
+#ifdef CONFIG_ELCO5300_TE_WINDOW
+/**
+ * @brief Switch the window rule on or off at run time (it is on after boot). Off means the edge rule.
+ *
+ * @retval 0 done, -ENOTSUP without TE sync.
+ */
+int co5300_te_window_enable(const struct device *dev, bool enable);
+#endif
 #endif /* CONFIG_ELCO5300_STATS */
 
 #ifdef __cplusplus

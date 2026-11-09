@@ -313,6 +313,33 @@ void PrintStats(const shell* sh) {
         KV("co5300.te_tvdl_max_us", CyclesToUs(s.te_tvdl_max));
         KV("co5300.te_tvdh_avg_us", s.te_tvdh_count > 0 ? CyclesToUs(s.te_tvdh_sum / s.te_tvdh_count) : 0);
         KV("co5300.te_tvdh_max_us", CyclesToUs(s.te_tvdh_max));
+
+        #ifdef CONFIG_ELCO5300_TE_WINDOW
+        KV("co5300.te_win_on", s.te_win_on ? 1 : 0);
+        KV("co5300.te_win_margin_us", s.te_win_margin_us);
+        KV("co5300.te_win_wmax_us", s.te_win_wmax_us);
+        KV("co5300.te_win_wmin_us", s.te_win_wmin_us);
+        KV("co5300.te_win_starts_now", s.te_win_starts_now);
+        KV("co5300.te_win_waits", s.te_win_waits);
+        KV("co5300.te_win_edge_waits", s.te_win_edge_waits);
+        KV("co5300.te_win_edge_timeouts", s.te_win_edge_timeouts);
+        KV("co5300.te_win_fallbacks", s.te_win_fallbacks);
+        KV("co5300.te_win_forced", s.te_win_forced);
+        KV("co5300.te_win_wait_us", CyclesToUs(s.te_win_wait_cycles));
+        KV("co5300.te_win_late", s.te_win_late);
+        KV("co5300.te_win_late_resend", s.te_win_late_resend);
+        // Eight equal bins over the scan period, from the falling edge
+        shell_print(
+            sh, "co5300.te_win_phase_hist=%u,%u,%u,%u,%u,%u,%u,%u", s.te_win_phase_hist[0], s.te_win_phase_hist[1],
+            s.te_win_phase_hist[2], s.te_win_phase_hist[3], s.te_win_phase_hist[4], s.te_win_phase_hist[5],
+            s.te_win_phase_hist[6], s.te_win_phase_hist[7]
+        );
+        // Scans a full frame stayed up: 1, 2, 3, 4, 5 or more
+        shell_print(
+            sh, "co5300.te_win_scans_hist=%u,%u,%u,%u,%u", s.te_win_scans_hist[0], s.te_win_scans_hist[1],
+            s.te_win_scans_hist[2], s.te_win_scans_hist[3], s.te_win_scans_hist[4]
+        );
+        #endif
     }
     #endif
 
@@ -390,6 +417,30 @@ int CmdTe(const shell* sh, size_t argc, char** argv) {
         return ret;
     }
     return 0;
+}
+    #endif
+
+    #if defined(CONFIG_ELCO5300_STATS) && defined(CONFIG_ELCO5300_TE_WINDOW)
+int CmdTewin(const shell* sh, size_t argc, char** argv) {
+    bool on = false;
+    if(argc != 2 || !IsOn(argv[1], on)) {
+        shell_print(sh, "usage: ui_bench tewin on|off");
+        return -EINVAL;
+    }
+
+    const int ret = co5300_te_window_enable(display_dev_, on);
+    if(ret != 0) {
+        shell_error(sh, "tewin %s failed: %d", on ? "on" : "off", ret);
+        return ret;
+    }
+    return 0;
+}
+    #else
+int CmdTewin(const shell* sh, size_t argc, char** argv) {
+    ARG_UNUSED(argc);
+    ARG_UNUSED(argv);
+    shell_error(sh, "tewin needs CONFIG_ELCO5300_STATS and CONFIG_ELCO5300_TE_WINDOW");
+    return -ENOTSUP;
 }
     #endif
 
@@ -834,6 +885,7 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
     sub_ui_bench,
     SHELL_CMD_ARG(full, NULL, "full on|off: invalidate the whole screen every refresh period", CmdFull, 2, 0),
     SHELL_CMD_ARG(te, NULL, "te on|off: the TE interrupt", CmdTe, 2, 0),
+    SHELL_CMD_ARG(tewin, NULL, "tewin on|off: the window rule (off: the edge rule)", CmdTewin, 2, 0),
     SHELL_CMD_ARG(
         tecal,
         NULL,

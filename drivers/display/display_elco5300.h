@@ -12,6 +12,9 @@
 #ifdef CONFIG_ELCO5300_STATS
 #include <zephyr/drivers/display/display_co5300.h>
 #endif
+#ifdef CONFIG_ELCO5300_TE_WINDOW
+#include "co5300_te_window.h"
+#endif
 
 #define SPI_WRITE_TIMEOUT 100
 
@@ -156,6 +159,14 @@ struct co5300_config {
 #define CO5300_TE_SEED_COUNT 8
 #define CO5300_TE_REJECT_LIMIT 8
 
+/* An estimate of a repeating interval (the scan period, the TE low time), fed by the ISR. */
+struct co5300_est {
+	uint64_t cycles;  /* EWMA of the accepted intervals */
+	bool valid;
+	uint8_t agree;    /* consecutive agreeing intervals while seeding */
+	uint8_t rejects;  /* consecutive rejected intervals */
+};
+
 /* The TE edge state. The ISR writes it and threads read it, always under lock: the 64-bit stamps
  * are not atomic on Xtensa. */
 struct co5300_te {
@@ -167,10 +178,8 @@ struct co5300_te {
 	uint32_t fall_seq;    /* falling edges seen, counts scan starts */
 	uint64_t fall_cycles; /* last falling edge (a scan starts) */
 	uint64_t rise_cycles; /* last rising edge (the porch starts) */
-	uint64_t s_cycles;    /* scan period estimate, EWMA of the falling-edge intervals */
-	bool s_valid;
-	uint8_t s_agree;      /* consecutive agreeing intervals while seeding */
-	uint8_t s_rejects;    /* consecutive rejected intervals */
+	struct co5300_est s;     /* scan period, from the falling-edge intervals */
+	struct co5300_est tvdl;  /* TE low time, from a fall to the next rise */
 #ifdef CONFIG_ELCO5300_STATS
 	uint32_t falls;
 	uint32_t rises;
@@ -216,9 +225,17 @@ struct co5300_data {
 	volatile bool te_seen;          /* an edge came since the last time the wait looked */
 	uint8_t te_timeouts_in_row;     /* flush thread only */
 #endif
+#ifdef CONFIG_ELCO5300_TE_WINDOW
+	struct co5300_te_wbounds wbounds; /* write time bounds per size class, flush thread only */
+	bool te_window_on;                /* the window rule is in use; off means the edge rule */
+#endif
 #ifdef CONFIG_ELCO5300_STATS
 	struct co5300_stats stats;
 	struct k_spinlock stats_lock;
+#ifdef CONFIG_ELCO5300_TE_WINDOW
+	bool last_full_valid;             /* last_full_seq is the edge count at the end of the previous full frame */
+	uint32_t last_full_seq;
+#endif
 	bool post_pending;	/* co5300_stats_mark_post() waits for the next write */
 	bool post_lifted;
 	uint32_t post_stamp;
