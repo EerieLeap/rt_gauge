@@ -77,8 +77,8 @@
     spim3_canbus: spim3_canbus {
 		group1 {
 			pinmux = <SPIM3_MISO_GPIO17>,
-				     <SPIM3_SCLK_GPIO44>,
-				     <SPIM3_CSEL_GPIO18>;
+				 <SPIM3_SCLK_GPIO44>,
+				 <SPIM3_CSEL_GPIO18>;
 		};
 		group2 {
 			pinmux = <SPIM3_MOSI_GPIO16>;

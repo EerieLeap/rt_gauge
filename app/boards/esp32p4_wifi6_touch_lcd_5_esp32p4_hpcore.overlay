@@ -13,6 +13,7 @@
 	aliases {
 		intfs0 = &intfs0;
 		gpioc = &gpioc;
+		can0 = &can0;
 	};
 
 	fstab {
@@ -38,6 +39,44 @@
 		di_0: di_0 {
 			gpios = <&gpio0 4 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
 			zephyr,code = <INPUT_BTN_0>;
+		};
+	};
+};
+
+/*
+ * External MCP2518FD on the 40-pin header. GPIO7/8 (I2C0, touch), GPIO37/38
+ * (CH343P USB-UART) and GPIO2 (GT911 IRQ) are taken, so it uses free pins.
+ */
+&spi3 {
+	status = "okay";
+	#address-cells = <1>;
+	#size-cells = <0>;
+	pinctrl-0 = <&spim3_canbus>;
+	pinctrl-names = "default";
+
+	can0: mcp2518fd@0 {
+		compatible = "microchip,mcp251xfd";
+		reg = <0>;
+		status = "okay";
+
+		/* Same rate as the S3; the MCP2518FD's maximum is 20 MHz. */
+		spi-max-frequency = <8000000>;
+		int-gpios = <&gpio0 3 GPIO_ACTIVE_LOW>;
+		osc-freq = <20000000>;
+	};
+};
+
+&pinctrl {
+	spim3_canbus: spim3_canbus {
+		group1 {
+			pinmux = <SPIM3_MISO_GPIO30>,
+				 <SPIM3_SCLK_GPIO28>,
+				 <SPIM3_CSEL_GPIO31>;
+		};
+
+		group2 {
+			pinmux = <SPIM3_MOSI_GPIO29>;
+			output-low;
 		};
 	};
 };
