@@ -4,12 +4,14 @@
 // The needle of a dial is a rotated image, and the plan for the display performance (Phase 3) changes the chunk
 // loop of lv_draw_sw_img.c so that rotated images skip pixels outside the image. That must not change one bit of
 // the output, so the output of the unpatched LVGL is recorded here: each group of draws (format, antialias, scale,
-// pivot) is drawn into an ARGB8888 canvas, and the CRC32 over the digests (FNV-1a of every 32-bit word) of the canvas after every draw, is
-// compared with GOLDEN below.
+// pivot) is drawn onto a canvas of every target format (ARGB8888, and RGB565, which has no alpha: the patch narrows the
+// chunks only on a target without alpha), and the CRC32 over the digests (FNV-1a of every 32-bit word) of the canvas
+// after every draw, is compared with GOLDEN and GOLDEN_RGB565 below.
 //
 // To record the table again (after a deliberate change of the output): set REGENERATE to true, build and run the
 // suite on native_sim (`zephyr.exe -test="image_transform_golden::*"`), paste the printed rows between the
-// markers into GOLDEN, and set REGENERATE back to false.
+// markers into the table the marker names, and set REGENERATE back to false. The table must come from an LVGL
+// without the patch: revert it first (move the patch out of app/patches/modules/lvgl, git apply --reverse).
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -282,9 +284,9 @@ std::vector<Group> Groups() {
     return groups;
 }
 
-// clang-format off: a table, one row per format, one column per group (Groups() order: rotate aa=0 scale 256
+// clang-format off: tables, one row per format, one column per group (Groups() order: rotate aa=0 scale 256
 // center, corner, off-center, scale 300 the same, aa=1 the same, scale-only aa=0/1, rotate-aniso aa=0/1, needle aa=0/1,
-// rotate-big, rotate-recolor).
+// rotate-big, rotate-recolor). GOLDEN holds the ARGB8888 target, GOLDEN_RGB565 the RGB565 target.
 struct GoldenRow {
     const char* format;
     uint32_t crc[GROUPS_PER_FORMAT];
@@ -351,12 +353,89 @@ const GoldenRow GOLDEN[] = {
         0x84417f07, 0x43f85274,
     } },
 };
+const GoldenRow GOLDEN_RGB565[] = {
+    { "RGB565A8", {
+        0xe6cdc18b, 0x13f9cc2c, 0x1b9770d8, 0xab9d45f3, 0xcb4e2f0a, 0x9cfc525f,
+        0x4ed7bb87, 0xa37341fe, 0xab7b9923, 0xab3501ce, 0xa2c2409c, 0xa5cda1ef,
+        0x76e4aee1, 0x42d96a5b, 0x8332c03f, 0x2c98433e, 0x07da7e00, 0xfcf4e3cd,
+        0xcd1472ff, 0x67359383,
+    } },
+    { "RGB565", {
+        0x786adbbb, 0x60582839, 0xd337cf01, 0x32562c5f, 0x9ad5509d, 0x1614cf9c,
+        0x23b59b12, 0xef378d0b, 0x86157c0c, 0xbae468a7, 0xd394f6f2, 0xd1b89487,
+        0x69600e22, 0x26ed2685, 0xc97e38d8, 0xcbcabe86, 0x821e6ff9, 0xb42f7b59,
+        0xa7edfb60, 0x759cfec0,
+    } },
+    { "RGB565_SWAPPED", {
+        0x786adbbb, 0x60582839, 0xd337cf01, 0x32562c5f, 0x9ad5509d, 0x1614cf9c,
+        0x23b59b12, 0xef378d0b, 0x86157c0c, 0xbae468a7, 0xd394f6f2, 0xd1b89487,
+        0x69600e22, 0x26ed2685, 0xc97e38d8, 0xcbcabe86, 0x821e6ff9, 0xb42f7b59,
+        0xa7edfb60, 0x759cfec0,
+    } },
+    { "ARGB8888", {
+        0xe6cdc18b, 0x13f9cc2c, 0x1b9770d8, 0xab9d45f3, 0xcb4e2f0a, 0x9cfc525f,
+        0xf50ab241, 0x309d16e6, 0xe7523b8b, 0x7f044100, 0x49de7d62, 0xcd678254,
+        0x76e4aee1, 0xb19c939a, 0x8332c03f, 0x2f6ad713, 0x07da7e00, 0x701a0dd2,
+        0xa2844e44, 0x2ce2e9d2,
+    } },
+    { "ARGB8888_PREMULTIPLIED", {
+        0xb3971879, 0x2b42078b, 0xbaffc2d6, 0xa7fde046, 0x1dbf27af, 0x141e2c82,
+        0xb2050ed9, 0x7eacc502, 0x1098cabc, 0x0dd85ad1, 0x87e8ca66, 0x8c910468,
+        0x191b72dc, 0xce052cc0, 0xf200217b, 0x423bba28, 0xa14baa8c, 0x9e507cc7,
+        0xec7293b3, 0xeea21e47,
+    } },
+    { "RGB888", {
+        0x786adbbb, 0x60582839, 0xd337cf01, 0x32562c5f, 0x9ad5509d, 0x1614cf9c,
+        0xce6276fd, 0x5e02e293, 0xb5256946, 0x275a00d5, 0x22e34b1e, 0xc02afbfc,
+        0x69600e22, 0x7ab089f8, 0xc97e38d8, 0xa55721e8, 0x821e6ff9, 0x91e3ecaf,
+        0xbd7edb92, 0x0dce01b1,
+    } },
+    { "XRGB8888", {
+        0x786adbbb, 0x60582839, 0xd337cf01, 0x32562c5f, 0x9ad5509d, 0x1614cf9c,
+        0xce6276fd, 0x5e02e293, 0xb5256946, 0x275a00d5, 0x22e34b1e, 0xc02afbfc,
+        0x69600e22, 0x7ab089f8, 0xc97e38d8, 0xa55721e8, 0x821e6ff9, 0x91e3ecaf,
+        0xbd7edb92, 0x0dce01b1,
+    } },
+    { "A8", {
+        0xa8b61845, 0x64e4a647, 0x2d034aa1, 0x67f0a261, 0x71c037f9, 0x870366b6,
+        0x52c26034, 0x2468f62c, 0xc29c68b7, 0xc98c8379, 0x636ee376, 0x566d672a,
+        0x192d30ea, 0x5597cf71, 0xa0ac838f, 0x5e395231, 0x42d7a62d, 0xdc3c78a1,
+        0x657666a4, 0x566d672a,
+    } },
+    { "L8", {
+        0xdccbfe81, 0x8fd570d9, 0x1635d534, 0x92068e64, 0x3d0d3b02, 0x0a29ac83,
+        0xe677f7d1, 0xe9797a3f, 0xd7d7204b, 0xca5e6b5e, 0x0da97ba0, 0x08ab04eb,
+        0x70cd8ff6, 0x2c608ceb, 0x8d9a0321, 0x3516252f, 0x41a57bcb, 0x69f2b96c,
+        0xbfb07d42, 0x08ab04eb,
+    } },
+    { "AL88", {
+        0x004a7882, 0x2765b0b8, 0x94950dc5, 0x2047b7bb, 0xbd95dee5, 0x24246383,
+        0x8de3b2f2, 0x571bfd92, 0xd460a5dc, 0x4715fa84, 0xddb56ce4, 0x6c681993,
+        0x24e29081, 0x424ff6ac, 0x9f7e80af, 0x4d176c22, 0xf47f6fd6, 0xa2a4b9ea,
+        0x3dd3ce7e, 0x6c681993,
+    } },
+};
 // clang-format on
 
-const GoldenRow* FindRow(const char* format) {
-    for(const GoldenRow& row : GOLDEN) {
-        if(std::strcmp(row.format, format) == 0) {
-            return &row;
+struct Target {
+    const char* table;
+    lv_color_format_t cf;
+    uint32_t px_size;
+    const GoldenRow* rows;
+    size_t row_count;
+};
+
+// clang-format off: a table.
+const Target TARGETS[] = {
+    { "GOLDEN", LV_COLOR_FORMAT_ARGB8888, 4, GOLDEN, sizeof(GOLDEN) / sizeof(GOLDEN[0]) },
+    { "GOLDEN_RGB565", LV_COLOR_FORMAT_RGB565, 2, GOLDEN_RGB565, sizeof(GOLDEN_RGB565) / sizeof(GOLDEN_RGB565[0]) },
+};
+// clang-format on
+
+const GoldenRow* FindRow(const Target& target, const char* format) {
+    for(size_t i = 0; i < target.row_count; ++i) {
+        if(std::strcmp(target.rows[i].format, format) == 0) {
+            return &target.rows[i];
         }
     }
     return nullptr;
@@ -443,7 +522,7 @@ alignas(64) uint8_t background_pixels[NEEDLE_CANVAS_SIZE * NEEDLE_CANVAS_SIZE * 
 lv_draw_buf_t canvas_buf;
 lv_draw_buf_t background_buf;
 
-void RunFormat(size_t index) {
+void RunFormat(size_t index, const Target& target) {
     views_test::EnsureTestDisplay();
     const Format& format = FORMATS[index];
     const std::vector<Group> groups = Groups();
@@ -456,15 +535,13 @@ void RunFormat(size_t index) {
     for(const int32_t size : { CANVAS_SIZE, NEEDLE_CANVAS_SIZE }) {
         lv_draw_buf_t* buf = &canvas_buf;
         lv_draw_buf_t* background = &background_buf;
-        const uint32_t stride = static_cast<uint32_t>(size) * 4;
+        const uint32_t stride = static_cast<uint32_t>(size) * target.px_size;
         zassert_equal(
-            lv_draw_buf_init(buf, size, size, LV_COLOR_FORMAT_ARGB8888, stride, canvas_pixels, sizeof(canvas_pixels)),
+            lv_draw_buf_init(buf, size, size, target.cf, stride, canvas_pixels, sizeof(canvas_pixels)),
             LV_RESULT_OK
         );
         zassert_equal(
-            lv_draw_buf_init(
-                background, size, size, LV_COLOR_FORMAT_ARGB8888, stride, background_pixels, sizeof(background_pixels)
-            ),
+            lv_draw_buf_init(background, size, size, target.cf, stride, background_pixels, sizeof(background_pixels)),
             LV_RESULT_OK
         );
         lv_obj_t* canvas = lv_canvas_create(lv_screen_active());
@@ -483,27 +560,27 @@ void RunFormat(size_t index) {
     }
 
     if constexpr(REGENERATE) {
-        printk("GOLDEN_TABLE_BEGIN\n    { \"%s\", {", format.name);
+        printk("%s_TABLE_BEGIN\n    { \"%s\", {", target.table, format.name);
         for(size_t g = 0; g < GROUPS_PER_FORMAT; ++g) {
             printk("%s0x%08x,", g % 6 == 0 ? "\n        " : " ", static_cast<unsigned>(crcs[g]));
         }
-        printk("\n    } },\nGOLDEN_TABLE_END\n");
+        printk("\n    } },\n%s_TABLE_END\n", target.table);
         return;
     }
 
-    const GoldenRow* row = FindRow(format.name);
-    zassert_not_null(row, "no golden row for format %s", format.name);
+    const GoldenRow* row = FindRow(target, format.name);
+    zassert_not_null(row, "no %s row for format %s", target.table, format.name);
     bool all_match = true;
     for(size_t g = 0; g < groups.size(); ++g) {
         if(crcs[g] != row->crc[g]) {
             all_match = false;
             printk(
-                "MISMATCH %s, %s: crc 0x%08x, expected 0x%08x\n", format.name, groups[g].name,
+                "MISMATCH %s, %s, %s: crc 0x%08x, expected 0x%08x\n", target.table, format.name, groups[g].name,
                 static_cast<unsigned>(crcs[g]), static_cast<unsigned>(row->crc[g])
             );
         }
     }
-    zassert_true(all_match, "image transform output of %s differs from the golden table", format.name);
+    zassert_true(all_match, "image transform output of %s differs from the table %s", format.name, target.table);
 }
 
 } // namespace
@@ -511,7 +588,9 @@ void RunFormat(size_t index) {
 #define FORMAT_TEST(INDEX, NAME) \
     ZTEST(image_transform_golden, test_##NAME) { \
         if((INDEX) < FORMAT_COUNT) { \
-            RunFormat(INDEX); \
+            for(const Target& target : TARGETS) { \
+                RunFormat((INDEX), target); \
+            } \
         } \
     }
 
