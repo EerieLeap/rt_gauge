@@ -1,0 +1,29 @@
+--- a/src/widgets/image/lv_image.c
++++ b/src/widgets/image/lv_image.c
+@@ -14,6 +14,7 @@
+ #include "../../misc/lv_text_private.h"
+ #include "../../draw/lv_draw_image_private.h"
+ #include "../../draw/lv_draw_private.h"
++#include "../../misc/cache/instance/lv_image_cache.h"
+ #include "../../core/lv_obj_event_private.h"
+ #include "../../core/lv_obj_class_private.h"
+ #include "../../core/lv_obj_draw_private.h"
+@@ -156,6 +157,9 @@
+     lv_image_src_t src_type = lv_image_src_get_type(src);
+     lv_image_t * img = (lv_image_t *)obj;
+ 
++    /*The image cache keys a variable source by its address: the RGB565 view of the old source leaves it now*/
++    if(img->alpha_state == LV_IMAGE_ALPHA_STATE_OPAQUE) lv_image_cache_drop(&img->opaque_dsc);
++
+ #if LV_USE_LOG && LV_LOG_LEVEL <= LV_LOG_LEVEL_INFO
+     switch(src_type) {
+         case LV_IMAGE_SRC_FILE:
+@@ -706,6 +710,8 @@
+     LV_ASSERT(obj != NULL);
+     LV_UNUSED(class_p);
+     lv_image_t * img = (lv_image_t *)obj;
++    /*The address of the RGB565 view is inside this object: no later object may find its cache entry*/
++    if(img->alpha_state == LV_IMAGE_ALPHA_STATE_OPAQUE) lv_image_cache_drop(&img->opaque_dsc);
+     if(img->src_type == LV_IMAGE_SRC_FILE || img->src_type == LV_IMAGE_SRC_SYMBOL) {
+         lv_free((void *)img->src);
+         img->src      = NULL;
