@@ -61,7 +61,7 @@ lv_obj_t* ArcFillIndicator::Create(lv_obj_t* parent, int32_t range_start, int32_
     lv_arc_set_bg_angles(
         lv_arc_, static_cast<lv_value_precise_t>(start_angle_ + 90), static_cast<lv_value_precise_t>(end_angle_ + 90)
     );
-    // lv_obj_set_style_arc_rounded(ui_arc, false, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_rounded(lv_arc_, false, LV_PART_INDICATOR);
 
     // lv_obj_set_style_bg_color(lv_arc_, lv_color_hex(0xFFFFFF), LV_PART_KNOB);
     lv_obj_set_style_bg_opa(lv_arc_, 0, LV_PART_KNOB);
