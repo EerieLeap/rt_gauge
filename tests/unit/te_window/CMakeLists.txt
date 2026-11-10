@@ -8,4 +8,4 @@ project(unit_te_window)
 get_filename_component(DISPLAY_DRIVER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../drivers/display ABSOLUTE)
 target_include_directories(app PRIVATE ${DISPLAY_DRIVER_DIR})
 
-target_sources(app PRIVATE src/te_window_test.c)
+target_sources(app PRIVATE src/te_window_test.c src/te_frame_test.c)
