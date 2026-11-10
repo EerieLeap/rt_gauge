@@ -127,11 +127,21 @@ void SliderControl::UpdateKnobPadding() {
     content_frame_->SetPaddingRight(half_knob_size + lv_obj_get_style_pad_right(lv_slider_, LV_PART_KNOB));
 }
 
+void SliderControl::UpdateHitArea() {
+    // LVGL's track is a dozen pixels tall and takes presses only LV_DPX(8) around it, a sliver of the box
+    // under a finger. A press beside it lands on the box, which keeps it (press lock), and the whole drag
+    // moves nothing. Reaching the box's top and bottom edges makes the box the target; LVGL looks for the
+    // slider only inside its parent, so the reach past the box's sides takes nothing.
+    const int32_t gap = (lv_obj_get_height(content_frame_->GetObject()) - lv_obj_get_height(lv_slider_) + 1) / 2;
+    lv_obj_set_ext_click_area(lv_slider_, std::max(gap, lv_dpx(8)));
+}
+
 void SliderControl::OnBoxResized() {
     if(lv_slider_ == nullptr)
         return;
 
     UpdateKnobPadding();
+    UpdateHitArea();
     lv_obj_center(lv_slider_);
     WidgetBase::OnBoxResized();
 }
@@ -141,6 +151,7 @@ int SliderControl::DoRender() {
 
     lv_obj_set_width(lv_slider_, lv_pct(100));
     UpdateKnobPadding();
+    UpdateHitArea();
 
     lv_obj_center(lv_slider_);
     lv_slider_set_range(lv_slider_, 0, step_count_);
