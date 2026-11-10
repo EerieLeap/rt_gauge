@@ -1890,7 +1890,7 @@ ZTEST(widget_bindings, test_chart_restoration_replays_only_unapplied_samples) {
     indicator.Configure(configuration);
     zassert_equal(indicator.Render(), 0);
     indicator.OnActivated();
-    auto* chart = lv_obj_get_child(views_test::WidgetContent(indicator), 0);
+    auto* chart = lv_obj_get_child(lv_obj_get_child(views_test::WidgetContent(indicator), 0), 0);
     auto* series = lv_chart_get_series_next(chart, nullptr);
     zassert_equal(lv_chart_get_x_start_point(chart, series), 0U);
     PublishSensor("visibility", true);
@@ -1906,7 +1906,7 @@ ZTEST(widget_bindings, test_chart_restoration_replays_only_unapplied_samples) {
     PublishSensor(SENSOR_ID, 55.0F);
     PublishSensor("visibility", true);
     zassert_equal(lv_chart_get_x_start_point(chart, series), 2U);
-    zassert_equal(lv_chart_get_series_y_array(chart, series)[1], 55);
+    zassert_equal(lv_chart_get_series_y_array(chart, series)[1], views_test::OnLvglScale(55));
     lv_refr_now(nullptr);
     zassert_equal(lv_chart_get_x_start_point(chart, series), 2U);
 }

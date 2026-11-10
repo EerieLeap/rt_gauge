@@ -12,43 +12,63 @@ enum class HorizontalChartIndicatorType : uint8_t {
     Line,
 };
 
+// A chart of the last CHART_POINT_COUNT values that moves left as values arrive. It sits in a viewport, one point
+// wider than the box with the extra point hidden left of it: with IS_SMOOTHED the chart scrolls the width of a point
+// back to rest over the interval between values, so a new point slides in instead of the whole line jumping a slot.
 class HorizontalChartIndicator : public IndicatorBase {
 private:
+    // A longer gap between values is a stall, not a rate to scroll over.
+    static constexpr uint32_t MAX_SCROLL_INTERVAL_MS = 10000;
+    static constexpr int32_t MAX_POINT_COUNT = 1000;
+
     int32_t point_count_{};
     HorizontalChartIndicatorType chart_type_{};
+    lv_obj_t* viewport_{};
     lv_obj_t* lv_chart_{};
 
+    // What one new point moves the others, in pixels.
+    float step_px_ = 0;
+    int32_t translate_px_ = 0;
+    bool has_last_point_ = false;
+    uint32_t last_point_ms_ = 0;
+    bool has_interval_ = false;
+    uint32_t interval_ms_ = 0;
+
+    int32_t PointCount() const;
     void UpdateIndicator(float value) override;
-    lv_obj_t* Create(
-        lv_obj_t* parent,
-        int32_t range_start,
-        int32_t range_end,
-        int32_t point_count,
-        HorizontalChartIndicatorType type
-    );
+    lv_obj_t* Create(lv_obj_t* parent, HorizontalChartIndicatorType type);
+    void UpdateGeometry();
+    void SetTranslate(int32_t pixels);
+    void CompleteScroll();
+    void StartScroll(uint32_t duration_ms);
+    uint32_t UpdateInterval(uint32_t elapsed_ms);
+
+    static void ScrollCallback(void* obj, int32_t pixels);
+    static void ViewportCallback(lv_event_t* event);
 
     int DoRender() override;
     int ApplyTheme(const ITheme& theme) override;
 
 public:
     explicit HorizontalChartIndicator(uint32_t id, std::shared_ptr<Frame> parent, WidgetContext context);
+    ~HorizontalChartIndicator() override;
+    HorizontalChartIndicator(const HorizontalChartIndicator&) = delete;
+    HorizontalChartIndicator& operator=(const HorizontalChartIndicator&) = delete;
+    HorizontalChartIndicator(HorizontalChartIndicator&&) = delete;
+    HorizontalChartIndicator& operator=(HorizontalChartIndicator&&) = delete;
+
     WidgetType GetType() const override {
         return WidgetType::IndicatorHorizontalChart;
     }
 
-    // Charts advance their series by one discrete sample per call (SHIFT
-    // mode). IndicatorBase::Update()'s animated interpolation is meant for
-    // needles/digital readouts; routing a chart through it would insert
-    // many interpolated "fake" samples per real sensor sample, distorting
-    // the chart's timebase and reshifting/redrawing the whole series on
-    // every animation frame instead of once per real update.
+    // A chart appends one sample per call. IndicatorBase::Update()'s eased interpolation is meant for needles and
+    // readouts: it would insert many interpolated samples per real one and distort the timebase.
     void Update(float value) override;
 
 protected:
     void RegisterProperties(WidgetPropertyStore& store) const override;
     void OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) override;
-
-public:
+    void OnProcessingSuspended() override;
 };
 
 } // namespace eerie_leap::views::widgets::indicators

@@ -200,23 +200,26 @@ ZTEST(widget_alpha, test_chart_pixels_compose_series_alpha_once_and_preserve_his
         configuration->properties[WidgetPropertyType::CHART_TYPE] = static_cast<int>(type);
         configuration->properties[WidgetPropertyType::CHART_POINT_COUNT] = 4;
         Scene scene(configuration);
-        auto* chart = scene.Inner();
+        // The chart sits in a viewport and has one point more than it shows.
+        auto* viewport = scene.Inner();
+        auto* chart = lv_obj_get_child(viewport, 0);
         auto* series = lv_chart_get_series_next(chart, nullptr);
+        const auto count = lv_chart_get_point_count(chart);
         for(int value : { 30, 70, 40, 80 })
             Publish(WidgetPropertyType::VALUE, value);
         auto* samples = lv_chart_get_y_array(chart, series);
-        const std::vector<int32_t> before(samples, samples + 4);
+        const std::vector<int32_t> before(samples, samples + count);
         const auto start = lv_chart_get_x_start_point(chart, series);
         CheckAlphaMatrix(scene);
-        zassert_equal(scene.Inner(), chart);
+        zassert_equal(scene.Inner(), viewport);
         zassert_equal(lv_chart_get_series_next(chart, nullptr), series);
         zassert_equal(lv_chart_get_y_array(chart, series), samples);
         zassert_true(std::equal(before.begin(), before.end(), samples));
         zassert_equal(lv_chart_get_x_start_point(chart, series), start);
         Publish(PRIMARY, White(0));
         Publish(WidgetPropertyType::VALUE, 55);
-        zassert_equal(lv_chart_get_x_start_point(chart, series), (start + 1) % 4);
-        zassert_equal(samples[start], 55);
+        zassert_equal(lv_chart_get_x_start_point(chart, series), (start + 1) % count);
+        zassert_equal(samples[start], views_test::OnLvglScale(55));
         scene.CheckBrightness(0);
         Publish(PRIMARY, White(255));
         scene.CheckBrightness(255);
@@ -289,7 +292,7 @@ ZTEST(widget_alpha, test_static_oval_composes_theme_and_explicit_alpha) {
 
 ZTEST(widget_alpha, test_layered_ancestor_opacity_restores_only_the_latest_hidden_sample) {
     Scene scene(Configuration(WidgetType::IndicatorHorizontalChart));
-    auto* chart = scene.Inner();
+    auto* chart = lv_obj_get_child(scene.Inner(), 0);
     auto* series = lv_chart_get_series_next(chart, nullptr);
     auto* samples = lv_chart_get_y_array(chart, series);
     const auto start = lv_chart_get_x_start_point(chart, series);
@@ -305,7 +308,7 @@ ZTEST(widget_alpha, test_layered_ancestor_opacity_restores_only_the_latest_hidde
     lv_refr_now(nullptr);
     zassert_true(scene.Base().IsProcessingEligible());
     zassert_equal(lv_chart_get_x_start_point(chart, series), (start + 1) % lv_chart_get_point_count(chart));
-    zassert_equal(samples[start], 80);
+    zassert_equal(samples[start], views_test::OnLvglScale(80));
     zassert_equal(lv_obj_get_style_opa_layered(chart, LV_PART_MAIN), 128);
 }
 

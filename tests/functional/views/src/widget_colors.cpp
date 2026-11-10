@@ -410,7 +410,9 @@ ZTEST(widget_colors, test_whole_widget_opacity_survives_render_theme_and_configu
         configuration->properties[WidgetPropertyType::OPACITY] = 128;
         auto widget = Render(configuration);
         auto* outer = widget->GetContainer()->GetObject();
-        auto* inner = lv_obj_get_child(views_test::WidgetContent(*widget), 0);
+        auto* top = lv_obj_get_child(views_test::WidgetContent(*widget), 0);
+        // A chart's own styles are on the chart in its viewport.
+        auto* inner = type == WidgetType::IndicatorHorizontalChart ? lv_obj_get_child(top, 0) : top;
         zassert_equal(lv_obj_get_style_opa_layered(outer, LV_PART_MAIN), 128);
         zassert_equal(
             lv_obj_get_style_opa_layered(inner, LV_PART_MAIN),
@@ -422,7 +424,7 @@ ZTEST(widget_colors, test_whole_widget_opacity_survives_render_theme_and_configu
         widget->OnDeactivated();
         widget->OnActivated();
         zassert_equal(lv_obj_get_style_opa_layered(outer, LV_PART_MAIN), 128);
-        zassert_equal(lv_obj_get_child(views_test::WidgetContent(*widget), 0), inner);
+        zassert_equal(lv_obj_get_child(views_test::WidgetContent(*widget), 0), top);
         configuration->properties[WidgetPropertyType::OPACITY] = 0;
         widget->Configure(configuration);
         zassert_equal(lv_obj_get_style_opa_layered(outer, LV_PART_MAIN), 0);
@@ -700,7 +702,7 @@ ZTEST(widget_colors, test_chart_color_changes_preserve_series_and_samples) {
         auto configuration = Configuration(WidgetType::IndicatorHorizontalChart);
         configuration->properties[WidgetPropertyType::CHART_TYPE] = static_cast<int>(chart_type);
         auto widget = Render(configuration);
-        auto* chart = Inner(*widget);
+        auto* chart = lv_obj_get_child(Inner(*widget), 0);
         Publish(WidgetPropertyType::VALUE, 40);
         auto* series = lv_chart_get_series_next(chart, nullptr);
         auto* samples = lv_chart_get_y_array(chart, series);
