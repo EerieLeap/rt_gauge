@@ -84,6 +84,8 @@ struct co5300_stats {
 	uint32_t te_tvdh_count;        /* rise to fall */
 	uint64_t te_tvdh_sum;
 	uint64_t te_tvdh_max;
+	uint32_t te_fall_dejittered;   /* falling edges whose stamp the frame path pulled back (the frame path's edge) */
+	uint32_t te_fall_dejitter_max_us; /* ... the largest pull-back */
 
 #ifdef CONFIG_ELCO5300_TE_WINDOW
 	/* The window rule (CONFIG_ELCO5300_TE_WINDOW). Rule decisions count per write attempt. */

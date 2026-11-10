@@ -87,6 +87,7 @@ static void co5300_te_forget_edges(struct co5300_te *te) {
 	te->have_level = false;
 	te->have_fall = false;
 	te->have_rise = false;
+	te->fall_raw_n = 0;
 }
 #endif
 
@@ -128,6 +129,7 @@ static void co5300_te_isr(const struct device *port, struct gpio_callback *cb, u
 			te->have_level = false;
 			te->have_fall = false;
 			te->have_rise = false;
+			te->fall_raw_n = 0;
 			k_sem_give(&te->cap_sem);
 		}
 		k_spin_unlock(&te->lock, key);
@@ -147,9 +149,36 @@ static void co5300_te_isr(const struct device *port, struct gpio_callback *cb, u
 	te->level = level;
 
 	if (!level) {
+		/* The edge without its interrupt latency, from the raw stamps of the edges before it and the
+		 * scan period as it stood before this edge. The estimators and display_write() keep the raw
+		 * stamp; only the frame path reads this one. */
+		uint64_t dj = now;
+
+		if (te->have_fall && te->s.valid && te->fall_raw_n > 0) {
+			int64_t earlier[3];
+			uint8_t n = MIN(te->fall_raw_n, 3);
+
+			for (uint8_t i = 0; i < n; i++) {
+				earlier[i] = (int64_t)te->fall_raw[i];
+			}
+			dj = (uint64_t)co5300_te_dejitter((int64_t)now, earlier, n, (int64_t)te->s.cycles);
+		}
+#ifdef CONFIG_ELCO5300_STATS
+		if (dj < now) {
+			te->dj_count++;
+			if (now - dj > te->dj_max_cycles) {
+				te->dj_max_cycles = now - dj;
+			}
+		}
+#endif
+		te->fall_dj_cycles = dj;
+		bool keep = !te->have_fall;
+
 		if (te->have_fall) {
 			uint64_t interval = now - te->fall_cycles;
 			bool accepted = co5300_est_feed(&te->s, interval);
+
+			keep = accepted;
 #ifdef CONFIG_ELCO5300_STATS
 			if (accepted && te->s.valid) {
 				if (te->iv_count == 0 || interval < te->iv_min) {
@@ -176,6 +205,15 @@ static void co5300_te_isr(const struct device *port, struct gpio_callback *cb, u
 		}
 		te->falls++;
 #endif
+		/* Only a stamp at a believable distance from the one before is history: a late one (or a
+		 * spurious pulse) would make the de-jitter pull the next edges early. */
+		if (keep) {
+			memmove(&te->fall_raw[1], &te->fall_raw[0], sizeof(te->fall_raw) - sizeof(te->fall_raw[0]));
+			te->fall_raw[0] = now;
+			if (te->fall_raw_n < ARRAY_SIZE(te->fall_raw)) {
+				te->fall_raw_n++;
+			}
+		}
 		te->fall_cycles = now;
 		te->have_fall = true;
 		te->fall_seq++;
@@ -293,6 +331,8 @@ void co5300_stats_get(const struct device *dev, struct co5300_stats *out) {
 	out->te_tvdh_count = te->tvdh_count;
 	out->te_tvdh_sum = te->tvdh_sum;
 	out->te_tvdh_max = te->tvdh_max;
+	out->te_fall_dejittered = te->dj_count;
+	out->te_fall_dejitter_max_us = MIN(k_cyc_to_us_floor64(te->dj_max_cycles), (uint64_t)UINT32_MAX);
 	k_spin_unlock(&te->lock, key);
 #endif
 #ifdef CONFIG_ELCO5300_TE_WINDOW
@@ -338,6 +378,8 @@ void co5300_stats_reset(const struct device *dev) {
 	te->tvdh_count = 0;
 	te->tvdh_sum = 0;
 	te->tvdh_max = 0;
+	te->dj_count = 0;
+	te->dj_max_cycles = 0;
 	k_spin_unlock(&te->lock, key);
 #endif
 }
@@ -551,7 +593,9 @@ static void co5300_te_snapshot(struct co5300_data *data, struct co5300_te_snap *
 	uint64_t s = te->s.cycles;
 	uint64_t tvdl = te->tvdl.cycles;
 
-	uint64_t fall = te->fall_cycles;
+	/* The frame path's edge: without the interrupt latency, so now - fall is its age (age_us stays raw
+	 * for display_write(), which must not change). */
+	uint64_t fall = te->fall_dj_cycles;
 
 	snap->valid = te->have_fall && te->s.valid && te->tvdl.valid;
 	snap->seq = te->fall_seq;

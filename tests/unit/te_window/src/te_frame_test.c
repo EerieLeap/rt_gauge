@@ -622,22 +622,19 @@ static int64_t edge_stamp(const struct SimState* sm, int64_t k) {
 static bool edge_lost(const struct SimState* sm, int64_t k);
 
 /*
- * What the driver keeps as the edge's time: the ISR stamp, but never later than an earlier edge's stamp plus
- * the scans between (a stamp can only be late). Up to three edges back, skipping lost ones.
+ * What the driver keeps as the edge's time: the ISR stamp, pulled back by co5300_te_dejitter() from the raw
+ * stamps of the last three edges it saw (a lost edge was never seen, so it is not in that ring).
  */
 static int64_t edge_driver_stamp(const struct SimState* sm, int64_t k) {
-    int64_t t = edge_stamp(sm, k);
+    int64_t earlier[3];
+    uint8_t n = 0;
 
-    for(int64_t j = 1; j <= 3 && k - j >= 0; j++) {
-        if(!edge_lost(sm, k - j)) {
-            int64_t c = edge_stamp(sm, k - j) + j * (int64_t)S_US;
-
-            if(c < t) {
-                t = c;
-            }
+    for(int64_t j = k - 1; j >= 0 && j >= k - 16 && n < 3; j--) {
+        if(!edge_lost(sm, j)) {
+            earlier[n++] = edge_stamp(sm, j);
         }
     }
-    return t;
+    return co5300_te_dejitter(edge_stamp(sm, k), earlier, n, S_US);
 }
 
 static int64_t edge_deliver(const struct SimState* sm, int64_t k) {
@@ -2471,6 +2468,178 @@ ZTEST(te_frame, test_search_budget_per_frame) {
         }
     }
     zassert_true(many > 0, "no frame searched more than 1000 nodes: the sweep does not reach the budget");
+}
+
+/* ---- co5300_te_dejitter(): the falling-edge stamp without the interrupt latency ---- */
+
+static int64_t dj_call(int64_t raw_0, const int64_t* earlier, uint8_t n, int64_t s) {
+    return co5300_te_dejitter(raw_0, earlier, n, s);
+}
+
+ZTEST(te_frame, test_dejitter_on_time_unchanged) {
+    const int64_t s = S_US;
+    const int64_t e = 5000000;
+    int64_t earlier[3] = { e - s, e - 2 * s, e - 3 * s };
+
+    zassert_equal(dj_call(e, earlier, 3, s), e);
+    zassert_equal(dj_call(e, earlier, 1, s), e);
+    zassert_equal(dj_call(e, NULL, 0, s), e, "no earlier stamp");
+    zassert_equal(dj_call(e + 900, earlier, 0, s), e + 900, "no earlier stamp");
+    zassert_equal(dj_call(e + 900, earlier, 3, 0), e + 900, "no scan period");
+    zassert_equal(dj_call(e + 900, earlier, 3, -5), e + 900, "no scan period");
+}
+
+ZTEST(te_frame, test_dejitter_late_stamp_pulled_back) {
+    const int64_t s = S_US;
+    const int64_t e = 7000000;
+    int64_t earlier[3] = { e - s, e - 2 * s + 40, e - 3 * s + 300 };
+
+    /* The best earlier edge predicts e exactly; any lateness below S/2 is removed. */
+    int64_t lates[] = { 1, 50, 777, s / 2 - 1 };
+
+    for(unsigned i = 0; i < ARRAY_SIZE(lates); i++) {
+        zassert_equal(dj_call(e + lates[i], earlier, 3, s), e, "late %lld", (long long)lates[i]);
+    }
+
+    /* Every earlier edge was late too: the result is the best of them. */
+    int64_t late_all[3] = { e - s + 120, e - 2 * s + 40, e - 3 * s + 300 };
+
+    zassert_equal(dj_call(e + 700, late_all, 3, s), e + 40);
+}
+
+ZTEST(te_frame, test_dejitter_lost_edges) {
+    const int64_t s = S_US;
+    const int64_t e = 9000000;
+    /* The edges one and two scans back were lost: k counts by time, not by the number of stamps. */
+    int64_t earlier[3] = { e - 3 * s, e - 4 * s + 60, e - 6 * s + 500 };
+
+    zassert_equal(dj_call(e + 400, earlier, 3, s), e);
+    zassert_equal(dj_call(e + 400, earlier, 1, s), e);
+
+    int64_t far_only[1] = { e - 5 * s + 123 };
+
+    zassert_equal(dj_call(e + 400, far_only, 1, s), e + 123);
+}
+
+ZTEST(te_frame, test_dejitter_earlier_late_does_not_drag) {
+    const int64_t s = S_US;
+    const int64_t e = 3000000;
+    /* The earlier edges were late; this one is on time and stays. */
+    int64_t earlier[3] = { e - s + 2000, e - 2 * s + 5000, e - 3 * s + 100 };
+
+    zassert_equal(dj_call(e, earlier, 3, s), e);
+    zassert_equal(dj_call(e + 10, earlier, 3, s), e + 10, "later than every prediction but the last");
+    zassert_equal(dj_call(e + 10, earlier, 2, s), e + 10);
+}
+
+ZTEST(te_frame, test_dejitter_ignores_stamps_not_before) {
+    const int64_t s = S_US;
+    const int64_t e = 1000000;
+    /* A stamp equal to, or after, the newest one counts no scans (k < 1) and cannot help or hurt. */
+    int64_t earlier[3] = { e, e + 5, e - s / 2 + 1 };
+
+    zassert_equal(dj_call(e, earlier, 3, s), e);
+}
+
+/* Stamps of a stream of edges with true period p, an estimate s = p + ds and random lateness. */
+static void dejitter_stream(
+    int64_t p,
+    int64_t ds,
+    int64_t edges,
+    int64_t late_max,
+    int lose_pct,
+    int64_t* min_err,
+    int64_t* max_err
+) {
+    const int64_t s = p + ds;
+    int64_t ring[3] = { 0, 0, 0 };
+    uint8_t n = 0;
+
+    *min_err = INT64_MAX;
+    *max_err = INT64_MIN;
+    for(int64_t k = 1; k <= edges; k++) {
+        int64_t truth = k * p;
+        int64_t raw = truth + rnd_in(0, late_max);
+
+        if(rnd_u32() % 100 < (uint32_t)lose_pct) {
+            continue;
+        }
+
+        int64_t r = dj_call(raw, ring, n, s);
+
+        if(r > raw) {
+            *max_err = INT64_MAX;
+        }
+        if(n > 0) { /* nothing to compare with on the first stamp */
+            if(r - truth < *min_err) {
+                *min_err = r - truth;
+            }
+            if(r - truth > *max_err) {
+                *max_err = r - truth;
+            }
+        }
+        /* The ring takes the raw stamp, never the result. */
+        for(int i = 2; i > 0; i--) {
+            ring[i] = ring[i - 1];
+        }
+        ring[0] = raw;
+        if(n < 3) {
+            n++;
+        }
+    }
+}
+
+ZTEST(te_frame, test_dejitter_scan_estimate_error_bounded) {
+    seed_rng(77);
+    for(int64_t ds = -40; ds <= 40; ds += 8) {
+        for(int lose = 0; lose <= 30; lose += 30) {
+            int64_t lo = 0;
+            int64_t hi = 0;
+            int64_t late_max = S_US / 4;
+
+            dejitter_stream(S_US, ds, 300, late_max, lose, &lo, &hi);
+            zassert_not_equal(hi, INT64_MAX, "result later than raw");
+            zassert_true(hi >= 0 && hi <= late_max, "ds %lld: late by %lld", (long long)ds, (long long)hi);
+            if(lose == 0) {
+                /* Three earlier stamps, so k <= 3: the estimate's error is multiplied by at most 3. */
+                zassert_true(lo >= -3 * (ds < 0 ? -ds : ds), "ds %lld: %lld early", (long long)ds, (long long)lo);
+            }
+        }
+    }
+}
+
+ZTEST(te_frame, test_dejitter_no_drift_over_long_stream) {
+    seed_rng(4242);
+
+    int64_t lo_short = 0;
+    int64_t hi_short = 0;
+    int64_t lo_long = 0;
+    int64_t hi_long = 0;
+    const int64_t ds = 25;
+
+    dejitter_stream(S_US, ds, 200, 3000, 0, &lo_short, &hi_short);
+    dejitter_stream(S_US, ds, 200000, 3000, 0, &lo_long, &hi_long);
+    /* The result is a function of raw stamps only, so a long run is no worse than a short one. */
+    zassert_true(lo_long >= -3 * ds, "%lld", (long long)lo_long);
+    zassert_true(lo_short >= -3 * ds);
+    zassert_true(hi_long <= 3000 && hi_short <= 3000);
+}
+
+ZTEST(te_frame, test_dejitter_in_microseconds_or_cycles) {
+    /* The same stream in two units gives the same answer scaled. */
+    const int64_t unit = 240; /* cycles per us */
+    int64_t e_us[4] = { 1000000 + 90, 1000000 - 16800, 1000000 - 2 * 16800 + 30, 1000000 - 3 * 16800 + 200 };
+    int64_t e_cy[4];
+
+    for(int i = 0; i < 4; i++) {
+        e_cy[i] = e_us[i] * unit;
+    }
+
+    int64_t r_us = dj_call(e_us[0], e_us + 1, 3, 16800);
+    int64_t r_cy = dj_call(e_cy[0], e_cy + 1, 3, 16800 * unit);
+
+    zassert_equal(r_us, 1000000);
+    zassert_equal(r_cy, r_us * unit);
 }
 
 ZTEST_SUITE(te_frame, NULL, NULL, NULL, NULL, NULL);

@@ -302,6 +302,38 @@ static inline int64_t co5300_te_fdiv(int64_t x, int64_t m) {
 	return (x % m < 0) ? q - 1 : q;
 }
 
+/*
+ * The time of a falling edge without its interrupt latency. A TE interrupt can run late (another interrupt
+ * or an irq_lock section ran first), so a raw stamp is never early; every earlier edge j says the edge is
+ * no later than raw_j + k_j * S, k_j the scans between them. Returns the smallest of raw_0 and those.
+ *
+ * raw_0 is the newest stamp, earlier[0..n) up to three older raw stamps of the same epoch (any order; raw
+ * means straight from the interrupt, never a result of this function, so an error cannot feed back). k_j is
+ * counted by time, round((raw_0 - raw_j) / S), because a lost edge makes the edge count short; only k_j >= 1
+ * counts. Times and s are in one unit, whichever the caller has (cycles or microseconds). Without a scan
+ * period (s <= 0) or earlier stamps the result is raw_0. An S off by dS moves the result by at most
+ * n * |dS| from the true edge, and the result is never later than raw_0.
+ */
+static inline int64_t co5300_te_dejitter(int64_t raw_0, const int64_t *earlier, uint8_t n, int64_t s) {
+	int64_t t = raw_0;
+
+	if (s <= 0 || earlier == NULL) {
+		return t;
+	}
+	for (uint8_t j = 0; j < n; j++) {
+		int64_t k = co5300_te_fdiv(raw_0 - earlier[j] + s / 2, s);
+
+		if (k >= 1) {
+			int64_t c = earlier[j] + k * s;
+
+			if (c < t) {
+				t = c;
+			}
+		}
+	}
+	return t;
+}
+
 struct co5300_te_frame_in {
 	uint32_t age_us;          /* since the snapshot's falling edge E_0 (scan 0 started there) */
 	uint32_t s_us;

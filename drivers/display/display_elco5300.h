@@ -12,7 +12,7 @@
 #if defined(CONFIG_ELCO5300_STATS) || defined(CONFIG_ELCO5300_FRAME_WRITE)
 #include <zephyr/drivers/display/display_co5300.h>
 #endif
-#ifdef CONFIG_ELCO5300_TE_WINDOW
+#if defined(CONFIG_ELCO5300_TE_WINDOW) || defined(CONFIG_ELCO5300_TE_SYNC)
 #include "co5300_te_window.h"
 #endif
 
@@ -177,7 +177,11 @@ struct co5300_te {
 	bool have_rise;
 	uint32_t fall_seq;    /* falling edges seen, counts scan starts */
 	uint32_t epoch;       /* changes whenever the edges and estimates are forgotten (blanking) */
-	uint64_t fall_cycles; /* last falling edge (a scan starts) */
+	uint64_t fall_cycles; /* last falling edge (a scan starts), as the ISR stamped it */
+	uint64_t fall_dj_cycles; /* the same edge without the interrupt latency (co5300_te_dejitter()); the frame path's edge */
+	uint64_t fall_raw[4]; /* raw stamps of the last falling edges, newest first; only fall_dj_cycles reads them; a stamp
+					  * whose interval the scan period estimate rejected is not kept */
+	uint8_t fall_raw_n;   /* valid entries of fall_raw; cleared with the edges */
 	uint64_t rise_cycles; /* last rising edge (the porch starts) */
 	struct co5300_est s;     /* scan period, from the falling-edge intervals */
 	struct co5300_est tvdl;  /* TE low time, from a fall to the next rise */
@@ -194,6 +198,8 @@ struct co5300_te {
 	uint32_t tvdh_count;
 	uint64_t tvdh_sum;
 	uint64_t tvdh_max;
+	uint32_t dj_count;       /* falling edges whose stamp was pulled back */
+	uint64_t dj_max_cycles;  /* the largest pull-back */
 	struct co5300_te_sample *cap_buf; /* the capture is armed while this is set */
 	size_t cap_count;
 	size_t cap_n;
