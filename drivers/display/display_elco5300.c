@@ -1354,6 +1354,9 @@ struct co5300_fw_counts {
 #define CO5300_FW_COUNT(fw, field, n) ((void)0)
 #endif
 
+/* An unplanned start waits at most this many scans for the previous frame's bound. */
+#define CO5300_FW_HOLD_MAX_SCANS 4
+
 enum co5300_fw_mode {
 	CO5300_FW_PLANNED, /* the pending rects follow one plan */
 	CO5300_FW_SPLIT,   /* no plan holds the frame: one rect at a time, each in its own window */
@@ -1706,9 +1709,35 @@ static void co5300_fw_abort_rest(struct co5300_fw *fw) {
 	fw->timed = false;
 }
 
+/* Holds an unplanned start until the previous frame's bound (scan N_min), so that even a rect written without a
+ * window never shows before its predecessor. Only with timing that is still good in the bound's epoch; a bound
+ * that is far off is stale and ignored. */
+static void co5300_fw_hold_bound(struct co5300_fw *fw) {
+	struct co5300_data *data = fw->data;
+	struct co5300_te_snap cur;
+
+	if (!fw->prev_bound.valid) {
+		return;
+	}
+	/* The window rule being off does not matter: the bound is about the scans, not about this rule. */
+	co5300_te_snapshot(data, &cur);
+	if (!cur.valid || !data->te_sync || data->blanked) {
+		return;
+	}
+
+	int32_t n = co5300_te_frame_min_scan(&fw->prev_bound, cur.fall_us, cur.s_us, cur.epoch);
+	int64_t wait = cur.fall_us + (int64_t)n * cur.s_us - cur.now_us;
+
+	if (n > 0 && n <= CO5300_FW_HOLD_MAX_SCANS && wait > 0) {
+		co5300_win_wait((uint32_t)wait);
+	}
+}
+
 /* A rect written without a plan (no timing, or no window of its own), re-sent at once on failure. */
 static void co5300_fw_write_plain(struct co5300_fw *fw, uint8_t r) {
 	bool again = true;
+
+	co5300_fw_hold_bound(fw);
 
 	while (again) {
 		co5300_fw_lock(fw);
