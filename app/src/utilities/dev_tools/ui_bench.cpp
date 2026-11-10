@@ -499,6 +499,120 @@ int CmdBar(const shell* sh, size_t argc, char** argv) {
     return 0;
 }
 
+// The slider sweep: moves the first slider of the active screen like a finger would, one drag tick per timer period,
+// so the writes that follow a drag (sensor, needle, bar, number, chart) run without a hand on the glass.
+constexpr uint32_t SWEEP_DEFAULT_PERIOD_MS = 16; // the S3's refresh period, the rate a drag's ticks arrive at
+constexpr int32_t SWEEP_DEFAULT_STEP = 1;
+constexpr int32_t SWEEP_PERIOD_MIN_MS = 5;
+constexpr int32_t SWEEP_PERIOD_MAX_MS = 1000;
+constexpr int32_t SWEEP_STEP_MAX = 1000;
+
+// All only touched under the LVGL lock. The position is kept here: the slider's inbound binding writes it too.
+lv_timer_t* sweep_timer_ = nullptr;
+int32_t sweep_step_ = SWEEP_DEFAULT_STEP;
+int32_t sweep_pos_ = 0;
+int32_t sweep_dir_ = 1;
+
+lv_obj_t* FindSlider(lv_obj_t* parent) {
+    const uint32_t count = lv_obj_get_child_count(parent);
+    for(uint32_t i = 0; i < count; i++) {
+        lv_obj_t* child = lv_obj_get_child(parent, static_cast<int32_t>(i));
+        if(lv_obj_check_type(child, &lv_slider_class))
+            return child;
+        if(lv_obj_t* found = FindSlider(child))
+            return found;
+    }
+    return nullptr;
+}
+
+// Looked up on every tick: a rebuilt UI must not leave a pointer behind.
+lv_obj_t* FindActiveSlider() {
+    lv_obj_t* screen = lv_screen_active();
+    if(screen == nullptr)
+        return nullptr;
+    if(lv_obj_check_type(screen, &lv_slider_class))
+        return screen;
+    return FindSlider(screen);
+}
+
+// Runs inside lv_timer_handler(), under the LVGL lock.
+void SweepTimer(lv_timer_t* timer) {
+    ARG_UNUSED(timer);
+
+    lv_obj_t* slider = FindActiveSlider();
+    if(slider == nullptr)
+        return;
+
+    const int32_t low = lv_slider_get_min_value(slider);
+    const int32_t high = lv_slider_get_max_value(slider);
+
+    int32_t next = sweep_pos_ + sweep_dir_ * sweep_step_;
+    if(next >= high) {
+        next = high;
+        sweep_dir_ = -1;
+    } else if(next <= low) {
+        next = low;
+        sweep_dir_ = 1;
+    }
+    sweep_pos_ = next;
+
+    lv_slider_set_value(slider, sweep_pos_, LV_ANIM_OFF);
+    lv_obj_send_event(slider, LV_EVENT_VALUE_CHANGED, nullptr);
+}
+
+bool ParseRange(const char* text, int32_t low, int32_t high, int32_t& out) {
+    char* end = nullptr;
+    const long value = strtol(text, &end, 10);
+    if(end == text || *end != '\0' || value < low || value > high)
+        return false;
+    out = static_cast<int32_t>(value);
+    return true;
+}
+
+int CmdSweep(const shell* sh, size_t argc, char** argv) {
+    bool on = false;
+    int32_t period_ms = SWEEP_DEFAULT_PERIOD_MS;
+    int32_t step = SWEEP_DEFAULT_STEP;
+
+    const bool valid = argc >= 2
+        && argc <= 4
+        && IsOn(argv[1], on)
+        && (on || argc == 2)
+        && (argc < 3 || ParseRange(argv[2], SWEEP_PERIOD_MIN_MS, SWEEP_PERIOD_MAX_MS, period_ms))
+        && (argc < 4 || ParseRange(argv[3], 1, SWEEP_STEP_MAX, step));
+    if(!valid) {
+        shell_print(
+            sh, "usage: ui_bench sweep on [period_ms %d..%d] [step 1..%d] | off", SWEEP_PERIOD_MIN_MS,
+            SWEEP_PERIOD_MAX_MS, SWEEP_STEP_MAX
+        );
+        return -EINVAL;
+    }
+
+    ScopedLvglLock lvgl_guard;
+
+    if(sweep_timer_ != nullptr) {
+        lv_timer_delete(sweep_timer_);
+        sweep_timer_ = nullptr;
+    }
+
+    if(!on) {
+        shell_print(sh, "sweep off");
+        return 0;
+    }
+
+    if(lv_obj_t* slider = FindActiveSlider()) {
+        sweep_pos_ = lv_slider_get_value(slider);
+    } else {
+        sweep_pos_ = 0;
+        shell_warn(sh, "no slider on the active screen yet; the sweep starts when one appears");
+    }
+    sweep_dir_ = 1;
+    sweep_step_ = step;
+    sweep_timer_ = lv_timer_create(SweepTimer, static_cast<uint32_t>(period_ms), nullptr);
+    shell_print(sh, "sweep on: period=%d ms step=%d", period_ms, step);
+    return 0;
+}
+
     #ifdef CONFIG_ELCO5300_STATS
 constexpr size_t TECAL_CAPTURE_A = 64; // mode 1: about 32 scans
 constexpr size_t TECAL_CAPTURE_B = 40; // scan-line mode: 20 frames, two rises skipped
@@ -901,6 +1015,14 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
         CmdBar,
         2,
         0
+    ),
+    SHELL_CMD_ARG(
+        sweep,
+        NULL,
+        "sweep on [period_ms] [step] | off: move the first slider back and forth, one drag tick per period",
+        CmdSweep,
+        2,
+        2
     ),
     SHELL_CMD_ARG(stats, NULL, "stats [reset]: counters since the last reset", CmdStats, 1, 1),
     SHELL_CMD_ARG(run, NULL, "run <warmup_ms> <window_ms>: full mode, warm up, reset, measure, print", CmdRun, 3, 0),
