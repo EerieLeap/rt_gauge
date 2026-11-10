@@ -1,8 +1,9 @@
 # SVG icons
 
 `IconFactory` creates `Svg` (`IconType` 3), which draws an SVG document stored as an
-`images` asset (`ui_assets/images`, `.svg` next to the raw `.bin` images). Use it like
-any other icon: in a `BasicIcon` or `BasicArcIcon` widget, or as a dial's needle.
+`images` asset (`ui_assets/images`, `.svg` next to the `.lvimg` and raw `.bin` images of
+[Image files](IMAGE_FILES.md)). Use it like any other icon: in a `BasicIcon` or
+`BasicArcIcon` widget, or as a dial's needle.
 
 ## Properties
 
