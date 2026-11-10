@@ -26,6 +26,8 @@ private:
     void UpdateSlider();
     // Room at the track's ends for the knob, which sticks out by half its size.
     void UpdateKnobPadding();
+    // The whole box takes a press, not only the thin track.
+    void UpdateHitArea();
     void OnBoxResized() override;
 
     int DoRender() override;

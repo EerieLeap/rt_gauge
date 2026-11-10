@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -491,6 +492,50 @@ ZTEST(widget_layout, test_a_slider_follows_a_new_size_of_its_box) {
     zassert_equal(lv_obj_get_width(views_test::WidgetContent(scene.Root())), static_cast<int32_t>(size.width));
     zassert_true(lv_obj_get_width(slider) > 0);
     zassert_equal(slider, ContentChild(scene.Root()), "The slider is the one the box held.");
+}
+
+// A finger is wider than the track: a press anywhere in a slider's box takes the slider, after a resize too, and a
+// press outside the box does not.
+ZTEST(widget_layout, test_a_press_anywhere_in_a_sliders_box_takes_the_slider) {
+    Scene scene(MakeSizedScreen(WidgetType::ControlSlider, 4, true));
+    lv_obj_t* const slider = ContentChild(scene.Root());
+
+    const auto check = [&](const char* when) {
+        lv_obj_update_layout(scene.container->GetObject());
+        lv_area_t box;
+        lv_obj_get_coords(scene.Root().GetContainer()->GetObject(), &box);
+        zassert_true(
+            lv_obj_get_height(slider) < lv_area_get_height(&box) / 2, "%s: the track must be thin for this test", when
+        );
+
+        const int32_t mid_x = (box.x1 + box.x2) / 2;
+        const int32_t mid_y = (box.y1 + box.y2) / 2;
+        const std::array<lv_point_t, 8> inside = { {
+            { box.x1, box.y1 },
+            { mid_x, box.y1 },
+            { box.x2, box.y1 },
+            { box.x1, mid_y },
+            { box.x2, mid_y },
+            { box.x1, box.y2 },
+            { mid_x, box.y2 },
+            { box.x2, box.y2 },
+        } };
+        for(auto point : inside) {
+            zassert_equal(
+                lv_indev_search_obj(scene.container->GetObject(), &point), slider,
+                "%s: (%d, %d) in the box missed the slider", when, static_cast<int>(point.x), static_cast<int>(point.y)
+            );
+        }
+
+        lv_point_t below = { mid_x, box.y2 + 1 };
+        zassert_not_equal(
+            lv_indev_search_obj(scene.container->GetObject(), &below), slider, "%s: a press below the box", when
+        );
+    };
+
+    check("rendered");
+    PublishSize(6.0F);
+    check("resized");
 }
 
 // What a publisher sends is a number of cells, and anything else fills nothing.

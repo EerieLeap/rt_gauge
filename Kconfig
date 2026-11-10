@@ -1,3 +1,22 @@
 # Project configuration options
 
 rsource "drivers/Kconfig"
+
+config GAUGE_ROUND_PANEL_CLIP
+	bool "Skip the corners of full-screen image copies on a round panel"
+	depends on LV_DRAW_SW_ASM_CUSTOM
+	default n
+	help
+	  A round panel shows only the circle inscribed in its frame buffer, so the corners of a full-screen
+	  image copy are never seen. With this option the gauge's blend hook copies, for a blit that fills the
+	  display's whole active frame buffer, only the chord of that circle (plus a margin) in each row. The panel
+	  still receives the full rectangle; the corners keep whatever pixels were there before, which nobody sees.
+	  Layers of the same size (transform layers, snapshots) are always copied whole.
+
+config GAUGE_ROUND_PANEL_CLIP_MARGIN_PX
+	int "Pixels kept on each side of a row beyond the chord"
+	depends on GAUGE_ROUND_PANEL_CLIP
+	range 0 16
+	default 2
+	help
+	  Pixels copied on each side of a row beyond the inscribed circle's chord.

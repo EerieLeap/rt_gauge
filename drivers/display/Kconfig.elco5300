@@ -22,10 +22,54 @@ config ELCO5300_TE_SYNC
 	  60/n FPS. The wait is skipped while the display is blanked, for
 	  later areas of the same frame, and after repeated TE timeouts.
 
+config ELCO5300_TE_WINDOW
+	bool "Start every area inside its tear-free window"
+	depends on ELCO5300_TE_SYNC
+	help
+	  Instead of waiting for the falling TE edge before a frame, start each
+	  area (first, later and re-sent ones) at a phase of the panel's scan at
+	  which the scan can neither overtake the write nor be overtaken by it
+	  inside the area's rows. A full frame then starts up to several
+	  milliseconds after an edge and stays on screen for one scan more
+	  often than with the edge rule. Needs the scan period and the TE low
+	  time measured (a few scans after start), a fresh edge and the normal
+	  orientation; otherwise the edge rule is used. The window comes from
+	  pure functions in co5300_te_window.h.
+
+config ELCO5300_TE_WINDOW_MARGIN_US
+	int "Margin around the forbidden start interval (microseconds)"
+	default 500
+	depends on ELCO5300_TE_WINDOW
+	help
+	  Added on both sides of an area's forbidden start interval, for the
+	  start latency, the position of the first row against the edge and
+	  the write time's tail beyond its recent maximum. It cannot cover a
+	  long stall inside a write (a cooperative thread running for
+	  milliseconds between two DMA pieces), which can tear the area; the
+	  bench audit counts such a write as late. A stale edge falls back to
+	  the edge rule.
+
+config ELCO5300_FRAME_WRITE
+	bool "Write the rectangles of one frame for one panel scan"
+	depends on ELCO5300_TE_WINDOW
+	help
+	  co5300_write_frame(): every rectangle of a frame starts inside its own
+	  tear-free window for one target scan, so no scan shows part of the frame
+	  new and part old. See co5300_te_window.h.
+
+config ELCO5300_FRAME_MAX_RECTS
+	int "Rectangles per frame"
+	default 32
+	range 1 64
+	depends on ELCO5300_FRAME_WRITE
+
 config ELCO5300_STATS
 	bool "CO5300 bench counters"
 	depends on ELCO5300
 	depends on SHELL
 	help
-	  Bench counters read by the app's ui_bench shell command; adds a few
-	  cycles per transaction.
+	  Bench counters and controls for the app's ui_bench shell command:
+	  the write and TE counters, the per-write audit of the window rule,
+	  the TE interrupt and window switches and the scan line calibration
+	  (TE mode 3). Adds a few cycles per transaction and write; never for
+	  a shipped build.

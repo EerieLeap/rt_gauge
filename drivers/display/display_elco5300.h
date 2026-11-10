@@ -8,9 +8,12 @@
 
 #include <zephyr/drivers/mspi.h>
 #include <zephyr/drivers/display.h>
-#ifdef CONFIG_ELCO5300_STATS
-#include <zephyr/drivers/display/display_co5300.h>
 #include <zephyr/spinlock.h>
+#if defined(CONFIG_ELCO5300_STATS) || defined(CONFIG_ELCO5300_FRAME_WRITE)
+#include <zephyr/drivers/display/display_co5300.h>
+#endif
+#if defined(CONFIG_ELCO5300_TE_WINDOW) || defined(CONFIG_ELCO5300_TE_SYNC)
+#include "co5300_te_window.h"
 #endif
 
 #define SPI_WRITE_TIMEOUT 100
@@ -148,6 +151,63 @@ struct co5300_config {
 	uint8_t orientation;
 };
 
+#ifdef CONFIG_ELCO5300_TE_SYNC
+/* Intervals within this many percent of the estimate are accepted. */
+#define CO5300_TE_ACCEPT_PCT 3
+/* Consecutive agreeing intervals before the estimate counts as valid, and consecutive rejected
+ * ones after which it is dropped and seeded again. */
+#define CO5300_TE_SEED_COUNT 8
+#define CO5300_TE_REJECT_LIMIT 8
+
+/* An estimate of a repeating interval (the scan period, the TE low time), fed by the ISR. */
+struct co5300_est {
+	uint64_t cycles;  /* EWMA of the accepted intervals */
+	bool valid;
+	uint8_t agree;    /* consecutive agreeing intervals while seeding */
+	uint8_t rejects;  /* consecutive rejected intervals */
+};
+
+/* The TE edge state. The ISR writes it and threads read it, always under lock: the 64-bit stamps
+ * are not atomic on Xtensa. */
+struct co5300_te {
+	struct k_spinlock lock;
+	bool have_level;      /* level is the previous sample's */
+	bool level;
+	bool have_fall;       /* fall_cycles is a falling edge since the interrupt was (re)armed */
+	bool have_rise;
+	uint32_t fall_seq;    /* falling edges seen, counts scan starts */
+	uint32_t epoch;       /* changes whenever the edges and estimates are forgotten (blanking) */
+	uint64_t fall_cycles; /* last falling edge (a scan starts), as the ISR stamped it */
+	uint64_t fall_dj_cycles; /* the same edge without the interrupt latency (co5300_te_dejitter()); the frame path's edge */
+	uint64_t fall_raw[4]; /* raw stamps of the last falling edges, newest first; only fall_dj_cycles reads them; a stamp
+					  * whose interval the scan period estimate rejected is not kept */
+	uint8_t fall_raw_n;   /* valid entries of fall_raw; cleared with the edges */
+	uint64_t rise_cycles; /* last rising edge (the porch starts) */
+	struct co5300_est s;     /* scan period, from the falling-edge intervals */
+	struct co5300_est tvdl;  /* TE low time, from a fall to the next rise */
+#ifdef CONFIG_ELCO5300_STATS
+	uint32_t falls;
+	uint32_t rises;
+	uint32_t coalesced;
+	uint32_t iv_count;
+	uint64_t iv_min;
+	uint64_t iv_max;
+	uint32_t tvdl_count;
+	uint64_t tvdl_sum;
+	uint64_t tvdl_max;
+	uint32_t tvdh_count;
+	uint64_t tvdh_sum;
+	uint64_t tvdh_max;
+	uint32_t dj_count;       /* falling edges whose stamp was pulled back */
+	uint64_t dj_max_cycles;  /* the largest pull-back */
+	struct co5300_te_sample *cap_buf; /* the capture is armed while this is set */
+	size_t cap_count;
+	size_t cap_n;
+	struct k_sem cap_sem;
+#endif
+};
+#endif
+
 /* Display data struct */
 struct co5300_data {
 	struct k_mutex lock; /* one operation (command sequence or whole write) at a time */
@@ -162,7 +222,9 @@ struct co5300_data {
 	bool configured;
 	struct gpio_callback te_gpio_cb_data;
 #ifdef CONFIG_ELCO5300_TE_SYNC
+	const struct device *dev;       /* the ISR finds te-gpios through it */
 	struct gpio_callback te_sync_cb_data;
+	struct co5300_te te;            /* edge state shared by the ISR and threads, under te.lock */
 	struct k_sem te_sem;            /* given by the TE edge that starts a scan, limit 1 */
 	bool te_sync;                   /* TE sync is armed (te-gpios present and set up) */
 	bool blanked;                   /* blanking_on() ran; no TE wait */
@@ -170,9 +232,24 @@ struct co5300_data {
 	volatile bool te_seen;          /* an edge came since the last time the wait looked */
 	uint8_t te_timeouts_in_row;     /* flush thread only */
 #endif
+#ifdef CONFIG_ELCO5300_TE_WINDOW
+	struct co5300_te_wbounds wbounds; /* write time bounds per size class, flush thread only */
+	bool te_window_on;                /* the window rule is in use; off means the edge rule */
+#ifdef CONFIG_ELCO5300_FRAME_WRITE
+	struct co5300_te_frame_bound frame_bound; /* what the previous frame leaves for the next; the frame writer only */
+#endif
+#endif
 #ifdef CONFIG_ELCO5300_STATS
 	struct co5300_stats stats;
 	struct k_spinlock stats_lock;
+#ifdef CONFIG_ELCO5300_TE_WINDOW
+	bool last_full_valid;             /* last_full_seq is the edge count at the end of the previous full frame */
+	uint32_t last_full_seq;
+#ifdef CONFIG_ELCO5300_FRAME_WRITE
+	bool frame_prev_valid;            /* frame_prev_shown_us is when the previous frame was first shown (audit) */
+	int64_t frame_prev_shown_us;
+#endif
+#endif
 	bool post_pending;	/* co5300_stats_mark_post() waits for the next write */
 	bool post_lifted;
 	uint32_t post_stamp;

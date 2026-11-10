@@ -76,8 +76,11 @@ config MSPI_ESP32_FAULT_INJECT_PERIOD
 	  real one), which exercises the recovery and the CO5300 driver's
 	  re-send. The re-send is a new packet, so it succeeds for N >= 2; N = 1
 	  fails every write, re-sends included. 0 turns the injection off and
-	  compiles it away. Injected faults are counted apart from real ones
-	  (injected_faults, with CONFIG_MSPI_ESP32_STATS).
+	  compiles it away, unless CONFIG_MSPI_ESP32_STATS is set: then it is
+	  always compiled in and N is only the period the unit starts with
+	  (mspi_esp32_fault_inject_set() changes it at run time). Injected
+	  faults are counted apart from real ones (injected_faults, with
+	  CONFIG_MSPI_ESP32_STATS).
 
 config MSPI_ESP32_STATS
 	bool "ESP32 MSPI bench counters"

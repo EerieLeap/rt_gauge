@@ -1,0 +1,391 @@
+diff --git a/src/draw/sw/lv_draw_sw.h b/src/draw/sw/lv_draw_sw.h
+index 2299ff58c..f33a87f69 100644
+--- a/src/draw/sw/lv_draw_sw.h
++++ b/src/draw/sw/lv_draw_sw.h
+@@ -143,6 +143,20 @@ void lv_draw_sw_transform(const lv_area_t * dest_area, const void * src_buf,
+                           int32_t src_w, int32_t src_h, int32_t src_stride,
+                           const lv_draw_image_dsc_t * draw_dsc, const lv_draw_image_sup_t * sup, lv_color_format_t src_cf, void * dest_buf);
+ 
++/**
++ * Used internally to skip the part of a rotated image's bounding box that holds no pixel of the image.
++ * All other pixels of the area transform to fully transparent ones.
++ * Only for a rotated image: a scale without rotation clamps the source coordinates.
++ * @param dest_area     area to calculate, in image local coordinates
++ * @param src_w         source buffer width in pixels
++ * @param src_h         source buffer height in pixels
++ * @param draw_dsc      draw descriptor
++ * @param res_area      `dest_area` with its x range narrowed to the columns that hold a pixel of the image
++ * @return              false if no pixel of the area is inside the image (`res_area` is not set)
++ */
++bool lv_draw_sw_transform_tight_area(const lv_area_t * dest_area, int32_t src_w, int32_t src_h,
++                                     const lv_draw_image_dsc_t * draw_dsc, lv_area_t * res_area);
++
+ #if LV_USE_VECTOR_GRAPHIC && LV_USE_THORVG
+ /**
+  * Draw vector graphics with SW render.
+diff --git a/src/draw/sw/lv_draw_sw_img.c b/src/draw/sw/lv_draw_sw_img.c
+index 7e6780010..c263c21b0 100644
+--- a/src/draw/sw/lv_draw_sw_img.c
++++ b/src/draw/sw/lv_draw_sw_img.c
+@@ -535,68 +535,93 @@ static void transform_and_recolor(lv_draw_task_t * t, const lv_draw_image_dsc_t
+     if(cf_final == LV_COLOR_FORMAT_RGB565A8) {
+         /*RGB565A8 images will blended as RGB565 + mask
+          *Therefore the stride can be different. */
+-        blend_dsc.src_stride = blend_w * 2;
+         blend_dsc.mask_area = &blend_area;
+         blend_dsc.mask_res = LV_DRAW_SW_MASK_RES_CHANGED;
+-        blend_dsc.mask_buf = transformed_buf + blend_w * 2 * buf_h;
+-        blend_dsc.mask_stride = blend_w;
+         blend_dsc.src_color_format = LV_COLOR_FORMAT_RGB565;
+     }
+     else if(cf_final == LV_COLOR_FORMAT_AL88) {
+         /*AL88 images will be blended as L8 + mask*/
+-        blend_dsc.src_stride = blend_w;
+         blend_dsc.mask_area = &blend_area;
+         blend_dsc.mask_res = LV_DRAW_SW_MASK_RES_CHANGED;
+-        blend_dsc.mask_buf = transformed_buf + blend_w * buf_h;
+-        blend_dsc.mask_stride = blend_w;
+         blend_dsc.src_color_format = LV_COLOR_FORMAT_L8;
+     }
+     else if(cf_final == LV_COLOR_FORMAT_A8) {
+         blend_dsc.mask_buf = transformed_buf;
+-        blend_dsc.mask_stride = blend_w;
+         blend_dsc.mask_area = &blend_area;
+         blend_dsc.mask_res = LV_DRAW_SW_MASK_RES_CHANGED;
+         blend_dsc.src_buf = NULL;
+     }
+-    else {
+-        blend_dsc.src_stride = blend_w * lv_color_format_get_size(cf_final);
+-    }
++
++    /*The chunks of a rotated image can be narrower than the area. Only for a target without alpha:
++     *blending a transparent pixel can overwrite a nearly transparent (alpha <= LV_OPA_MIN)
++     *pixel of an alpha target, so skipping those pixels would not be bit-exact there.*/
++    bool rotated = draw_dsc->rotation != 0 && !lv_color_format_has_alpha(t->target_layer->color_format);
++    int32_t area_x1 = blend_area.x1;
++    int32_t area_x2 = blend_area.x2;
+ 
+     while(blend_area.y1 <= y_last) {
+         /*Apply transformations if any or separate the channels*/
+         lv_area_t relative_area;
+         relative_area = blend_area;
+         lv_area_move(&relative_area, -img_coords->x1, -img_coords->y1);
+-        lv_draw_sw_transform(&relative_area, src_buf, src_w, src_h, img_stride,
+-                             draw_dsc, sup, cf, transformed_buf);
+-
+-        if(do_recolor || has_colorkey) {
+-            lv_area_t relative_area2;
+-            relative_area2 = blend_area;
+-            lv_area_move(&relative_area2, -blend_area.x1, -blend_area.y1);
+-            if(has_colorkey && cf_final != LV_COLOR_FORMAT_RGB565_SWAPPED) {
+-                colorkey_and_recolor(relative_area2, transformed_buf, transformed_buf, blend_dsc.src_stride, cf_final, draw_dsc,
+-                                     &blend_dsc);
++
++        /*Most of the bounding box of a rotated image can be out of the image. Such pixels are
++         *fully transparent, and blending them leaves a target without alpha unchanged, so transforming
++         *and blending only the columns between the leftmost and rightmost pixels of the image in
++         *this chunk gives the same result.*/
++        bool has_pixels = !rotated || lv_draw_sw_transform_tight_area(&relative_area, src_w, src_h, draw_dsc, &relative_area);
++
++        if(has_pixels) {
++            blend_area.x1 = relative_area.x1 + img_coords->x1;
++            blend_area.x2 = relative_area.x2 + img_coords->x1;
++
++            /*Lay out the chunk in the buffer as `lv_draw_sw_transform` writes it*/
++            int32_t chunk_w = lv_area_get_width(&blend_area);
++            int32_t chunk_h = lv_area_get_height(&blend_area);
++            if(cf_final == LV_COLOR_FORMAT_RGB565A8) {
++                blend_dsc.src_stride = chunk_w * 2;
++                blend_dsc.mask_buf = transformed_buf + chunk_w * 2 * chunk_h;
++                blend_dsc.mask_stride = chunk_w;
++            }
++            else if(cf_final == LV_COLOR_FORMAT_AL88) {
++                blend_dsc.src_stride = chunk_w;
++                blend_dsc.mask_buf = transformed_buf + chunk_w * chunk_h;
++                blend_dsc.mask_stride = chunk_w;
++            }
++            else if(cf_final == LV_COLOR_FORMAT_A8) {
++                blend_dsc.mask_stride = chunk_w;
+             }
+             else {
+-                recolor(relative_area2, transformed_buf, transformed_buf, blend_dsc.src_stride, cf_final, draw_dsc);
++                blend_dsc.src_stride = chunk_w * lv_color_format_get_size(cf_final);
+             }
+-        }
+ 
+-        /*Blend*/
+-        lv_draw_sw_blend(t, &blend_dsc);
++            lv_draw_sw_transform(&relative_area, src_buf, src_w, src_h, img_stride,
++                                 draw_dsc, sup, cf, transformed_buf);
++
++            if(do_recolor || has_colorkey) {
++                lv_area_t relative_area2;
++                relative_area2 = blend_area;
++                lv_area_move(&relative_area2, -blend_area.x1, -blend_area.y1);
++                if(has_colorkey && cf_final != LV_COLOR_FORMAT_RGB565_SWAPPED) {
++                    colorkey_and_recolor(relative_area2, transformed_buf, transformed_buf, blend_dsc.src_stride, cf_final, draw_dsc,
++                                         &blend_dsc);
++                }
++                else {
++                    recolor(relative_area2, transformed_buf, transformed_buf, blend_dsc.src_stride, cf_final, draw_dsc);
++                }
++            }
++
++            /*Blend*/
++            lv_draw_sw_blend(t, &blend_dsc);
++        }
+ 
+         /*Go to the next area*/
++        blend_area.x1 = area_x1;
++        blend_area.x2 = area_x2;
+         blend_area.y1 = blend_area.y2 + 1;
+         blend_area.y2 = blend_area.y1 + buf_h - 1;
+         if(blend_area.y2 > y_last) {
+             blend_area.y2 = y_last;
+-            if(cf_final == LV_COLOR_FORMAT_RGB565A8) {
+-                blend_dsc.mask_buf = transformed_buf + blend_w * 2 * lv_area_get_height(&blend_area);
+-            }
+-            else if(cf_final == LV_COLOR_FORMAT_AL88) {
+-                blend_dsc.mask_buf = transformed_buf + blend_w * lv_area_get_height(&blend_area);
+-            }
+         }
+     }
+ 
+diff --git a/src/draw/sw/lv_draw_sw_transform.c b/src/draw/sw/lv_draw_sw_transform.c
+index bf2a248c9..83d8b1a55 100644
+--- a/src/draw/sw/lv_draw_sw_transform.c
++++ b/src/draw/sw/lv_draw_sw_transform.c
+@@ -28,9 +28,25 @@ typedef struct {
+     lv_point_t pivot;
+ } point_transform_dsc_t;
+ 
++/*The inverse transformation of an image. The source coordinate of a destination pixel is
++ *    xs_ups(x, y) = x0_ups + ((sxy * y) >> 8) + ((sxx * x) >> 8)
++ *    ys_ups(x, y) = y0_ups + ((syy * y) >> 8) + ((syx * x) >> 8)
++ *where x and y are the absolute (image local) destination coordinates.*/
++typedef struct {
++    int32_t sxx;
++    int32_t sxy;
++    int32_t syx;
++    int32_t syy;
++    int32_t x0_ups;
++    int32_t y0_ups;
++} transform_map_t;
++
+ /**********************
+  *  STATIC PROTOTYPES
+  **********************/
++static void transform_map_init(transform_map_t * map, const lv_draw_image_dsc_t * draw_dsc);
++static inline int64_t transform_div(int64_t n, int64_t d);
++
+ /**
+  * Find the sub-range of [x_from, x_to) where lo <= base + ((step * x) >> 8) <= hi.
+  * As the coordinate is a linear (monotonic) function of `x` the result is an interval.
+@@ -137,29 +153,6 @@ void lv_draw_sw_transform(const lv_area_t * dest_area, const void * src_buf,
+ {
+     LV_UNUSED(sup);
+ 
+-    point_transform_dsc_t tr_dsc;
+-    tr_dsc.angle = -draw_dsc->rotation;
+-    tr_dsc.scale_x = draw_dsc->scale_x;
+-    tr_dsc.scale_y = draw_dsc->scale_y;
+-    tr_dsc.pivot = draw_dsc->pivot;
+-
+-    int32_t angle_low = tr_dsc.angle / 10;
+-    int32_t angle_high = angle_low + 1;
+-    int32_t angle_rem = tr_dsc.angle  - (angle_low * 10);
+-
+-    int32_t s1 = lv_trigo_sin(angle_low);
+-    int32_t s2 = lv_trigo_sin(angle_high);
+-
+-    int32_t c1 = lv_trigo_sin(angle_low + 90);
+-    int32_t c2 = lv_trigo_sin(angle_high + 90);
+-
+-    tr_dsc.sinma = (s1 * (10 - angle_rem) + s2 * angle_rem) / 10;
+-    tr_dsc.cosma = (c1 * (10 - angle_rem) + c2 * angle_rem) / 10;
+-    tr_dsc.sinma = tr_dsc.sinma >> (LV_TRIGO_SHIFT - 10);
+-    tr_dsc.cosma = tr_dsc.cosma >> (LV_TRIGO_SHIFT - 10);
+-    tr_dsc.pivot_x_256 = tr_dsc.pivot.x * 256;
+-    tr_dsc.pivot_y_256 = tr_dsc.pivot.y * 256;
+-
+     int32_t dest_w = lv_area_get_width(dest_area);
+     int32_t dest_h = lv_area_get_height(dest_area);
+ 
+@@ -204,31 +197,17 @@ void lv_draw_sw_transform(const lv_area_t * dest_area, const void * src_buf,
+     LV_UNUSED(xs_step_256);
+     LV_UNUSED(ys_step_256);
+ 
+-    /*Compute the steps and the anchor point of the inverse transformation analytically.
+-     *The source coordinate of a destination pixel is
+-     *    xs_ups(x, y) = x0_ups + ((sxy * y) >> 8) + ((sxx * x) >> 8)
+-     *where x and y are the absolute (image local) destination coordinates.
+-     *As it doesn't depend on the rendered area, rendering only a part of the image
++    /*As the mapping doesn't depend on the rendered area, rendering only a part of the image
+      *results in exactly the same pixels as rendering the whole image
+      *(needed for deterministic partial rendering).*/
+-    int32_t sinma = tr_dsc.sinma;
+-    int32_t cosma = tr_dsc.cosma;
+-    if(tr_dsc.angle == 0) {
+-        /*Use the exact values to make the no-rotation case bit-exact (the table gives 1023 for cos(0))*/
+-        sinma = 0;
+-        cosma = 1024;
+-    }
+-    /*Multiply instead of shifting: `sinma` and `cosma` can be negative and
+-     *left shifting a negative value is undefined behavior*/
+-    int32_t sxx = (int32_t)(((int64_t)cosma * 16384) / tr_dsc.scale_x);
+-    int32_t sxy = (int32_t)((-(int64_t)sinma * 16384) / tr_dsc.scale_x);
+-    int32_t syx = (int32_t)(((int64_t)sinma * 16384) / tr_dsc.scale_y);
+-    int32_t syy = (int32_t)(((int64_t)cosma * 16384) / tr_dsc.scale_y);
+-
+-    int64_t xin0 = -(int64_t)tr_dsc.pivot.x;
+-    int64_t yin0 = -(int64_t)tr_dsc.pivot.y;
+-    int32_t x0_ups = (int32_t)(((cosma * xin0 - sinma * yin0) * 64) / tr_dsc.scale_x) + tr_dsc.pivot_x_256 + 0x80;
+-    int32_t y0_ups = (int32_t)(((sinma * xin0 + cosma * yin0) * 64) / tr_dsc.scale_y) + tr_dsc.pivot_y_256 + 0x80;
++    transform_map_t map;
++    transform_map_init(&map, draw_dsc);
++    int32_t sxx = map.sxx;
++    int32_t sxy = map.sxy;
++    int32_t syx = map.syx;
++    int32_t syy = map.syy;
++    int32_t x0_ups = map.x0_ups;
++    int32_t y0_ups = map.y0_ups;
+ 
+     /*If scaled only, keep the source coordinates inside the image to avoid
+      *fading out the last column/row due to the rounding of the steps.
+@@ -331,10 +310,94 @@ void lv_draw_sw_transform(const lv_area_t * dest_area, const void * src_buf,
+     }
+ }
+ 
++bool lv_draw_sw_transform_tight_area(const lv_area_t * dest_area, int32_t src_w, int32_t src_h,
++                                     const lv_draw_image_dsc_t * draw_dsc, lv_area_t * res_area)
++{
++    transform_map_t map;
++    transform_map_init(&map, draw_dsc);
++
++    int32_t x_end = dest_area->x2 + 1;
++    int32_t hi_x = src_w * 256 - 1;
++    int32_t hi_y = src_h * 256 - 1;
++
++    int32_t tight_from = x_end;
++    int32_t tight_to = dest_area->x1;
++
++    int32_t y;
++    for(y = dest_area->y1; y <= dest_area->y2; y++) {
++        int32_t xs_ups = map.x0_ups + (int32_t)(((int64_t)map.sxy * y) >> 8);
++        int32_t ys_ups = map.y0_ups + (int32_t)(((int64_t)map.syy * y) >> 8);
++
++        int32_t xa, xb, ya, yb;
++        transform_safe_interval(xs_ups, map.sxx, 0, hi_x, dest_area->x1, x_end, &xa, &xb);
++        transform_safe_interval(ys_ups, map.syx, 0, hi_y, dest_area->x1, x_end, &ya, &yb);
++        if(ya > xa) xa = ya;
++        if(yb < xb) xb = yb;
++
++        if(xa < xb) {
++            if(xa < tight_from) tight_from = xa;
++            if(xb > tight_to) tight_to = xb;
++        }
++    }
++
++    if(tight_from >= tight_to) return false;
++
++    *res_area = *dest_area;
++    res_area->x1 = tight_from;
++    res_area->x2 = tight_to - 1;
++    return true;
++}
++
+ /**********************
+  *   STATIC FUNCTIONS
+  **********************/
+ 
++static void transform_map_init(transform_map_t * map, const lv_draw_image_dsc_t * draw_dsc)
++{
++    point_transform_dsc_t tr_dsc;
++    tr_dsc.angle = -draw_dsc->rotation;
++    tr_dsc.scale_x = draw_dsc->scale_x;
++    tr_dsc.scale_y = draw_dsc->scale_y;
++    tr_dsc.pivot = draw_dsc->pivot;
++
++    int32_t angle_low = tr_dsc.angle / 10;
++    int32_t angle_high = angle_low + 1;
++    int32_t angle_rem = tr_dsc.angle  - (angle_low * 10);
++
++    int32_t s1 = lv_trigo_sin(angle_low);
++    int32_t s2 = lv_trigo_sin(angle_high);
++
++    int32_t c1 = lv_trigo_sin(angle_low + 90);
++    int32_t c2 = lv_trigo_sin(angle_high + 90);
++
++    tr_dsc.sinma = (s1 * (10 - angle_rem) + s2 * angle_rem) / 10;
++    tr_dsc.cosma = (c1 * (10 - angle_rem) + c2 * angle_rem) / 10;
++    tr_dsc.sinma = tr_dsc.sinma >> (LV_TRIGO_SHIFT - 10);
++    tr_dsc.cosma = tr_dsc.cosma >> (LV_TRIGO_SHIFT - 10);
++    tr_dsc.pivot_x_256 = tr_dsc.pivot.x * 256;
++    tr_dsc.pivot_y_256 = tr_dsc.pivot.y * 256;
++
++    /*Compute the steps and the anchor point of the inverse transformation analytically.*/
++    int32_t sinma = tr_dsc.sinma;
++    int32_t cosma = tr_dsc.cosma;
++    if(tr_dsc.angle == 0) {
++        /*Use the exact values to make the no-rotation case bit-exact (the table gives 1023 for cos(0))*/
++        sinma = 0;
++        cosma = 1024;
++    }
++    /*Multiply instead of shifting: `sinma` and `cosma` can be negative and
++     *left shifting a negative value is undefined behavior*/
++    map->sxx = (int32_t)transform_div((int64_t)cosma * 16384, tr_dsc.scale_x);
++    map->sxy = (int32_t)transform_div(-(int64_t)sinma * 16384, tr_dsc.scale_x);
++    map->syx = (int32_t)transform_div((int64_t)sinma * 16384, tr_dsc.scale_y);
++    map->syy = (int32_t)transform_div((int64_t)cosma * 16384, tr_dsc.scale_y);
++
++    int64_t xin0 = -(int64_t)tr_dsc.pivot.x;
++    int64_t yin0 = -(int64_t)tr_dsc.pivot.y;
++    map->x0_ups = (int32_t)transform_div((cosma * xin0 - sinma * yin0) * 64, tr_dsc.scale_x) + tr_dsc.pivot_x_256 + 0x80;
++    map->y0_ups = (int32_t)transform_div((sinma * xin0 + cosma * yin0) * 64, tr_dsc.scale_y) + tr_dsc.pivot_y_256 + 0x80;
++}
++
+ /**
+  * `(32 << 8) / alpha_sum` for every possible alpha sum, so the alpha weighted color
+  * interpolation can normalize without a division. Most MCU cores, Xtensa included, have no
+@@ -1585,6 +1648,13 @@ static void transform_al88(const uint8_t * src, int32_t src_w, int32_t src_h, in
+ 
+ #endif
+ 
++/*A 64-bit division is a library call on 32-bit cores, and in practice the operands fit in 32 bits*/
++static inline int64_t transform_div(int64_t n, int64_t d)
++{
++    if(n >= INT32_MIN && n <= INT32_MAX && d <= INT32_MAX) return (int32_t)n / (int32_t)d;
++    return n / d;
++}
++
+ static void transform_safe_interval(int32_t base, int32_t step, int32_t lo, int32_t hi,
+                                     int32_t x_from, int32_t x_to, int32_t * res_from, int32_t * res_to)
+ {
+@@ -1604,19 +1674,23 @@ static void transform_safe_interval(int32_t base, int32_t step, int32_t lo, int3
+         if(lo_n > 0 || hi_n < 0) xb = xa;
+     }
+     else if(step > 0) {
+-        int64_t from = lo_n > 0 ? (lo_n + step - 1) / step : -((-lo_n) / step);     /* ceil(lo_n / step) */
+-        int64_t to = hi_n >= 0 ? hi_n / step : -((-hi_n + step - 1) / step);        /* floor(hi_n / step) */
++        int64_t from = lo_n > 0 ? transform_div(lo_n + step - 1, step) : -transform_div(-lo_n, step);     /* ceil(lo_n / step) */
++        int64_t to = hi_n >= 0 ? transform_div(hi_n, step) : -transform_div(-hi_n + step - 1, step);      /* floor(hi_n / step) */
+         if(from > x_to) from = x_to;
++        if(from < x_from) from = x_from;
+         if(to < x_from - 1) to = x_from - 1;
++        if(to > x_to - 1) to = x_to - 1;
+         if((int32_t)from > xa) xa = (int32_t)from;
+         if((int32_t)(to + 1) < xb) xb = (int32_t)(to + 1);
+     }
+     else {
+         int64_t step_p = -(int64_t)step;
+-        int64_t to = lo_n <= 0 ? (-lo_n) / step_p : -((lo_n + step_p - 1) / step_p);     /* floor(lo_n / step) */
+-        int64_t from = hi_n <= 0 ? ((-hi_n) + step_p - 1) / step_p : -(hi_n / step_p);   /* ceil(hi_n / step) */
++        int64_t to = lo_n <= 0 ? transform_div(-lo_n, step_p) : -transform_div(lo_n + step_p - 1, step_p);     /* floor(lo_n / step) */
++        int64_t from = hi_n <= 0 ? transform_div((-hi_n) + step_p - 1, step_p) : -transform_div(hi_n, step_p); /* ceil(hi_n / step) */
+         if(from > x_to) from = x_to;
++        if(from < x_from) from = x_from;
+         if(to < x_from - 1) to = x_from - 1;
++        if(to > x_to - 1) to = x_to - 1;
+         if((int32_t)from > xa) xa = (int32_t)from;
+         if((int32_t)(to + 1) < xb) xb = (int32_t)(to + 1);
+     }

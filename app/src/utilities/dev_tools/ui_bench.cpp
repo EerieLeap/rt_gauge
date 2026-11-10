@@ -1,7 +1,9 @@
 #ifdef CONFIG_EERIE_LEAP_UI_BENCH
 
     #include <atomic>
+    #include <cmath>
     #include <cstdint>
+    #include <cstdio>
     #include <cstdlib>
     #include <cstring>
 
@@ -20,7 +22,13 @@
     #endif
 
     #include "domain/ui_domain/lvgl_lock.h"
+    #include "domain/ui_domain/ui_async_flush.h"
     #include "utilities/dev_tools/system_info.h"
+
+    #ifdef CONFIG_EERIE_LEAP_UI_FRAME_FLUSH
+        #include "domain/ui_domain/services/frame_flush/co5300_frame_writer.h"
+        #include "domain/ui_domain/services/frame_flush/frame_batcher.h"
+    #endif
 
     #include "ui_bench.h"
 
@@ -73,6 +81,16 @@ uint64_t CyclesToUs(uint64_t cycles) {
     return k_cyc_to_us_floor64(cycles);
 }
 
+// Microseconds times 100.
+[[maybe_unused]] uint64_t Us100(uint64_t cycles) {
+    return k_cyc_to_ns_floor64(cycles) / 10;
+}
+
+    #ifdef CONFIG_EERIE_LEAP_UI_FRAME_FLUSH
+// The batcher's counters only grow; a reset takes this baseline and the additive ones print as the difference.
+eerie_leap::domain::ui_domain::services::frame_flush::FrameBatcher::Stats flush_base_;
+    #endif
+
 uint64_t ThreadCycles(k_tid_t tid) {
     #ifdef CONFIG_SCHED_THREAD_USAGE
     if(tid == nullptr)
@@ -90,7 +108,9 @@ uint64_t ThreadCycles(k_tid_t tid) {
 }
 
 k_tid_t FlushTid() {
-    #ifdef CONFIG_LV_Z_FLUSH_THREAD
+    #ifdef CONFIG_EERIE_LEAP_UI_FRAME_FLUSH
+    return eerie_leap::domain::ui_domain::services::frame_flush::WriterTid();
+    #elif defined(CONFIG_LV_Z_FLUSH_THREAD)
     return lvgl_flush_thread;
     #else
     return nullptr;
@@ -133,7 +153,8 @@ void DisplayEvent(lv_event_t* e) {
             K_SPINLOCK(&lock_) {
                 ++counters_.areas;
             }
-    #ifdef CONFIG_ELCO5300_STATS
+    // With the frame writer the glue marks the stamp once per batch, at the post.
+    #if defined(CONFIG_ELCO5300_STATS) && !defined(CONFIG_EERIE_LEAP_UI_FRAME_FLUSH)
             co5300_stats_mark_post(display_dev_, now, k_thread_priority_get(k_current_get()) < renderer_priority_);
     #endif
             break;
@@ -197,6 +218,12 @@ void ResetStats() {
         baseline_.busy_cycles = busy;
     }
 
+    #ifdef CONFIG_EERIE_LEAP_UI_FRAME_FLUSH
+    if(auto* batcher = eerie_leap::domain::ui_domain::services::frame_flush::FrameBatcher::Instance()) {
+        flush_base_ = batcher->GetStats();
+        batcher->ResetMaxima();
+    }
+    #endif
     #ifdef CONFIG_ELCO5300_STATS
     co5300_stats_reset(display_dev_);
     #endif
@@ -233,7 +260,7 @@ void PrintStats(const shell* sh) {
     KV("wait_max_us", CyclesToUs(c.wait_cycles_max));
     #ifdef CONFIG_SCHED_THREAD_USAGE
     KV("renderer_cpu_us", CyclesToUs(renderer - b.renderer_cycles));
-        #ifdef CONFIG_LV_Z_FLUSH_THREAD
+        #ifdef EERIE_LEAP_UI_ASYNC_FLUSH
     KV("flush_cpu_us", CyclesToUs(flush - b.flush_cycles));
         #endif
     #endif
@@ -279,6 +306,126 @@ void PrintStats(const shell* sh) {
         KV("co5300.write_retries", s.write_retries);
         KV("co5300.write_failures", s.write_failures);
         KV("co5300.other_cmds", s.other_cmds);
+
+        KV("co5300.w_full_count", s.w_full_count);
+        KV("co5300.w_full_us", CyclesToUs(s.w_full_cycles));
+        KV("co5300.w_full_min_us", s.w_full_count > 0 ? CyclesToUs(s.w_full_min) : 0);
+        KV("co5300.w_full_max_us", CyclesToUs(s.w_full_max));
+        KV("co5300.w_part_count", s.w_part_count);
+        KV("co5300.w_part_us", CyclesToUs(s.w_part_cycles));
+        KV("co5300.w_part_min_us", s.w_part_count > 0 ? CyclesToUs(s.w_part_min) : 0);
+        KV("co5300.w_part_max_us", CyclesToUs(s.w_part_max));
+        KV("co5300.w_resent", s.w_resent);
+        // < 22 ms, 0.5 ms bins up to 25 ms, >= 25 ms
+        shell_print(
+            sh, "co5300.frame_w_hist=%u,%u,%u,%u,%u,%u,%u,%u", s.w_full_hist[0], s.w_full_hist[1], s.w_full_hist[2],
+            s.w_full_hist[3], s.w_full_hist[4], s.w_full_hist[5], s.w_full_hist[6], s.w_full_hist[7]
+        );
+
+        KV("co5300.te_falls", s.te_falls);
+        KV("co5300.te_rises", s.te_rises);
+        KV("co5300.te_coalesced", s.te_coalesced);
+        KV("co5300.te_s_us100", Us100(s.te_s_cycles));
+        KV("co5300.te_s_valid", s.te_s_valid ? 1 : 0);
+        KV("co5300.te_iv_min_us100", s.te_iv_count > 0 ? Us100(s.te_iv_min) : 0);
+        KV("co5300.te_iv_max_us100", Us100(s.te_iv_max));
+        KV("co5300.te_tvdl_avg_us", s.te_tvdl_count > 0 ? CyclesToUs(s.te_tvdl_sum / s.te_tvdl_count) : 0);
+        KV("co5300.te_tvdl_max_us", CyclesToUs(s.te_tvdl_max));
+        KV("co5300.te_tvdh_avg_us", s.te_tvdh_count > 0 ? CyclesToUs(s.te_tvdh_sum / s.te_tvdh_count) : 0);
+        KV("co5300.te_tvdh_max_us", CyclesToUs(s.te_tvdh_max));
+
+        #ifdef CONFIG_ELCO5300_TE_WINDOW
+        KV("co5300.te_win_on", s.te_win_on ? 1 : 0);
+        KV("co5300.te_win_margin_us", s.te_win_margin_us);
+        KV("co5300.te_win_wmax_us", s.te_win_wmax_us);
+        KV("co5300.te_win_wmin_us", s.te_win_wmin_us);
+        KV("co5300.te_win_starts_now", s.te_win_starts_now);
+        KV("co5300.te_win_waits", s.te_win_waits);
+        KV("co5300.te_win_edge_waits", s.te_win_edge_waits);
+        KV("co5300.te_win_edge_timeouts", s.te_win_edge_timeouts);
+        KV("co5300.te_win_fallbacks", s.te_win_fallbacks);
+        KV("co5300.te_win_forced", s.te_win_forced);
+        KV("co5300.te_win_wait_us", CyclesToUs(s.te_win_wait_cycles));
+        KV("co5300.te_win_late", s.te_win_late);
+        KV("co5300.te_win_late_resend", s.te_win_late_resend);
+        // Eight equal bins over the scan period, from the falling edge
+        shell_print(
+            sh, "co5300.te_win_phase_hist=%u,%u,%u,%u,%u,%u,%u,%u", s.te_win_phase_hist[0], s.te_win_phase_hist[1],
+            s.te_win_phase_hist[2], s.te_win_phase_hist[3], s.te_win_phase_hist[4], s.te_win_phase_hist[5],
+            s.te_win_phase_hist[6], s.te_win_phase_hist[7]
+        );
+        // Scans a full frame stayed up: 1, 2, 3, 4, 5 or more
+        shell_print(
+            sh, "co5300.te_win_scans_hist=%u,%u,%u,%u,%u", s.te_win_scans_hist[0], s.te_win_scans_hist[1],
+            s.te_win_scans_hist[2], s.te_win_scans_hist[3], s.te_win_scans_hist[4]
+        );
+
+            #ifdef CONFIG_ELCO5300_FRAME_WRITE
+        KV("co5300.te_fall_dejittered", s.te_fall_dejittered);
+        KV("co5300.te_fall_dejitter_max_us", s.te_fall_dejitter_max_us);
+        KV("co5300.frame_writes", s.frame_writes);
+        KV("co5300.frame_rects", s.frame_rects);
+        KV("co5300.frame_rects_max", s.frame_rects_max);
+        KV("co5300.frame_searched", s.frame_searched);
+        KV("co5300.frame_search_us_max", s.frame_search_us_max);
+        KV("co5300.frame_no_window", s.frame_no_window);
+        KV("co5300.frame_split", s.frame_split);
+        KV("co5300.frame_rounds_exhausted", s.frame_rounds_exhausted);
+        KV("co5300.frame_resend_split", s.frame_resend_split);
+        KV("co5300.frame_edge_fallbacks", s.frame_edge_fallbacks);
+        KV("co5300.frame_timing_lost", s.frame_timing_lost);
+        KV("co5300.frame_bound_moved", s.frame_bound_moved);
+        KV("co5300.frame_paced", s.frame_paced);
+        KV("co5300.frame_pace_us", s.frame_pace_us);
+        KV("co5300.frame_first_wait_us", s.frame_first_wait_us);
+        KV("co5300.frame_gap_max_us", s.frame_gap_max_us);
+        KV("co5300.frame_us", s.frame_us);
+        KV("co5300.frame_us_max", s.frame_us_max);
+        KV("co5300.frame_mixed", s.frame_mixed);
+        KV("co5300.frame_late", s.frame_late);
+        KV("co5300.frame_out_of_order", s.frame_out_of_order);
+        KV("co5300.frame_failed_rects", s.frame_failed_rects);
+        KV("co5300.frame_aborted", s.frame_aborted);
+        // Target scan from the plan's edge: 0, 1, 2, 3 or more
+        shell_print(
+            sh, "co5300.frame_target_hist=%u,%u,%u,%u", s.frame_target_hist[0], s.frame_target_hist[1],
+            s.frame_target_hist[2], s.frame_target_hist[3]
+        );
+        // Scans a frame stayed up: 0 (replaced in the same scan), 1, 2, 3, 4 or more
+        shell_print(
+            sh, "co5300.frame_scans_hist=%u,%u,%u,%u,%u", s.frame_scans_hist[0], s.frame_scans_hist[1],
+            s.frame_scans_hist[2], s.frame_scans_hist[3], s.frame_scans_hist[4]
+        );
+            #endif
+        #endif
+    }
+    #endif
+
+    #ifdef CONFIG_EERIE_LEAP_UI_FRAME_FLUSH
+    {
+        const auto* batcher = eerie_leap::domain::ui_domain::services::frame_flush::FrameBatcher::Instance();
+        if(batcher != nullptr) {
+            const auto f = batcher->GetStats();
+
+            const auto& b = flush_base_;
+            KV("flush.frames", f.frames - b.frames);
+            KV("flush.areas", f.areas - b.areas);
+            KV("flush.rects_max", f.rects_max);
+            KV("flush.array_waits", f.array_waits - b.array_waits);
+            KV("flush.array_wait_us", f.array_wait_us - b.array_wait_us);
+            KV("flush.array_wait_max_us", f.array_wait_max_us);
+            KV("flush.lookahead_switches", f.lookahead_switches - b.lookahead_switches);
+            KV("flush.overflows", f.overflows - b.overflows);
+            KV("flush.frame_breaks", f.frame_breaks - b.frame_breaks);
+            KV("flush.guard_trips", f.guard_trips - b.guard_trips);
+            KV("flush.repairs", f.repairs - b.repairs);
+            KV("flush.repairs_deferred", f.repairs_deferred - b.repairs_deferred);
+            KV("flush.install_failed", f.install_failed);
+            KV("flush.bytes_max", f.bytes_max);
+        } else {
+            // Install() refused (or has not run): Zephyr's per-area path writes.
+            shell_print(sh, "flush.installed=0");
+        }
     }
     #endif
 
@@ -327,6 +474,482 @@ int CmdFull(const shell* sh, size_t argc, char** argv) {
 
     full_.store(on);
     return 0;
+}
+
+    #ifndef CONFIG_ELCO5300_STATS
+int CmdTe(const shell* sh, size_t argc, char** argv) {
+    ARG_UNUSED(argc);
+    ARG_UNUSED(argv);
+    shell_error(sh, "te needs CONFIG_ELCO5300_STATS");
+    return -ENOTSUP;
+}
+
+int CmdTecal(const shell* sh, size_t argc, char** argv) {
+    return CmdTe(sh, argc, argv);
+}
+    #endif
+
+    #ifdef CONFIG_ELCO5300_STATS
+int CmdTe(const shell* sh, size_t argc, char** argv) {
+    bool on = false;
+    if(argc != 2 || !IsOn(argv[1], on)) {
+        shell_print(sh, "usage: ui_bench te on|off");
+        return -EINVAL;
+    }
+
+    const int ret = co5300_te_irq_enable(display_dev_, on);
+    if(ret != 0) {
+        shell_error(sh, "te %s failed: %d", on ? "on" : "off", ret);
+        return ret;
+    }
+    return 0;
+}
+    #endif
+
+    #if defined(CONFIG_ELCO5300_STATS) && defined(CONFIG_ELCO5300_TE_WINDOW)
+int CmdTewin(const shell* sh, size_t argc, char** argv) {
+    bool on = false;
+    if(argc != 2 || !IsOn(argv[1], on)) {
+        shell_print(sh, "usage: ui_bench tewin on|off");
+        return -EINVAL;
+    }
+
+    const int ret = co5300_te_window_enable(display_dev_, on);
+    if(ret != 0) {
+        shell_error(sh, "tewin %s failed: %d", on ? "on" : "off", ret);
+        return ret;
+    }
+    return 0;
+}
+    #else
+int CmdTewin(const shell* sh, size_t argc, char** argv) {
+    ARG_UNUSED(argc);
+    ARG_UNUSED(argv);
+    shell_error(sh, "tewin needs CONFIG_ELCO5300_STATS and CONFIG_ELCO5300_TE_WINDOW");
+    return -ENOTSUP;
+}
+    #endif
+
+// The moving bar: a full-white strip as wide as BAR_WIDTH_PX, as tall as the screen, on the top layer.
+constexpr int32_t BAR_WIDTH_PX = 40;
+constexpr int32_t BAR_STEP_PX = 11;
+
+// Both only touched under the LVGL lock.
+lv_obj_t* bar_ = nullptr;
+lv_timer_t* bar_timer_ = nullptr;
+
+// Runs inside lv_timer_handler(), under the LVGL lock.
+void BarTimer(lv_timer_t* timer) {
+    ARG_UNUSED(timer);
+
+    if(bar_ == nullptr)
+        return;
+
+    const int32_t width = lv_display_get_horizontal_resolution(nullptr);
+    lv_obj_set_x(bar_, (lv_obj_get_x(bar_) + BAR_STEP_PX) % width);
+}
+
+void BarSet(bool on) {
+    ScopedLvglLock lvgl_guard;
+
+    if(on == (bar_ != nullptr))
+        return;
+
+    if(!on) {
+        lv_timer_delete(bar_timer_);
+        lv_obj_delete(bar_);
+        bar_timer_ = nullptr;
+        bar_ = nullptr;
+        return;
+    }
+
+    bar_ = lv_obj_create(lv_layer_top());
+    lv_obj_remove_style_all(bar_);
+    lv_obj_set_clickable(bar_, false);
+    lv_obj_set_scrollable(bar_, false);
+    lv_obj_set_size(bar_, BAR_WIDTH_PX, lv_display_get_vertical_resolution(nullptr));
+    lv_obj_set_pos(bar_, 0, 0);
+    lv_obj_set_style_bg_color(bar_, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(bar_, LV_OPA_COVER, 0);
+    bar_timer_ = lv_timer_create(BarTimer, LV_DEF_REFR_PERIOD, nullptr);
+}
+
+int CmdBar(const shell* sh, size_t argc, char** argv) {
+    bool on = false;
+    if(argc != 2 || !IsOn(argv[1], on)) {
+        shell_print(sh, "usage: ui_bench bar on|off");
+        return -EINVAL;
+    }
+
+    BarSet(on);
+    return 0;
+}
+
+// The slider sweep: moves the first slider of the active screen like a finger would, one drag tick per timer period,
+// so the writes that follow a drag (sensor, needle, bar, number, chart) run without a hand on the glass.
+constexpr uint32_t SWEEP_DEFAULT_PERIOD_MS = 16; // the S3's refresh period, the rate a drag's ticks arrive at
+constexpr int32_t SWEEP_DEFAULT_STEP = 1;
+constexpr int32_t SWEEP_PERIOD_MIN_MS = 5;
+constexpr int32_t SWEEP_PERIOD_MAX_MS = 1000;
+constexpr int32_t SWEEP_STEP_MAX = 1000;
+
+// All only touched under the LVGL lock. The position is kept here: the slider's inbound binding writes it too.
+lv_timer_t* sweep_timer_ = nullptr;
+int32_t sweep_step_ = SWEEP_DEFAULT_STEP;
+int32_t sweep_pos_ = 0;
+int32_t sweep_dir_ = 1;
+
+lv_obj_t* FindSlider(lv_obj_t* parent) {
+    const uint32_t count = lv_obj_get_child_count(parent);
+    for(uint32_t i = 0; i < count; i++) {
+        lv_obj_t* child = lv_obj_get_child(parent, static_cast<int32_t>(i));
+        if(lv_obj_check_type(child, &lv_slider_class))
+            return child;
+        if(lv_obj_t* found = FindSlider(child))
+            return found;
+    }
+    return nullptr;
+}
+
+// Looked up on every tick: a rebuilt UI must not leave a pointer behind.
+lv_obj_t* FindActiveSlider() {
+    lv_obj_t* screen = lv_screen_active();
+    if(screen == nullptr)
+        return nullptr;
+    if(lv_obj_check_type(screen, &lv_slider_class))
+        return screen;
+    return FindSlider(screen);
+}
+
+// Runs inside lv_timer_handler(), under the LVGL lock.
+void SweepTimer(lv_timer_t* timer) {
+    ARG_UNUSED(timer);
+
+    lv_obj_t* slider = FindActiveSlider();
+    if(slider == nullptr)
+        return;
+
+    const int32_t low = lv_slider_get_min_value(slider);
+    const int32_t high = lv_slider_get_max_value(slider);
+
+    int32_t next = sweep_pos_ + sweep_dir_ * sweep_step_;
+    if(next >= high) {
+        next = high;
+        sweep_dir_ = -1;
+    } else if(next <= low) {
+        next = low;
+        sweep_dir_ = 1;
+    }
+    sweep_pos_ = next;
+
+    lv_slider_set_value(slider, sweep_pos_, LV_ANIM_OFF);
+    lv_obj_send_event(slider, LV_EVENT_VALUE_CHANGED, nullptr);
+}
+
+bool ParseRange(const char* text, int32_t low, int32_t high, int32_t& out) {
+    char* end = nullptr;
+    const long value = strtol(text, &end, 10);
+    if(end == text || *end != '\0' || value < low || value > high)
+        return false;
+    out = static_cast<int32_t>(value);
+    return true;
+}
+
+int CmdSweep(const shell* sh, size_t argc, char** argv) {
+    bool on = false;
+    int32_t period_ms = SWEEP_DEFAULT_PERIOD_MS;
+    int32_t step = SWEEP_DEFAULT_STEP;
+
+    const bool valid = argc >= 2
+        && argc <= 4
+        && IsOn(argv[1], on)
+        && (on || argc == 2)
+        && (argc < 3 || ParseRange(argv[2], SWEEP_PERIOD_MIN_MS, SWEEP_PERIOD_MAX_MS, period_ms))
+        && (argc < 4 || ParseRange(argv[3], 1, SWEEP_STEP_MAX, step));
+    if(!valid) {
+        shell_print(
+            sh, "usage: ui_bench sweep on [period_ms %d..%d] [step 1..%d] | off", SWEEP_PERIOD_MIN_MS,
+            SWEEP_PERIOD_MAX_MS, SWEEP_STEP_MAX
+        );
+        return -EINVAL;
+    }
+
+    ScopedLvglLock lvgl_guard;
+
+    if(sweep_timer_ != nullptr) {
+        lv_timer_delete(sweep_timer_);
+        sweep_timer_ = nullptr;
+    }
+
+    if(!on) {
+        shell_print(sh, "sweep off");
+        return 0;
+    }
+
+    if(lv_obj_t* slider = FindActiveSlider()) {
+        sweep_pos_ = lv_slider_get_value(slider);
+    } else {
+        sweep_pos_ = 0;
+        shell_warn(sh, "no slider on the active screen yet; the sweep starts when one appears");
+    }
+    sweep_dir_ = 1;
+    sweep_step_ = step;
+    sweep_timer_ = lv_timer_create(SweepTimer, static_cast<uint32_t>(period_ms), nullptr);
+    shell_print(sh, "sweep on: period=%d ms step=%d", period_ms, step);
+    return 0;
+}
+
+    #ifdef CONFIG_ELCO5300_STATS
+constexpr size_t TECAL_CAPTURE_A = 64; // mode 1: about 32 scans
+constexpr size_t TECAL_CAPTURE_B = 40; // scan-line mode: 20 frames, two rises skipped
+constexpr size_t TECAL_SKIP_RISES = 2;
+constexpr size_t TECAL_MAX_RISES = 16;
+constexpr int TECAL_A_TIMEOUT_MS = 1000;
+constexpr int TECAL_B_TIMEOUT_MS = 500;
+constexpr int TECAL_SETTLE_MS = 100; // mode 1 takes effect on the frame after the command
+
+const uint16_t TECAL_DEFAULT_LINES[] = { 2, 8, 9, 10, 11, 12, 13, 14, 50, 100, 200, 300, 400, 440, 465, 470 };
+
+// Static: the shell thread's stack is 4 KB.
+co5300_te_sample tecal_samples_[TECAL_CAPTURE_A];
+
+double CyclesToUsF(double cycles) {
+    return cycles * 1e6 / static_cast<double>(sys_clock_hw_cycles_per_sec());
+}
+
+// Microseconds with two decimals, without the float printf support.
+struct UsText {
+    char text[24];
+
+    explicit UsText(double us) {
+        const long long hundredths = std::llround(us * 100.0);
+        const long long absolute = hundredths < 0 ? -hundredths : hundredths;
+        snprintf(text, sizeof(text), "%s%lld.%02lld", hundredths < 0 ? "-" : "", absolute / 100, absolute % 100);
+    }
+};
+
+struct ModeOne {
+    double s_cycles = 0;    // mean falling-edge interval
+    uint64_t last_fall = 0; // E
+    double tvdl_cycles = 0;
+    double tvdh_cycles = 0;
+};
+
+// Mode 1 capture of TECAL_CAPTURE_A edges. False when the unit gave too few edges.
+bool CaptureModeOne(ModeOne& out) {
+    size_t got = 0;
+    if(co5300_te_capture_start(display_dev_, tecal_samples_, TECAL_CAPTURE_A) != 0)
+        return false;
+
+    co5300_te_capture_wait(display_dev_, K_MSEC(TECAL_A_TIMEOUT_MS), &got);
+
+    size_t falls = 0;
+    size_t tvdl_n = 0;
+    size_t tvdh_n = 0;
+    uint64_t first_fall = 0;
+    uint64_t sum_tvdl = 0;
+    uint64_t sum_tvdh = 0;
+    bool have_fall = false;
+    bool have_rise = false;
+    uint64_t fall = 0;
+    uint64_t rise = 0;
+    for(size_t i = 0; i < got; i++) {
+        const co5300_te_sample& e = tecal_samples_[i];
+        if(e.level == 0) {
+            if(have_rise) {
+                sum_tvdh += e.cycles - rise;
+                tvdh_n++;
+            }
+            if(falls == 0)
+                first_fall = e.cycles;
+            falls++;
+            fall = e.cycles;
+            have_fall = true;
+        } else {
+            if(have_fall) {
+                sum_tvdl += e.cycles - fall;
+                tvdl_n++;
+            }
+            rise = e.cycles;
+            have_rise = true;
+        }
+    }
+
+    if(falls < 3 || tvdl_n == 0 || tvdh_n == 0)
+        return false;
+
+    out.s_cycles = static_cast<double>(fall - first_fall) / static_cast<double>(falls - 1);
+    out.last_fall = fall;
+    out.tvdl_cycles = static_cast<double>(sum_tvdl) / static_cast<double>(tvdl_n);
+    out.tvdh_cycles = static_cast<double>(sum_tvdh) / static_cast<double>(tvdh_n);
+    return true;
+}
+
+// The rising edges one line produced (after the skipped ones); the phase is computed once the next mode-1 reference
+// is known. Returns the number of edges kept.
+uint64_t tecal_rises_[TECAL_MAX_RISES];
+
+size_t CaptureLine(uint16_t line, const ModeOne& ref) {
+    size_t got = 0;
+    if(co5300_te_set_scanline(display_dev_, line) != 0)
+        return 0;
+
+    if(co5300_te_capture_start(display_dev_, tecal_samples_, TECAL_CAPTURE_B) != 0)
+        return 0;
+
+    co5300_te_capture_wait(display_dev_, K_MSEC(TECAL_B_TIMEOUT_MS), &got);
+
+    size_t rises = 0;
+    size_t used = 0;
+    for(size_t i = 0; i < got && used < TECAL_MAX_RISES; i++) {
+        const co5300_te_sample& e = tecal_samples_[i];
+        if(e.level == 0 || e.cycles <= ref.last_fall)
+            continue;
+
+        if(++rises <= TECAL_SKIP_RISES)
+            continue;
+
+        tecal_rises_[used++] = e.cycles;
+    }
+    return used;
+}
+
+// The mean phase of the kept rising edges after the falling edge E of `before`, in (-S/2, S/2]. S is taken from the
+// span between the falling edges of the two mode-1 references around the line: the panel's own period wanders by more
+// than the error budget over the tens of scans between them, which a period measured before the line cannot follow.
+double LinePhaseCycles(const ModeOne& before, const ModeOne& after, size_t used) {
+    const double span = static_cast<double>(after.last_fall - before.last_fall);
+    const double s_fit = span / std::round(span / before.s_cycles);
+
+    double sum = 0;
+    for(size_t i = 0; i < used; i++) {
+        const double t = static_cast<double>(tecal_rises_[i] - before.last_fall);
+        sum += t - std::round(t / s_fit) * s_fit;
+    }
+    return sum / static_cast<double>(used);
+}
+
+int CmdTecal(const shell* sh, size_t argc, char** argv) {
+    uint16_t lines[16];
+    size_t line_count = 0;
+    if(argc > 1) {
+        for(size_t i = 1; i < argc; i++) {
+            char* end = nullptr;
+            const long v = strtol(argv[i], &end, 10);
+            if(*end != '\0' || v < 1 || v > 65535) {
+                shell_print(sh, "usage: ui_bench tecal [line ...]  (lines 1..65535)");
+                return -EINVAL;
+            }
+            lines[line_count++] = static_cast<uint16_t>(v);
+        }
+    } else {
+        for(const uint16_t line : TECAL_DEFAULT_LINES)
+            lines[line_count++] = line;
+    }
+
+    // Start from mode 1 whatever an earlier run left.
+    int result = co5300_te_set_scanline(display_dev_, 0);
+    if(result != 0) {
+        shell_error(sh, "tecal: TE mode 1 failed: %d", result);
+        return result;
+    }
+    k_msleep(TECAL_SETTLE_MS);
+
+    for(size_t i = 0; i < line_count; i++) {
+        ModeOne ref;
+        if(!CaptureModeOne(ref)) {
+            shell_error(sh, "tecal: too few TE edges in mode 1 (te off, or the screen is not scanning?)");
+            result = -ETIMEDOUT;
+            break;
+        }
+
+        if(i == 0) {
+            shell_print(
+                sh, "tecal ref S_us=%s tvdl_us=%s tvdh_us=%s", UsText(CyclesToUsF(ref.s_cycles)).text,
+                UsText(CyclesToUsF(ref.tvdl_cycles)).text, UsText(CyclesToUsF(ref.tvdh_cycles)).text
+            );
+        }
+
+        const size_t pulses = CaptureLine(lines[i], ref);
+
+        // Always back to mode 1 before the next line, and on every error path.
+        const int restore = co5300_te_set_scanline(display_dev_, 0);
+        if(restore != 0) {
+            shell_error(sh, "tecal: TE mode 1 failed: %d", restore);
+            result = restore;
+            break;
+        }
+        k_msleep(TECAL_SETTLE_MS);
+
+        if(pulses == 0) {
+            shell_print(sh, "tecal line=%u phase_us=0.00 pulses=0", lines[i]);
+            continue;
+        }
+
+        ModeOne after;
+        if(!CaptureModeOne(after)) {
+            shell_error(sh, "tecal: too few TE edges in mode 1 after line %u", lines[i]);
+            result = -ETIMEDOUT;
+            break;
+        }
+
+        shell_print(
+            sh, "tecal line=%u phase_us=%s pulses=%u", lines[i],
+            UsText(CyclesToUsF(LinePhaseCycles(ref, after, pulses))).text, static_cast<unsigned>(pulses)
+        );
+    }
+
+    co5300_te_set_scanline(display_dev_, 0);
+    shell_print(sh, "tecal done");
+    return result;
+}
+    #endif
+
+// A diagnostic: off writes each rect of a frame through display_write(), in LVGL's order, after the whole frame is
+// rendered. That is neither the old interleaved render and write nor the batch rule.
+int CmdBatch(const shell* sh, size_t argc, char** argv) {
+    #ifdef CONFIG_EERIE_LEAP_UI_FRAME_FLUSH
+    bool on = false;
+    if(argc != 2 || !IsOn(argv[1], on)) {
+        shell_print(
+            sh, "usage: ui_bench batch on|off  (now %s)",
+            eerie_leap::domain::ui_domain::services::frame_flush::IsBatching() ? "on" : "off"
+        );
+        return -EINVAL;
+    }
+
+    eerie_leap::domain::ui_domain::services::frame_flush::SetBatching(on);
+    return 0;
+    #else
+    ARG_UNUSED(argc);
+    ARG_UNUSED(argv);
+    shell_error(sh, "batch needs CONFIG_EERIE_LEAP_UI_FRAME_FLUSH");
+    return -ENOTSUP;
+    #endif
+}
+
+// Period 1 fails every packet, re-sends included; from 2 on a rect never fails all three attempts.
+int CmdInject(const shell* sh, size_t argc, char** argv) {
+    #ifdef CONFIG_MSPI_ESP32_STATS
+    int32_t period = 0;
+    if(argc != 2 || !ParseRange(argv[1], 0, 1000000, period)) {
+        shell_print(sh, "usage: ui_bench inject <N>  (fail every Nth PSRAM packet, 0 = off)");
+        return -EINVAL;
+    }
+
+    const int ret = mspi_esp32_fault_inject_set(mspi_dev_, static_cast<uint32_t>(period));
+    if(ret != 0) {
+        shell_error(sh, "inject failed: %d", ret);
+        return ret;
+    }
+    shell_print(sh, "inject period=%d", static_cast<int>(period));
+    return 0;
+    #else
+    ARG_UNUSED(argc);
+    ARG_UNUSED(argv);
+    shell_error(sh, "inject needs CONFIG_MSPI_ESP32_STATS");
+    return -ENOTSUP;
+    #endif
 }
 
 int CmdStats(const shell* sh, size_t argc, char** argv) {
@@ -508,6 +1131,41 @@ int CmdHeap(const shell* sh, size_t argc, char** argv) {
 SHELL_STATIC_SUBCMD_SET_CREATE(
     sub_ui_bench,
     SHELL_CMD_ARG(full, NULL, "full on|off: invalidate the whole screen every refresh period", CmdFull, 2, 0),
+    SHELL_CMD_ARG(te, NULL, "te on|off: the TE interrupt", CmdTe, 2, 0),
+    SHELL_CMD_ARG(tewin, NULL, "tewin on|off: the window rule (off: the edge rule)", CmdTewin, 2, 0),
+    SHELL_CMD_ARG(
+        tecal,
+        NULL,
+        "tecal [line ...]: time from TE's falling edge to scan line N, per line",
+        CmdTecal,
+        1,
+        16
+    ),
+    SHELL_CMD_ARG(
+        bar,
+        NULL,
+        "bar on|off: a white bar moving over the screen, content changes every refresh",
+        CmdBar,
+        2,
+        0
+    ),
+    SHELL_CMD_ARG(
+        sweep,
+        NULL,
+        "sweep on [period_ms] [step] | off: move the first slider back and forth, one drag tick per period",
+        CmdSweep,
+        2,
+        2
+    ),
+    SHELL_CMD_ARG(
+        batch,
+        NULL,
+        "batch on|off: write a frame's rects as one batch (off: one display_write each, a diagnostic)",
+        CmdBatch,
+        2,
+        0
+    ),
+    SHELL_CMD_ARG(inject, NULL, "inject <N>: fail every Nth PSRAM packet on purpose (0 = off)", CmdInject, 2, 0),
     SHELL_CMD_ARG(stats, NULL, "stats [reset]: counters since the last reset", CmdStats, 1, 1),
     SHELL_CMD_ARG(run, NULL, "run <warmup_ms> <window_ms>: full mode, warm up, reset, measure, print", CmdRun, 3, 0),
     SHELL_CMD_ARG(trace, NULL, "trace [on|off]: LVGL profiler switch, or dump", CmdTrace, 1, 1),

@@ -1,0 +1,9 @@
+common:
+  tags:
+    - unit
+    - te_window
+  platform_allow:
+    - native_sim
+
+tests:
+  unit.te_window: {}
