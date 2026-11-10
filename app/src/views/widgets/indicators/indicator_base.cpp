@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cmath>
 
 #include "domain/ui_domain/models/widget_property.h"
@@ -99,6 +100,16 @@ void IndicatorBase::Update(float value) {
         UpdateIndicatorCallback(this, static_cast<int32_t>(value * 10 * CONFIG_EERIE_LEAP_FLOAT_SIGNIFICANT_DIGITS));
         OnValueShownAtOnce();
     }
+}
+
+int32_t IndicatorBase::ToLvglScale(float value) const {
+    const float span = range_end_ - range_start_;
+    if(!(span > 0.0F))
+        return 0;
+
+    const auto scaled = std::lround((value - range_start_) / span * static_cast<float>(LVGL_VALUE_SCALE));
+
+    return static_cast<int32_t>(std::clamp<long>(scaled, 0, LVGL_VALUE_SCALE));
 }
 
 void IndicatorBase::OnPropertyReceived(WidgetPropertyType type) {

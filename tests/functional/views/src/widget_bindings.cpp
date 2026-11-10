@@ -1193,17 +1193,17 @@ ZTEST(widget_bindings, test_hidden_screen_can_resume_without_reactivating_its_gr
     screen->SetVisibility(true);
     lv_refr_now(nullptr);
     zassert_true(widget->IsProcessingEligible());
-    zassert_equal(lv_bar_get_value(bar), 42);
+    zassert_equal(lv_bar_get_value(bar), views_test::OnLvglScale(42));
     PublishSensor(SENSOR_ID, 7.0F);
-    zassert_equal(lv_bar_get_value(bar), 7);
+    zassert_equal(lv_bar_get_value(bar), views_test::OnLvglScale(7));
     screen->SetVisibility(false);
     PublishSensor(SENSOR_ID, 55.0F);
-    zassert_equal(lv_bar_get_value(bar), 7);
+    zassert_equal(lv_bar_get_value(bar), views_test::OnLvglScale(7));
     screen->SetVisibility(true);
     lv_refr_now(nullptr);
-    zassert_equal(lv_bar_get_value(bar), 55);
+    zassert_equal(lv_bar_get_value(bar), views_test::OnLvglScale(55));
     PublishSensor(SENSOR_ID, 80.0F);
-    zassert_equal(lv_bar_get_value(bar), 80);
+    zassert_equal(lv_bar_get_value(bar), views_test::OnLvglScale(80));
 }
 
 ZTEST(widget_bindings, test_suspended_local_updates_do_not_write_or_publish) {
@@ -1570,7 +1570,7 @@ ZTEST(widget_bindings, test_generic_animation_and_value_smoothing_have_independe
         zassert_equal(smoothing->act_time, elapsed);
         auto* bar = lv_obj_get_child(views_test::WidgetContent(indicator), 0);
         const auto displayed = lv_bar_get_value(bar);
-        zassert_true(displayed > 10 && displayed < 80);
+        zassert_true(displayed > views_test::OnLvglScale(10) && displayed < views_test::OnLvglScale(80));
         PublishSensor("visibility", false);
         zassert_equal(lv_anim_count_running(), count);
         lv_tick_inc(5000);
@@ -1581,10 +1581,10 @@ ZTEST(widget_bindings, test_generic_animation_and_value_smoothing_have_independe
         PublishSensor("visibility", true);
         zassert_is_null(lv_anim_get(&indicator, nullptr));
         zassert_equal(lv_anim_count_running(), count + 1);
-        zassert_equal(lv_bar_get_value(bar), 80);
+        zassert_equal(lv_bar_get_value(bar), views_test::OnLvglScale(80));
         lv_tick_inc(5000);
         lv_anim_refr_now();
-        zassert_equal(lv_bar_get_value(bar), 80);
+        zassert_equal(lv_bar_get_value(bar), views_test::OnLvglScale(80));
         zassert_equal(lv_anim_count_running(), count + 1);
         indicator.OnDeactivated();
         zassert_equal(lv_anim_count_running(), count);
@@ -1644,13 +1644,13 @@ ZTEST(widget_bindings, test_initial_value_replays_after_management_restoration) 
         zassert_equal(indicator.Render(), 0);
         indicator.OnActivated();
         auto* bar = lv_obj_get_child(views_test::WidgetContent(indicator), 0);
-        zassert_equal(lv_bar_get_value(bar), 0);
+        zassert_equal(lv_bar_get_value(bar), views_test::OnLvglScale(0));
 
         // There is no value binding: restoration must apply the configured value by itself.
         PublishSensor(OTHER_SENSOR_ID, 1);
-        zassert_equal(lv_bar_get_value(bar), 42);
+        zassert_equal(lv_bar_get_value(bar), views_test::OnLvglScale(42));
         lv_refr_now(nullptr);
-        zassert_equal(lv_bar_get_value(bar), 42);
+        zassert_equal(lv_bar_get_value(bar), views_test::OnLvglScale(42));
     }
 }
 
@@ -1670,12 +1670,12 @@ ZTEST(widget_bindings, test_initial_value_replays_after_ancestor_restoration) {
         zassert_equal(indicator.Render(), 0);
         indicator.OnActivated();
         auto* bar = lv_obj_get_child(views_test::WidgetContent(indicator), 0);
-        zassert_equal(lv_bar_get_value(bar), 0);
+        zassert_equal(lv_bar_get_value(bar), views_test::OnLvglScale(0));
 
         lv_obj_set_hidden(root->GetObject(), false);
         lv_obj_set_style_opa(root->GetObject(), 255, LV_PART_MAIN);
         lv_refr_now(nullptr);
-        zassert_equal(lv_bar_get_value(bar), 42);
+        zassert_equal(lv_bar_get_value(bar), views_test::OnLvglScale(42));
     }
 }
 
@@ -1697,7 +1697,7 @@ ZTEST(widget_bindings, test_indicator_animation_resumes_after_management_restora
         lv_anim_refr_now();
         auto* bar = lv_obj_get_child(views_test::WidgetContent(indicator), 0);
         const auto displayed = lv_bar_get_value(bar);
-        zassert_true(displayed > 10 && displayed < 80);
+        zassert_true(displayed > views_test::OnLvglScale(10) && displayed < views_test::OnLvglScale(80));
         PublishSensor(OTHER_SENSOR_ID, 0);
         zassert_is_null(lv_anim_get(&indicator, nullptr));
         lv_tick_inc(5000);
@@ -1708,10 +1708,10 @@ ZTEST(widget_bindings, test_indicator_animation_resumes_after_management_restora
         // easing the pause interrupted does not resume.
         PublishSensor(OTHER_SENSOR_ID, 1);
         zassert_is_null(lv_anim_get(&indicator, nullptr));
-        zassert_equal(lv_bar_get_value(bar), 80);
+        zassert_equal(lv_bar_get_value(bar), views_test::OnLvglScale(80));
         lv_tick_inc(5000);
         lv_anim_refr_now();
-        zassert_equal(lv_bar_get_value(bar), 80);
+        zassert_equal(lv_bar_get_value(bar), views_test::OnLvglScale(80));
     }
 }
 
@@ -1733,7 +1733,7 @@ ZTEST(widget_bindings, test_indicator_animation_resumes_after_ancestor_restorati
         lv_anim_refr_now();
         auto* bar = lv_obj_get_child(views_test::WidgetContent(indicator), 0);
         const auto displayed = lv_bar_get_value(bar);
-        zassert_true(displayed > 10 && displayed < 80);
+        zassert_true(displayed > views_test::OnLvglScale(10) && displayed < views_test::OnLvglScale(80));
         if(hidden)
             lv_obj_set_hidden(root->GetObject(), true);
         else
@@ -1747,10 +1747,10 @@ ZTEST(widget_bindings, test_indicator_animation_resumes_after_ancestor_restorati
         lv_obj_set_style_opa(root->GetObject(), 255, LV_PART_MAIN);
         lv_refr_now(nullptr);
         zassert_is_null(lv_anim_get(&indicator, nullptr));
-        zassert_equal(lv_bar_get_value(bar), 80);
+        zassert_equal(lv_bar_get_value(bar), views_test::OnLvglScale(80));
         lv_tick_inc(5000);
         lv_anim_refr_now();
-        zassert_equal(lv_bar_get_value(bar), 80);
+        zassert_equal(lv_bar_get_value(bar), views_test::OnLvglScale(80));
     }
 }
 
@@ -1768,16 +1768,16 @@ ZTEST(widget_bindings, test_the_first_bound_value_is_shown_at_once_and_the_next_
     auto* bar = lv_obj_get_child(views_test::WidgetContent(indicator), 0);
 
     // The record's value is no reading: the first event replaces it without easing from it.
-    zassert_equal(lv_bar_get_value(bar), 20);
+    zassert_equal(lv_bar_get_value(bar), views_test::OnLvglScale(20));
     PublishSensor(SENSOR_ID, 70.0F);
     zassert_is_null(lv_anim_get(&indicator, nullptr));
-    zassert_equal(lv_bar_get_value(bar), 70);
+    zassert_equal(lv_bar_get_value(bar), views_test::OnLvglScale(70));
     PublishSensor(SENSOR_ID, 30.0F);
     zassert_not_null(lv_anim_get(&indicator, nullptr));
-    zassert_equal(lv_bar_get_value(bar), 70);
+    zassert_equal(lv_bar_get_value(bar), views_test::OnLvglScale(70));
     lv_tick_inc(5000);
     lv_anim_refr_now();
-    zassert_equal(lv_bar_get_value(bar), 30);
+    zassert_equal(lv_bar_get_value(bar), views_test::OnLvglScale(30));
 }
 
 ZTEST(widget_bindings, test_the_first_value_after_a_screen_group_pause_is_shown_at_once) {
@@ -1801,19 +1801,19 @@ ZTEST(widget_bindings, test_the_first_value_after_a_screen_group_pause_is_shown_
     PublishSensor(SENSOR_ID, 90.0F);
     indicator.OnActivated();
     zassert_is_null(lv_anim_get(&indicator, nullptr));
-    zassert_equal(lv_bar_get_value(bar), 90);
+    zassert_equal(lv_bar_get_value(bar), views_test::OnLvglScale(90));
     PublishSensor(SENSOR_ID, 50.0F);
     zassert_not_null(lv_anim_get(&indicator, nullptr));
-    zassert_equal(lv_bar_get_value(bar), 90);
+    zassert_equal(lv_bar_get_value(bar), views_test::OnLvglScale(90));
 
     // Without an event during the pause, the replayed value is shown at once and so is the first event after it.
     indicator.OnDeactivated();
     indicator.OnActivated();
     zassert_is_null(lv_anim_get(&indicator, nullptr));
-    zassert_equal(lv_bar_get_value(bar), 50);
+    zassert_equal(lv_bar_get_value(bar), views_test::OnLvglScale(50));
     PublishSensor(SENSOR_ID, 5.0F);
     zassert_is_null(lv_anim_get(&indicator, nullptr));
-    zassert_equal(lv_bar_get_value(bar), 5);
+    zassert_equal(lv_bar_get_value(bar), views_test::OnLvglScale(5));
     PublishSensor(SENSOR_ID, 60.0F);
     zassert_not_null(lv_anim_get(&indicator, nullptr));
 }
@@ -1841,10 +1841,10 @@ ZTEST(widget_bindings, test_the_first_event_after_an_inactive_spell_is_shown_at_
     zassert_is_null(lv_anim_get(&indicator, nullptr));
     PublishSensor(SENSOR_ID, 70.0F);
     zassert_is_null(lv_anim_get(&indicator, nullptr));
-    zassert_equal(lv_bar_get_value(bar), 70);
+    zassert_equal(lv_bar_get_value(bar), views_test::OnLvglScale(70));
     PublishSensor(SENSOR_ID, 20.0F);
     zassert_not_null(lv_anim_get(&indicator, nullptr));
-    zassert_equal(lv_bar_get_value(bar), 70);
+    zassert_equal(lv_bar_get_value(bar), views_test::OnLvglScale(70));
 }
 
 ZTEST(widget_bindings, test_hidden_digital_value_replays_with_latest_precision) {

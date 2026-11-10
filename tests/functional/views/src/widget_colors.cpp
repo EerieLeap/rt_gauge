@@ -376,27 +376,27 @@ ZTEST(widget_colors, test_simulator_gallery) {
     auto widget = render(configuration);
     auto* bar = Inner(*widget);
     Publish(WidgetPropertyType::VALUE, 25);
-    zassert_equal(lv_bar_get_value(bar), 25);
+    zassert_equal(lv_bar_get_value(bar), views_test::OnLvglScale(25));
     GallerySnapshot(root->GetObject(), "13_initial_25");
     Publish(WidgetPropertyType::IS_VISIBLE, false);
     Publish(WidgetPropertyType::VALUE, 50);
     Publish(WidgetPropertyType::VALUE, 80);
-    zassert_equal(lv_bar_get_value(bar), 25);
+    zassert_equal(lv_bar_get_value(bar), views_test::OnLvglScale(25));
     GallerySnapshot(root->GetObject(), "14_hidden_80", false);
     Publish(WidgetPropertyType::IS_VISIBLE, true);
-    zassert_equal(lv_bar_get_value(bar), 80);
+    zassert_equal(lv_bar_get_value(bar), views_test::OnLvglScale(80));
     GallerySnapshot(root->GetObject(), "15_revealed_80");
     Publish(WidgetPropertyType::OPACITY, 0);
     Publish(WidgetPropertyType::VALUE, 60);
-    zassert_equal(lv_bar_get_value(bar), 80);
+    zassert_equal(lv_bar_get_value(bar), views_test::OnLvglScale(80));
     GallerySnapshot(root->GetObject(), "16_transparent_60", false);
     Publish(WidgetPropertyType::OPACITY, 255);
-    zassert_equal(lv_bar_get_value(bar), 60);
+    zassert_equal(lv_bar_get_value(bar), views_test::OnLvglScale(60));
     GallerySnapshot(root->GetObject(), "17_restored_60");
     Publish(WidgetPropertyType::IS_ACTIVE, false);
     Publish(WidgetPropertyType::VALUE, 95);
     Publish(WidgetPropertyType::IS_ACTIVE, true);
-    zassert_equal(lv_bar_get_value(bar), 60);
+    zassert_equal(lv_bar_get_value(bar), views_test::OnLvglScale(60));
     GallerySnapshot(root->GetObject(), "18_rejected_95");
 }
 
@@ -487,10 +487,10 @@ ZTEST(widget_colors, test_value_animation_and_theme_changes_preserve_whole_widge
 
     // The easing the pause cut short is not resumed: the value that arrived meanwhile is shown at once.
     zassert_is_null(lv_anim_get(indicator, nullptr));
-    zassert_equal(lv_bar_get_value(Inner(*widget)), 75);
+    zassert_equal(lv_bar_get_value(Inner(*widget)), views_test::OnLvglScale(75));
     lv_tick_inc(5000);
     lv_anim_refr_now();
-    zassert_equal(lv_bar_get_value(Inner(*widget)), 75);
+    zassert_equal(lv_bar_get_value(Inner(*widget)), views_test::OnLvglScale(75));
     zassert_equal(lv_obj_get_style_opa_layered(outer, LV_PART_MAIN), 128);
 }
 

@@ -22,6 +22,11 @@ private:
     // meaningful change. Skip re-triggering for tiny deltas.
     static constexpr float MIN_ANIMATION_DELTA_RATIO = 0.001F; // 0.1% of range
 
+public:
+    // LVGL bars, arcs and charts take whole numbers, so they get the position in the range on this scale, not the
+    // value in its own units: a range of 0..8 would otherwise have nine positions.
+    static constexpr int32_t LVGL_VALUE_SCALE = 10000;
+
 protected:
     lv_anim_t value_change_animation_{};
     float range_start_ = 0;
@@ -44,6 +49,9 @@ protected:
     void OnValueShownAtOnce() {
         can_ease_ = has_received_value_ || !is_value_bound_;
     }
+
+    // The value's position in the range on LVGL_VALUE_SCALE, 0 for an empty range.
+    int32_t ToLvglScale(float value) const;
 
     virtual void UpdateIndicator(float value) = 0;
     lv_anim_t CreateValueChangeAnimation();

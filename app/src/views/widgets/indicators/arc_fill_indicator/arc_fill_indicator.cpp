@@ -18,9 +18,7 @@ ArcFillIndicator::ArcFillIndicator(uint32_t id, std::shared_ptr<Frame> parent, W
     IndicatorBase(id, std::move(parent), std::move(context)) {}
 
 int ArcFillIndicator::DoRender() {
-    auto* lv_obj = Create(
-        content_frame_->GetObject(), static_cast<int32_t>(range_start_), static_cast<int32_t>(range_end_)
-    );
+    auto* lv_obj = Create(content_frame_->GetObject(), 0, LVGL_VALUE_SCALE);
     const auto child = std::make_shared<Frame>(Frame::Create(lv_obj).Build());
     content_frame_->SetChild(child);
 
@@ -73,7 +71,7 @@ lv_obj_t* ArcFillIndicator::Create(lv_obj_t* parent, int32_t range_start, int32_
 }
 
 void ArcFillIndicator::UpdateIndicator(float value) {
-    lv_arc_set_value(lv_arc_, static_cast<int32_t>(value));
+    lv_arc_set_value(lv_arc_, ToLvglScale(value));
 }
 
 void ArcFillIndicator::OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) {

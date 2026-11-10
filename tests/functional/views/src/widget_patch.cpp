@@ -1009,7 +1009,7 @@ ZTEST(widget_patch, test_a_smoothed_bar_eases_to_a_patched_value_from_the_value_
     auto* widget = Find(scene.screen, 1);
     lv_obj_t* const bar = Inner(*widget);
 
-    zassert_equal(lv_bar_get_value(bar), 20, "Built showing its value");
+    zassert_equal(lv_bar_get_value(bar), views_test::OnLvglScale(20), "Built showing its value");
     zassert_is_null(ValueAnimation(*widget), "and not easing to it");
 
     const auto plan = scene.Patch({ Put(WithValue(*widget->GetConfiguration(), 80.0)) });
@@ -1017,21 +1017,21 @@ ZTEST(widget_patch, test_a_smoothed_bar_eases_to_a_patched_value_from_the_value_
     zassert_equal(Find(scene.screen, 1), widget);
     zassert_equal(Inner(*widget), bar);
     zassert_not_null(ValueAnimation(*widget), "Easing to the new value");
-    zassert_equal(lv_bar_get_value(bar), 20, "from the old one");
+    zassert_equal(lv_bar_get_value(bar), views_test::OnLvglScale(20), "from the old one");
 
     // A move of 60 in 100 takes 2.4 s; a tenth of a second in, it is just off 20, not off the minimum.
     lv_tick_inc(100);
     lv_anim_refr_now();
-    zassert_between_inclusive(lv_bar_get_value(bar), 21, 30);
+    zassert_between_inclusive(lv_bar_get_value(bar), views_test::OnLvglScale(20) + 1, views_test::OnLvglScale(30));
 
     // Another value while easing: from where it is now.
     scene.Patch({ Put(WithValue(*widget->GetConfiguration(), 30.0)) });
     lv_tick_inc(100);
     lv_anim_refr_now();
-    zassert_between_inclusive(lv_bar_get_value(bar), 21, 30);
+    zassert_between_inclusive(lv_bar_get_value(bar), views_test::OnLvglScale(20) + 1, views_test::OnLvglScale(30));
 
     Settle();
-    zassert_equal(lv_bar_get_value(bar), 30);
+    zassert_equal(lv_bar_get_value(bar), views_test::OnLvglScale(30));
     zassert_is_null(ValueAnimation(*widget));
 }
 
@@ -1090,7 +1090,7 @@ ZTEST(widget_patch, test_a_built_smoothed_indicator_shows_its_value_at_once) {
     const auto plan = scene.Patch({ Put(smoothed) });
     zassert_true(plan.effects[0] == PatchEffect::WidgetRebuilt);
     auto* rebuilt = Find(scene.screen, 1);
-    zassert_equal(lv_bar_get_value(Inner(*rebuilt)), 70);
+    zassert_equal(lv_bar_get_value(Inner(*rebuilt)), views_test::OnLvglScale(70));
     zassert_is_null(ValueAnimation(*rebuilt));
 }
 

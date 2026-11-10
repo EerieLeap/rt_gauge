@@ -20,9 +20,7 @@ BarIndicator::BarIndicator(uint32_t id, std::shared_ptr<Frame> parent, WidgetCon
     IndicatorBase(id, std::move(parent), std::move(context)) {}
 
 int BarIndicator::DoRender() {
-    auto* lv_obj = Create(
-        content_frame_->GetObject(), static_cast<int32_t>(range_start_), static_cast<int32_t>(range_end_)
-    );
+    auto* lv_obj = Create(content_frame_->GetObject(), 0, LVGL_VALUE_SCALE);
     const auto child = std::make_shared<Frame>(Frame::Create(lv_obj).Build());
     content_frame_->SetChild(child);
 
@@ -92,7 +90,7 @@ void BarIndicator::UpdateDirection(
 }
 
 void BarIndicator::UpdateIndicator(float value) {
-    lv_bar_set_value(lv_bar_, static_cast<int32_t>(value), LV_ANIM_OFF);
+    lv_bar_set_value(lv_bar_, ToLvglScale(value), LV_ANIM_OFF);
 }
 
 void BarIndicator::OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) {

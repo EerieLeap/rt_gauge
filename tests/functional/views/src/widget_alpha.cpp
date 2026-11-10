@@ -395,7 +395,7 @@ ZTEST(widget_alpha, test_fill_and_track_alpha_remain_independent_under_widget_fa
     zassert_within(pixels[16].blue, 32, ROUNDING);
     zassert_equal(pixels[48].red, 0);
     zassert_within(pixels[48].blue, 64, ROUNDING);
-    zassert_equal(lv_bar_get_value(scene.Inner()), 50);
+    zassert_equal(lv_bar_get_value(scene.Inner()), views_test::OnLvglScale(50));
 }
 
 ZTEST(widget_alpha, test_control_style_changes_preserve_values_states_and_event_callbacks) {

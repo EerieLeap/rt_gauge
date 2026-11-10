@@ -1,5 +1,6 @@
 #include <array>
 #include <cerrno>
+#include <cmath>
 #include <span>
 #include <utility>
 
@@ -10,6 +11,7 @@
 #include "subsys/assets/asset_provider.h"
 #include "subsys/device_tree/dt_fs.h"
 #include "subsys/fs/services/fs_service.h"
+#include "views/widgets/indicators/indicator_base.h"
 #include "views/widgets/widget_factory.h"
 
 #include "views_test_support.h"
@@ -74,6 +76,13 @@ void EnsureTestDisplay() {
 void CleanTestDisplay(void* /*fixture*/) {
     if(test_display != nullptr)
         lv_obj_clean(lv_screen_active());
+}
+
+int32_t OnLvglScale(float value, float range_start, float range_end) {
+    return static_cast<int32_t>(std::lround(
+        (value - range_start) / (range_end - range_start)
+        * static_cast<float>(eerie_leap::views::widgets::indicators::IndicatorBase::LVGL_VALUE_SCALE)
+    ));
 }
 
 lv_obj_t* WidgetContent(const IWidget& widget) {

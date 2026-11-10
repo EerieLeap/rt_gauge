@@ -32,6 +32,10 @@ void EnsureTestDisplay();
 // children of the active screen.
 void CleanTestDisplay(void* fixture);
 
+// The position of a value in its range on the scale that a bar or an arc takes (IndicatorBase::LVGL_VALUE_SCALE), as
+// lv_bar_get_value() and lv_arc_get_value() report it. The default range is 0..100.
+int32_t OnLvglScale(float value, float range_start = 0.0F, float range_end = 100.0F);
+
 // The stable presentation object beneath a widget's public layout container.
 lv_obj_t* WidgetContent(const eerie_leap::views::widgets::IWidget& widget);
 
