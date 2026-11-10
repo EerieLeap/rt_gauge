@@ -39,6 +39,9 @@ protected:
     bool can_ease_ = false;
     bool has_received_value_ = false; // An inbound binding delivered VALUE since the build or the last pause.
     bool is_value_bound_ = false;
+    // One pause can suspend the indicator twice (an animation tick finding it ineligible, then the next refresh), and
+    // an event between the two must survive the second.
+    bool is_paused_ = false;
 
     // Whether the next value eases from the one on display (IS_SMOOTHED and a live value shown).
     bool ShouldEaseNextValue() const {
@@ -69,6 +72,7 @@ public:
 
 protected:
     void OnProcessingSuspended() override;
+    void OnProcessingUpdated(bool enabled) override;
     void OnPropertyReceived(WidgetPropertyType type) override;
     void OnConfigured() override;
     void RegisterProperties(WidgetPropertyStore& store) const override;

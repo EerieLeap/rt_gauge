@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 #include "domain/ui_domain/models/widget_property.h"
 
@@ -128,7 +129,15 @@ void IndicatorBase::OnProcessingSuspended() {
         pending_properties_.set(static_cast<size_t>(WidgetPropertyType::VALUE));
 
     can_ease_ = false;
-    has_received_value_ = false;
+    if(!std::exchange(is_paused_, true))
+        has_received_value_ = false;
+}
+
+void IndicatorBase::OnProcessingUpdated(bool enabled) {
+    if(enabled)
+        is_paused_ = false;
+
+    WidgetBase::OnProcessingUpdated(enabled);
 }
 
 void IndicatorBase::RegisterProperties(WidgetPropertyStore& store) const {

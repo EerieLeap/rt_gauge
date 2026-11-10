@@ -1847,6 +1847,43 @@ ZTEST(widget_bindings, test_the_first_event_after_an_inactive_spell_is_shown_at_
     zassert_equal(lv_bar_get_value(bar), views_test::OnLvglScale(70));
 }
 
+ZTEST(widget_bindings, test_an_event_between_two_suspensions_of_one_pause_still_eases_after_the_replay) {
+    using eerie_leap::views::widgets::indicators::BarIndicator;
+
+    auto configuration = MakeConfiguration();
+    configuration->properties[WidgetPropertyType::IS_SMOOTHED] = true;
+    configuration->bindings.push_back(SensorBinding(WidgetPropertyType::VALUE, SENSOR_ID));
+    auto root = MakeRoot();
+    BarIndicator indicator(1, root, WidgetContext{});
+    indicator.Configure(configuration);
+    zassert_equal(indicator.Render(), 0);
+    indicator.OnActivated();
+    auto* bar = lv_obj_get_child(views_test::WidgetContent(indicator), 0);
+    PublishSensor(SENSOR_ID, 10.0F);
+    PublishSensor(SENSOR_ID, 40.0F);
+    zassert_not_null(lv_anim_get(&indicator, nullptr));
+
+    // Hiding an ancestor triggers no processing update: the animation tick finds the indicator ineligible and
+    // suspends it first.
+    lv_obj_set_hidden(root->GetObject(), true);
+    lv_tick_inc(100);
+    lv_anim_refr_now();
+    zassert_is_null(lv_anim_get(&indicator, nullptr));
+
+    // An event in between is stored, and the refresh-start synchronization suspends the same pause a second time.
+    PublishSensor(SENSOR_ID, 90.0F);
+    lv_refr_now(nullptr);
+
+    lv_obj_set_hidden(root->GetObject(), false);
+    lv_refr_now(nullptr);
+    zassert_is_null(lv_anim_get(&indicator, nullptr));
+    zassert_equal(lv_bar_get_value(bar), views_test::OnLvglScale(90));
+
+    // The replayed event was a received value, so the next one eases.
+    PublishSensor(SENSOR_ID, 20.0F);
+    zassert_not_null(lv_anim_get(&indicator, nullptr));
+}
+
 ZTEST(widget_bindings, test_hidden_digital_value_replays_with_latest_precision) {
     using eerie_leap::views::widgets::indicators::DigitalIndicator;
 
