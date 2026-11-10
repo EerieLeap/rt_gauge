@@ -39,6 +39,16 @@ void mspi_esp32_stats_get(const struct device *controller, struct mspi_esp32_sta
 
 /** @brief Zero the counters (and drop a pending gap stamp). */
 void mspi_esp32_stats_reset(const struct device *controller);
+
+/**
+ * @brief Bench only: set the fault-injection period at run time. The first piece of every Nth direct-PSRAM packet
+ * then fails as if the TX FIFO had underrun (counted in injected_faults). It starts at
+ * CONFIG_MSPI_ESP32_FAULT_INJECT_PERIOD, or 0 (off) without it. N = 1 fails every packet, re-sends included; N >= 2
+ * never fails all three attempts of a rect.
+ *
+ * @retval 0 set, -ENOTSUP without direct PSRAM transfers.
+ */
+int mspi_esp32_fault_inject_set(const struct device *controller, uint32_t period);
 #endif /* CONFIG_MSPI_ESP32_STATS */
 
 #ifdef __cplusplus

@@ -444,6 +444,23 @@ void mspi_esp32_stats_get(const struct device *controller, struct mspi_esp32_sta
 	k_spin_unlock(&data->stats_lock, key);
 }
 
+int mspi_esp32_fault_inject_set(const struct device *controller, uint32_t period)
+{
+#ifdef MSPI_ESP32_PSRAM_DMA
+	struct mspi_esp32_data *data = controller->data;
+
+	/* Plain stores: the writer reads them under the bus lock, and a count that survives a change only moves
+	 * the first fault by up to one packet. */
+	data->fault_inject_count = 0;
+	data->fault_inject_period = period;
+	return 0;
+#else
+	ARG_UNUSED(controller);
+	ARG_UNUSED(period);
+	return -ENOTSUP;
+#endif
+}
+
 void mspi_esp32_stats_reset(const struct device *controller)
 {
 	struct mspi_esp32_data *data = controller->data;
@@ -1034,7 +1051,17 @@ static int IRAM_ATTR transfer_piece(const struct device *dev, const struct mspi_
 		bool underrun = hal->hw->dma_int_raw.outfifo_empty_err != 0;
 		bool injected = false;
 
-#if defined(CONFIG_MSPI_ESP32_FAULT_INJECT_PERIOD) && CONFIG_MSPI_ESP32_FAULT_INJECT_PERIOD > 0
+#if defined(CONFIG_MSPI_ESP32_STATS)
+		/* Bench only: fail the first piece of every Nth packet as if it had underrun. A
+		 * re-send is a new packet, so it succeeds for N >= 2. N is set at run time. */
+		uint32_t inject_period = data->fault_inject_period;
+
+		if (inject_period > 0 && off == 0 && ++data->fault_inject_count >= inject_period) {
+			data->fault_inject_count = 0;
+			injected = !underrun;
+			underrun = true;
+		}
+#elif defined(CONFIG_MSPI_ESP32_FAULT_INJECT_PERIOD) && CONFIG_MSPI_ESP32_FAULT_INJECT_PERIOD > 0
 		/* Bench only: fail the first piece of every Nth packet as if it had underrun. A
 		 * re-send is a new packet, so it succeeds for N >= 2. */
 		if (off == 0 && ++data->fault_inject_count >= CONFIG_MSPI_ESP32_FAULT_INJECT_PERIOD) {
@@ -1574,6 +1601,14 @@ static int mspi_esp32_init(const struct device *dev)
 	data->dev_config.cs_pin_id = (config->mspi_config.num_ce_gpios > 0) ? -1 : 0;
 
 	data->clock_frequency = config->mspi_config.max_freq;
+
+#ifdef CONFIG_MSPI_ESP32_STATS
+#ifdef CONFIG_MSPI_ESP32_FAULT_INJECT_PERIOD
+	data->fault_inject_period = CONFIG_MSPI_ESP32_FAULT_INJECT_PERIOD;
+#else
+	data->fault_inject_period = 0;
+#endif
+#endif
 
 	const struct mspi_dt_spec spec = {
 		.bus = dev,
