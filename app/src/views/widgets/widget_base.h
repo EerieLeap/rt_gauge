@@ -125,6 +125,10 @@ protected:
     virtual void OnBoxResized();
     void UpdateProcessingState();
     virtual void OnProcessingSuspended();
+    // An inbound binding stored an event's value, called just before the widget reacts to it (now, or at the replay
+    // after a pause). OnPropertyChanged() cannot tell an event from a patch or a replay. Runs under the LVGL lock and
+    // the dispatch guard.
+    virtual void OnPropertyReceived(WidgetPropertyType type);
     // Idempotently synchronize owned work, including after an ancestor changes between refreshes.
     virtual void OnProcessingUpdated(bool enabled);
 

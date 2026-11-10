@@ -339,6 +339,7 @@ ZTEST(widget_alpha, test_segment_animation_recolors_displayed_state_without_jump
     configuration->properties[WidgetPropertyType::IS_SMOOTHED] = true;
     configuration->properties[INACTIVE] = std::pmr::string("#0000FF40");
     Scene scene(configuration);
+    Publish(WidgetPropertyType::VALUE, 0);
     Publish(WidgetPropertyType::VALUE, 100);
     lv_tick_inc(400);
     lv_anim_refr_now();

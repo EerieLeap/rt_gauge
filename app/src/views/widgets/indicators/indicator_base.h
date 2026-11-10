@@ -27,9 +27,23 @@ protected:
     float range_start_ = 0;
     float range_end_ = 0;
     float value_ = 0;
-    // Whether a value has been shown yet. The first one is shown at once, whatever IS_SMOOTHED says: smoothing eases
-    // a change of what is on the display, and a widget that was just built has shown nothing to ease from.
-    bool is_value_shown_ = false;
+
+    // IS_SMOOTHED eases between values shown one after another while the indicator processes. The first value after
+    // the build or a pause is shown at once: there is nothing live to ease from, and a bound VALUE holds the record's
+    // value until the first event, which is no reading.
+    bool can_ease_ = false;
+    bool has_received_value_ = false; // An inbound binding delivered VALUE since the build or the last pause.
+    bool is_value_bound_ = false;
+
+    // Whether the next value eases from the one on display (IS_SMOOTHED and a live value shown).
+    bool ShouldEaseNextValue() const {
+        return IsSmoothed() && can_ease_;
+    }
+    // A value was shown without easing. Easing resumes once what is shown came from the source: always for a value
+    // without an inbound binding, else after the binding delivered one.
+    void OnValueShownAtOnce() {
+        can_ease_ = has_received_value_ || !is_value_bound_;
+    }
 
     virtual void UpdateIndicator(float value) = 0;
     lv_anim_t CreateValueChangeAnimation();
@@ -47,6 +61,8 @@ public:
 
 protected:
     void OnProcessingSuspended() override;
+    void OnPropertyReceived(WidgetPropertyType type) override;
+    void OnConfigured() override;
     void RegisterProperties(WidgetPropertyStore& store) const override;
     void OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) override;
 };

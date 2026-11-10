@@ -360,6 +360,8 @@ void WidgetBase::UpdateProcessingState() {
 
 void WidgetBase::OnProcessingSuspended() {}
 
+void WidgetBase::OnPropertyReceived(WidgetPropertyType) {}
+
 void WidgetBase::OnProcessingUpdated(bool) {}
 
 void WidgetBase::OnConfigured() {}
@@ -571,6 +573,7 @@ void WidgetBase::ResolveBindings() {
                     if(std::holds_alternative<std::monostate>(value) || !store->Set(target, value))
                         return;
 
+                    OnPropertyReceived(target);
                     NotifyPropertyChanged(target, value, effect);
                 });
             }

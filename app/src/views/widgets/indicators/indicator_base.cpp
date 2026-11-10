@@ -33,7 +33,6 @@ void IndicatorBase::UpdateIndicatorCallback(void* obj, int32_t value) {
     const float value_float = static_cast<float>(value) / (10 * CONFIG_EERIE_LEAP_FLOAT_SIGNIFICANT_DIGITS);
     indicator->UpdateIndicator(value_float);
     indicator->value_ = value_float;
-    indicator->is_value_shown_ = true;
 }
 
 lv_anim_t IndicatorBase::CreateValueChangeAnimation() {
@@ -90,14 +89,25 @@ void IndicatorBase::Update(float value) {
     else if(value > range_end_)
         value = range_end_;
 
-    if(IsSmoothed() && is_value_shown_) {
+    if(ShouldEaseNextValue()) {
         if(std::abs(value - value_) < MIN_ANIMATION_DELTA_RATIO * (range_end_ - range_start_))
             return;
 
         ValueChangeAnimation(value_change_animation_, range_end_ - range_start_, value_, value);
     } else {
+        lv_anim_delete(this, UpdateIndicatorCallback);
         UpdateIndicatorCallback(this, static_cast<int32_t>(value * 10 * CONFIG_EERIE_LEAP_FLOAT_SIGNIFICANT_DIGITS));
+        OnValueShownAtOnce();
     }
+}
+
+void IndicatorBase::OnPropertyReceived(WidgetPropertyType type) {
+    if(type == WidgetPropertyType::VALUE)
+        has_received_value_ = true;
+}
+
+void IndicatorBase::OnConfigured() {
+    is_value_bound_ = IsDrivenByInboundBinding(WidgetPropertyType::VALUE);
 }
 
 void IndicatorBase::OnProcessingSuspended() {
@@ -105,6 +115,9 @@ void IndicatorBase::OnProcessingSuspended() {
     // work even if no further value event arrives before processing becomes eligible again.
     if(lv_anim_delete(this, UpdateIndicatorCallback))
         pending_properties_.set(static_cast<size_t>(WidgetPropertyType::VALUE));
+
+    can_ease_ = false;
+    has_received_value_ = false;
 }
 
 void IndicatorBase::RegisterProperties(WidgetPropertyStore& store) const {

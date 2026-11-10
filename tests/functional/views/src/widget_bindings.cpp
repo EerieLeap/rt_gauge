@@ -1548,6 +1548,10 @@ ZTEST(widget_bindings, test_generic_animation_and_value_smoothing_have_independe
         indicator.Configure(configuration);
         zassert_equal(indicator.Render(), 0);
         indicator.OnActivated();
+
+        // The first value is shown at once; the second one eases.
+        PublishSensor(SENSOR_ID, 10.0F);
+        zassert_is_null(lv_anim_get(&indicator, nullptr));
         PublishSensor(SENSOR_ID, 80.0F);
         auto* smoothing = lv_anim_get(&indicator, nullptr);
         zassert_not_null(smoothing);
@@ -1566,18 +1570,21 @@ ZTEST(widget_bindings, test_generic_animation_and_value_smoothing_have_independe
         zassert_equal(smoothing->act_time, elapsed);
         auto* bar = lv_obj_get_child(views_test::WidgetContent(indicator), 0);
         const auto displayed = lv_bar_get_value(bar);
-        zassert_true(displayed > 0 && displayed < 80);
+        zassert_true(displayed > 10 && displayed < 80);
         PublishSensor("visibility", false);
         zassert_equal(lv_anim_count_running(), count);
         lv_tick_inc(5000);
         lv_anim_refr_now();
         zassert_equal(lv_bar_get_value(bar), displayed);
+
+        // The easing the pause cut short completes at once on resume.
         PublishSensor("visibility", true);
-        zassert_equal(lv_anim_count_running(), count + 2);
+        zassert_is_null(lv_anim_get(&indicator, nullptr));
+        zassert_equal(lv_anim_count_running(), count + 1);
+        zassert_equal(lv_bar_get_value(bar), 80);
         lv_tick_inc(5000);
         lv_anim_refr_now();
         zassert_equal(lv_bar_get_value(bar), 80);
-        zassert_is_null(lv_anim_get(&indicator, nullptr));
         zassert_equal(lv_anim_count_running(), count + 1);
         indicator.OnDeactivated();
         zassert_equal(lv_anim_count_running(), count);
@@ -1597,6 +1604,7 @@ ZTEST(widget_bindings, test_indicator_animation_stops_for_each_suspension_condit
         indicator.Configure(configuration);
         zassert_equal(indicator.Render(), 0);
         indicator.OnActivated();
+        PublishSensor(SENSOR_ID, 10.0F);
         PublishSensor(SENSOR_ID, 80.0F);
         zassert_not_null(lv_anim_get(&indicator, nullptr));
         auto* bar = lv_obj_get_child(views_test::WidgetContent(indicator), 0);
@@ -1608,13 +1616,17 @@ ZTEST(widget_bindings, test_indicator_animation_stops_for_each_suspension_condit
         zassert_is_null(lv_anim_get(&indicator, nullptr));
         zassert_equal(lv_bar_get_value(bar), displayed);
         PublishSensor(OTHER_SENSOR_ID, 1);
+
+        // The value shown on resume is no easing start for the next one only after the source delivered once.
         PublishSensor(SENSOR_ID, 42.0F);
+        PublishSensor(SENSOR_ID, 30.0F);
         zassert_not_null(lv_anim_get(&indicator, nullptr));
+        const auto resumed = lv_bar_get_value(bar);
         lv_obj_set_hidden(root->GetObject(), true);
         lv_tick_inc(100);
         lv_anim_refr_now();
         zassert_is_null(lv_anim_get(&indicator, nullptr));
-        zassert_equal(lv_bar_get_value(bar), displayed);
+        zassert_equal(lv_bar_get_value(bar), resumed);
     }
 }
 
@@ -1679,25 +1691,27 @@ ZTEST(widget_bindings, test_indicator_animation_resumes_after_management_restora
         indicator.Configure(configuration);
         zassert_equal(indicator.Render(), 0);
         indicator.OnActivated();
+        PublishSensor(SENSOR_ID, 10.0F);
         PublishSensor(SENSOR_ID, 80.0F);
         lv_tick_inc(500);
         lv_anim_refr_now();
         auto* bar = lv_obj_get_child(views_test::WidgetContent(indicator), 0);
         const auto displayed = lv_bar_get_value(bar);
-        zassert_true(displayed > 0 && displayed < 80);
+        zassert_true(displayed > 10 && displayed < 80);
         PublishSensor(OTHER_SENSOR_ID, 0);
         zassert_is_null(lv_anim_get(&indicator, nullptr));
         lv_tick_inc(5000);
         lv_anim_refr_now();
         zassert_equal(lv_bar_get_value(bar), displayed);
 
-        // No new value arrives during suspension or after restoration.
+        // No new value arrives during suspension or after restoration: the target is shown at once, since the
+        // easing the pause interrupted does not resume.
         PublishSensor(OTHER_SENSOR_ID, 1);
-        zassert_not_null(lv_anim_get(&indicator, nullptr));
+        zassert_is_null(lv_anim_get(&indicator, nullptr));
+        zassert_equal(lv_bar_get_value(bar), 80);
         lv_tick_inc(5000);
         lv_anim_refr_now();
         zassert_equal(lv_bar_get_value(bar), 80);
-        zassert_is_null(lv_anim_get(&indicator, nullptr));
     }
 }
 
@@ -1713,12 +1727,13 @@ ZTEST(widget_bindings, test_indicator_animation_resumes_after_ancestor_restorati
         indicator.Configure(configuration);
         zassert_equal(indicator.Render(), 0);
         indicator.OnActivated();
+        PublishSensor(SENSOR_ID, 10.0F);
         PublishSensor(SENSOR_ID, 80.0F);
         lv_tick_inc(500);
         lv_anim_refr_now();
         auto* bar = lv_obj_get_child(views_test::WidgetContent(indicator), 0);
         const auto displayed = lv_bar_get_value(bar);
-        zassert_true(displayed > 0 && displayed < 80);
+        zassert_true(displayed > 10 && displayed < 80);
         if(hidden)
             lv_obj_set_hidden(root->GetObject(), true);
         else
@@ -1731,11 +1746,105 @@ ZTEST(widget_bindings, test_indicator_animation_resumes_after_ancestor_restorati
         lv_obj_set_hidden(root->GetObject(), false);
         lv_obj_set_style_opa(root->GetObject(), 255, LV_PART_MAIN);
         lv_refr_now(nullptr);
-        zassert_not_null(lv_anim_get(&indicator, nullptr));
+        zassert_is_null(lv_anim_get(&indicator, nullptr));
+        zassert_equal(lv_bar_get_value(bar), 80);
         lv_tick_inc(5000);
         lv_anim_refr_now();
         zassert_equal(lv_bar_get_value(bar), 80);
     }
+}
+
+ZTEST(widget_bindings, test_the_first_bound_value_is_shown_at_once_and_the_next_eases) {
+    using eerie_leap::views::widgets::indicators::BarIndicator;
+
+    auto configuration = MakeConfiguration();
+    configuration->properties[WidgetPropertyType::IS_SMOOTHED] = true;
+    configuration->properties[WidgetPropertyType::VALUE] = 20.0;
+    configuration->bindings.push_back(SensorBinding(WidgetPropertyType::VALUE, SENSOR_ID));
+    BarIndicator indicator(1, MakeRoot(), WidgetContext{});
+    indicator.Configure(configuration);
+    zassert_equal(indicator.Render(), 0);
+    indicator.OnActivated();
+    auto* bar = lv_obj_get_child(views_test::WidgetContent(indicator), 0);
+
+    // The record's value is no reading: the first event replaces it without easing from it.
+    zassert_equal(lv_bar_get_value(bar), 20);
+    PublishSensor(SENSOR_ID, 70.0F);
+    zassert_is_null(lv_anim_get(&indicator, nullptr));
+    zassert_equal(lv_bar_get_value(bar), 70);
+    PublishSensor(SENSOR_ID, 30.0F);
+    zassert_not_null(lv_anim_get(&indicator, nullptr));
+    zassert_equal(lv_bar_get_value(bar), 70);
+    lv_tick_inc(5000);
+    lv_anim_refr_now();
+    zassert_equal(lv_bar_get_value(bar), 30);
+}
+
+ZTEST(widget_bindings, test_the_first_value_after_a_screen_group_pause_is_shown_at_once) {
+    using eerie_leap::views::widgets::indicators::BarIndicator;
+
+    auto configuration = MakeConfiguration();
+    configuration->properties[WidgetPropertyType::IS_SMOOTHED] = true;
+    configuration->bindings.push_back(SensorBinding(WidgetPropertyType::VALUE, SENSOR_ID));
+    BarIndicator indicator(1, MakeRoot(), WidgetContext{});
+    indicator.Configure(configuration);
+    zassert_equal(indicator.Render(), 0);
+    indicator.OnActivated();
+    auto* bar = lv_obj_get_child(views_test::WidgetContent(indicator), 0);
+    PublishSensor(SENSOR_ID, 10.0F);
+    PublishSensor(SENSOR_ID, 40.0F);
+    zassert_not_null(lv_anim_get(&indicator, nullptr));
+
+    // An event during the pause is stored and replayed at once.
+    indicator.OnDeactivated();
+    zassert_is_null(lv_anim_get(&indicator, nullptr));
+    PublishSensor(SENSOR_ID, 90.0F);
+    indicator.OnActivated();
+    zassert_is_null(lv_anim_get(&indicator, nullptr));
+    zassert_equal(lv_bar_get_value(bar), 90);
+    PublishSensor(SENSOR_ID, 50.0F);
+    zassert_not_null(lv_anim_get(&indicator, nullptr));
+    zassert_equal(lv_bar_get_value(bar), 90);
+
+    // Without an event during the pause, the replayed value is shown at once and so is the first event after it.
+    indicator.OnDeactivated();
+    indicator.OnActivated();
+    zassert_is_null(lv_anim_get(&indicator, nullptr));
+    zassert_equal(lv_bar_get_value(bar), 50);
+    PublishSensor(SENSOR_ID, 5.0F);
+    zassert_is_null(lv_anim_get(&indicator, nullptr));
+    zassert_equal(lv_bar_get_value(bar), 5);
+    PublishSensor(SENSOR_ID, 60.0F);
+    zassert_not_null(lv_anim_get(&indicator, nullptr));
+}
+
+ZTEST(widget_bindings, test_the_first_event_after_an_inactive_spell_is_shown_at_once) {
+    using eerie_leap::views::widgets::indicators::BarIndicator;
+
+    auto configuration = MakeConfiguration();
+    configuration->properties[WidgetPropertyType::IS_SMOOTHED] = true;
+    configuration->bindings.push_back(SensorBinding(WidgetPropertyType::VALUE, SENSOR_ID));
+    configuration->bindings.push_back(SensorBinding(WidgetPropertyType::IS_ACTIVE, OTHER_SENSOR_ID));
+    BarIndicator indicator(1, MakeRoot(), WidgetContext{});
+    indicator.Configure(configuration);
+    zassert_equal(indicator.Render(), 0);
+    indicator.OnActivated();
+    auto* bar = lv_obj_get_child(views_test::WidgetContent(indicator), 0);
+    PublishSensor(SENSOR_ID, 10.0F);
+    PublishSensor(SENSOR_ID, 40.0F);
+    zassert_not_null(lv_anim_get(&indicator, nullptr));
+
+    // IS_ACTIVE off drops events, so the stored value is stale on resume and the first event replaces it.
+    PublishSensor(OTHER_SENSOR_ID, 0);
+    PublishSensor(SENSOR_ID, 90.0F);
+    PublishSensor(OTHER_SENSOR_ID, 1);
+    zassert_is_null(lv_anim_get(&indicator, nullptr));
+    PublishSensor(SENSOR_ID, 70.0F);
+    zassert_is_null(lv_anim_get(&indicator, nullptr));
+    zassert_equal(lv_bar_get_value(bar), 70);
+    PublishSensor(SENSOR_ID, 20.0F);
+    zassert_not_null(lv_anim_get(&indicator, nullptr));
+    zassert_equal(lv_bar_get_value(bar), 70);
 }
 
 ZTEST(widget_bindings, test_hidden_digital_value_replays_with_latest_precision) {

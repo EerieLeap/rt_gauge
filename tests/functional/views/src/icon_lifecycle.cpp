@@ -1025,6 +1025,9 @@ ZTEST(icon_lifecycle, test_dial_animation_takes_its_share_of_a_full_sweep) {
         dial.Assemble(configuration, needle, context);
         zassert_equal(dial.Render(), 0);
         dial.OnActivated();
+
+        // The first value is shown at once, so the sweep to measure starts from a second one.
+        Publish(WidgetPropertyType::VALUE, 0.0F);
         Publish(WidgetPropertyType::VALUE, expected.value);
         auto* animation = lv_anim_get(&dial, nullptr);
         zassert_not_null(animation, "max %g, value %g", expected.max, static_cast<double>(expected.value));

@@ -469,6 +469,7 @@ ZTEST(widget_colors, test_value_animation_and_theme_changes_preserve_whole_widge
     auto widget = Render(configuration);
     auto* outer = widget->GetContainer()->GetObject();
     auto* indicator = dynamic_cast<WidgetBase*>(widget.get());
+    Publish(WidgetPropertyType::VALUE, 0.0F);
     Publish(WidgetPropertyType::VALUE, 100.0F);
     zassert_not_null(lv_anim_get(indicator, nullptr));
     lv_tick_inc(100);
@@ -483,7 +484,10 @@ ZTEST(widget_colors, test_value_animation_and_theme_changes_preserve_whole_widge
     lv_anim_refr_now();
     zassert_equal(lv_obj_get_style_opa_layered(outer, LV_PART_MAIN), 0);
     Publish(WidgetPropertyType::OPACITY, 128);
-    zassert_not_null(lv_anim_get(indicator, nullptr));
+
+    // The easing the pause cut short is not resumed: the value that arrived meanwhile is shown at once.
+    zassert_is_null(lv_anim_get(indicator, nullptr));
+    zassert_equal(lv_bar_get_value(Inner(*widget)), 75);
     lv_tick_inc(5000);
     lv_anim_refr_now();
     zassert_equal(lv_bar_get_value(Inner(*widget)), 75);
