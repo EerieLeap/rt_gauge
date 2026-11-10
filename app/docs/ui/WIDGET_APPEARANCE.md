@@ -474,6 +474,19 @@ are never replayed. Inactive controls cannot publish, navigate, or change
 values; the one exception is a button's release, which a suspension that cuts a
 press short still sends.
 
+`IS_SMOOTHED` eases between values an indicator shows one after another. The
+first value after the widget is built, the first a `VALUE` binding delivers (the
+record's value is no reading) and the first after a suspension are shown at
+once; an easing a suspension cut short completes on restoration. After
+an explicit `IS_ACTIVE=false`, whose events are dropped, the first event is also
+shown at once. Bars and filled arcs position their fill on a 0..10000 scale over
+the range, so they move in sub-unit steps. The horizontal chart keeps one point
+more than it shows, hidden left of its box, and scrolls a point's width back to
+rest over the interval between values (an average of the last intervals); a gap
+over 10 s, the first value and the first after a suspension do not scroll.
+Without `IS_SMOOTHED` the chart jumps a point per value. A scrolling chart
+redraws its whole area every frame while it moves.
+
 Persisted IDs 0-33 and CBOR version 1/layout are unchanged. Opacity is ID 34;
 the six colors are IDs 35-40; animation type, requested active, and duration are
 IDs 41-43; `FONT_FILE_PATH` and `FONT_SIZE_PX` are IDs 49 and 50. Old
