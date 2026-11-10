@@ -235,15 +235,17 @@ void HorizontalChartIndicator::Update(float value) {
     else if(value > range_end_)
         value = range_end_;
 
-    const uint32_t now = lv_tick_get();
-    const uint32_t elapsed = has_last_point_ ? lv_tick_elaps(last_point_ms_) : 0;
+    const uint32_t point_ms = has_received_ms_ ? received_ms_ : lv_tick_get();
+    has_received_ms_ = false;
+    // Unsigned difference: a point stamped before the last one gives a huge gap, which is a stall (no scroll).
+    const uint32_t elapsed = has_last_point_ ? point_ms - last_point_ms_ : 0;
     const bool is_scrolling = ShouldEaseNextValue() && has_last_point_ && elapsed <= MAX_SCROLL_INTERVAL_MS;
 
     // An early value cuts the scroll short; what is left of it is small with a steady source.
     CompleteScroll();
     UpdateIndicator(value);
     value_ = value;
-    last_point_ms_ = now;
+    last_point_ms_ = point_ms;
     has_last_point_ = true;
 
     if(is_scrolling) {
@@ -263,6 +265,15 @@ void HorizontalChartIndicator::OnProcessingSuspended() {
     has_interval_ = false;
 
     IndicatorBase::OnProcessingSuspended();
+}
+
+void HorizontalChartIndicator::OnPropertyReceived(WidgetPropertyType type) {
+    if(type == WidgetPropertyType::VALUE) {
+        received_ms_ = lv_tick_get();
+        has_received_ms_ = true;
+    }
+
+    IndicatorBase::OnPropertyReceived(type);
 }
 
 void HorizontalChartIndicator::OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) {

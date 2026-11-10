@@ -31,6 +31,10 @@ private:
     int32_t translate_px_ = 0;
     bool has_last_point_ = false;
     uint32_t last_point_ms_ = 0;
+    // When the value was received, so a replay on resume or the first render is stamped with the event's time, not
+    // its own: the next scroll then spans the real gap between events, not the gap to the replay.
+    bool has_received_ms_ = false;
+    uint32_t received_ms_ = 0;
     bool has_interval_ = false;
     uint32_t interval_ms_ = 0;
 
@@ -69,6 +73,7 @@ protected:
     void RegisterProperties(WidgetPropertyStore& store) const override;
     void OnPropertyChanged(WidgetPropertyType type, const ConfigValue& value) override;
     void OnProcessingSuspended() override;
+    void OnPropertyReceived(WidgetPropertyType type) override;
 };
 
 } // namespace eerie_leap::views::widgets::indicators

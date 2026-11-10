@@ -1884,6 +1884,43 @@ ZTEST(widget_bindings, test_an_event_between_two_suspensions_of_one_pause_still_
     zassert_not_null(lv_anim_get(&indicator, nullptr));
 }
 
+ZTEST(widget_bindings, test_the_first_scroll_after_a_chart_resume_spans_the_interval_between_events) {
+    using eerie_leap::views::widgets::indicators::HorizontalChartIndicator;
+
+    auto configuration = MakeConfiguration();
+    configuration->properties[WidgetPropertyType::IS_SMOOTHED] = true;
+    configuration->properties[WidgetPropertyType::CHART_POINT_COUNT] = 5;
+    configuration->bindings.push_back(SensorBinding(WidgetPropertyType::VALUE, SENSOR_ID));
+    configuration->bindings.push_back(SensorBinding(WidgetPropertyType::IS_VISIBLE, "visibility"));
+    HorizontalChartIndicator indicator(1, MakeRoot(), WidgetContext{});
+    indicator.Configure(configuration);
+    zassert_equal(indicator.Render(), 0);
+    indicator.OnActivated();
+
+    // A steady stream of one event per 100 ms.
+    for(int i = 0; i < 4; ++i) {
+        PublishSensor(SENSOR_ID, 10.0F * static_cast<float>(i + 1));
+        lv_tick_inc(100);
+    }
+
+    // The events go on during the pause; the unit resumes 30 ms after the last one, and the replay appends it.
+    PublishSensor("visibility", false);
+    for(int i = 0; i < 3; ++i) {
+        PublishSensor(SENSOR_ID, 50.0F + static_cast<float>(i));
+        lv_tick_inc(i < 2 ? 100 : 30);
+    }
+    PublishSensor("visibility", true);
+    lv_refr_now(nullptr);
+    zassert_is_null(lv_anim_get(&indicator, nullptr));
+
+    // The next event is 100 ms after the previous one, which is what the scroll spans, not the 70 ms since the replay.
+    lv_tick_inc(70);
+    PublishSensor(SENSOR_ID, 70.0F);
+    auto* scroll = lv_anim_get(&indicator, nullptr);
+    zassert_not_null(scroll);
+    zassert_equal(lv_anim_get_time(scroll), 100U);
+}
+
 ZTEST(widget_bindings, test_hidden_digital_value_replays_with_latest_precision) {
     using eerie_leap::views::widgets::indicators::DigitalIndicator;
 
