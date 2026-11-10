@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <zephyr/ztest.h>
 
@@ -25,6 +26,7 @@
 #include "views/widgets/indicators/dial_indicator/dial_indicator.h"
 #include "views/widgets/widget_factory.h"
 
+#include "image_file_fixtures.h"
 #include "lottie_spinner_json.h"
 #include "views_test_support.h"
 
@@ -535,6 +537,85 @@ ZTEST(icon_lifecycle, test_an_image_file_draws_at_its_own_size_whatever_the_size
         }
     }
 }
+
+#ifdef CONFIG_EERIE_LEAP_UI_IMAGE_LZ4
+// LVGL is handed the expanded pixels, so a compressed file is painted as the same picture written without compression.
+ZTEST(icon_lifecycle, test_a_compressed_image_file_draws_as_its_uncompressed_twin_does) {
+    ScopedLvglLock lock;
+    int drawn = 0;
+
+    for(const auto& fixture : views_test::IMAGE_FILE_FIXTURES) {
+        if(!fixture.is_compressed || (fixture.color_format != OPAQUE_FORMAT && fixture.color_format != ALPHA_FORMAT))
+            continue;
+
+        const auto twin = views_test::UncompressedTwinOf(fixture.name);
+        zassert_false(twin.empty(), "%s has no twin", fixture.name);
+
+        auto packed_configuration = RotationConfiguration(IconType::Image);
+        const FileBench packed(*packed_configuration, "packed.lvimg", { fixture.bytes.begin(), fixture.bytes.end() });
+        auto plain_configuration = RotationConfiguration(IconType::Image);
+        const FileBench plain(*plain_configuration, "plain.lvimg", { twin.begin(), twin.end() });
+
+        TestIcon packed_icon(1, MakeRoot(), packed.context);
+        packed_icon.Configure(packed_configuration);
+        zassert_equal(packed_icon.Render(), 0, "%s", fixture.name);
+        TestIcon plain_icon(2, MakeRoot(), plain.context);
+        plain_icon.Configure(plain_configuration);
+        zassert_equal(plain_icon.Render(), 0, "%s", fixture.name);
+
+        CheckDrawnSize(packed_icon, 8, 6);
+        CheckDrawnSize(plain_icon, 8, 6);
+        const auto* shown = ShownImage(packed_icon);
+        const auto* expected = ShownImage(plain_icon);
+        zassert_equal(shown->header.cf, expected->header.cf, "%s", fixture.name);
+        zassert_equal(shown->header.flags, 0, "%s", fixture.name);
+        zassert_equal(shown->header.stride, expected->header.stride, "%s", fixture.name);
+        zassert_equal(shown->data_size, expected->data_size, "%s", fixture.name);
+        zassert_mem_equal(shown->data, expected->data, expected->data_size);
+
+        std::unique_ptr<lv_draw_buf_t, decltype(&lv_draw_buf_destroy)> packed_pixels(
+            lv_snapshot_take(Inner(packed_icon), LV_COLOR_FORMAT_ARGB8888), lv_draw_buf_destroy
+        );
+        std::unique_ptr<lv_draw_buf_t, decltype(&lv_draw_buf_destroy)> plain_pixels(
+            lv_snapshot_take(Inner(plain_icon), LV_COLOR_FORMAT_ARGB8888), lv_draw_buf_destroy
+        );
+        zassert_not_null(packed_pixels, "%s", fixture.name);
+        zassert_not_null(plain_pixels, "%s", fixture.name);
+        zassert_equal(packed_pixels->data_size, plain_pixels->data_size, "%s", fixture.name);
+        zassert_mem_equal(packed_pixels->data, plain_pixels->data, plain_pixels->data_size);
+        ++drawn;
+    }
+
+    zassert_equal(drawn, 2, "The build's two compressed files");
+}
+
+// Damaged data in a sound head: the file is refused as the loader reads it, and the icon draws nothing.
+ZTEST(icon_lifecycle, test_a_compressed_image_file_with_damaged_data_draws_nothing) {
+    ScopedLvglLock lock;
+    constexpr size_t HEADS_SIZE = 24;
+    int checked = 0;
+
+    for(const auto& fixture : views_test::IMAGE_FILE_FIXTURES) {
+        if(!fixture.is_compressed || (fixture.color_format != OPAQUE_FORMAT && fixture.color_format != ALPHA_FORMAT))
+            continue;
+
+        std::vector<uint8_t> file(fixture.bytes.begin(), fixture.bytes.end());
+        std::fill(file.begin() + HEADS_SIZE, file.end(), 0xFF);
+        auto configuration = RotationConfiguration(IconType::Image);
+        const FileBench bench(*configuration, "damaged.lvimg", file);
+        TestIcon widget(1, MakeRoot(), bench.context);
+        widget.Configure(configuration);
+
+        zassert_not_equal(widget.Render(), 0, "%s rendered", fixture.name);
+        zassert_is_null(widget.GetIconContainer().get());
+        zassert_equal(CountImages(views_test::WidgetContent(widget)), 0);
+        zassert_equal(bench.cache->GetLoadedBytes(), 0U);
+        ++checked;
+    }
+
+    zassert_equal(checked, 2);
+}
+#endif
 
 ZTEST(icon_lifecycle, test_the_extension_of_an_image_file_may_be_in_any_case) {
     ScopedLvglLock lock;

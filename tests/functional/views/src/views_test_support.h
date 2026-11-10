@@ -86,6 +86,24 @@ std::vector<uint8_t> ImageFileBytes(
     uint32_t stride = 0
 );
 
+// An LZ4 block that is literals alone, which any LZ4 decoder takes: it expands to @p bytes.
+std::vector<uint8_t> Lz4LiteralBlock(std::span<const uint8_t> bytes);
+
+// A compressed image file (.lvimg): the 12-byte header with the compressed flag, LVGL's compressed-data header, then
+// @p block. The header says the block expands to @p decompressed_bytes, whatever it really does.
+std::vector<uint8_t> CompressedImageFileAround(
+    lv_color_format_t color_format,
+    uint32_t width,
+    uint32_t height,
+    uint32_t stride,
+    std::span<const uint8_t> block,
+    uint32_t decompressed_bytes
+);
+
+// The uncompressed twin of a compressed image fixture ("opaque_rgb565_lz4" for "opaque_rgb565"): the whole file's
+// bytes, empty for a name that has none.
+std::span<const uint8_t> UncompressedTwinOf(std::string_view fixture_name);
+
 // A fill-slot BasicIcon needle for a dial. Labels get text so they can render.
 std::shared_ptr<eerie_leap::domain::ui_domain::models::WidgetConfiguration> NeedleConfiguration(
     uint32_t id,

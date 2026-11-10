@@ -78,7 +78,8 @@ private:
     std::shared_ptr<eerie_leap::subsys::assets::AssetsManager> assets_manager_;
     std::pmr::vector<Entry> entries_;
 
-    std::shared_ptr<const LoadedImage> Load(const eerie_leap::subsys::assets::AssetStore& store, std::string_view name);
+    static std::shared_ptr<const LoadedImage>
+    Load(const eerie_leap::subsys::assets::AssetStore& store, std::string_view name);
 
 public:
     explicit ImageCache(std::shared_ptr<eerie_leap::subsys::assets::AssetsManager> assets_manager);

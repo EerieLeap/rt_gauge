@@ -11,3 +11,7 @@ common:
 
 tests:
   unit.domain: {}
+  # A build that decompresses LZ4 image files: the unit lists the method.
+  unit.domain.lz4:
+    extra_configs:
+      - CONFIG_EERIE_LEAP_UI_IMAGE_LZ4=y

@@ -51,3 +51,8 @@ config EERIE_LEAP_SD_CHECK_INTERVAL_MS
 config EERIE_LEAP_UI_IMAGE_MAX_SIZE
 	int "Largest image upload"
 	default 4194304
+
+config EERIE_LEAP_UI_IMAGE_LZ4
+	bool "LZ4 image files"
+	select LV_USE_LZ4
+	select LV_USE_LZ4_INTERNAL

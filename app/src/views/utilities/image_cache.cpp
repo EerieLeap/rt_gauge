@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
+#include <limits>
 #include <new>
 #include <span>
 #include <utility>
@@ -18,6 +20,11 @@
 
 #include <misc/cache/instance/lv_image_cache.h>
 
+#ifdef CONFIG_EERIE_LEAP_UI_IMAGE_LZ4
+    // LVGL's own copy: the build has one LZ4, and its decoder is the one that reads the files LVGLImage.py writes.
+    #include <libs/lz4/lz4.h>
+#endif
+
 namespace eerie_leap::views::utilities {
 
 using eerie_leap::domain::ui_domain::ScopedLvglLock;
@@ -33,6 +40,83 @@ using eerie_leap::utilities::memory::Mrm;
 using eerie_memory::make_shared_pmr;
 
 LOG_MODULE_REGISTER(image_cache_logger);
+
+namespace {
+
+/**
+ * @brief Reads the pixels of @p head's file into @p pixels, expanding them if the file is compressed.
+ *
+ * Logs why and returns false when the file ends early or its data does not expand to exactly the pixel bytes its
+ * header promises. May throw std::bad_alloc for the block the compressed bytes are read into.
+ */
+bool ReadPixels(AssetReader& reader, const ImageFileHead& head, std::span<uint8_t> pixels, std::string_view name) {
+    if(head.compression == LV_IMAGE_COMPRESS_NONE) {
+        const ssize_t pixels_read = reader.Read(head.data_offset, pixels);
+        if(pixels_read < 0 || std::cmp_not_equal(pixels_read, head.pixel_bytes)) {
+            LOG_ERR(
+                "Image '%.*s' ended after %d of its %u pixel bytes.", static_cast<int>(name.size()), name.data(),
+                static_cast<int>(std::max<ssize_t>(pixels_read, 0)), static_cast<unsigned>(head.pixel_bytes)
+            );
+            return false;
+        }
+
+        return true;
+    }
+
+#ifdef CONFIG_EERIE_LEAP_UI_IMAGE_LZ4
+    if(head.compression != LV_IMAGE_COMPRESS_LZ4
+        || head.compressed_bytes > static_cast<uint32_t>(std::numeric_limits<int>::max())) {
+        LOG_ERR(
+            "Image '%.*s' is compressed in a way this unit does not decompress.", static_cast<int>(name.size()),
+            name.data()
+        );
+        return false;
+    }
+
+    // The compressed bytes wait in a block of their own while they expand; a byte stream needs no particular
+    // alignment. The block is freed as soon as the pixels are out, since the pixels are what stays in RAM.
+    constexpr size_t SCRATCH_ALIGNMENT = alignof(std::max_align_t);
+    const LoadedImage::Pixels compressed(
+        static_cast<uint8_t*>(Mrm::GetExtPmr()->allocate(head.compressed_bytes, SCRATCH_ALIGNMENT)),
+        LoadedImage::PixelDeleter{ Mrm::GetExtPmr(), head.compressed_bytes, SCRATCH_ALIGNMENT }
+    );
+
+    const ssize_t compressed_read = reader.Read(
+        head.data_offset, std::span<uint8_t>(compressed.get(), head.compressed_bytes)
+    );
+    if(compressed_read < 0 || std::cmp_not_equal(compressed_read, head.compressed_bytes)) {
+        LOG_ERR(
+            "Image '%.*s' ended after %d of its %u compressed bytes.", static_cast<int>(name.size()), name.data(),
+            static_cast<int>(std::max<ssize_t>(compressed_read, 0)), static_cast<unsigned>(head.compressed_bytes)
+        );
+        return false;
+    }
+
+    // LVGL's decoder would keep its output in the draw-buffer cache; the cache here owns the pixels instead.
+    // NOLINTBEGIN(cppcoreguidelines-pro-type-reinterpret-cast): LZ4's API takes the bytes as char.
+    const int expanded = LZ4_decompress_safe(
+        reinterpret_cast<const char*>(compressed.get()), reinterpret_cast<char*>(pixels.data()),
+        static_cast<int>(head.compressed_bytes), static_cast<int>(head.pixel_bytes)
+    );
+    // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast)
+    if(expanded < 0 || std::cmp_not_equal(expanded, head.pixel_bytes)) {
+        LOG_ERR(
+            "Image '%.*s' is damaged: its compressed data does not expand to the %u pixel bytes its header gives.",
+            static_cast<int>(name.size()), name.data(), static_cast<unsigned>(head.pixel_bytes)
+        );
+        return false;
+    }
+
+    return true;
+#else
+    LOG_ERR(
+        "Image '%.*s' is compressed, and this unit decompresses no images.", static_cast<int>(name.size()), name.data()
+    );
+    return false;
+#endif
+}
+
+} // namespace
 
 void LoadedImage::PixelDeleter::operator()(uint8_t* pixels) const noexcept {
     if(pixels != nullptr)
@@ -139,26 +223,10 @@ std::shared_ptr<const LoadedImage> ImageCache::Load(const AssetStore& store, std
         LoadedImage::PixelDeleter{ Mrm::GetExtPmr(), head.pixel_bytes, LV_DRAW_BUF_ALIGN }
     );
 
-    // The parser refuses a compressed file until the build lists a method, so every file reaching this point holds
-    // its pixels as they are. A method is added here: read head.compressed_bytes from head.data_offset into a
-    // temporary buffer on the external heap, decompress that into the pixels, and require exactly head.pixel_bytes
-    // out. LVGL must never see a compressed descriptor.
-    if(head.compression != LV_IMAGE_COMPRESS_NONE) {
-        LOG_ERR(
-            "Image '%.*s' is compressed, and this unit decompresses no images.", static_cast<int>(name.size()),
-            name.data()
-        );
+    // LVGL never sees a compressed descriptor: the pixels are expanded here, so the draw path, the patches and
+    // LVGL's image cache are the same for every file.
+    if(!ReadPixels(reader, head, std::span<uint8_t>(pixels.get(), head.pixel_bytes), name))
         return nullptr;
-    }
-
-    const ssize_t pixels_read = reader.Read(head.data_offset, std::span<uint8_t>(pixels.get(), head.pixel_bytes));
-    if(pixels_read < 0 || std::cmp_not_equal(pixels_read, head.pixel_bytes)) {
-        LOG_ERR(
-            "Image '%.*s' ended after %d of its %u pixel bytes.", static_cast<int>(name.size()), name.data(),
-            static_cast<int>(std::max<ssize_t>(pixels_read, 0)), static_cast<unsigned>(head.pixel_bytes)
-        );
-        return nullptr;
-    }
 
     return make_shared_pmr<LoadedImage>(Mrm::GetExtPmr(), head.header, std::move(pixels), head.pixel_bytes);
 }

@@ -59,8 +59,12 @@ constexpr std::array BUILD_FORMATS = { LV_COLOR_FORMAT_L8, LV_COLOR_FORMAT_AL88 
 constexpr std::span<const lv_color_format_t> BUILD_FORMATS{};
 #endif
 
-// Add the methods a build decompresses here, behind the Kconfig symbol that brings the decompressor.
+// The methods the build decompresses: each one is listed behind the Kconfig symbol that brings its decompressor.
+#ifdef CONFIG_EERIE_LEAP_UI_IMAGE_LZ4
+constexpr std::array BUILD_COMPRESSIONS = { LV_IMAGE_COMPRESS_LZ4 };
+#else
 constexpr std::span<const lv_image_compress_t> BUILD_COMPRESSIONS{};
+#endif
 
 uint16_t ReadU16(std::span<const uint8_t> bytes, size_t at) {
     return static_cast<uint16_t>(bytes[at] | (bytes[at + 1] << 8));
