@@ -1620,7 +1620,10 @@ static int co5300_fw_attempt(struct co5300_fw *fw, uint8_t r) {
 	int ret = co5300_write_locked(fw->dev, rect->x, rect->y, &desc, rect->buf);
 	uint64_t c1 = k_cycle_get_64();
 
-	w->start_us[r] = (int64_t)k_cyc_to_us_floor64(c0);
+	/* The first attempt's start stays: rows a failed attempt already wrote count for the audit. */
+	if (fw->attempt[r] == 0U) {
+		w->start_us[r] = (int64_t)k_cyc_to_us_floor64(c0);
+	}
 	w->end_us[r] = (int64_t)k_cyc_to_us_floor64(c1);
 #ifdef CONFIG_ELCO5300_STATS
 	if (fw->attempt[r] == 0U && !fw->waited[r] && fw->written > 0U) {
@@ -1845,7 +1848,7 @@ static void co5300_fw_wait(struct co5300_fw *fw, uint32_t wait_us, bool edge) {
 }
 
 /* The rect missed its window (or its rounds ran out): plan the pending ones again for the scans after it. */
-static void co5300_fw_missed(struct co5300_fw *fw) {
+static void co5300_fw_count_miss(struct co5300_fw *fw) {
 	if (fw->attempt[co5300_fw_current(fw)] > 0U) {
 		CO5300_FW_COUNT(fw, resend_split, 1U);
 	} else {
@@ -1854,6 +1857,10 @@ static void co5300_fw_missed(struct co5300_fw *fw) {
 	if (fw->run.rounds >= CO5300_TE_FRAME_MAX_WAITS) {
 		CO5300_FW_COUNT(fw, rounds_exhausted, 1U);
 	}
+}
+
+static void co5300_fw_missed(struct co5300_fw *fw) {
+	co5300_fw_count_miss(fw);
 	fw->floor = co5300_te_frame_rel_scan(&fw->run, fw->snap.fall_us, fw->snap.s_us) + 1;
 	fw->floor_set = true;
 	fw->run.replans++;
@@ -1907,7 +1914,15 @@ static void co5300_fw_next(struct co5300_fw *fw) {
 		co5300_fw_missed(fw);
 		break;
 	case CO5300_TE_FRAME_LOST:
-		CO5300_FW_COUNT(fw, timing_lost, 1U);
+		/* Past the re-plan limit the step also answers LOST for a miss or used-up rounds, with the timing
+		 * itself still good: those count as the misses they are. */
+		if (fw->run.replans >= CO5300_TE_FRAME_MAX_REPLANS && fw->snap.valid && fw->snap.epoch == fw->run.epoch &&
+		    fw->snap.s_us != 0U &&
+		    fw->snap.now_us - fw->snap.fall_us <= (int64_t)fw->snap.s_us + fw->snap.s_us / 10) {
+			co5300_fw_count_miss(fw);
+		} else {
+			CO5300_FW_COUNT(fw, timing_lost, 1U);
+		}
 		co5300_fw_to_plain(fw);
 		break;
 	}
@@ -2068,6 +2083,7 @@ int co5300_write_frame(const struct device *dev, struct co5300_frame *frame) {
 
 	return fw.first_err;
 }
+
 #endif /* CONFIG_ELCO5300_FRAME_WRITE */
 
 #if defined(CONFIG_ELCO5300_STATS) && defined(CONFIG_ELCO5300_TE_SYNC)

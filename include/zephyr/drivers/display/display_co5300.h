@@ -115,11 +115,12 @@ struct co5300_stats {
 	uint32_t frame_search_us_max;  /* the longest planning time of one plan, search included */
 	uint32_t frame_no_window;      /* no order and scan held the frame: written rect by rect */
 	uint32_t frame_split;          /* a rect missed its window at run time: the rest went to a later scan */
-	uint32_t frame_rounds_exhausted; /* a rect used up its wait rounds (also counted in frame_split) */
+	uint32_t frame_rounds_exhausted; /* a rect used up its wait rounds (also counted in frame_split, or in
+					 * frame_resend_split for a re-send) */
 	uint32_t frame_resend_split;   /* a re-send could not make the target scan */
 	uint32_t frame_edge_fallbacks; /* no timing at the start: edge rule */
 	uint32_t frame_timing_lost;    /* timing lost in the middle of a frame */
-	uint32_t frame_bound_moved;    /* the planned scan equals a positive bound from the previous frame */
+	uint32_t frame_bound_moved;    /* the previous frame's bound made the plan later than the same plan without it */
 	uint32_t frame_paced;          /* rects that slept for their window after the previous rect */
 	uint64_t frame_pace_us;        /* ... and the time */
 	uint64_t frame_first_wait_us;  /* waits before the first rect */
