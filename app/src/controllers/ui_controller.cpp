@@ -25,6 +25,7 @@
 #include "domain/settings_domain/event_bus/settings_payload_type.h"
 #include "domain/settings_domain/models/setting_id.h"
 #include "domain/ui_domain/event_bus/navigation_event_channel.h"
+#include "domain/ui_domain/images/image_asset_provider.h"
 #include "domain/ui_domain/lvgl_lock.h"
 #include "domain/ui_domain/models/animation.h"
 #include "domain/ui_domain/models/icon_type.h"
@@ -69,6 +70,7 @@ using eerie_leap::domain::settings_domain::event_bus::SettingsEventType;
 using eerie_leap::domain::ui_domain::ScopedLvglLock;
 using eerie_leap::domain::ui_domain::event_bus::NavigationEventType;
 using eerie_leap::domain::ui_domain::event_bus::NavigationPayloadType;
+using eerie_leap::domain::ui_domain::images::MakeImageAssetProvider;
 using eerie_leap::domain::ui_domain::preview::PatchEffect;
 using eerie_leap::domain::ui_domain::preview::ScreenAction;
 using eerie_leap::subsys::assets::AssetAccess;
@@ -294,16 +296,7 @@ void UiController::RegisterAssets() {
         ToMask(AssetAccess::READ) | ToMask(AssetAccess::WRITE) | ToMask(AssetAccess::DELETE)
     );
 
-    images_registered_ = assets_manager_->Register(
-        AssetProvider{ .kind = AssetKind::IMAGES,
-            .name = "images",
-            .store = images_store_,
-            .extensions = IMAGE_EXTENSIONS,
-            .access = ACCESS,
-            .max_size = CONFIG_EERIE_LEAP_UI_IMAGE_MAX_SIZE,
-            // The raw .bin files carry no header: their pixels are in the firmware's colour format.
-            .pixel_format = static_cast<uint32_t>(LV_COLOR_FORMAT_NATIVE_WITH_ALPHA) }
-    );
+    images_registered_ = assets_manager_->Register(MakeImageAssetProvider(images_store_));
     if(!images_registered_)
         LOG_ERR("Failed to register the image assets, the registry has them already.");
 

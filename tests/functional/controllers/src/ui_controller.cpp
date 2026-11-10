@@ -2,6 +2,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <cstdio>
 #include <deque>
 #include <initializer_list>
 #include <memory>
@@ -41,6 +42,7 @@
 #include "domain/ui_domain/configuration/parsers/ui_configuration_cbor_parser.h"
 #include "domain/ui_domain/configuration/ui_configuration_manager.h"
 #include "domain/ui_domain/event_bus/navigation_event_channel.h"
+#include "domain/ui_domain/images/image_file.h"
 #include "domain/ui_domain/lvgl_lock.h"
 #include "domain/ui_domain/models/navigation_intent.h"
 #include "domain/ui_domain/models/screen_configuration.h"
@@ -69,6 +71,7 @@ using eerie_leap::domain::ui_domain::configuration::parsers::UiConfigurationCbor
 using eerie_leap::domain::ui_domain::event_bus::NavigationEventChannel;
 using eerie_leap::domain::ui_domain::event_bus::NavigationEventType;
 using eerie_leap::domain::ui_domain::event_bus::NavigationPayloadType;
+using eerie_leap::domain::ui_domain::images::IMAGE_FILE_HEAD_SIZE;
 using eerie_leap::domain::ui_domain::models::NavigationAction;
 using eerie_leap::domain::ui_domain::models::PropertyBinding;
 using eerie_leap::domain::ui_domain::models::ScreenConfiguration;
@@ -410,7 +413,7 @@ ZTEST(ui_controller, test_lvgl_decodes_no_svg_images) {
 // What a client sees of the gauge's UI assets (the SMP assets group) is these kinds.
 ZTEST(ui_controller, test_the_controller_registers_the_image_animation_and_font_kinds) {
     CheckProvider(
-        Assets(), AssetKind::IMAGES, "images", "ui_assets/images", { ".bin", ".svg" },
+        Assets(), AssetKind::IMAGES, "images", "ui_assets/images", { ".bin", ".svg", ".lvimg" },
         CONFIG_EERIE_LEAP_UI_IMAGE_MAX_SIZE
     );
     CheckProvider(
@@ -437,6 +440,204 @@ ZTEST(ui_controller, test_the_controller_registers_the_image_animation_and_font_
         Assets().Find(AssetKind::FONTS)->store.get(), Assets().Find(AssetKind::IMAGES)->store.get(),
         "Expected a store for each kind."
     );
+}
+
+// The images kind lists the files that describe themselves, and judges them as the loader will.
+
+namespace {
+
+// Files tools/LVGLImage.py wrote from an 8 x 6 picture.
+const std::array<uint8_t, 108> OPAQUE_AL88 = { 0x19, 0x15, 0x00, 0x00, 0x08, 0x00, 0x06, 0x00, 0x10, 0x00, 0x00, 0x00,
+    0x00, 0xFF, 0x0D, 0xFF, 0x21, 0xFF, 0x35, 0xFF, 0x49, 0xFF, 0x5D, 0xFF, 0x70, 0xFF, 0x84, 0xFF, 0x2B, 0xFF, 0x2F,
+    0xFF, 0x39, 0xFF, 0x46, 0xFF, 0x56, 0xFF, 0x68, 0xFF, 0x79, 0xFF, 0x8C, 0xFF, 0x57, 0xFF, 0x5A, 0xFF, 0x5F, 0xFF,
+    0x67, 0xFF, 0x72, 0xFF, 0x7F, 0xFF, 0x8E, 0xFF, 0x9E, 0xFF, 0x84, 0xFF, 0x85, 0xFF, 0x89, 0xFF, 0x8F, 0xFF, 0x96,
+    0xFF, 0xA0, 0xFF, 0xAC, 0xFF, 0xB9, 0xFF, 0xB0, 0xFF, 0xB2, 0xFF, 0xB4, 0xFF, 0xB9, 0xFF, 0xBF, 0xFF, 0xC6, 0xFF,
+    0xCF, 0xFF, 0xDA, 0xFF, 0xDD, 0xFF, 0xDE, 0xFF, 0xE0, 0xFF, 0xE4, 0xFF, 0xE8, 0xFF, 0xEE, 0xFF, 0xF6, 0xFF, 0xFE,
+    0xFF };
+#if LV_COLOR_DEPTH == 16
+const std::array<uint8_t, 156> OPAQUE_RGB565A8 = { 0x19, 0x14, 0x00, 0x00, 0x08, 0x00, 0x06, 0x00, 0x10, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x02, 0x20, 0x05, 0x48, 0x07, 0x68, 0x0A, 0x90, 0x0D, 0xB0, 0x0F, 0xD8, 0x12, 0xF8, 0x82, 0x01,
+    0x85, 0x21, 0x87, 0x49, 0x8A, 0x69, 0x8D, 0x91, 0x8F, 0xB1, 0x92, 0xD9, 0x95, 0xF9, 0x25, 0x03, 0x27, 0x23, 0x2A,
+    0x4B, 0x2D, 0x6B, 0x2F, 0x93, 0x32, 0xB3, 0x35, 0xDB, 0x37, 0xFB, 0xC7, 0x04, 0xCA, 0x24, 0xCD, 0x4C, 0xCF, 0x6C,
+    0xD2, 0x94, 0xD5, 0xB4, 0xD7, 0xDC, 0xDA, 0xFC, 0x6A, 0x06, 0x6D, 0x26, 0x6F, 0x4E, 0x72, 0x6E, 0x75, 0x96, 0x77,
+    0xB6, 0x7A, 0xDE, 0x7D, 0xFE, 0xED, 0x07, 0xEF, 0x27, 0xF2, 0x4F, 0xF5, 0x6F, 0xF7, 0x97, 0xFA, 0xB7, 0xFD, 0xDF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+#else
+const std::array<uint8_t, 108> OPAQUE_RGB565 = { 0x19, 0x12, 0x00, 0x00, 0x08, 0x00, 0x06, 0x00, 0x10, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x02, 0x20, 0x05, 0x40, 0x07, 0x68, 0x0A, 0x90, 0x0D, 0xB0, 0x0F, 0xD8, 0x12, 0xF8, 0x82, 0x01, 0x85,
+    0x21, 0x87, 0x41, 0x8A, 0x69, 0x8D, 0x91, 0x8F, 0xB1, 0x92, 0xD9, 0x95, 0xF9, 0x25, 0x03, 0x27, 0x23, 0x2A, 0x43,
+    0x2D, 0x6B, 0x2F, 0x93, 0x32, 0xB3, 0x35, 0xDB, 0x37, 0xFB, 0xC7, 0x04, 0xCA, 0x24, 0xCD, 0x44, 0xCF, 0x6C, 0xD2,
+    0x94, 0xD5, 0xB4, 0xD7, 0xDC, 0xDA, 0xFC, 0x4A, 0x06, 0x4D, 0x26, 0x4F, 0x46, 0x52, 0x6E, 0x55, 0x96, 0x57, 0xB6,
+    0x5A, 0xDE, 0x5D, 0xFE, 0xED, 0x07, 0xEF, 0x27, 0xF2, 0x47, 0xF5, 0x6F, 0xF7, 0x97, 0xFA, 0xB7, 0xFD, 0xDF, 0xFF,
+    0xFF };
+#endif
+
+#if LV_COLOR_DEPTH == 16
+// This build draws RGB565 and RGB565A8.
+const std::array<uint8_t, 156>& DrawnImage() {
+    return OPAQUE_RGB565A8;
+}
+
+const std::array<uint8_t, 108>& UndrawnImage() {
+    return OPAQUE_AL88;
+}
+
+constexpr std::string_view DRAWN_FORMATS_TEXT = "0x12 RGB565, 0x14 RGB565A8";
+constexpr uint8_t DRAWN_FORMAT = LV_COLOR_FORMAT_RGB565A8;
+constexpr uint8_t UNDRAWN_FORMAT = LV_COLOR_FORMAT_AL88;
+#else
+// This build draws L8 and AL88.
+const std::array<uint8_t, 108>& DrawnImage() {
+    return OPAQUE_AL88;
+}
+
+const std::array<uint8_t, 108>& UndrawnImage() {
+    return OPAQUE_RGB565;
+}
+
+constexpr std::string_view DRAWN_FORMATS_TEXT = "0x06 L8, 0x15 AL88";
+constexpr uint8_t DRAWN_FORMAT = LV_COLOR_FORMAT_AL88;
+constexpr uint8_t UNDRAWN_FORMAT = LV_COLOR_FORMAT_RGB565;
+#endif
+
+std::shared_ptr<const AssetProvider> Images() {
+    return Assets().Find(AssetKind::IMAGES);
+}
+
+void StoreImage(std::string_view name, std::span<const uint8_t> bytes) {
+    zassert_true(Images()->store->Save(name, bytes), "Expected %s to be stored.", std::string(name).c_str());
+}
+
+std::span<const uint8_t> HeadOf(std::span<const uint8_t> file) {
+    return file.first(std::min<size_t>(file.size(), IMAGE_FILE_HEAD_SIZE));
+}
+
+} // namespace
+
+ZTEST(ui_controller, test_the_images_kind_lists_bin_svg_and_lvimg_files_and_the_formats_the_build_draws) {
+    const auto images = Images();
+
+    zassert_true(
+        std::ranges::equal(images->extensions, std::initializer_list<std::string_view>{ ".bin", ".svg", ".lvimg" })
+    );
+
+    // The formats of this suite's colour depth, as LVGL numbers them; no build decompresses yet.
+#if LV_COLOR_DEPTH == 16
+    zassert_true(std::ranges::equal(images->image.formats, std::initializer_list<uint32_t>{ 0x12, 0x14 }));
+#else
+    zassert_true(std::ranges::equal(images->image.formats, std::initializer_list<uint32_t>{ 0x06, 0x15 }));
+#endif
+    zassert_true(images->image.compressions.empty());
+
+    zassert_equal(images->content_head_size, 24U);
+    zassert_equal(images->pixel_format, static_cast<uint32_t>(LV_COLOR_FORMAT_NATIVE_WITH_ALPHA));
+    zassert_true(static_cast<bool>(images->image.get_info));
+    zassert_true(static_cast<bool>(images->check_content));
+}
+
+ZTEST(ui_controller, test_other_kinds_list_no_image_files_and_check_nothing) {
+    for(const auto kind : { AssetKind::ANIMATIONS, AssetKind::FONTS }) {
+        const auto provider = Assets().Find(kind);
+        zassert_true(provider->image.formats.empty());
+        zassert_true(provider->image.compressions.empty());
+        zassert_false(static_cast<bool>(provider->image.get_info));
+        zassert_false(static_cast<bool>(provider->check_content));
+        zassert_equal(provider->content_head_size, 0U);
+    }
+}
+
+ZTEST(ui_controller, test_a_stored_image_file_gives_its_facts) {
+    const auto& file = DrawnImage();
+    StoreImage("gear_8x6.lvimg", file);
+
+    const auto info = Images()->image.get_info("gear_8x6.lvimg");
+    zassert_true(info.has_value());
+    zassert_equal(info->width, 8U);
+    zassert_equal(info->height, 6U);
+    zassert_equal(info->format, DRAWN_FORMAT);
+    zassert_equal(info->compression, 0U);
+
+    // The extension's case makes no difference to the kind, as the volume's names don't either.
+    StoreImage("GEAR_8X6.LVIMG", file);
+    zassert_true(Images()->image.get_info("GEAR_8X6.LVIMG").has_value());
+}
+
+ZTEST(ui_controller, test_a_broken_missing_or_raw_file_gives_no_facts) {
+    const auto& file = DrawnImage();
+
+    // One byte short.
+    StoreImage("short.lvimg", std::span<const uint8_t>(file).first(file.size() - 1));
+    zassert_false(Images()->image.get_info("short.lvimg").has_value());
+
+    // A byte more.
+    std::vector<uint8_t> longer(file.begin(), file.end());
+    longer.push_back(0);
+    StoreImage("longer.lvimg", longer);
+    zassert_false(Images()->image.get_info("longer.lvimg").has_value());
+
+    // A format the build doesn't draw.
+    StoreImage("undrawn.lvimg", UndrawnImage());
+    zassert_false(Images()->image.get_info("undrawn.lvimg").has_value());
+
+    // Under 12 bytes, and empty.
+    StoreImage("tiny.lvimg", std::span<const uint8_t>(file).first(5));
+    zassert_false(Images()->image.get_info("tiny.lvimg").has_value());
+    StoreImage("empty.lvimg", std::span<const uint8_t>());
+    zassert_false(Images()->image.get_info("empty.lvimg").has_value());
+
+    // Missing.
+    zassert_false(Images()->image.get_info("nothing_here.lvimg").has_value());
+
+    // A raw file and a document are not such images, whatever their first bytes are.
+    StoreImage("raw.bin", file);
+    zassert_false(Images()->image.get_info("raw.bin").has_value());
+    StoreImage("icon.svg", file);
+    zassert_false(Images()->image.get_info("icon.svg").has_value());
+}
+
+ZTEST(ui_controller, test_an_upload_of_an_image_file_is_judged_by_its_head) {
+    const auto& file = DrawnImage();
+    const auto& check = Images()->check_content;
+
+    zassert_false(check("gear_8x6.lvimg", file.size(), HeadOf(file)).has_value());
+
+    // The head alone is enough: the file's length is what the client announced.
+    const auto longer = check("gear_8x6.lvimg", file.size() + 1, HeadOf(file));
+    zassert_true(longer.has_value());
+    char longer_expected[128];
+    snprintf(
+        longer_expected, sizeof(longer_expected),
+        "A 8 by 6 image in colour format 0x%02X with stride 16 is %zu bytes long; this file is %zu.", DRAWN_FORMAT,
+        file.size(), file.size() + 1
+    );
+    zassert_true(*longer == longer_expected, "Unexpected message: %s", longer->c_str());
+
+    const auto undrawn = check("other.lvimg", UndrawnImage().size(), HeadOf(UndrawnImage()));
+    zassert_true(undrawn.has_value());
+    char expected[128];
+    snprintf(
+        expected, sizeof(expected), "Colour format 0x%02X is not one this unit draws (it draws %s).", UNDRAWN_FORMAT,
+        std::string(DRAWN_FORMATS_TEXT).c_str()
+    );
+    zassert_true(*undrawn == expected, "Unexpected message: %s", undrawn->c_str());
+
+    const std::array<uint8_t, 4> not_an_image{ 0x00, 0x01, 0x02, 0x03 };
+    const auto too_short = check("x.lvimg", not_an_image.size(), not_an_image);
+    zassert_true(too_short.has_value());
+    zassert_true(*too_short == "An image file starts with a 12-byte header; this one is 4 bytes long.");
+
+    // The extension decides, ignoring ASCII case.
+    zassert_true(check("X.LVIMG", not_an_image.size(), not_an_image).has_value());
+}
+
+ZTEST(ui_controller, test_raw_and_svg_uploads_are_not_checked) {
+    const std::array<uint8_t, 4> anything{ 0x00, 0x01, 0x02, 0x03 };
+    const auto& check = Images()->check_content;
+
+    zassert_false(check("raw.bin", anything.size(), anything).has_value());
+    zassert_false(check("icon.svg", anything.size(), anything).has_value());
 }
 
 // Configure() reads the stored configuration and must have found usable groups.
@@ -626,7 +827,7 @@ ZTEST(ui_controller_assets, test_destroying_the_controller_unregisters_its_asset
     zassert_equal(controller->Initialize(), 0, "Expected the UI controller to initialize.");
 
     CheckProvider(
-        *assets_manager, AssetKind::IMAGES, "images", "ui_assets/images", { ".bin", ".svg" },
+        *assets_manager, AssetKind::IMAGES, "images", "ui_assets/images", { ".bin", ".svg", ".lvimg" },
         CONFIG_EERIE_LEAP_UI_IMAGE_MAX_SIZE
     );
     CheckProvider(

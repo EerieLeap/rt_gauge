@@ -21,7 +21,7 @@ set(APP_SRC_UI_DOMAIN_DIR ${APP_SRC_DIR}/domain/ui_domain)
 file(GLOB_RECURSE APP_SRC_UI_DOMAIN
   ${APP_SRC_UI_DOMAIN_DIR}/models/*.cpp
   ${APP_SRC_UI_DOMAIN_DIR}/configuration/parsers/*.cpp
-  ${APP_SRC_UI_DOMAIN_DIR}/images/*.cpp
+  ${APP_SRC_UI_DOMAIN_DIR}/images/image_file.cpp
   ${APP_SRC_UI_DOMAIN_DIR}/preview/*.cpp
 )
 
