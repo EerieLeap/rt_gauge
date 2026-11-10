@@ -8,6 +8,7 @@
 
 namespace eerie_leap::views::utilities {
 class FontCache;
+class ImageCache;
 } // namespace eerie_leap::views::utilities
 
 namespace eerie_leap::views::widgets {
@@ -15,6 +16,7 @@ namespace eerie_leap::views::widgets {
 using eerie_leap::domain::ui_domain::services::NavigationService;
 using eerie_leap::subsys::assets::AssetsManager;
 using eerie_leap::views::utilities::FontCache;
+using eerie_leap::views::utilities::ImageCache;
 
 // Everything the view layer may hand to a screen or a widget, passed at
 // construction instead of a per-dependency setter on IWidget.
@@ -24,6 +26,9 @@ struct WidgetContext {
     std::shared_ptr<AssetsManager> assets_manager;
     // The fonts text widgets draw with when configured to; null when the unit serves none.
     std::shared_ptr<FontCache> font_cache;
+    // The self-describing image files (.lvimg) image icons draw, shared between them; null when the unit serves none,
+    // and an icon that names such a file then draws nothing.
+    std::shared_ptr<ImageCache> image_cache;
     std::shared_ptr<NavigationService> navigation_service;
 };
 

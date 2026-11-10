@@ -59,3 +59,7 @@ config EERIE_LEAP_UI_BUILTIN_FONTS
 config EERIE_LEAP_UI_FONT_GLYPH_CACHE_SIZE
 	int "Glyph cache of one font size"
 	default 131072
+
+config EERIE_LEAP_UI_IMAGE_MAX_SIZE
+	int "Largest image upload"
+	default 4194304

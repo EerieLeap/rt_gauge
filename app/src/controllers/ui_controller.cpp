@@ -242,9 +242,10 @@ int UiController::Initialize() {
         ui_render_work_queue_thread_.reset();
     }
 
-    widget_context_ = WidgetContext{
-        .assets_manager = assets_manager_, .font_cache = font_cache_, .navigation_service = navigation_service_
-    };
+    widget_context_ = WidgetContext{ .assets_manager = assets_manager_,
+        .font_cache = font_cache_,
+        .image_cache = image_cache_,
+        .navigation_service = navigation_service_ };
 
     if(Configure(ui_configuration_manager_->Get()) != 0)
         LOG_ERR("Failed to configure the UI from the stored configuration.");
@@ -325,6 +326,7 @@ void UiController::RegisterAssets() {
         LOG_ERR("Failed to register the font assets.");
 
     font_cache_ = std::make_shared<FontCache>(assets_manager_);
+    image_cache_ = std::make_shared<ImageCache>(assets_manager_);
 }
 
 void UiController::ConfigureGestures() {

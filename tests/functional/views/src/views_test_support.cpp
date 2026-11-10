@@ -99,6 +99,63 @@ const lv_color32_t* PixelRow(const lv_draw_buf_t& buffer, uint32_t row) {
     return reinterpret_cast<const lv_color32_t*>(buffer.data + (row * buffer.header.stride));
 }
 
+namespace {
+
+constexpr size_t IMAGE_HEADER_SIZE = 12;
+
+uint32_t BytesPerPixel(lv_color_format_t color_format) {
+    return color_format == LV_COLOR_FORMAT_L8 ? 1U : 2U;
+}
+
+void PutU16(std::vector<uint8_t>& bytes, uint32_t value) {
+    bytes.push_back(static_cast<uint8_t>(value & 0xFF));
+    bytes.push_back(static_cast<uint8_t>((value >> 8) & 0xFF));
+}
+
+} // namespace
+
+size_t ImagePixelBytes(lv_color_format_t color_format, uint32_t width, uint32_t height, uint32_t stride) {
+    if(stride == 0)
+        stride = width * BytesPerPixel(color_format);
+
+    size_t bytes = static_cast<size_t>(stride) * height;
+    if(color_format == LV_COLOR_FORMAT_RGB565A8)
+        bytes += static_cast<size_t>(stride / 2) * height;
+
+    return bytes;
+}
+
+std::vector<uint8_t> ImageFileAround(
+    lv_color_format_t color_format,
+    uint32_t width,
+    uint32_t height,
+    uint32_t stride,
+    std::span<const uint8_t> pixels
+) {
+    if(stride == 0)
+        stride = width * BytesPerPixel(color_format);
+
+    std::vector<uint8_t> file;
+    file.reserve(IMAGE_HEADER_SIZE + pixels.size());
+    file.push_back(LV_IMAGE_HEADER_MAGIC);
+    file.push_back(static_cast<uint8_t>(color_format));
+    PutU16(file, 0);
+    PutU16(file, width);
+    PutU16(file, height);
+    PutU16(file, stride);
+    PutU16(file, 0);
+    file.insert(file.end(), pixels.begin(), pixels.end());
+
+    return file;
+}
+
+std::vector<uint8_t>
+ImageFileBytes(lv_color_format_t color_format, uint32_t width, uint32_t height, uint8_t fill, uint32_t stride) {
+    const std::vector<uint8_t> pixels(ImagePixelBytes(color_format, width, height, stride), fill);
+
+    return ImageFileAround(color_format, width, height, stride, pixels);
+}
+
 std::shared_ptr<AssetStore> MakeAssetStore(std::string_view directory) {
     DtFs::InitInternalFs();
     auto fs = std::make_shared<FsService>(DtFs::GetInternalFsMp());

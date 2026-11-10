@@ -38,6 +38,7 @@
 #include "views/screens/i_screen.h"
 #include "views/ui_highlight.h"
 #include "views/utilities/font_cache.h"
+#include "views/utilities/image_cache.h"
 #include "views/utilitites/frame.h"
 #include "views/widgets/widget_context.h"
 
@@ -75,6 +76,7 @@ using eerie_leap::views::OverlayHost;
 using eerie_leap::views::UiHighlight;
 using eerie_leap::views::screens::IScreen;
 using eerie_leap::views::utilities::FontCache;
+using eerie_leap::views::utilities::ImageCache;
 using eerie_leap::views::utilitites::Frame;
 using eerie_leap::views::widgets::WidgetContext;
 
@@ -113,6 +115,7 @@ private:
     bool fonts_registered_ = false;
     // Finds the fonts kind through the registry, so it works whichever controller registered it.
     std::shared_ptr<FontCache> font_cache_;
+    std::shared_ptr<ImageCache> image_cache_;
     std::shared_ptr<NavigationService> navigation_service_;
 
     // Declared before ui_input_service_, which detaches from their LVGL objects on teardown.

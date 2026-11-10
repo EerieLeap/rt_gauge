@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <eerie_memory.hpp>
+#include <lvgl.h>
 #include <zephyr/kernel.h>
 #include <zephyr/mgmt/mcumgr/mgmt/mgmt_defines.h>
 #include <zephyr/sys/crc.h>
@@ -18,6 +19,7 @@
 #include "configuration/cbor/cbor_ui_config/cbor_ui_config.h"
 #include "utilities/memory/memory_resource_manager.h"
 
+#include "subsys/assets/asset_kind.h"
 #include "subsys/assets/assets_manager.h"
 #include "subsys/device_tree/dt_display.h"
 #include "subsys/device_tree/dt_fs.h"
@@ -30,6 +32,8 @@
 #include "domain/settings_domain/event_bus/settings_events_channel.h"
 #include "domain/ui_domain/configuration/parsers/ui_configuration_cbor_parser.h"
 #include "domain/ui_domain/event_bus/navigation_event_channel.h"
+#include "domain/ui_domain/lvgl_lock.h"
+#include "domain/ui_domain/models/icon_type.h"
 #include "domain/ui_domain/models/screen_configuration.h"
 #include "domain/ui_domain/models/ui_configuration.h"
 #include "domain/ui_domain/models/widget_configuration.h"
@@ -47,12 +51,14 @@ using eerie_leap::domain::configuration_domain::smp::ConfigMgmtGroup;
 using eerie_leap::domain::settings_domain::event_bus::SettingsEventsChannel;
 using eerie_leap::domain::ui_domain::configuration::parsers::UiConfigurationCborParser;
 using eerie_leap::domain::ui_domain::event_bus::NavigationEventChannel;
+using eerie_leap::domain::ui_domain::models::IconType;
 using eerie_leap::domain::ui_domain::models::ScreenConfiguration;
 using eerie_leap::domain::ui_domain::models::ScreenType;
 using eerie_leap::domain::ui_domain::models::UiConfiguration;
 using eerie_leap::domain::ui_domain::models::WidgetConfiguration;
 using eerie_leap::domain::ui_domain::models::WidgetPropertyType;
 using eerie_leap::domain::ui_domain::models::WidgetType;
+using eerie_leap::subsys::assets::AssetKind;
 using eerie_leap::subsys::assets::AssetsManager;
 using eerie_leap::subsys::device_tree::DtDisplay;
 using eerie_leap::subsys::device_tree::DtFs;
@@ -122,6 +128,7 @@ struct Fixture {
     std::shared_ptr<FsService> fs_service;
     std::shared_ptr<WorkQueueThread> config_work_queue;
     std::shared_ptr<ConfigurationService> configuration_service = std::make_shared<ConfigurationService>();
+    std::shared_ptr<AssetsManager> assets = std::make_shared<AssetsManager>();
     std::shared_ptr<UiController> controller;
     std::shared_ptr<eerie_leap::domain::ui_domain::configuration::UiConfigurationManager> manager;
     std::shared_ptr<eerie_leap::domain::ui_domain::services::NavigationService> navigation;
@@ -276,7 +283,7 @@ void* Setup() {
         ++fixture.stored_count;
     });
     fixture.controller = std::make_shared<UiController>(
-        fixture.fs_service, fixture.config_work_queue, fixture.configuration_service, std::make_shared<AssetsManager>()
+        fixture.fs_service, fixture.config_work_queue, fixture.configuration_service, fixture.assets
     );
     zassert_equal(fixture.controller->Initialize(), 0);
     fixture.controller->Start();
@@ -311,6 +318,7 @@ void Teardown(void*) {
     fixture.manager.reset();
     fixture.navigation.reset();
     fixture.controller.reset();
+    fixture.assets.reset();
     fixture.config_work_queue.reset();
     fixture.fs_service.reset();
 }
@@ -1199,6 +1207,87 @@ ZTEST(smp_ui, test_a_patch_renews_the_lease) {
         zassert_true(SendPatch(token, rev, { PutWidgetOp(0, *recolored) }).IsOk());
         zassert_true(Read(Command::STATUS).Flag("active"), "Round %u", rev);
     }
+}
+
+// ======== A staged configuration that names an image file ========
+
+namespace {
+
+constexpr uint32_t IMAGE_FILE_WIDTH = 8;
+constexpr uint32_t IMAGE_FILE_HEIGHT = 6;
+
+// An .lvimg of white pixels in the first format this build draws: RGB565 on 16 bits, L8 on 8.
+std::vector<uint8_t> ImageFile() {
+    constexpr uint32_t BYTES_PER_PIXEL = LV_COLOR_DEPTH == 16 ? 2 : 1;
+    constexpr uint32_t STRIDE = IMAGE_FILE_WIDTH * BYTES_PER_PIXEL;
+    constexpr uint8_t COLOR_FORMAT = LV_COLOR_DEPTH == 16 ? LV_COLOR_FORMAT_RGB565 : LV_COLOR_FORMAT_L8;
+
+    std::vector<uint8_t> file = { LV_IMAGE_HEADER_MAGIC, COLOR_FORMAT, 0, 0, IMAGE_FILE_WIDTH, 0, IMAGE_FILE_HEIGHT, 0,
+        static_cast<uint8_t>(STRIDE), 0, 0, 0 };
+    file.resize(file.size() + static_cast<size_t>(STRIDE) * IMAGE_FILE_HEIGHT, 0xFF);
+
+    return file;
+}
+
+// Whether an image object that shows a picture of the file's size is at or below @p object.
+bool ShowsImageFile(lv_obj_t* object) {
+    if(lv_obj_check_type(object, &lv_image_class)) {
+        const void* source = lv_image_get_src(object);
+        if(source != nullptr && lv_image_src_get_type(source) == LV_IMAGE_SRC_VARIABLE) {
+            const auto* descriptor = static_cast<const lv_image_dsc_t*>(source);
+            if(descriptor->header.w == IMAGE_FILE_WIDTH && descriptor->header.h == IMAGE_FILE_HEIGHT)
+                return true;
+        }
+    }
+
+    const uint32_t children = lv_obj_get_child_count(object);
+    for(uint32_t index = 0; index < children; ++index) {
+        if(ShowsImageFile(lv_obj_get_child(object, static_cast<int32_t>(index))))
+            return true;
+    }
+
+    return false;
+}
+
+bool WaitUntilAnImageFileIsShown() {
+    const int64_t deadline = k_uptime_get() + WAIT_MS;
+    while(k_uptime_get() < deadline) {
+        {
+            const eerie_leap::domain::ui_domain::ScopedLvglLock lock;
+            if(ShowsImageFile(lv_display_get_screen_active(nullptr)) || ShowsImageFile(lv_layer_top()))
+                return true;
+        }
+        k_msleep(POLL_MS);
+    }
+
+    return false;
+}
+
+} // namespace
+
+ZTEST(smp_ui, test_a_staged_configuration_that_names_an_image_file_builds_it) {
+    constexpr const char* NAME = "staged_picture.lvimg";
+    const auto provider = fixture.assets->Find(AssetKind::IMAGES);
+    zassert_not_null(provider.get());
+    zassert_true(provider->store->Save(NAME, ImageFile()));
+
+    auto configuration = MakeConfiguration({ GROUP_ID }, std::nullopt, 0);
+    auto widget = eerie_memory::make_shared_pmr<WidgetConfiguration>(Mrm::GetExtPmr());
+    widget->type = WidgetType::BasicIcon;
+    widget->id = 0;
+    widget->position_grid = { 0, 0 };
+    widget->size_grid = { 100, 100 };
+    widget->properties[WidgetPropertyType::ICON_TYPE] = static_cast<int>(IconType::Image);
+    widget->properties[WidgetPropertyType::FILE_PATH] = std::pmr::string(NAME, Mrm::GetExtPmr());
+    configuration->screen_configurations.front()->AddWidget(std::move(widget));
+
+    const auto token = Begin();
+    const auto response = StageAll(token, Encode(configuration));
+
+    zassert_true(response.IsOk(), "STAGE refused: %u", ErrorOf(response));
+    zassert_true(WaitUntilGroupIs(GROUP_ID));
+    zassert_true(WaitUntilAnImageFileIsShown(), "The staged widget did not draw the image file");
+    zassert_true(provider->store->Delete(NAME));
 }
 
 ZTEST(smp_ui, test_a_command_that_does_not_exist_is_not_served) {
