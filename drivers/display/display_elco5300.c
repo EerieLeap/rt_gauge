@@ -95,6 +95,7 @@ static void co5300_te_forget_edges(struct co5300_te *te) {
 /* Forgets the edges and the estimates (blanking: the scan stops and starts again), so the
  * window rule restarts from fresh edges. Called under te.lock. */
 static void co5300_te_reset(struct co5300_te *te) {
+	te->epoch++;
 	co5300_te_forget_edges(te);
 	memset(&te->s, 0, sizeof(te->s));
 	memset(&te->tvdl, 0, sizeof(te->tvdl));
@@ -314,6 +315,9 @@ void co5300_stats_reset(const struct device *dev) {
 	data->post_pending = false;
 #ifdef CONFIG_ELCO5300_TE_WINDOW
 	data->last_full_valid = false;
+#ifdef CONFIG_ELCO5300_FRAME_WRITE
+	data->frame_prev_valid = false;
+#endif
 #endif
 	k_spin_unlock(&data->stats_lock, key);
 
@@ -348,6 +352,30 @@ void co5300_stats_mark_post(const struct device *dev, uint32_t cycles, bool lift
 	k_spin_unlock(&data->stats_lock, key);
 }
 
+/* Turns a pending post stamp into one sample. The caller holds stats_lock. */
+static void co5300_stats_take_post(struct co5300_data *data, uint32_t now) {
+	if (!data->post_pending) {
+		return;
+	}
+
+	uint32_t delay = now - data->post_stamp;
+	uint32_t us = k_cyc_to_us_floor32(delay);
+
+	data->stats.post_samples++;
+	data->stats.post_cycles += delay;
+	if (delay > data->stats.post_cycles_max) {
+		data->stats.post_cycles_max = delay;
+	}
+	if (data->post_lifted) {
+		data->stats.post_lifted++;
+		if (delay > data->stats.post_cycles_max_lifted) {
+			data->stats.post_cycles_max_lifted = delay;
+		}
+	}
+	data->stats.post_hist[us < 10 ? 0 : us < 100 ? 1 : us < 1000 ? 2 : us < 10000 ? 3 : 4]++;
+	data->post_pending = false;
+}
+
 /* display_write() entry: counts the write and turns a pending post stamp into one sample. */
 static void co5300_stats_write_enter(struct co5300_data *data, const struct display_buffer_descriptor *desc, uint32_t now) {
 	k_spinlock_key_t key = k_spin_lock(&data->stats_lock);
@@ -356,26 +384,22 @@ static void co5300_stats_write_enter(struct co5300_data *data, const struct disp
 	if (!desc->frame_incomplete) {
 		data->stats.frames++;
 	}
-	if (data->post_pending) {
-		uint32_t delay = now - data->post_stamp;
-		uint32_t us = k_cyc_to_us_floor32(delay);
-
-		data->stats.post_samples++;
-		data->stats.post_cycles += delay;
-		if (delay > data->stats.post_cycles_max) {
-			data->stats.post_cycles_max = delay;
-		}
-		if (data->post_lifted) {
-			data->stats.post_lifted++;
-			if (delay > data->stats.post_cycles_max_lifted) {
-				data->stats.post_cycles_max_lifted = delay;
-			}
-		}
-		data->stats.post_hist[us < 10 ? 0 : us < 100 ? 1 : us < 1000 ? 2 : us < 10000 ? 3 : 4]++;
-		data->post_pending = false;
-	}
+	co5300_stats_take_post(data, now);
 	k_spin_unlock(&data->stats_lock, key);
 }
+
+#ifdef CONFIG_ELCO5300_FRAME_WRITE
+/* co5300_write_frame() entry: counts the batch's rects as writes and the batch as one frame, and turns a pending
+ * post stamp into one sample, as display_write() does. */
+static void co5300_stats_frame_enter(struct co5300_data *data, uint8_t rects, uint32_t now) {
+	k_spinlock_key_t key = k_spin_lock(&data->stats_lock);
+
+	data->stats.writes += rects;
+	data->stats.frames++;
+	co5300_stats_take_post(data, now);
+	k_spin_unlock(&data->stats_lock, key);
+}
+#endif
 
 /* W-only time of one write that succeeded at the first attempt. */
 static void co5300_stats_write_w(struct co5300_data *data, bool full, uint32_t cycles) {
@@ -508,6 +532,9 @@ struct co5300_te_snap {
 	uint32_t tvdl_us;
 	uint32_t seq;     /* falling edges seen */
 	bool valid;       /* an edge and both estimates are valid */
+	int64_t now_us;   /* the driver's microsecond clock at the reading */
+	int64_t fall_us;  /* the last falling edge on that clock */
+	uint32_t epoch;   /* which run of edges and estimates this is (blanking starts a new one) */
 };
 
 static uint32_t co5300_us32(uint64_t cycles) {
@@ -524,9 +551,15 @@ static void co5300_te_snapshot(struct co5300_data *data, struct co5300_te_snap *
 	uint64_t s = te->s.cycles;
 	uint64_t tvdl = te->tvdl.cycles;
 
+	uint64_t fall = te->fall_cycles;
+
 	snap->valid = te->have_fall && te->s.valid && te->tvdl.valid;
 	snap->seq = te->fall_seq;
+	snap->epoch = te->epoch;
 	k_spin_unlock(&te->lock, key);
+
+	snap->now_us = (int64_t)k_cyc_to_us_floor64(now);
+	snap->fall_us = (int64_t)k_cyc_to_us_floor64(fall);
 
 	snap->age_us = co5300_us32(age);
 	snap->s_us = co5300_us32(s);
@@ -1247,6 +1280,722 @@ static int co5300_write(const struct device *dev, const uint16_t x, const uint16
 
 	return ret;
 }
+
+#ifdef CONFIG_ELCO5300_FRAME_WRITE
+
+BUILD_ASSERT(sizeof(((struct co5300_frame_work *)0)->stack) == CO5300_TE_FRAME_SEARCH_MAX,
+	     "co5300_frame_work.stack holds the order search's levels");
+
+#ifdef CONFIG_ELCO5300_STATS
+/* What one frame counts; folded into the shared counters once, when the frame is done. */
+struct co5300_fw_counts {
+	uint32_t searched;
+	uint32_t no_window;
+	uint32_t split;
+	uint32_t rounds_exhausted;
+	uint32_t resend_split;
+	uint32_t edge_fallbacks;
+	uint32_t timing_lost;
+	uint32_t bound_moved;
+	uint32_t paced;
+	uint32_t search_us_max;
+	uint32_t gap_max_us;
+	uint64_t pace_cycles;
+	uint64_t first_wait_cycles;
+	int8_t target; /* the first plan's scan from its edge, -1 before it */
+	uint32_t aborted;
+};
+#define CO5300_FW_COUNT(fw, field, n) ((fw)->counts.field += (n))
+#else
+#define CO5300_FW_COUNT(fw, field, n) ((void)0)
+#endif
+
+enum co5300_fw_mode {
+	CO5300_FW_PLANNED, /* the pending rects follow one plan */
+	CO5300_FW_SPLIT,   /* no plan holds the frame: one rect at a time, each in its own window */
+	CO5300_FW_PLAIN,   /* no timing: back to back in row order */
+};
+
+/* The run state of one co5300_write_frame() call. The writer thread has 4 KB, so it stays small; the plan's
+ * arrays are in the caller's co5300_frame_work. Pending rects are todo[head..cnt). */
+struct co5300_fw {
+	const struct device *dev;
+	struct co5300_data *data;
+	struct co5300_frame *frame;
+	struct co5300_te_frame_snap snap;   /* the reading the last decision used */
+	struct co5300_te_frame_run run;     /* the plan being followed */
+	struct co5300_te_frame_bound prev_bound; /* what the previous frame left */
+	int64_t ref_us;                     /* E_ref of the first plan: the stamps are relative to it */
+	int64_t last_end_us;                /* end of the last attempt */
+	int32_t floor;                      /* a re-plan's first allowed scan, relative to snap's edge */
+	uint32_t seq;                       /* the falling-edge count of snap */
+	uint32_t s_us;                      /* S and tvdl of the first plan, for the bound and the audit */
+	uint32_t tvdl_us;
+	uint32_t epoch;
+	int first_err;
+	enum co5300_fw_mode mode;
+	uint8_t head;
+	uint8_t cnt;
+	uint8_t m;                          /* rects in the current plan */
+	/* Per rect, not per head: a re-plan or a fall back to row order can put another rect first while a
+	 * failed one still waits for its re-send, and it must not inherit that rect's count. */
+	uint8_t attempt[CONFIG_ELCO5300_FRAME_MAX_RECTS];
+	uint8_t waited[CONFIG_ELCO5300_FRAME_MAX_RECTS];    /* the rect slept for its window */
+	uint8_t not_timeout[CONFIG_ELCO5300_FRAME_MAX_RECTS]; /* an attempt of the rect failed for another reason */
+	uint8_t written;                    /* rects finished, written or failed */
+	bool need_plan;
+	bool floor_set;
+	bool planned_once;
+	bool timed;                         /* the stamps can be tied to the panel's scans */
+	bool aborted;                       /* the bus timed out on every attempt: stop sending */
+#ifdef CONFIG_ELCO5300_STATS
+	struct co5300_fw_counts counts;
+#endif
+};
+
+static void co5300_fw_snapshot(struct co5300_fw *fw) {
+	struct co5300_data *data = fw->data;
+	struct co5300_te_snap snap;
+
+	co5300_te_snapshot(data, &snap);
+	fw->snap.now_us = snap.now_us;
+	fw->snap.fall_us = snap.fall_us;
+	fw->snap.s_us = snap.s_us;
+	fw->snap.tvdl_us = snap.tvdl_us;
+	fw->snap.epoch = snap.epoch;
+	fw->snap.valid = snap.valid && data->te_sync && !data->blanked && data->te_window_on &&
+			 data->orientation == DISPLAY_ORIENTATION_NORMAL;
+	fw->seq = snap.seq;
+}
+
+/* One lock take, like display_write()'s. */
+static void co5300_fw_lock(struct co5300_fw *fw) {
+	(void)co5300_lock(fw->data);
+#ifdef CONFIG_ELCO5300_STATS
+	co5300_stats_lock_take(fw->data);
+#endif
+}
+
+/* Plans todo[head .. head + m) on the reading in fw->snap. NO_WINDOW leaves the default order in work.order. */
+static enum co5300_te_frame_result co5300_fw_plan(struct co5300_fw *fw) {
+	const struct co5300_config *config = fw->dev->config;
+	struct co5300_frame_work *w = &fw->frame->work;
+	int64_t age = fw->snap.now_us - fw->snap.fall_us;
+	int32_t min_scan = co5300_te_frame_min_scan(&fw->prev_bound, fw->snap.fall_us, fw->snap.s_us, fw->snap.epoch);
+
+#ifdef CONFIG_ELCO5300_STATS
+	int32_t bound_scan = min_scan;
+	int32_t floor_scan = fw->floor_set ? fw->floor : 0;
+#endif
+	if (fw->floor_set) {
+		min_scan = MAX(min_scan, fw->floor);
+		fw->floor_set = false;
+	}
+	for (uint8_t j = 0; j < fw->m; j++) {
+		uint8_t r = w->todo[fw->head + j];
+
+		w->sy0[j] = w->y0[r];
+		w->sy1[j] = w->y1[r];
+		w->sw_min_us[j] = w->w_min_us[r];
+		w->sw_max_us[j] = w->w_max_us[r];
+	}
+
+	struct co5300_te_frame_in in = {
+		.age_us = age < 0 ? 0U : age > UINT32_MAX ? UINT32_MAX : (uint32_t)age,
+		.s_us = fw->snap.s_us,
+		.tvdl_us = fw->snap.tvdl_us,
+		.panel_h = config->height,
+		.margin_us = CONFIG_ELCO5300_TE_WINDOW_MARGIN_US,
+		.gap_us = CO5300_TE_FRAME_GAP_US,
+		.min_scan = min_scan,
+		.valid = fw->snap.valid,
+		.n = fw->m,
+		.y0 = w->sy0,
+		.y1 = w->sy1,
+		.w_min_us = w->sw_min_us,
+		.w_max_us = w->sw_max_us,
+	};
+	struct co5300_te_frame_scratch sc = {
+		.a_us = w->a_us,
+		.b_us = w->b_us,
+		.best = w->best,
+		.stack = w->stack,
+		.stack_t_us = w->stack_t_us,
+	};
+	int32_t scan = 0;
+	uint32_t nodes = 0;
+#ifdef CONFIG_ELCO5300_STATS
+	/* The cross-frame bound moved the target only if the frame's first plan, without it, would have
+	 * started earlier. The real plan runs last: it leaves the order. */
+	int32_t free_scan = -1;
+
+	if (fw->counts.target < 0 && bound_scan > 0) {
+		struct co5300_te_frame_in free_in = in;
+		uint32_t free_nodes = 0;
+		int32_t s0 = 0;
+
+		free_in.min_scan = floor_scan;
+		if (co5300_te_frame_plan(&free_in, &sc, w->order, &s0, &free_nodes) == CO5300_TE_FRAME_OK) {
+			free_scan = s0;
+		}
+	}
+	uint32_t t0 = k_cycle_get_32();
+#endif
+	enum co5300_te_frame_result res = co5300_te_frame_plan(&in, &sc, w->order, &scan, &nodes);
+
+	if (res == CO5300_TE_FRAME_NO_WINDOW) {
+		co5300_te_frame_sorted(&in, &sc, w->order);
+	}
+#ifdef CONFIG_ELCO5300_STATS
+	uint32_t us = k_cyc_to_us_floor32(k_cycle_get_32() - t0);
+
+	fw->counts.search_us_max = MAX(fw->counts.search_us_max, us);
+	if (res == CO5300_TE_FRAME_OK) {
+		if (nodes > 0U) {
+			fw->counts.searched++;
+		}
+		if (free_scan >= 0 && scan > free_scan) {
+			fw->counts.bound_moved++;
+		}
+		if (fw->counts.target < 0) {
+			fw->counts.target = (int8_t)MIN(scan, 3);
+		}
+	}
+#endif
+	if (res == CO5300_TE_FRAME_OK) {
+		fw->run.ref_us = fw->snap.fall_us;
+		fw->run.scan = scan;
+		fw->run.epoch = fw->snap.epoch;
+		fw->run.k = 0;
+		fw->run.rounds = 0;
+	}
+	return res;
+}
+
+/* The rect the plan is at. In a split frame the plan holds one rect and order[0] is 0. */
+static uint8_t co5300_fw_current(const struct co5300_fw *fw) {
+	const struct co5300_frame_work *w = &fw->frame->work;
+
+	return w->todo[fw->head + w->order[fw->run.k]];
+}
+
+/* One rect is finished, written or given up. */
+static void co5300_fw_done(struct co5300_fw *fw, uint8_t r) {
+	fw->written++;
+	fw->attempt[r] = 0;
+	fw->run.rounds = 0;
+	fw->not_timeout[r] = 0;
+	fw->waited[r] = 0;
+	if (fw->mode == CO5300_FW_PLANNED) {
+		if (++fw->run.k >= fw->m) {
+			fw->head = fw->cnt;
+		}
+	} else {
+		fw->head++;
+		fw->need_plan = fw->mode == CO5300_FW_SPLIT;
+	}
+}
+
+/* Drops the finished rects from a plan that is given up: the pending ones move to todo[head..cnt). */
+static void co5300_fw_compact(struct co5300_fw *fw) {
+	struct co5300_frame_work *w = &fw->frame->work;
+
+	if (fw->mode != CO5300_FW_PLANNED || fw->need_plan || fw->head >= fw->cnt) {
+		return;
+	}
+
+	uint8_t left = fw->m - fw->run.k;
+
+	for (uint8_t j = 0; j < left; j++) {
+		w->best[j] = w->todo[fw->head + w->order[fw->run.k + j]];
+	}
+	for (uint8_t j = 0; j < left; j++) {
+		w->todo[fw->head + j] = w->best[j];
+	}
+	fw->cnt = fw->head + left;
+	fw->m = left;
+	fw->run.k = 0;
+}
+
+/* The timing is gone (or was never there): the pending rects go back to back in row order, and the edge rule
+ * starts the frame if nothing was written yet. */
+static void co5300_fw_to_plain(struct co5300_fw *fw) {
+	struct co5300_frame_work *w = &fw->frame->work;
+
+	co5300_fw_compact(fw);
+	for (uint8_t i = fw->head + 1U; i < fw->cnt; i++) {
+		uint8_t v = w->todo[i];
+		uint8_t j = i;
+
+		while (j > fw->head && w->y0[w->todo[j - 1U]] > w->y0[v]) {
+			w->todo[j] = w->todo[j - 1U];
+			j--;
+		}
+		w->todo[j] = v;
+	}
+	fw->mode = CO5300_FW_PLAIN;
+	fw->timed = false;
+	fw->need_plan = false;
+	if (fw->written == 0U) {
+		co5300_te_edge_rule(fw->data, true);
+	}
+}
+
+/* No plan holds the frame: write the rects one at a time, in the default order (now in work.order). */
+static void co5300_fw_to_split(struct co5300_fw *fw) {
+	struct co5300_frame_work *w = &fw->frame->work;
+
+	for (uint8_t j = 0; j < fw->m; j++) {
+		w->best[j] = w->todo[fw->head + w->order[j]];
+	}
+	for (uint8_t j = 0; j < fw->m; j++) {
+		w->todo[fw->head + j] = w->best[j];
+	}
+	fw->mode = CO5300_FW_SPLIT;
+	fw->m = 1U;
+	CO5300_FW_COUNT(fw, no_window, 1U);
+}
+
+/* One attempt at rect r; the caller holds the driver lock. */
+static int co5300_fw_attempt(struct co5300_fw *fw, uint8_t r) {
+	struct co5300_data *data = fw->data;
+	struct co5300_frame_work *w = &fw->frame->work;
+	const struct co5300_rect *rect = &fw->frame->rects[r];
+	struct display_buffer_descriptor desc = {
+		.buf_size = (uint32_t)rect->w * rect->h * data->bytes_per_pixel,
+		.width = rect->w,
+		.height = rect->h,
+		.pitch = rect->w,
+		.frame_incomplete = false,
+	};
+	/* From before the window command to after the last pixel, as display_write()'s W. */
+	uint64_t c0 = k_cycle_get_64();
+	int ret = co5300_write_locked(fw->dev, rect->x, rect->y, &desc, rect->buf);
+	uint64_t c1 = k_cycle_get_64();
+
+	w->start_us[r] = (int64_t)k_cyc_to_us_floor64(c0);
+	w->end_us[r] = (int64_t)k_cyc_to_us_floor64(c1);
+#ifdef CONFIG_ELCO5300_STATS
+	if (fw->attempt[r] == 0U && !fw->waited[r] && fw->written > 0U) {
+		int64_t gap = w->start_us[r] - fw->last_end_us;
+
+		fw->counts.gap_max_us = MAX(fw->counts.gap_max_us, (uint32_t)MAX(gap, 0));
+	}
+#endif
+	fw->last_end_us = w->end_us[r];
+	if (ret == 0) {
+		uint32_t cycles = (uint32_t)(c1 - c0);
+
+		if (fw->attempt[r] == 0U) {
+			/* Only a first attempt that succeeded teaches the bounds. */
+			co5300_te_wbounds_update(&data->wbounds, desc.buf_size,
+				co5300_te_ns_per_byte(data->mspi_dev_config.freq), k_cyc_to_us_floor32(cycles));
+		}
+#ifdef CONFIG_ELCO5300_STATS
+		const struct co5300_config *config = fw->dev->config;
+
+		if (fw->attempt[r] > 0U) {
+			co5300_stats_count_resent(data);
+		} else {
+			co5300_stats_write_w(data, (uint32_t)rect->w * rect->h == (uint32_t)config->width * config->height,
+					     cycles);
+		}
+#endif
+	}
+	return ret;
+}
+
+/* Rect r failed every attempt (or was not sent): the caller reports it. */
+static void co5300_fw_fail(struct co5300_fw *fw, uint8_t r, int ret) {
+	struct co5300_frame *frame = fw->frame;
+
+	frame->failed_index[frame->failed++] = r;
+	if (fw->first_err == 0) {
+		fw->first_err = ret;
+	}
+}
+
+/* A failed attempt of rect r (the lock is released). Returns true when the rect gets another attempt. */
+static bool co5300_fw_failed_attempt(struct co5300_fw *fw, uint8_t r, int ret) {
+	if (ret != -ETIMEDOUT) {
+		fw->not_timeout[r] = 1;
+	}
+	if ((ret == -EIO || ret == -ETIMEDOUT) && fw->attempt[r] < CO5300_WRITE_RETRIES) {
+		LOG_WRN("Pixel write failed (%d), re-sending the area (%d/%d)", ret, fw->attempt[r] + 1, CO5300_WRITE_RETRIES);
+#ifdef CONFIG_ELCO5300_STATS
+		co5300_stats_count_retry(fw->data);
+#endif
+		fw->attempt[r]++;
+		return true;
+	}
+	if (ret == -EIO || ret == -ETIMEDOUT) {
+		LOG_ERR("Pixel write failed on every attempt (%d): the area is left incomplete", ret);
+#ifdef CONFIG_ELCO5300_STATS
+		co5300_stats_count_failure(fw->data);
+#endif
+	}
+	co5300_fw_fail(fw, r, ret);
+	/* A dead bus must not cost 3 timeouts for every remaining rect. */
+	fw->aborted = ret == -ETIMEDOUT && fw->not_timeout[r] == 0U;
+	co5300_fw_done(fw, r);
+	return false;
+}
+
+/* The bus timed out on every attempt: the rects still pending were never sent. */
+static void co5300_fw_abort_rest(struct co5300_fw *fw) {
+	struct co5300_frame_work *w = &fw->frame->work;
+	int64_t now_us = (int64_t)k_cyc_to_us_floor64(k_cycle_get_64());
+
+	co5300_fw_compact(fw);
+	if (fw->head < fw->cnt) {
+		CO5300_FW_COUNT(fw, aborted, 1U);
+	}
+	for (uint8_t i = fw->head; i < fw->cnt; i++) {
+		uint8_t r = w->todo[i];
+
+		w->start_us[r] = now_us;
+		w->end_us[r] = now_us;
+		co5300_fw_fail(fw, r, -ETIMEDOUT);
+	}
+	fw->head = fw->cnt;
+	/* A rect that timed out three times stalled for far longer than any window allows. */
+	fw->timed = false;
+}
+
+/* A rect written without a plan (no timing, or no window of its own), re-sent at once on failure. */
+static void co5300_fw_write_plain(struct co5300_fw *fw, uint8_t r) {
+	bool again = true;
+
+	while (again) {
+		co5300_fw_lock(fw);
+
+		int ret = co5300_fw_attempt(fw, r);
+
+		if (ret < 0) {
+			co5300_forget_window(fw->data);
+		}
+		co5300_unlock(fw->data);
+		if (ret == 0) {
+			co5300_fw_done(fw, r);
+			again = false;
+		} else {
+			again = co5300_fw_failed_attempt(fw, r, ret);
+		}
+	}
+}
+
+static void co5300_fw_make_plan(struct co5300_fw *fw) {
+	struct co5300_frame_work *w = &fw->frame->work;
+
+	if (!fw->floor_set) {
+		co5300_fw_snapshot(fw);
+	}
+	fw->m = fw->mode == CO5300_FW_SPLIT ? 1U : (uint8_t)(fw->cnt - fw->head);
+
+	bool first = !fw->planned_once;
+
+	fw->planned_once = true;
+	if (first) {
+		fw->ref_us = fw->snap.fall_us;
+		fw->s_us = fw->snap.s_us;
+		fw->tvdl_us = fw->snap.tvdl_us;
+		fw->epoch = fw->snap.epoch;
+	}
+
+	switch (co5300_fw_plan(fw)) {
+	case CO5300_TE_FRAME_OK:
+		fw->need_plan = false;
+		break;
+	case CO5300_TE_FRAME_NO_WINDOW:
+		if (fw->mode == CO5300_FW_PLANNED) {
+			co5300_fw_to_split(fw);
+		} else {
+			/* This rect has no window of its own: the edge rule if it is the frame's first, else at once. */
+			if (fw->written == 0U) {
+				co5300_te_edge_rule(fw->data, true);
+			}
+			co5300_fw_write_plain(fw, w->todo[fw->head]);
+		}
+		break;
+	case CO5300_TE_FRAME_FALLBACK:
+		if (first) {
+			CO5300_FW_COUNT(fw, edge_fallbacks, 1U);
+		} else {
+			CO5300_FW_COUNT(fw, timing_lost, 1U);
+		}
+		co5300_fw_to_plain(fw);
+		break;
+	}
+}
+
+/* Executes a WAIT or WAIT_EDGE of the step function: today's sleep-and-spin, or te_sem with the sequence check. */
+static void co5300_fw_wait(struct co5300_fw *fw, uint32_t wait_us, bool edge) {
+	struct co5300_data *data = fw->data;
+	uint64_t t0 = k_cycle_get_64();
+
+	if (!edge) {
+		co5300_win_wait(wait_us);
+	} else {
+		struct co5300_te_snap again;
+
+		/* An edge between the snapshot and the reset is seen in the sequence number. */
+		k_sem_reset(&data->te_sem);
+		co5300_te_snapshot(data, &again);
+		if (again.seq == fw->seq) {
+			int ret = k_sem_take(&data->te_sem, K_USEC(fw->snap.s_us + fw->snap.s_us / 4U));
+
+			if (ret != 0) {
+				if (++data->te_timeouts_in_row == CO5300_TE_MAX_TIMEOUTS) {
+					LOG_WRN("No TE edge for %d waits, the edge rule takes over", CO5300_TE_MAX_TIMEOUTS);
+				}
+			} else {
+				data->te_timeouts_in_row = 0;
+			}
+		}
+	}
+#ifdef CONFIG_ELCO5300_STATS
+	uint64_t spent = k_cycle_get_64() - t0;
+
+	if (fw->written == 0U) {
+		fw->counts.first_wait_cycles += spent;
+	} else {
+		if (!fw->waited[co5300_fw_current(fw)]) {
+			fw->counts.paced++;
+		}
+		fw->counts.pace_cycles += spent;
+	}
+#else
+	ARG_UNUSED(t0);
+#endif
+	fw->waited[co5300_fw_current(fw)] = 1;
+	fw->run.rounds++;
+}
+
+/* The rect missed its window (or its rounds ran out): plan the pending ones again for the scans after it. */
+static void co5300_fw_missed(struct co5300_fw *fw) {
+	if (fw->attempt[co5300_fw_current(fw)] > 0U) {
+		CO5300_FW_COUNT(fw, resend_split, 1U);
+	} else {
+		CO5300_FW_COUNT(fw, split, 1U);
+	}
+	if (fw->run.rounds >= CO5300_TE_FRAME_MAX_WAITS) {
+		CO5300_FW_COUNT(fw, rounds_exhausted, 1U);
+	}
+	fw->floor = co5300_te_frame_rel_scan(&fw->run, fw->snap.fall_us, fw->snap.s_us) + 1;
+	fw->floor_set = true;
+	fw->run.replans++;
+	co5300_fw_compact(fw);
+	fw->need_plan = true;
+}
+
+/* One step of the plan: asks the step function and executes its action, nothing else. */
+static void co5300_fw_next(struct co5300_fw *fw) {
+	struct co5300_frame_work *w = &fw->frame->work;
+	uint32_t wait_us = 0;
+
+	co5300_fw_snapshot(fw);
+
+	enum co5300_te_frame_action action =
+		co5300_te_frame_step(&fw->run, w->a_us, w->b_us, w->order, &fw->snap, &wait_us);
+
+	if (action == CO5300_TE_FRAME_START) {
+		/* The lock may have waited (blanking holds it for 130 or 240 ms): step again once it is ours. */
+		co5300_fw_lock(fw);
+		co5300_fw_snapshot(fw);
+		action = co5300_te_frame_step(&fw->run, w->a_us, w->b_us, w->order, &fw->snap, &wait_us);
+		if (action != CO5300_TE_FRAME_START) {
+			co5300_unlock(fw->data);
+		}
+	}
+
+	switch (action) {
+	case CO5300_TE_FRAME_START: {
+		uint8_t r = co5300_fw_current(fw);
+		int ret = co5300_fw_attempt(fw, r);
+
+		if (ret < 0) {
+			co5300_forget_window(fw->data);
+		}
+		co5300_unlock(fw->data);
+		if (ret == 0) {
+			co5300_fw_done(fw, r);
+		} else {
+			(void)co5300_fw_failed_attempt(fw, r, ret);
+		}
+		break;
+	}
+	case CO5300_TE_FRAME_WAIT:
+		co5300_fw_wait(fw, wait_us, false);
+		break;
+	case CO5300_TE_FRAME_WAIT_EDGE:
+		co5300_fw_wait(fw, wait_us, true);
+		break;
+	case CO5300_TE_FRAME_REPLAN:
+		co5300_fw_missed(fw);
+		break;
+	case CO5300_TE_FRAME_LOST:
+		CO5300_FW_COUNT(fw, timing_lost, 1U);
+		co5300_fw_to_plain(fw);
+		break;
+	}
+}
+
+#ifdef CONFIG_ELCO5300_STATS
+/* The audit (bench builds) and the counters of one frame, folded in under one lock. */
+static void co5300_fw_stats_end(struct co5300_fw *fw, const struct co5300_te_frame_bound *bound) {
+	const struct co5300_config *config = fw->dev->config;
+	struct co5300_data *data = fw->data;
+	struct co5300_frame *frame = fw->frame;
+	struct co5300_frame_work *w = &frame->work;
+	struct co5300_te_frame_verdict v = {false, false, 0};
+	int64_t first_start = w->start_us[0];
+	int64_t last_end = w->end_us[0];
+
+	for (uint8_t i = 1; i < frame->n; i++) {
+		first_start = MIN(first_start, w->start_us[i]);
+		last_end = MAX(last_end, w->end_us[i]);
+	}
+	if (fw->timed) {
+		v = co5300_te_frame_audit(frame->n, w->y0, w->y1, w->start_us, w->end_us, w->w_max_us, fw->ref_us,
+					  fw->s_us, fw->tvdl_us, config->height, CONFIG_ELCO5300_TE_WINDOW_MARGIN_US);
+	}
+
+	/* First shown: by the audit's scan, or, without timing, the bound (any scan after the last end). */
+	int64_t shown_us = fw->timed ? v.shown_us : bound->at_us;
+	bool out_of_order = false;
+
+	if (fw->timed && fw->prev_bound.valid && fw->prev_bound.epoch == bound->epoch) {
+		int64_t tol = fw->prev_bound.scan_start ? (int64_t)fw->s_us / 2 : 0;
+
+		out_of_order = v.shown_us + tol < fw->prev_bound.at_us;
+	}
+
+	const struct co5300_fw_counts *c = &fw->counts;
+	k_spinlock_key_t key = k_spin_lock(&data->stats_lock);
+	struct co5300_stats *st = &data->stats;
+	uint32_t frame_us = (uint32_t)MIN(last_end - first_start, (int64_t)UINT32_MAX);
+
+	st->frame_writes++;
+	st->frame_rects += frame->n;
+	st->frame_rects_max = MAX(st->frame_rects_max, (uint32_t)frame->n);
+	st->frame_searched += c->searched;
+	st->frame_search_us_max = MAX(st->frame_search_us_max, c->search_us_max);
+	st->frame_no_window += c->no_window;
+	st->frame_split += c->split;
+	st->frame_rounds_exhausted += c->rounds_exhausted;
+	st->frame_resend_split += c->resend_split;
+	st->frame_edge_fallbacks += c->edge_fallbacks;
+	st->frame_timing_lost += c->timing_lost;
+	st->frame_bound_moved += c->bound_moved;
+	st->frame_paced += c->paced;
+	st->frame_pace_us += k_cyc_to_us_floor64(c->pace_cycles);
+	st->frame_first_wait_us += k_cyc_to_us_floor64(c->first_wait_cycles);
+	st->frame_gap_max_us = MAX(st->frame_gap_max_us, c->gap_max_us);
+	st->frame_us += frame_us;
+	st->frame_us_max = MAX(st->frame_us_max, frame_us);
+	st->frame_mixed += v.mixed ? 1U : 0U;
+	st->frame_late += v.late ? 1U : 0U;
+	st->frame_out_of_order += out_of_order ? 1U : 0U;
+	st->frame_failed_rects += frame->failed;
+	st->frame_aborted += c->aborted;
+	if (c->target >= 0) {
+		st->frame_target_hist[c->target]++;
+	}
+	if (data->frame_prev_valid && fw->s_us != 0U) {
+		int64_t d = shown_us - data->frame_prev_shown_us;
+		int64_t scans = co5300_te_fdiv(d + (int64_t)fw->s_us / 2, fw->s_us);
+
+		st->frame_scans_hist[scans < 0 ? 0 : scans > 4 ? 4 : scans]++;
+	}
+	data->frame_prev_valid = fw->s_us != 0U;
+	data->frame_prev_shown_us = shown_us;
+	k_spin_unlock(&data->stats_lock, key);
+}
+#endif /* CONFIG_ELCO5300_STATS */
+
+int co5300_write_frame(const struct device *dev, struct co5300_frame *frame) {
+	const struct co5300_config *config = dev->config;
+	struct co5300_data *data = dev->data;
+
+	if (frame == NULL || frame->n == 0U || frame->n > CONFIG_ELCO5300_FRAME_MAX_RECTS) {
+		return -EINVAL;
+	}
+	for (uint8_t i = 0; i < frame->n; i++) {
+		const struct co5300_rect *rect = &frame->rects[i];
+
+		if (rect->buf == NULL || rect->w == 0U || rect->h == 0U || (uint32_t)rect->x + rect->w > config->width ||
+		    (uint32_t)rect->y + rect->h > config->height) {
+			return -EINVAL;
+		}
+	}
+
+#ifdef CONFIG_ELCO5300_STATS
+	uint32_t start = k_cycle_get_32();
+
+	co5300_stats_frame_enter(data, frame->n, start);
+#endif
+
+	struct co5300_frame_work *w = &frame->work;
+	uint32_t ns_per_byte = co5300_te_ns_per_byte(data->mspi_dev_config.freq);
+
+	frame->failed = 0U;
+	/* The bounds are frozen now: a rect that succeeds teaches the envelopes for later frames only. */
+	for (uint8_t i = 0; i < frame->n; i++) {
+		const struct co5300_rect *rect = &frame->rects[i];
+
+		w->y0[i] = rect->y;
+		w->y1[i] = (uint16_t)(rect->y + rect->h - 1U);
+		co5300_te_wbounds_get(&data->wbounds, (uint32_t)rect->w * rect->h * data->bytes_per_pixel, ns_per_byte,
+				      &w->w_min_us[i], &w->w_max_us[i]);
+		w->todo[i] = i;
+	}
+
+	struct co5300_fw fw = {
+		.dev = dev,
+		.data = data,
+		.frame = frame,
+		.prev_bound = data->frame_bound,
+		.mode = CO5300_FW_PLANNED,
+		.cnt = frame->n,
+		.need_plan = true,
+		.timed = true,
+#ifdef CONFIG_ELCO5300_STATS
+		.counts.target = -1,
+#endif
+	};
+
+	while (fw.head < fw.cnt) {
+		if (fw.mode == CO5300_FW_PLAIN) {
+			co5300_fw_write_plain(&fw, w->todo[fw.head]);
+		} else if (fw.need_plan) {
+			co5300_fw_make_plan(&fw);
+		} else {
+			co5300_fw_next(&fw);
+		}
+		if (fw.aborted) {
+			co5300_fw_abort_rest(&fw);
+		}
+	}
+
+	/* The bound for the next frame, from what was written. Without timing it is the end of the last rect. */
+	struct co5300_te_snap now;
+
+	co5300_te_snapshot(data, &now);
+
+	struct co5300_te_frame_bound bound = co5300_te_frame_finish(frame->n, w->y0, w->y1, w->start_us, w->end_us,
+		fw.ref_us, fw.s_us, fw.tvdl_us, config->height, CONFIG_ELCO5300_TE_WINDOW_MARGIN_US, fw.timed,
+		fw.timed ? fw.epoch : now.epoch);
+
+#ifdef CONFIG_ELCO5300_STATS
+	co5300_fw_stats_end(&fw, &bound);
+	co5300_stats_write_exit(data, start);
+#endif
+	data->frame_bound = bound;
+	data->frame_start = true;
+
+	return fw.first_err;
+}
+#endif /* CONFIG_ELCO5300_FRAME_WRITE */
 
 #if defined(CONFIG_ELCO5300_STATS) && defined(CONFIG_ELCO5300_TE_SYNC)
 

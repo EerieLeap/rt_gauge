@@ -49,6 +49,20 @@ config ELCO5300_TE_WINDOW_MARGIN_US
 	  bench audit counts such a write as late. A stale edge falls back to
 	  the edge rule.
 
+config ELCO5300_FRAME_WRITE
+	bool "Write the rectangles of one frame for one panel scan"
+	depends on ELCO5300_TE_WINDOW
+	help
+	  co5300_write_frame(): every rectangle of a frame starts inside its own
+	  tear-free window for one target scan, so no scan shows part of the frame
+	  new and part old. See co5300_te_window.h.
+
+config ELCO5300_FRAME_MAX_RECTS
+	int "Rectangles per frame"
+	default 32
+	range 1 64
+	depends on ELCO5300_FRAME_WRITE
+
 config ELCO5300_STATS
 	bool "CO5300 bench counters"
 	depends on ELCO5300

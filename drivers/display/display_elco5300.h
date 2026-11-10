@@ -9,7 +9,7 @@
 #include <zephyr/drivers/mspi.h>
 #include <zephyr/drivers/display.h>
 #include <zephyr/spinlock.h>
-#ifdef CONFIG_ELCO5300_STATS
+#if defined(CONFIG_ELCO5300_STATS) || defined(CONFIG_ELCO5300_FRAME_WRITE)
 #include <zephyr/drivers/display/display_co5300.h>
 #endif
 #ifdef CONFIG_ELCO5300_TE_WINDOW
@@ -176,6 +176,7 @@ struct co5300_te {
 	bool have_fall;       /* fall_cycles is a falling edge since the interrupt was (re)armed */
 	bool have_rise;
 	uint32_t fall_seq;    /* falling edges seen, counts scan starts */
+	uint32_t epoch;       /* changes whenever the edges and estimates are forgotten (blanking) */
 	uint64_t fall_cycles; /* last falling edge (a scan starts) */
 	uint64_t rise_cycles; /* last rising edge (the porch starts) */
 	struct co5300_est s;     /* scan period, from the falling-edge intervals */
@@ -228,6 +229,9 @@ struct co5300_data {
 #ifdef CONFIG_ELCO5300_TE_WINDOW
 	struct co5300_te_wbounds wbounds; /* write time bounds per size class, flush thread only */
 	bool te_window_on;                /* the window rule is in use; off means the edge rule */
+#ifdef CONFIG_ELCO5300_FRAME_WRITE
+	struct co5300_te_frame_bound frame_bound; /* what the previous frame leaves for the next; the frame writer only */
+#endif
 #endif
 #ifdef CONFIG_ELCO5300_STATS
 	struct co5300_stats stats;
@@ -235,6 +239,10 @@ struct co5300_data {
 #ifdef CONFIG_ELCO5300_TE_WINDOW
 	bool last_full_valid;             /* last_full_seq is the edge count at the end of the previous full frame */
 	uint32_t last_full_seq;
+#ifdef CONFIG_ELCO5300_FRAME_WRITE
+	bool frame_prev_valid;            /* frame_prev_shown_us is when the previous frame was first shown (audit) */
+	int64_t frame_prev_shown_us;
+#endif
 #endif
 	bool post_pending;	/* co5300_stats_mark_post() waits for the next write */
 	bool post_lifted;
