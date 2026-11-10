@@ -83,6 +83,9 @@ public:
 
     Stats GetStats() const;
 
+    // Zeroes the three maxima, which only ever grow, so a bench reset starts them over.
+    void ResetMaxima();
+
     // True from the third failing frame in a row until a frame that was rendered after the full-screen repair
     // completes without a failure.
     bool IsRepairDeferred() const;

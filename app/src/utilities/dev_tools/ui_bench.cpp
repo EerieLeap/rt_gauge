@@ -22,7 +22,13 @@
     #endif
 
     #include "domain/ui_domain/lvgl_lock.h"
+    #include "domain/ui_domain/ui_async_flush.h"
     #include "utilities/dev_tools/system_info.h"
+
+    #ifdef CONFIG_EERIE_LEAP_UI_FRAME_FLUSH
+        #include "domain/ui_domain/services/frame_flush/co5300_frame_writer.h"
+        #include "domain/ui_domain/services/frame_flush/frame_batcher.h"
+    #endif
 
     #include "ui_bench.h"
 
@@ -80,6 +86,11 @@ uint64_t CyclesToUs(uint64_t cycles) {
     return k_cyc_to_ns_floor64(cycles) / 10;
 }
 
+    #ifdef CONFIG_EERIE_LEAP_UI_FRAME_FLUSH
+// The batcher's counters only grow; a reset takes this baseline and the additive ones print as the difference.
+eerie_leap::domain::ui_domain::services::frame_flush::FrameBatcher::Stats flush_base_;
+    #endif
+
 uint64_t ThreadCycles(k_tid_t tid) {
     #ifdef CONFIG_SCHED_THREAD_USAGE
     if(tid == nullptr)
@@ -97,7 +108,9 @@ uint64_t ThreadCycles(k_tid_t tid) {
 }
 
 k_tid_t FlushTid() {
-    #ifdef CONFIG_LV_Z_FLUSH_THREAD
+    #ifdef CONFIG_EERIE_LEAP_UI_FRAME_FLUSH
+    return eerie_leap::domain::ui_domain::services::frame_flush::WriterTid();
+    #elif defined(CONFIG_LV_Z_FLUSH_THREAD)
     return lvgl_flush_thread;
     #else
     return nullptr;
@@ -140,7 +153,8 @@ void DisplayEvent(lv_event_t* e) {
             K_SPINLOCK(&lock_) {
                 ++counters_.areas;
             }
-    #ifdef CONFIG_ELCO5300_STATS
+    // With the frame writer the glue marks the stamp once per batch, at the post.
+    #if defined(CONFIG_ELCO5300_STATS) && !defined(CONFIG_EERIE_LEAP_UI_FRAME_FLUSH)
             co5300_stats_mark_post(display_dev_, now, k_thread_priority_get(k_current_get()) < renderer_priority_);
     #endif
             break;
@@ -204,6 +218,12 @@ void ResetStats() {
         baseline_.busy_cycles = busy;
     }
 
+    #ifdef CONFIG_EERIE_LEAP_UI_FRAME_FLUSH
+    if(auto* batcher = eerie_leap::domain::ui_domain::services::frame_flush::FrameBatcher::Instance()) {
+        flush_base_ = batcher->GetStats();
+        batcher->ResetMaxima();
+    }
+    #endif
     #ifdef CONFIG_ELCO5300_STATS
     co5300_stats_reset(display_dev_);
     #endif
@@ -240,7 +260,7 @@ void PrintStats(const shell* sh) {
     KV("wait_max_us", CyclesToUs(c.wait_cycles_max));
     #ifdef CONFIG_SCHED_THREAD_USAGE
     KV("renderer_cpu_us", CyclesToUs(renderer - b.renderer_cycles));
-        #ifdef CONFIG_LV_Z_FLUSH_THREAD
+        #ifdef EERIE_LEAP_UI_ASYNC_FLUSH
     KV("flush_cpu_us", CyclesToUs(flush - b.flush_cycles));
         #endif
     #endif
@@ -339,7 +359,73 @@ void PrintStats(const shell* sh) {
             sh, "co5300.te_win_scans_hist=%u,%u,%u,%u,%u", s.te_win_scans_hist[0], s.te_win_scans_hist[1],
             s.te_win_scans_hist[2], s.te_win_scans_hist[3], s.te_win_scans_hist[4]
         );
+
+            #ifdef CONFIG_ELCO5300_FRAME_WRITE
+        KV("co5300.te_fall_dejittered", s.te_fall_dejittered);
+        KV("co5300.te_fall_dejitter_max_us", s.te_fall_dejitter_max_us);
+        KV("co5300.frame_writes", s.frame_writes);
+        KV("co5300.frame_rects", s.frame_rects);
+        KV("co5300.frame_rects_max", s.frame_rects_max);
+        KV("co5300.frame_searched", s.frame_searched);
+        KV("co5300.frame_search_us_max", s.frame_search_us_max);
+        KV("co5300.frame_no_window", s.frame_no_window);
+        KV("co5300.frame_split", s.frame_split);
+        KV("co5300.frame_rounds_exhausted", s.frame_rounds_exhausted);
+        KV("co5300.frame_resend_split", s.frame_resend_split);
+        KV("co5300.frame_edge_fallbacks", s.frame_edge_fallbacks);
+        KV("co5300.frame_timing_lost", s.frame_timing_lost);
+        KV("co5300.frame_bound_moved", s.frame_bound_moved);
+        KV("co5300.frame_paced", s.frame_paced);
+        KV("co5300.frame_pace_us", s.frame_pace_us);
+        KV("co5300.frame_first_wait_us", s.frame_first_wait_us);
+        KV("co5300.frame_gap_max_us", s.frame_gap_max_us);
+        KV("co5300.frame_us", s.frame_us);
+        KV("co5300.frame_us_max", s.frame_us_max);
+        KV("co5300.frame_mixed", s.frame_mixed);
+        KV("co5300.frame_late", s.frame_late);
+        KV("co5300.frame_out_of_order", s.frame_out_of_order);
+        KV("co5300.frame_failed_rects", s.frame_failed_rects);
+        KV("co5300.frame_aborted", s.frame_aborted);
+        // Target scan from the plan's edge: 0, 1, 2, 3 or more
+        shell_print(
+            sh, "co5300.frame_target_hist=%u,%u,%u,%u", s.frame_target_hist[0], s.frame_target_hist[1],
+            s.frame_target_hist[2], s.frame_target_hist[3]
+        );
+        // Scans a frame stayed up: 0 (replaced in the same scan), 1, 2, 3, 4 or more
+        shell_print(
+            sh, "co5300.frame_scans_hist=%u,%u,%u,%u,%u", s.frame_scans_hist[0], s.frame_scans_hist[1],
+            s.frame_scans_hist[2], s.frame_scans_hist[3], s.frame_scans_hist[4]
+        );
+            #endif
         #endif
+    }
+    #endif
+
+    #ifdef CONFIG_EERIE_LEAP_UI_FRAME_FLUSH
+    {
+        const auto* batcher = eerie_leap::domain::ui_domain::services::frame_flush::FrameBatcher::Instance();
+        if(batcher != nullptr) {
+            const auto f = batcher->GetStats();
+
+            const auto& b = flush_base_;
+            KV("flush.frames", f.frames - b.frames);
+            KV("flush.areas", f.areas - b.areas);
+            KV("flush.rects_max", f.rects_max);
+            KV("flush.array_waits", f.array_waits - b.array_waits);
+            KV("flush.array_wait_us", f.array_wait_us - b.array_wait_us);
+            KV("flush.array_wait_max_us", f.array_wait_max_us);
+            KV("flush.lookahead_switches", f.lookahead_switches - b.lookahead_switches);
+            KV("flush.overflows", f.overflows - b.overflows);
+            KV("flush.frame_breaks", f.frame_breaks - b.frame_breaks);
+            KV("flush.guard_trips", f.guard_trips - b.guard_trips);
+            KV("flush.repairs", f.repairs - b.repairs);
+            KV("flush.repairs_deferred", f.repairs_deferred - b.repairs_deferred);
+            KV("flush.install_failed", f.install_failed);
+            KV("flush.bytes_max", f.bytes_max);
+        } else {
+            // Install() refused (or has not run): Zephyr's per-area path writes.
+            shell_print(sh, "flush.installed=0");
+        }
     }
     #endif
 
@@ -819,6 +905,53 @@ int CmdTecal(const shell* sh, size_t argc, char** argv) {
 }
     #endif
 
+// A diagnostic: off writes each rect of a frame through display_write(), in LVGL's order, after the whole frame is
+// rendered. That is neither the old interleaved render and write nor the batch rule.
+int CmdBatch(const shell* sh, size_t argc, char** argv) {
+    #ifdef CONFIG_EERIE_LEAP_UI_FRAME_FLUSH
+    bool on = false;
+    if(argc != 2 || !IsOn(argv[1], on)) {
+        shell_print(
+            sh, "usage: ui_bench batch on|off  (now %s)",
+            eerie_leap::domain::ui_domain::services::frame_flush::IsBatching() ? "on" : "off"
+        );
+        return -EINVAL;
+    }
+
+    eerie_leap::domain::ui_domain::services::frame_flush::SetBatching(on);
+    return 0;
+    #else
+    ARG_UNUSED(argc);
+    ARG_UNUSED(argv);
+    shell_error(sh, "batch needs CONFIG_EERIE_LEAP_UI_FRAME_FLUSH");
+    return -ENOTSUP;
+    #endif
+}
+
+// Period 1 fails every packet, re-sends included; from 2 on a rect never fails all three attempts.
+int CmdInject(const shell* sh, size_t argc, char** argv) {
+    #ifdef CONFIG_MSPI_ESP32_STATS
+    int32_t period = 0;
+    if(argc != 2 || !ParseRange(argv[1], 0, 1000000, period)) {
+        shell_print(sh, "usage: ui_bench inject <N>  (fail every Nth PSRAM packet, 0 = off)");
+        return -EINVAL;
+    }
+
+    const int ret = mspi_esp32_fault_inject_set(mspi_dev_, static_cast<uint32_t>(period));
+    if(ret != 0) {
+        shell_error(sh, "inject failed: %d", ret);
+        return ret;
+    }
+    shell_print(sh, "inject period=%d", static_cast<int>(period));
+    return 0;
+    #else
+    ARG_UNUSED(argc);
+    ARG_UNUSED(argv);
+    shell_error(sh, "inject needs CONFIG_MSPI_ESP32_STATS");
+    return -ENOTSUP;
+    #endif
+}
+
 int CmdStats(const shell* sh, size_t argc, char** argv) {
     if(argc == 1) {
         PrintStats(sh);
@@ -1024,6 +1157,15 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
         2,
         2
     ),
+    SHELL_CMD_ARG(
+        batch,
+        NULL,
+        "batch on|off: write a frame's rects as one batch (off: one display_write each, a diagnostic)",
+        CmdBatch,
+        2,
+        0
+    ),
+    SHELL_CMD_ARG(inject, NULL, "inject <N>: fail every Nth PSRAM packet on purpose (0 = off)", CmdInject, 2, 0),
     SHELL_CMD_ARG(stats, NULL, "stats [reset]: counters since the last reset", CmdStats, 1, 1),
     SHELL_CMD_ARG(run, NULL, "run <warmup_ms> <window_ms>: full mode, warm up, reset, measure, print", CmdRun, 3, 0),
     SHELL_CMD_ARG(trace, NULL, "trace [on|off]: LVGL profiler switch, or dump", CmdTrace, 1, 1),

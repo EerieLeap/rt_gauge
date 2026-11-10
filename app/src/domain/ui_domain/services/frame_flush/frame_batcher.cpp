@@ -552,4 +552,13 @@ FrameBatcher::Stats FrameBatcher::GetStats() const {
     return copy;
 }
 
+void FrameBatcher::ResetMaxima() {
+    // The renderer raises these without the lock; a race loses at most one sample.
+    K_SPINLOCK(&lock_) {
+        stats_.rects_max = 0;
+        stats_.array_wait_max_us = 0;
+        stats_.bytes_max = 0;
+    }
+}
+
 } // namespace eerie_leap::domain::ui_domain::services::frame_flush
