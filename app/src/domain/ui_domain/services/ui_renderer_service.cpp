@@ -1,3 +1,4 @@
+#include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -20,6 +21,10 @@
 #include "utilities/memory/memory_resource_manager.h"
 #ifdef CONFIG_EERIE_LEAP_UI_BENCH
     #include "utilities/dev_tools/ui_bench.h"
+#endif
+
+#ifdef CONFIG_EERIE_LEAP_UI_FRAME_FLUSH
+    #include "frame_flush/co5300_frame_writer.h"
 #endif
 
 #include "ui_renderer_service.h"
@@ -392,12 +397,48 @@ int UiRendererService::Initialize() {
     lv_obj_set_style_bg_color(screen, lv_color_black(), LV_PART_MAIN);
     lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, LV_PART_MAIN);
 
+#ifdef CONFIG_EERIE_LEAP_UI_FRAME_FLUSH
+    InstallFrameFlush();
+#endif
+
 #ifdef CONFIG_EERIE_LEAP_UI_BENCH
     eerie_leap::utilities::dev_tools::UiBench::Install(lv_display_get_default(), PRIORITY);
 #endif
 
     return 0;
 }
+
+#ifdef CONFIG_EERIE_LEAP_UI_FRAME_FLUSH
+
+void UiRendererService::BatcherWakeCb(void* data) {
+    // Runs on the writer thread: a rect failed and wants its repair.
+    k_sem_give(&static_cast<UiRendererService*>(data)->wake_);
+}
+
+void UiRendererService::InstallFrameFlush() {
+    // A failure here keeps Zephyr's flush path: the display works, without frame consistency. It must not fail
+    // Initialize(): that would fail main() and revert a test image.
+    auto* display = lv_display_get_default();
+    int result = display == nullptr ? -ENODEV : frame_flush::Co5300WriterInitialize();
+
+    if(result == 0) {
+        const ScopedLvglLock lvgl_guard;
+        result = batcher_.Install(display, frame_flush::Co5300FrameSink(), BatcherWakeCb, this);
+    }
+
+    if(result != 0) {
+        LOG_ERR("Frame flush not installed (%d), keeping the per-area flush path.", result);
+        return;
+    }
+
+    #ifdef CONFIG_ELCO5300_STATS
+    frame_flush::SetRendererPriority(PRIORITY);
+    #endif
+
+    LOG_INF("Frame flush installed.");
+}
+
+#endif
 
 void UiRendererService::ResumeCb(void* data) {
     // Runs on whichever thread resumed a timer, normally under the LVGL lock.
@@ -446,6 +487,10 @@ void UiRendererService::Render() {
         return;
 
     LvglLock::GetInstance().Lock();
+#ifdef CONFIG_EERIE_LEAP_UI_FRAME_FLUSH
+    // Before the handler, so a repair resumes the refresh timer that this very pass then runs.
+    batcher_.ApplyRepairs();
+#endif
     const uint32_t sleep_ms = lv_timer_handler();
     LvglLock::GetInstance().Unlock();
 

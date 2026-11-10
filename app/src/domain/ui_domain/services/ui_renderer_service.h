@@ -8,6 +8,10 @@
 
 #include <subsys/threading/thread.h>
 
+#ifdef CONFIG_EERIE_LEAP_UI_FRAME_FLUSH
+    #include "frame_flush/frame_batcher.h"
+#endif
+
 namespace eerie_leap::domain::ui_domain::services {
 
 using eerie_leap::subsys::threading::IThread;
@@ -26,6 +30,15 @@ private:
     // instead of for the period lv_timer_handler() returned. Taken with a timeout of K_FOREVER when no timer is due.
     k_sem wake_{};
     bool resume_registered_ = false;
+
+#ifdef CONFIG_EERIE_LEAP_UI_FRAME_FLUSH
+    // Packs a frame's areas into slots and hands the frame to the writer thread (frame_flush/). Installed in
+    // Initialize(); when that fails, Zephyr's flush path stays.
+    frame_flush::FrameBatcher batcher_;
+
+    void InstallFrameFlush();
+    static void BatcherWakeCb(void* data);
+#endif
 
     void ThreadEntry() override;
 

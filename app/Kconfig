@@ -112,6 +112,38 @@ source "Kconfig.zephyr"
 		default 180 if EERIE_LEAP_UI_ROTATION_180
 		default 270 if EERIE_LEAP_UI_ROTATION_270
 
+	config EERIE_LEAP_UI_FRAME_FLUSH
+		bool "Write each LVGL frame as one batch"
+		depends on ELCO5300_FRAME_WRITE && LV_Z_PARTIAL_REFRESH && LV_Z_DOUBLE_VDB
+		depends on LV_Z_VDB_SIZE = 100 && LV_Z_BUFFER_ALLOC_STATIC
+		depends on !LV_Z_FLUSH_THREAD && EERIE_LEAP_UI_ROTATION_NONE
+		help
+		  Every area of a frame renders into its own slot of one of the two
+		  full-size frame buffers, and the frame goes to the panel in one
+		  co5300_write_frame() call from the frame writer thread, so no panel
+		  scan shows two frames. Zephyr's flush thread carries one area per
+		  message and cannot do this, so it must be off, and so must the
+		  rotation, whose flush callback this one would replace.
+
+	config EERIE_LEAP_UI_FRAME_FLUSH_THREAD_PRIORITY
+		int "Frame writer thread priority"
+		default -11
+		depends on EERIE_LEAP_UI_FRAME_FLUSH
+		help
+		  Cooperative and above the bus workers (-10), so a posted frame
+		  starts at once and CAN and BLE are not starved by the writer's
+		  waits for the panel's scan.
+
+	config EERIE_LEAP_UI_FRAME_FLUSH_THREAD_STACK_SIZE
+		int "Frame writer thread stack size"
+		default 4096
+		depends on EERIE_LEAP_UI_FRAME_FLUSH
+		help
+		  Estimated from the call chain at 2.1 KB in normal operation and
+		  2.8-3.1 KB when the MSPI error path logs, which it does immediately
+		  on this stack. Zephyr's flush thread, on a shallower chain, measured
+		  1.4 KB and overflowed 2 KB on that path.
+
 	config EERIE_LEAP_FLOAT_SIGNIFICANT_DIGITS
 		int "Floating point significant digits"
 		default 4

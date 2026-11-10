@@ -22,7 +22,8 @@
 #include "domain/sensor_domain/event_bus/sensor_event_type.h"
 #include "domain/sensor_domain/event_bus/sensor_payload_type.h"
 #include "domain/settings_domain/models/setting_id.h"
-#ifndef CONFIG_LV_Z_FLUSH_THREAD
+#include "domain/ui_domain/ui_async_flush.h"
+#ifndef EERIE_LEAP_UI_ASYNC_FLUSH
     #include "domain/ui_domain/lvgl_lock.h"
 #endif
 
@@ -33,7 +34,7 @@ namespace eerie_leap::domain::display_domain::services {
 using eerie_leap::domain::sensor_domain::event_bus::SensorEventType;
 using eerie_leap::domain::sensor_domain::event_bus::SensorPayloadType;
 using eerie_leap::domain::settings_domain::models::SettingId;
-#ifndef CONFIG_LV_Z_FLUSH_THREAD
+#ifndef EERIE_LEAP_UI_ASYNC_FLUSH
 using eerie_leap::domain::ui_domain::ScopedLvglLock;
 #endif
 using eerie_leap::subsys::device_tree::DtDisplay;
@@ -319,11 +320,11 @@ int DisplayService::ApplyBrightness(uint8_t value) const {
     if(!is_initialized_)
         return -ENODEV;
 
-#ifndef CONFIG_LV_Z_FLUSH_THREAD
-    // Without the flush thread LVGL flushes inside lv_timer_handler() under its
-    // lock, so every driver call here has to take it too. With the thread the
-    // driver serializes whole operations itself, and holding the lock would
-    // stall rendering for the area in flight.
+#ifndef EERIE_LEAP_UI_ASYNC_FLUSH
+    // Without a flush thread, Zephyr's or the frame writer, LVGL flushes inside
+    // lv_timer_handler() under its lock, so every driver call here has to take
+    // it too. With one the driver serializes whole operations itself, and
+    // holding the lock would stall rendering for the area in flight.
     // Zephyr's k_mutex is recursive, so a control widget calling in from inside
     // lv_timer_handler() re-locks harmlessly.
     ScopedLvglLock lvgl_guard;
@@ -346,7 +347,7 @@ int DisplayService::ApplyBlanking(bool enabled) const {
     if(!is_initialized_)
         return -ENODEV;
 
-#ifndef CONFIG_LV_Z_FLUSH_THREAD
+#ifndef EERIE_LEAP_UI_ASYNC_FLUSH
     // See ApplyBrightness(): the driver's own lock covers the flush thread.
     ScopedLvglLock lvgl_guard;
 #endif
