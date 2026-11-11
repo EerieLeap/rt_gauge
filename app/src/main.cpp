@@ -56,6 +56,9 @@
 #endif
 
 #include "controllers/ble_controller.h"
+#ifdef CONFIG_EERIE_LEAP_CONTROLLER_CAN_MONITOR
+    #include "controllers/can_monitor_controller.h"
+#endif
 #include "controllers/canbus_controller.h"
 #include "controllers/display_controller.h"
 #ifdef CONFIG_EERIE_LEAP_CONTROLLER_DFU
@@ -457,8 +460,17 @@ int main() {
     const auto ble_controller = std::make_shared<BleController>(
         sensors_controller->GetProcessingService(), sensor_readings_frame, canbus_com_service
     );
+#ifdef CONFIG_EERIE_LEAP_CONTROLLER_CAN_MONITOR
+    std::shared_ptr<CanMonitorController> can_monitor_controller;
+#endif
     bool is_ble_up = false;
     if(ble_controller->Initialize() == 0) {
+#ifdef CONFIG_EERIE_LEAP_CONTROLLER_CAN_MONITOR
+        // Needs the access point BLE has just made; before BLE starts, so the first connection finds the canmon group.
+        can_monitor_controller = std::make_shared<CanMonitorController>(*canbus_controller, BleService::GetInstance());
+        if(can_monitor_controller->Initialize() != 0 || can_monitor_controller->Start() != 0)
+            LOG_ERR("Failed to start the CAN monitor controller.");
+#endif
         is_ble_up = eerie_leap::controllers::BleController::Start() == 0;
         if(!is_ble_up)
             LOG_ERR("Failed to start the BLE controller.");

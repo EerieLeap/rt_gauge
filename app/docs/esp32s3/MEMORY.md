@@ -94,14 +94,16 @@ and it replaces the stock `partitions_0x0_amp_16M` table completely (no APP CPU 
 ### S3 display memory
 - Two RGB565 frames of 434,312 B (466x466x2) live in `.lvgl_buf` in PSRAM. With the frame flush they are the slot
   arrays: every area of a frame renders into its own 64-B-aligned slot of one of them, and the next frame uses the
-  other. The 2 MB LVGL pool and the 2.25 MB SPIRAM heap share PSRAM with the text/rodata copies the linker's overflow
+  other. The 2 MB LVGL pool and the 2.1875 MB SPIRAM heap share PSRAM with the text/rodata copies the linker's overflow
   check does not count.
 - Code grows the PSRAM in use in steps of 64 KB: the text copy is rounded up to a 64 KB page, rodata starts on the next
   page, and external RAM starts on the page after the rodata. So check both slacks, the text page's and the rodata
   page's (`app/zephyr/zephyr.map`), not only the margin. On 2026-11-10 the production image had 43,712 B of text slack,
-  9,532 B of rodata slack and a margin of 114,352 B; the display bench build's text crossed its page, so
-  `app/display_bench.conf` gives the SPIRAM heap 64 KB less, for a margin of 48,816 B. `scripts/check_image_sizes.py`
-  fails the build when the PSRAM runs out, so check its PSRAM line after adding code or buffers.
+  9,532 B of rodata slack and a margin of 114,352 B. On 2026-11-11 the CAN monitor's code no longer fit and the SPIRAM
+  heap gave up 64 KB (2.25 MB before): 56,832 B of text slack, 59,980 B of rodata slack and a margin of 48,816 B. The
+  bench and display bench builds fit the same heap, the display bench with only 1,504 B of text slack.
+  `scripts/check_image_sizes.py` fails the build when the PSRAM runs out, so check its PSRAM line after adding code or
+  buffers.
 - Keep `LV_DRAW_BUF_ALIGN` at its default: LVGL rounds draw-buffer sizes up to it, a 466x466 RGB565 frame (434,312 B)
   is not a multiple of 64, so the full-screen `lv_draw_buf_reshape()` fails and a later draw writes through NULL. The
   frame batcher also needs it to divide 64 (a build-time check).
