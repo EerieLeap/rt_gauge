@@ -2,23 +2,23 @@
 
 | File | Purpose |
 | --- | --- |
-| `smp_can_client.py` | An SMP client for a unit, over CAN, over its console or over Bluetooth. Reads and writes stored configurations as YAML or JSON, lists, downloads, uploads and deletes its asset files, and inspects, uploads, tests and confirms firmware images (`image update` runs a whole update). |
-| `test_smp_can_client.py` | Self-test of the client's image, `dfu` and Bluetooth parts against simulated units: `python3 tools/test_smp_can_client.py` (needs `cbor2` only). |
+| `smp_can_client.py` | An SMP client for a unit, over CAN, over its console or over Bluetooth. Reads and writes stored configurations as YAML or JSON, lists, downloads, uploads and deletes its asset files, inspects, uploads, tests and confirms firmware images (`image update` runs a whole update), and runs CAN monitor sessions: a port's frames over Bluetooth, sending, periodic frames, replay, and a bus load generator. |
+| `test_smp_can_client.py` | Self-test of the client's image, `dfu`, Bluetooth and CAN monitor parts against simulated units: `python3 tools/test_smp_can_client.py` (needs `cbor2` only). |
 | `LVGLImage.py` | LVGL's image converter, for the UI's asset files. |
 | `update_zephyr.sh` | Updates the west workspace to `west.yml` with the build's patches reverted and applied again. |
 
 ## SMP client
 
 `smp_can_client.py` sends SMP requests to one unit and prints the responses. It speaks the `os`, `img`
-(MCUmgr's image management, group 1), `device`, `network`, `config`, `assets`, `logging` and `dfu` groups the
-units serve (see rt_core's `docs/smp.md`); the `live`, `calibration` and `files` groups have no command here.
+(MCUmgr's image management, group 1), `device`, `network`, `config`, `assets`, `logging`, `dfu` and `canmon` groups
+the units serve (see rt_core's `docs/smp.md`); the `live`, `calibration` and `files` groups have no command here.
 
 ### Requirements
 
 | Needed for | Package |
 | --- | --- |
 | Every command | `cbor2` |
-| CAN | `python-can` |
+| CAN (`--target`, `can generate`, `can ... --generate`) | `python-can` |
 | Serial | `pyserial` |
 | Bluetooth (`--ble`, `ble-scan`) | `bleak` 0.20 or newer (BlueZ on Linux) |
 | Descriptions (`config-get`, `config-set`, `config-encode`, `config-decode`) | `PyYAML` and `zcbor` 0.9.1 |
@@ -80,8 +80,9 @@ given (`--timeout-s`, 300; the swap takes up to ~2.5 min) the client says so and
 #### Bluetooth
 
 A unit with BLE advertises the access point service of rt_core's `docs/bluetooth.md`
-(`e7a1b2c3-d4e5-6f78-9a0b-c1d2e3f40000`). The client uses two of its characteristics: `info` (read: protocol
-version, the largest SMP packet, the requests in flight the unit takes) and `smp` (write without response, notify).
+(`e7a1b2c3-d4e5-6f78-9a0b-c1d2e3f40000`). The client uses three of its characteristics: `info` (read: protocol
+version, the largest SMP packet, the requests in flight the unit takes), `smp` (write without response, notify) and,
+for the `can` commands, `bus` (notify: the CAN monitor's stream).
 It is the configurator app's counterpart: every command but `shell` works over it, the same as over CAN and the console.
 
 `--ble` takes the device name the unit advertises (compared without regard to case) or its address (a MAC address,
@@ -131,6 +132,12 @@ carry on. Not tested against a radio yet: this checkout's tests use a stand-in f
 | `image erase` | any | Erases slot 1. |
 | `image update FILE [--no-reset] [--timeout-s N] [--in-flight N] [--upgrade]` | any | The whole update: checks, upload, test, reset, wait for the swap, wait for the confirmation or the revert. |
 | `dfu status` | any | Whether the running image is confirmed, the confirmation state, and why the unit last reset. |
+| `can ports` | any | The unit's CAN ports and what its CAN monitor has (`canmon` group 74 `STATUS`; see [CAN monitor](#can-monitor)). |
+| `can monitor PORT\|--synthetic FPS:IDS:DLC[:ext][:fd]` | Bluetooth | Streams a port's frames, or the synthetic source's: a line a second, a candump log with `--out`, a summary at the end. |
+| `can send PORT FRAME...` | Bluetooth | Arms a session and sends frames in candump's notation, then shows their echoes. |
+| `can periodic PORT FRAME@MS[xN]...` | Bluetooth | Arms a session and sends frames periodically until the end. |
+| `can replay PORT FILE [--speed PCT] [--loop] [--rx-only]` | Bluetooth | Arms a session and replays a candump log through the unit. |
+| `can generate FPS [--id ID] [--length N] [--duration S]` | none (a CAN adapter) | Loads a bus through this host's CAN adapter with numbered frames. |
 | `ble-scan [--time S] [--all]` | none | Lists the access points in range (needs `bleak`). |
 | `shell TEXT [--wait S]` | serial | Types TEXT as a shell command line and prints the console for S seconds (1). An empty TEXT only listens: `shell "" --wait 15` catches a thread analyzer report. |
 | `bench [--size N] [--count N]` | any | Echo round trips, for throughput. |
@@ -440,6 +447,79 @@ python3 tools/smp_can_client.py --serial /dev/ttyACM0 reset
 python3 tools/smp_can_client.py --serial /dev/ttyACM0 dfu status
 ```
 
+### CAN monitor
+
+The `can` commands are a client of the CAN monitor (rt_core's `docs/can_monitor.md`): a session of the `canmon`
+group (74) on a port of the unit that is the access point streams the port's frames, with their receive times, as
+notifications of the `bus` characteristic. Only the access point serves it (`--route` stays 0), and only over its
+Bluetooth (`--ble`): `can ports` alone works on any transport. Each command turns the notifications on, reads
+`STATUS`, opens one session, sends a request with its token once a second (`STATS`, which keeps the 5 s lease), and
+closes it at the end, after which it reads the stream up to the session's `end` record. Ctrl-C ends a command; the
+session is closed all the same, and a lost link ends it on the unit.
+
+**Ports and modes.** `--mode tap` watches a channel the unit's stored CAN configuration runs, as it runs (its
+bitrate and consumers stay); `listen` and `active` run a port the configuration does not use on a bus of the
+session's own (`--type classic|fd`, `--port-bitrate B`, 0 or none detecting it, `--port-data-bitrate B`), listen-only
+or acknowledging and able to transmit. `auto`, the default, taps a configured port and runs another listen-only, or
+active for the commands that transmit. `--synthetic FPS:IDS:DLC[:ext][:fd]` streams frames the unit generates with no
+bus (port 255), in a bench build (`EERIE_LEAP_CAN_MONITOR_SYNTHETIC`): raise FPS until `gap` lines show to find the
+link's ceiling. `--filter ID/MASK[/ext|std]` (hex, repeatable) has the unit pass only the frames whose ID & MASK
+equals the filter's; `--delta` asks for changed-bytes records, which the client decodes with the table the unit
+keeps. The unit's refusals are named (`BUSY`, `BAD_MODE`, `NOT_LISTENING`, `NO_MEMORY`, `TX_UNSUPPORTED`, ...).
+
+**What it prints.** A line for each of the unit's statistics records, about one a second: the frames received and
+sent, the load (bit time over the second, without stuff bits), the notifications and KiB the client got, the frames
+lost at each stage (the controller, the receive queue, the ring, the echo pool) and the controller's error counts.
+State changes, gaps (with their cause), the filter swap (`tap`) and transmit events come as lines of their own. The
+summary gives the session's totals, the notifications, the `seq` holes (a notification the link dropped) and the
+frames. `--print-frames` prints every frame. `--out FILE` writes them as a candump log,
+`(seconds) can<N> frame R|T`, the time being the unit's (µs since it started) and `T` marking the unit's own frames;
+a send that failed is left out.
+
+**Counting known frames.** `can generate FPS` sends frames of one ID (`--id`, hex, default 123) through this host's
+CAN adapter (`--interface`, `--channel`, `--bitrate`, `--fd`), their payload numbered as the synthetic source numbers
+its own: the frame number little-endian in the first 8 bytes, then byte i = 0xA5 ^ i. `can monitor --expect ID`
+follows those numbers and counts the frames missing, repeated or not the generator's, against the frames the gap
+records say were lost; a synthetic session is checked the same way. It also counts the holes, runs of missing
+numbers: a controller gap counts an overrun once, however many frames it dropped, and a unit may report it a few
+frames before the hole, so compare the holes with the overruns. Missing frames beyond what the gap records count,
+with no overrun, never reached the unit. `--generate FPS` runs the generator inside the
+session's command, on this host's adapter, and checks its frames (it numbers from 0 once the session is open, so a
+first frame received above 0 is reported: the frames before it are counted nowhere else); the client refuses it
+when the adapter's `--bitrate` (and `--data-bitrate` with `--fd`) is not the port's, since its frames would only be
+errors on the bus. The generator counts what it hands to the adapter: keep FPS under what the bus carries (about
+4,000 8-byte frames a second at 500 kbit/s), since an adapter that cannot send them drops them unseen. It sends a
+pass of frames every 2 ms (Python 3.11 or later keeps that pause on Windows), at most 50 ms worth, so a coarser host
+timer does not lower the rate; its summary gives the rate it reached. A CANable with its slcan firmware is
+`--interface slcan --channel /dev/ttyACM1` (Linux) or `--channel COM5` (Windows).
+
+**Transmit.** `send`, `periodic` and `replay` arm the session first (`ARM`: the unit sends nothing before, and shows
+the cap, 50 % of the bus time by default, and the identifiers it keeps for the COM channel's network). Frames are in
+candump's notation: `123#DEADBEEF`, `18DA00F1#00` (more than 3 digits is a 29-bit ID), `123#R4` (a remote frame
+asking for 4 bytes), `123##1` and 12 to 64 bytes (CAN FD; the digit is BRS 1, ESI 2). `send` sends 16 a request,
+stops at the cap and shows the echoes; `periodic FRAME@MS[xN]` runs until the end (`--duration`, or Ctrl-C), then
+stops the list. `replay FILE` reads a candump log, `--rx-only` leaving out the frames marked `T`, and plays it at
+`--speed PCT` (100: the capture's pace) with `--loop` while the whole replay fits the unit's buffer: the client keeps
+that buffer filled ahead, as many chunks in flight as the access point takes requests (its `info` window, 3), never
+more than the room the unit gave, and the command ends with the unit's `replay done`. A `replay underrun` says the
+buffer ran dry and the replay waited for the next chunk. A frame needs another node on the bus to acknowledge it:
+without one (the adapter, kept on the bus by `--generate` at a low rate) the first frame stays queued and every later
+periodic frame is skipped.
+
+On a development container without Bluetooth (WSL2 has none), run the Bluetooth commands from the host's own Python
+(`pip install bleak cbor2`, plus `python-can` for `--generate`), and `can generate` wherever the CAN adapter is.
+
+```shell
+python3 tools/smp_can_client.py --ble EerieLeap can ports
+python3 tools/smp_can_client.py --ble EerieLeap can monitor 0 --out bus.log
+python3 tools/smp_can_client.py --ble EerieLeap can monitor --synthetic 4000:8:8 --duration 30
+python3 tools/smp_can_client.py --interface slcan --channel /dev/ttyACM1 --bitrate 500000 can generate 2000
+python3 tools/smp_can_client.py --ble EerieLeap can monitor 0 --expect 123 --duration 60
+python3 tools/smp_can_client.py --ble EerieLeap can send 0 123#DEADBEEF 7E0#0201
+python3 tools/smp_can_client.py --ble EerieLeap can periodic 0 123#11223344@100 --duration 10
+python3 tools/smp_can_client.py --ble EerieLeap can replay 0 bus.log --rx-only --speed 200
+```
+
 ### Types
 
 | Number | Name | Schema |
@@ -550,6 +630,7 @@ of such a build is `build_bench/app/zephyr/zephyr.signed.bin`. A bench unit can 
 | `SHELL_BACKEND_SERIAL_FORCE_TX_BLOCKING_MODE` | Shell output is polled too. Interrupt-driven output waits for a host to drain the USB-Serial-JTAG FIFO and blocks the shell thread, and with it the threads that print, while no host has the port open. |
 | `THREAD_ANALYZER_AUTO`, `_AUTO_INTERVAL=10`, `_AUTO_STACK_SIZE=3072`, `_PRINT_THREAD_PRIORITY` | A report of every thread's stack peak every 10 s, through the log; `shell "" --wait 15` catches one. |
 | `STACK_SENTINEL` | The S3 has no stack guard; a sentinel stops the unit with the thread's name when a stack overflows. |
+| `EERIE_LEAP_CAN_MONITOR_SYNTHETIC` | The CAN monitor's synthetic source (`can monitor --synthetic`), which measures the Bluetooth link with no bus. |
 
 rt_daq's fragment also enables `APP_LOGGING_SHELL` and `APP_SENSOR_SHELL` (its `docs/application.md`).
 

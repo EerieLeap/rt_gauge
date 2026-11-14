@@ -30,6 +30,10 @@ over MCUmgr's image group, and image update runs the whole sequence of the firmw
 check the file against the unit, upload, mark for test, reset, wait for the swap and watch the unit
 confirm itself (dfu status) or revert. The format is in tools/README.md.
 
+The can commands use the CAN monitor of a unit with Bluetooth (rt_core docs/can_monitor.md): they stream a port's
+frames, or the unit's synthetic source, over the access point, send frames, periodic frames and a replay of a candump
+log through the unit, and load a bus through a CAN adapter of this host (can generate).
+
 Requires cbor2; python-can for CAN, pyserial for serial, bleak for Bluetooth, PyYAML and zcbor for
 descriptions.
 
@@ -54,6 +58,10 @@ Examples:
     smp_can_client.py --ble "EerieLeap Gauge" info
     smp_can_client.py --ble AA:BB:CC:DD:EE:FF --route 5 image upload rt_daq_0.0.2.signed.bin
     smp_can_client.py --serial /dev/ttyACM0 dfu status
+    smp_can_client.py --ble EerieLeap can monitor 0 --out bus.log
+    smp_can_client.py --ble EerieLeap can monitor --synthetic 4000:8:8 --duration 30
+    smp_can_client.py --ble EerieLeap can send 0 123#DEADBEEF
+    smp_can_client.py --interface slcan --channel /dev/ttyACM1 --bitrate 500000 can generate 2000
 """
 
 from __future__ import annotations
@@ -126,11 +134,13 @@ SERIAL_BASE64 = re.compile(rb"[A-Za-z0-9+/=]*")
 DEFAULT_BAUD = 115200
 ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 
-# The access point service of rt_core's docs/bluetooth.md: info (read), smp (write without response, notify) and
-# live (notify). `info` is [protocol version u8][largest SMP packet u16 LE][requests in flight u8].
+# The access point service of rt_core's docs/bluetooth.md: info (read), smp (write without response, notify),
+# live (notify) and bus (notify, the CAN monitor's stream). `info` is [protocol version u8][largest SMP packet
+# u16 LE][requests in flight u8].
 BLE_SERVICE_UUID = "e7a1b2c3-d4e5-6f78-9a0b-c1d2e3f40000"
 BLE_INFO_UUID = "e7a1b2c3-d4e5-6f78-9a0b-c1d2e3f40001"
 BLE_SMP_UUID = "e7a1b2c3-d4e5-6f78-9a0b-c1d2e3f40002"
+BLE_BUS_UUID = "e7a1b2c3-d4e5-6f78-9a0b-c1d2e3f40004"
 BLE_PROTOCOL_VERSION = 1
 BLE_INFO = struct.Struct("<BHB")
 # An ATT write carries the MTU less its 3-byte header; 23 is the MTU before any exchange.
@@ -254,6 +264,7 @@ class Group(IntEnum):
     ASSETS = 70
     LOGGING = 71
     DFU = 72
+    CAN_MONITOR = 74
 
 
 OS_RESET = 5
@@ -338,8 +349,32 @@ DFU_ERRORS = {
     5: "BAD_IDENTITY: the identity TLV of the image is malformed",
 }
 
+# The canmon group's errors (CanMonitorError in rt_core's can_monitor_smp.cddl).
+CAN_MONITOR_ERRORS = {
+    1: "UNKNOWN",
+    2: "NO_SESSION: no session holds this token",
+    3: "BAD_TOKEN",
+    4: "BUSY: the port has a session, every session slot is taken, or a CAN configuration is being applied",
+    5: "NOT_FOUND: the unit has no such port",
+    6: "BAD_MODE: tap is for a channel the configuration runs, listen and active for a port it does not use; "
+       "a listen-only or synthetic session cannot transmit",
+    7: "BAD_BITRATE",
+    8: "NOT_LISTENING: bus notifications are off",
+    9: "NO_MEMORY: the session's ring or the replay buffer cannot be had",
+    10: "NOT_ARMED",
+    11: "RESERVED: an identifier of the COM channel's network (CDMP, SMP)",
+    12: "RATE: over the transmit cap",
+    13: "BUS_OFF",
+    14: "NO_ROOM: the replay buffer is full",
+    15: "TX_UNSUPPORTED: the firmware is built without transmit",
+    16: "BAD_SEQ: a replay chunk out of order, or no replay running",
+}
+CAN_MONITOR_NO_SESSION = 2
+CAN_MONITOR_RATE = 12
+CAN_MONITOR_NO_ROOM = 14
+
 GROUP_ERRORS = {Group.CONFIG: CONFIG_ERRORS, Group.ASSETS: ASSETS_ERRORS, Group.IMG: IMG_ERRORS,
-                Group.DFU: DFU_ERRORS}
+                Group.DFU: DFU_ERRORS, Group.CAN_MONITOR: CAN_MONITOR_ERRORS}
 # MCUmgr's MGMT_ERR_ENOTSUP, which a unit answers at the top level for a group it does not serve.
 MGMT_ERR_ENOTSUP = 8
 MGMT_ERR_EINVAL = 3
@@ -348,6 +383,7 @@ MISSING_GROUP_HINTS = {
     Group.ASSETS: "the unit has no assets group (older firmware)",
     Group.IMG: "the unit has no image management (built without DFU)",
     Group.DFU: "the unit has no dfu group (older firmware, or built without DFU)",
+    Group.CAN_MONITOR: "the unit has no CAN monitor (older firmware, or a unit that does not build it)",
 }
 
 
@@ -365,6 +401,19 @@ class DeviceCommand(IntEnum):
     INFO = 0
     TIME = 1
     SET_TIME = 2
+
+
+class CanMonitorCommand(IntEnum):
+    """The canmon group (74): STATUS and STATS are reads, the others writes."""
+    STATUS = 0
+    OPEN = 1
+    CLOSE = 2
+    FILTER = 3
+    STATS = 4
+    ARM = 5
+    SEND = 6
+    PERIODIC = 7
+    REPLAY = 8
 
 
 ASSET_KINDS = {"images": 0, "animations": 1, "sensor_scripts": 2, "can_scripts": 3, "logs": 4, "fonts": 5}
@@ -892,6 +941,7 @@ class SmpBleLink:
         self._info_window = 1
         self._reassembler = BleReassembler()
         self._packets: queue.Queue = queue.Queue()
+        self._bus: queue.Queue | None = None
         self._lost = threading.Event()
         self._closing = False
 
@@ -957,6 +1007,20 @@ class SmpBleLink:
                 continue
             return packet
 
+    def start_bus(self) -> queue.Queue:
+        """Turns on the notifications of the `bus` characteristic, the CAN monitor's stream. Each one arrives in the
+        queue returned, and None when the link drops."""
+        client = self._client
+        if self._lost.is_set() or client is None:
+            raise ConnectionError("the Bluetooth link was lost")
+        characteristic = client.services.get_characteristic(BLE_BUS_UUID)
+        if characteristic is None:
+            raise RuntimeError("the unit has no bus characteristic: its firmware has no CAN monitor")
+        if self._bus is None:
+            self._bus = queue.Queue()
+            self._run(client.start_notify(characteristic, self._on_bus_notification), BLE_WRITE_TIMEOUT_S)
+        return self._bus
+
     def _run_loop(self) -> None:
         asyncio.set_event_loop(self._loop)
         self._loop.run_forever()
@@ -980,6 +1044,7 @@ class SmpBleLink:
         while not self._packets.empty():
             self._packets.get_nowait()
         self._lost.clear()
+        self._bus = None
         self._reassembler = BleReassembler()
         timeout_s = self._scan_timeout_s + BLE_CONNECT_TIMEOUT_S + BLE_PAIR_TIMEOUT_S + BLE_WRITE_TIMEOUT_S
         try:
@@ -1072,12 +1137,18 @@ class SmpBleLink:
         for route, packet in self._reassembler.accept(bytes(data), time.monotonic()):
             self._packets.put((route, packet))
 
+    def _on_bus_notification(self, characteristic, data: bytearray) -> None:
+        if self._bus is not None:
+            self._bus.put(bytes(data))
+
     def _on_disconnected(self, client) -> None:
         # A client that was dropped on purpose (a reconnect, a failed connect) is no longer self._client.
         if self._closing or client is not self._client:
             return
         self._lost.set()
         self._packets.put(None)
+        if self._bus is not None:
+            self._bus.put(None)
 
 
 def encode_request(op: Op, group: int, command: int, body: dict | None, sequence: int) -> bytes:
@@ -3239,6 +3310,1094 @@ def command_logging(client: SmpClient, args: argparse.Namespace) -> None:
     LOGGING_HANDLERS[args.logging_command](client, args)
 
 
+# The CAN monitor (rt_core docs/can_monitor.md): a session of the canmon group on a port of the access point streams
+# that port's frames as notifications of the `bus` characteristic. tap is for a channel the unit's configuration runs,
+# listen and active for a port it does not use (on a bus of the session's own), and the synthetic source (port 255)
+# generates frames with no bus, to measure the link.
+CAN_MONITOR_MODES = {"tap": 0, "listen": 1, "active": 2}
+CAN_MONITOR_MODE_NAMES = {0: "tap", 1: "listen-only", 2: "active"}
+CAN_MONITOR_TYPES = {"classic": 1, "fd": 2}
+CAN_MONITOR_TYPE_NAMES = {0: "no bus", 1: "classical CAN", 2: "CAN FD"}
+CAN_RECORD_VERSION = 1
+# A notification: version, port, seq, base_us (the time of the record before its first), the record count.
+CAN_NOTIFICATION_HEADER = struct.Struct("<BBHQB")
+CAN_SYNTHETIC_PORT = 255
+# A record's head byte (DLC, IDE, FDF, BRS, an ext byte follows) and ext byte (RTR, ESI, TX, TX failed, the kind).
+CAN_HEAD_DLC = 0x0F
+CAN_HEAD_IDE = 0x10
+CAN_HEAD_FDF = 0x20
+CAN_HEAD_BRS = 0x40
+CAN_HEAD_EXT = 0x80
+CAN_EXT_RTR = 0x01
+CAN_EXT_ESI = 0x02
+CAN_EXT_TX = 0x04
+CAN_EXT_TX_FAILED = 0x08
+CAN_DLC_LENGTHS = (0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 20, 24, 32, 48, 64)
+CAN_STD_ID_MAX = 0x7FF
+CAN_EXT_ID_MAX = 0x1FFFFFFF
+CAN_BUS_STATES = ("error-active", "error-warning", "error-passive", "bus-off", "stopped")
+CAN_GAP_CAUSES = {1: "ring", 2: "receive queue", 3: "controller", 4: "echo pool"}
+CAN_GAP_CONTROLLER = 3
+CAN_END_REASONS = {1: "closed", 2: "the lease lapsed", 3: "disconnected", 4: "a CAN configuration was stored",
+                   5: "the session's bus stopped"}
+CAN_TX_EVENTS = {1: "disarmed", 2: "bus-off", 3: "frames skipped", 4: "replay done", 5: "replay underrun"}
+CAN_TX_REPLAY_DONE = 4
+CAN_TAP_MARKS = {1: "frames around it may be repeated", 2: "frames around it may be missing"}
+# A statistics record: received, sent, busy_us, the errors, the losses (in this order) and the frames filtered out.
+CAN_STATISTICS_VALUES = 13
+CAN_ERROR_NAMES = ("bit", "stuff", "CRC", "form", "ack")
+CAN_LOST_NAMES = ("controller", "queue", "ring", "echo")
+CAN_SEND_MAX_FRAMES = 16
+# STATS once a second keeps the lease (5 s) and gives the totals; any request with the token renews it.
+CAN_MONITOR_STATS_INTERVAL_S = 1.0
+# After CLOSE the unit sends what the ring holds, the last statistics and the end record, and frees a ring that has
+# not drained in 5 s.
+CAN_MONITOR_END_WAIT_S = 6.0
+# The longest a command with work of its own (a replay) waits for notifications between two turns.
+CAN_MONITOR_TICK_S = 0.05
+CAN_REPLAY_RETRY_S = 0.05
+CAN_REPLAY_BATCHES_PER_TICK = 2
+CAN_GENERATOR_DEFAULT_ID = 0x123
+CAN_GENERATOR_BURST = 64
+# A pass's frames: up to 50 ms worth (64 at least), so a coarse sleep (a 15.6 ms tick on Windows) keeps the rate.
+CAN_GENERATOR_BURST_S = 0.05
+CAN_GENERATOR_PAUSE_S = 0.002
+CAN_GENERATOR_MAX_ERRORS = 1000
+CANDUMP_LINE = re.compile(r"\((\d+)\.(\d+)\)\s+(\S+)\s+(\S+)(?:\s+([RT]))?")
+
+
+class CanRecordKind(IntEnum):
+    FRAME = 0
+    CHANGED_BYTES = 1
+    STATE = 2
+    STATISTICS = 3
+    GAP = 4
+    END = 5
+    TX_EVENT = 6
+    TAP = 7
+
+
+class CanRecordError(ValueError):
+    """A notification the client cannot read."""
+
+
+def encode_leb128(value: int) -> bytes:
+    out = bytearray()
+    while value >= 0x80:
+        out.append(value & 0x7F | 0x80)
+        value >>= 7
+    out.append(value)
+    return bytes(out)
+
+
+def decode_leb128(data: bytes, offset: int) -> tuple[int, int]:
+    """The unsigned LEB128 at @p offset: its value and the offset after it."""
+    value = 0
+    for index in range(10):
+        if offset + index >= len(data):
+            raise CanRecordError("a value runs past the notification")
+        byte = data[offset + index]
+        if index == 9 and byte > 1:
+            raise CanRecordError("a value past 64 bits")
+        value |= (byte & 0x7F) << (7 * index)
+        if not byte & 0x80:
+            return value, offset + index + 1
+    raise CanRecordError("a value longer than 10 bytes")
+
+
+def can_payload_length(dlc: int, fdf: bool, rtr: bool) -> int:
+    """The payload bytes a record of this DLC carries: none for a remote frame, 8 at most without FDF."""
+    if rtr:
+        return 0
+    length = CAN_DLC_LENGTHS[dlc]
+    return length if fdf else min(length, 8)
+
+
+def can_dlc_of(length: int, fd: bool) -> int:
+    if length <= 8:
+        return length
+    if not fd or length not in CAN_DLC_LENGTHS:
+        raise ValueError(f"{length} B is no {'CAN FD' if fd else 'classical CAN'} frame length")
+    return CAN_DLC_LENGTHS.index(length)
+
+
+def format_can_id(can_id: int, extended: bool) -> str:
+    return f"{can_id:08X}" if extended else f"{can_id:03X}"
+
+
+def format_can_frame(can_id: int, extended: bool, data: bytes | None, *, fd: bool = False, brs: bool = False,
+                     esi: bool = False, remote: bool = False, dlc: int = 0) -> str:
+    """candump's notation: ID#DATA, ID#R[LEN] for a remote frame, ID##F DATA for CAN FD (F: BRS 1, ESI 2)."""
+    identifier = format_can_id(can_id, extended)
+    if remote:
+        return f"{identifier}#R" + (str(dlc) if dlc else "")
+    payload = "??" if data is None else data.hex().upper()
+    if fd:
+        return f"{identifier}##{(1 if brs else 0) | (2 if esi else 0):X}{payload}"
+    return f"{identifier}#{payload}"
+
+
+@dataclasses.dataclass(frozen=True)
+class CanFrameSpec:
+    """A frame to send. A remote frame's data is as long as the length it asks for (the unit sends no data)."""
+    can_id: int
+    extended: bool
+    data: bytes = b""
+    fd: bool = False
+    brs: bool = False
+    esi: bool = False
+    remote: bool = False
+
+    @property
+    def flags(self) -> int:
+        """SEND's and PERIODIC's flags: IDE, FDF, BRS, RTR."""
+        return (1 if self.extended else 0) | (2 if self.fd else 0) | (4 if self.brs else 0) | (8 if self.remote else 0)
+
+    def __str__(self) -> str:
+        return format_can_frame(self.can_id, self.extended, self.data, fd=self.fd, brs=self.brs, esi=self.esi,
+                                remote=self.remote, dlc=len(self.data))
+
+
+def parse_can_frame(text: str) -> CanFrameSpec:
+    """candump's notation: 123#DEADBEEF (an ID of more than 3 digits is 29-bit), 123#R or 123#R4 (remote), and
+    123##1DEADBEEF (CAN FD, the digit after ## being BRS 1 and ESI 2). Dots between the data bytes are skipped."""
+    id_text, separator, rest = text.partition("#")
+    try:
+        can_id = int(id_text, 16)
+    except ValueError:
+        raise ValueError(f"{text!r}: the frame needs a hex ID before #") from None
+    extended = len(id_text) > 3
+    if not separator or can_id > (CAN_EXT_ID_MAX if extended else CAN_STD_ID_MAX):
+        raise ValueError(f"{text!r}: not a frame in candump's notation (ID#DATA, an ID of 3 or 8 hex digits)")
+    try:
+        if rest.startswith("#"):
+            if len(rest) < 2:
+                raise ValueError("no flags digit after ##")
+            flags = int(rest[1], 16)
+            data = bytes.fromhex(rest[2:].replace(".", ""))
+            can_dlc_of(len(data), True)
+            return CanFrameSpec(can_id, extended, data, fd=True, brs=bool(flags & 1), esi=bool(flags & 2))
+        if rest[:1] in ("R", "r"):
+            length = int(rest[1:]) if rest[1:] else 0
+            if not 0 <= length <= 8:
+                raise ValueError("a remote frame asks for 0 to 8 bytes")
+            return CanFrameSpec(can_id, extended, bytes(length), remote=True)
+        data = bytes.fromhex(rest.replace(".", ""))
+        if len(data) > 8:
+            raise ValueError("more than 8 bytes need CAN FD (ID##FDATA)")
+        return CanFrameSpec(can_id, extended, data)
+    except ValueError as error:
+        raise ValueError(f"{text!r}: {error}") from None
+
+
+def encode_can_frame_record(dt_us: int, frame: CanFrameSpec) -> bytes:
+    """A kind 0 record of the stream's format, which REPLAY takes (ESI is not carried)."""
+    head = can_dlc_of(len(frame.data), frame.fd)
+    head |= (CAN_HEAD_IDE if frame.extended else 0) | (CAN_HEAD_FDF if frame.fd else 0)
+    head |= CAN_HEAD_BRS if frame.brs else 0
+    record = bytearray([head | CAN_HEAD_EXT, CAN_EXT_RTR] if frame.remote else [head])
+    record += encode_leb128(dt_us)
+    record += frame.can_id.to_bytes(4 if frame.extended else 2, "little")
+    if not frame.remote:
+        record += frame.data
+    return bytes(record)
+
+
+def read_candump_log(path: Path, rx_only: bool = False) -> list[tuple[int, CanFrameSpec]]:
+    """The frames of a candump log, `(seconds) interface frame [R|T]` a line, with their times in µs."""
+    frames = []
+    for number, line in enumerate(path.read_text(encoding="ascii", errors="replace").splitlines(), 1):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        match = CANDUMP_LINE.fullmatch(line)
+        if match is None:
+            raise RuntimeError(f"{path}:{number}: not a candump log line: {line!r}")
+        seconds, fraction, _, frame_text, direction = match.groups()
+        if rx_only and direction == "T":
+            continue
+        try:
+            frame = parse_can_frame(frame_text)
+        except ValueError as error:
+            raise RuntimeError(f"{path}:{number}: {error}") from None
+        frames.append((int(seconds) * 1_000_000 + int(fraction[:6].ljust(6, "0")), frame))
+    return frames
+
+
+@dataclasses.dataclass
+class CanRecord:
+    """A record of the stream, its time in µs since the unit started."""
+    kind: CanRecordKind
+    time_us: int
+    can_id: int = 0
+    dlc: int = 0
+    ide: bool = False
+    fdf: bool = False
+    brs: bool = False
+    rtr: bool = False
+    esi: bool = False
+    tx: bool = False
+    tx_failed: bool = False
+    # None: a changed-bytes frame whose previous payload the client does not hold.
+    data: bytes | None = b""
+    state: int = 0
+    tec: int = 0
+    rec: int = 0
+    bitrate: int = 0
+    values: tuple[int, ...] = ()
+    count: int = 0
+    # The gap's cause, the end's reason, the tx event or the tap's mark.
+    code: int = 0
+
+    def frame_text(self) -> str:
+        return format_can_frame(self.can_id, self.ide, self.data, fd=self.fdf, brs=self.brs, esi=self.esi,
+                                remote=self.rtr, dlc=self.dlc)
+
+
+class CanStreamDecoder:
+    """Reads a session's notifications: whole records, their times from `base_us`, and the changed-bytes table the
+    unit keeps (emptied at every gap and tap record). Counts the `seq` holes a dropped notification leaves."""
+
+    def __init__(self) -> None:
+        self.table: dict[tuple[int, bool], bytes] = {}
+        self.next_seq: int | None = None
+        self.seq_holes = 0
+        self.notifications = 0
+        self.size = 0
+        self.unknown_changes = 0
+
+    def decode(self, notification: bytes) -> list[CanRecord]:
+        if len(notification) < CAN_NOTIFICATION_HEADER.size:
+            raise CanRecordError(f"a notification of {len(notification)} B, shorter than its header")
+        version, _, seq, base_us, count = CAN_NOTIFICATION_HEADER.unpack_from(notification)
+        if version != CAN_RECORD_VERSION:
+            raise CanRecordError(f"records of version {version}; this client reads version {CAN_RECORD_VERSION}")
+        self.notifications += 1
+        self.size += len(notification)
+        if self.next_seq is not None:
+            self.seq_holes += (seq - self.next_seq) & 0xFFFF
+        self.next_seq = (seq + 1) & 0xFFFF
+
+        records = []
+        offset, time_us = CAN_NOTIFICATION_HEADER.size, base_us
+        for _ in range(count):
+            record, offset = self._record(notification, offset, time_us)
+            time_us = record.time_us
+            records.append(record)
+        if offset != len(notification):
+            raise CanRecordError(f"{len(notification) - offset} B after the notification's {count} records")
+        return records
+
+    @staticmethod
+    def _take(data: bytes, offset: int, size: int) -> bytes:
+        if offset + size > len(data):
+            raise CanRecordError("a record runs past the notification")
+        return data[offset:offset + size]
+
+    def _record(self, data: bytes, offset: int, time_us: int) -> tuple[CanRecord, int]:
+        head = self._take(data, offset, 1)[0]
+        offset += 1
+        ext = 0
+        if head & CAN_HEAD_EXT:
+            ext = self._take(data, offset, 1)[0]
+            offset += 1
+        kind_value, flags = ext >> 4, ext & 0x0F
+        if kind_value >= len(CanRecordKind):
+            raise CanRecordError(f"a record of kind {kind_value}")
+        kind = CanRecordKind(kind_value)
+        if kind >= CanRecordKind.STATE and (head != CAN_HEAD_EXT or flags):
+            raise CanRecordError(f"a {kind.name.lower()} record with frame bits")
+        dt_us, offset = decode_leb128(data, offset)
+        record = CanRecord(kind, time_us + dt_us)
+
+        if kind in (CanRecordKind.FRAME, CanRecordKind.CHANGED_BYTES):
+            offset = self._frame(data, offset, head, flags, record)
+        elif kind == CanRecordKind.STATE:
+            record.state, record.tec, record.rec = self._take(data, offset, 3)
+            record.bitrate, offset = decode_leb128(data, offset + 3)
+        elif kind == CanRecordKind.STATISTICS:
+            values = []
+            for _ in range(CAN_STATISTICS_VALUES):
+                value, offset = decode_leb128(data, offset)
+                values.append(value)
+            record.values = tuple(values)
+        elif kind == CanRecordKind.GAP:
+            record.count, offset = decode_leb128(data, offset)
+            record.code = self._take(data, offset, 1)[0]
+            offset += 1
+            self.table.clear()
+        elif kind == CanRecordKind.TX_EVENT:
+            record.code = self._take(data, offset, 1)[0]
+            record.count, offset = decode_leb128(data, offset + 1)
+        else:
+            record.code = self._take(data, offset, 1)[0]
+            offset += 1
+            if kind == CanRecordKind.TAP:
+                self.table.clear()
+        return record, offset
+
+    def _frame(self, data: bytes, offset: int, head: int, flags: int, record: CanRecord) -> int:
+        record.dlc = head & CAN_HEAD_DLC
+        record.ide = bool(head & CAN_HEAD_IDE)
+        record.fdf = bool(head & CAN_HEAD_FDF)
+        record.brs = bool(head & CAN_HEAD_BRS)
+        record.rtr, record.esi = bool(flags & CAN_EXT_RTR), bool(flags & CAN_EXT_ESI)
+        record.tx, record.tx_failed = bool(flags & CAN_EXT_TX), bool(flags & CAN_EXT_TX_FAILED)
+        id_size = 4 if record.ide else 2
+        record.can_id = int.from_bytes(self._take(data, offset, id_size), "little")
+        offset += id_size
+        if record.can_id > (CAN_EXT_ID_MAX if record.ide else CAN_STD_ID_MAX):
+            raise CanRecordError(f"identifier {record.can_id:#x} past its format")
+        key = (record.can_id, record.ide)
+
+        if record.kind == CanRecordKind.FRAME:
+            record.data = self._take(data, offset, can_payload_length(record.dlc, record.fdf, record.rtr))
+            offset += len(record.data)
+        else:
+            if record.rtr:
+                raise CanRecordError("a changed-bytes record of a remote frame")
+            length = can_payload_length(record.dlc, record.fdf, False)
+            masks = self._take(data, offset, (length + 7) // 8)
+            offset += len(masks)
+            for index, mask in enumerate(masks):
+                if length - 8 * index < 8 and mask >> (length - 8 * index):
+                    raise CanRecordError("a changed-bytes mask names a byte past the payload")
+            positions = [position for position in range(length) if masks[position // 8] >> (position % 8) & 1]
+            changed = self._take(data, offset, len(positions))
+            offset += len(positions)
+            previous = self.table.get(key)
+            if previous is None or len(previous) != length:
+                record.data = None
+                self.unknown_changes += 1
+            else:
+                payload = bytearray(previous)
+                for position, value in zip(positions, changed):
+                    payload[position] = value
+                record.data = bytes(payload)
+
+        if record.data and not record.rtr:
+            self.table[key] = record.data
+        return offset
+
+
+class CanCounterCheck:
+    """Follows the frame number that `can generate` and the unit's synthetic source put in each payload
+    (little-endian, its first 8 bytes at most, then byte i = 0xA5 ^ i): missing frames, repeated ones, and payloads
+    that are not theirs. With an ID it follows that ID's frames, without one every frame."""
+
+    def __init__(self, can_id: int | None) -> None:
+        self.can_id = can_id
+        self.checked = self.missing = self.repeated = self.foreign = 0
+        # Runs of missing numbers: a controller overrun counts once in the gaps, however many frames its hole holds.
+        self.holes = 0
+        self.first: int | None = None
+        self._next: int | None = None
+
+    def add(self, record: CanRecord) -> None:
+        if record.tx or record.rtr or not record.data or (self.can_id is not None and record.can_id != self.can_id):
+            return
+        data = record.data
+        width = min(len(data), 8)
+        if any(data[index] != (0xA5 ^ index) & 0xFF for index in range(width, len(data))):
+            self.foreign += 1
+            return
+        self.checked += 1
+        counter = int.from_bytes(data[:width], "little")
+        modulus = 1 << 8 * width
+        if self._next is not None:
+            ahead = (counter - self._next) % modulus
+            if ahead >= modulus // 2:
+                self.repeated += 1
+                return
+            self.missing += ahead
+            self.holes += ahead != 0
+        else:
+            self.first = counter
+        self._next = (counter + 1) % modulus
+
+
+class CanStreamReport:
+    """What a session's stream shows: a line for each of the unit's statistics records (about once a second), the
+    events as they come, the frames into a candump log, and the counter check of known frames."""
+
+    def __init__(self, *, log=None, port_name: str = "can0", print_frames: bool = False, print_tx: bool = False,
+                 check: CanCounterCheck | None = None) -> None:
+        self.log, self.port_name = log, port_name
+        self.print_frames, self.print_tx = print_frames, print_tx
+        self.check = check
+        self.start_s = time.monotonic()
+        self.totals = [0] * CAN_STATISTICS_VALUES
+        self.statistics_records = 0
+        self.frames = self.tx_failed = self.unknown = 0
+        self.gaps: collections.Counter = collections.Counter()
+        self._pending_gaps: collections.Counter = collections.Counter()
+        self._pending_gap_records: collections.Counter = collections.Counter()
+        self.replay_done = False
+        self.end_reason: int | None = None
+        self.generated: str | None = None
+        self._notifications = self._notification_bytes = 0
+
+    def add_notification(self, size: int) -> None:
+        self._notifications += 1
+        self._notification_bytes += size
+
+    def add(self, record: CanRecord) -> None:
+        if record.kind in (CanRecordKind.FRAME, CanRecordKind.CHANGED_BYTES):
+            self._frame(record)
+        elif record.kind == CanRecordKind.STATISTICS:
+            self._statistics(record.values)
+        elif record.kind == CanRecordKind.STATE:
+            state = CAN_BUS_STATES[record.state] if record.state < len(CAN_BUS_STATES) else str(record.state)
+            print(f"state: {state}, tec {record.tec}, rec {record.rec}"
+                  + (f", bitrate detected: {record.bitrate} bit/s" if record.bitrate else ""))
+        elif record.kind == CanRecordKind.GAP:
+            self.gaps[record.code] += record.count
+            self._pending_gaps[record.code] += record.count
+            self._pending_gap_records[record.code] += 1
+        elif record.kind == CanRecordKind.TX_EVENT:
+            self.replay_done = self.replay_done or record.code == CAN_TX_REPLAY_DONE
+            print(f"tx: {CAN_TX_EVENTS.get(record.code, record.code)} ({record.count})")
+        elif record.kind == CanRecordKind.TAP:
+            print(f"tap: the unit swapped its filters, {CAN_TAP_MARKS.get(record.code, record.code)}")
+        elif record.kind == CanRecordKind.END:
+            self.end_reason = record.code
+
+    def _frame(self, record: CanRecord) -> None:
+        if record.tx_failed:
+            self.tx_failed += 1
+        elif record.data is None:
+            self.unknown += 1
+        else:
+            self.frames += 1
+            if self.check is not None:
+                self.check.add(record)
+            if self.log is not None:
+                self.log.write(f"({record.time_us // 1_000_000:010d}.{record.time_us % 1_000_000:06d}) "
+                               f"{self.port_name} {record.frame_text()} {'T' if record.tx else 'R'}\n")
+        if self.print_frames or (self.print_tx and record.tx):
+            direction = "TX failed" if record.tx_failed else "TX" if record.tx else "RX"
+            print(f"{record.time_us / 1e6:14.6f}  {direction:9}  {record.frame_text()}")
+
+    def _print_gaps(self) -> None:
+        """The gaps since the previous line, a line a cause: an overloaded ring writes one between every two
+        notifications."""
+        for code, frames in self._pending_gaps.items():
+            gaps = self._pending_gap_records[code]
+            print(f"gap: {frames} frames lost" + (f" in {gaps} gaps" if gaps > 1 else "")
+                  + f" ({CAN_GAP_CAUSES.get(code, code)})")
+        self._pending_gaps.clear()
+        self._pending_gap_records.clear()
+
+    def _statistics(self, values: tuple[int, ...]) -> None:
+        self._print_gaps()
+        if self.statistics_records == 0:
+            print(f"{'time':>9} {'rx/s':>7} {'tx/s':>6} {'load':>7} | {'notif':>6} {'KiB':>7} | "
+                  f"{'lost ctrl/queue/ring/echo':<26} | errors")
+        self.statistics_records += 1
+        self.totals = [total + value for total, value in zip(self.totals, values)]
+        lost = "/".join(str(value) for value in values[8:12])
+        print(f"{time.monotonic() - self.start_s:7.1f} s {values[0]:>7} {values[1]:>6} {values[2] / 10_000:5.1f} % | "
+              f"{self._notifications:>6} {self._notification_bytes / 1024:>7.1f} | {lost:<26} | {sum(values[3:8])}"
+              + (f"  filtered {values[12]}" if values[12] else ""))
+        self._notifications = self._notification_bytes = 0
+
+    def print_summary(self, session: "CanMonitorSession") -> None:
+        self._print_gaps()
+        elapsed_s = time.monotonic() - self.start_s
+        totals = self.totals
+        if self.statistics_records == 0 and session.stats is not None:
+            stats = session.stats
+            totals = [stats["rx"], stats["tx"], stats["busy_us"], *stats["errors"], *stats["lost"], stats["filtered"]]
+        decoder = session.decoder
+        ended = CAN_END_REASONS.get(self.end_reason, str(self.end_reason)) if self.end_reason else (
+            "the link was lost" if session.link_lost else "no end record came")
+        print(f"session: {elapsed_s:.1f} s, ended: {ended}")
+        print(f"unit: {totals[0]} frames received, {totals[1]} sent, bus busy {totals[2] / 1e6:.3f} s; lost "
+              + ", ".join(f"{name} {value}" for name, value in zip(CAN_LOST_NAMES, totals[8:12]))
+              + f"; filtered {totals[12]}; errors "
+              + ", ".join(f"{name} {value}" for name, value in zip(CAN_ERROR_NAMES, totals[3:8])))
+        rate = decoder.notifications / elapsed_s if elapsed_s > 0 else 0.0
+        print(f"stream: {decoder.notifications} notifications ({format_size(decoder.size)}, {rate:.1f}/s), "
+              f"{decoder.seq_holes} seq holes, {self.frames} frames"
+              + (f", {self.tx_failed} sends failed" if self.tx_failed else "")
+              + (f", {self.unknown} changed-bytes frames without their previous payload" if self.unknown else "")
+              + (f", {session.malformed} notifications not read" if session.malformed else ""))
+        if self.check is not None:
+            check = self.check
+            whose = "every frame" if check.can_id is None else f"ID {format_can_id(check.can_id, check.can_id > 0x7FF)}"
+            gap_frames = sum(self.gaps.values())
+            # No later frame shows a frame lost at the end (a drain the unit cut): only the gap does.
+            after_last = gap_frames - check.missing if check.can_id is None and gap_frames > check.missing else 0
+            print(f"counter check ({whose}): {check.checked} frames, {check.missing} missing"
+                  + (f" in {check.holes} hole{'s' if check.holes != 1 else ''}" if check.holes else "")
+                  + f", {check.repeated} repeated, {check.foreign} not the generator's; the gap records count "
+                  f"{gap_frames} frames lost"
+                  + (" (all of them)" if check.missing and check.missing == gap_frames else "")
+                  + (f", {after_last} of them after the last frame received" if after_last else ""))
+            overruns = self.gaps[CAN_GAP_CONTROLLER]
+            if overruns and check.holes and check.missing > gap_frames:
+                print(f"controller: {overruns} overrun{'s' if overruns != 1 else ''}, each counted once however many "
+                      f"frames it dropped; the holes hold {check.missing / check.holes:.1f} frames on average")
+            elif not overruns and check.missing > gap_frames:
+                print(f"{check.missing - gap_frames} of the missing frames have no gap record: the unit never received "
+                      "them (lost before it, by the sending adapter or on the bus)")
+            # This client's generator numbers from 0, and starts once the session is open.
+            if self.generated is not None and check.first:
+                print(f"the first frame received was number {check.first}: the {check.first} sent before it are "
+                      "missing too")
+        if self.generated is not None:
+            print(self.generated)
+
+
+class CanMonitorSession:
+    """A canmon session over the access point: opened once `bus` notifications are on, a request with its token at
+    least once a second (STATS) to keep the lease, the stream decoded, and CLOSE, after which the unit drains the ring
+    and sends the end record."""
+
+    def __init__(self, client: SmpClient, notifications: queue.Queue, report: CanStreamReport) -> None:
+        self.client = client
+        self.notifications = notifications
+        self.report = report
+        self.decoder = CanStreamDecoder()
+        self.token = 0
+        self.stats: dict | None = None
+        self.ended = self.gone = self.link_lost = False
+        self.malformed = 0
+        self._next_stats_s = math.inf
+
+    @property
+    def is_over(self) -> bool:
+        return self.ended or self.gone or self.link_lost
+
+    def open(self, request: dict) -> dict:
+        # A repeated OPEN gets the same token until a request carries it, so a lost answer may be asked for again.
+        answer = self.client.write(Group.CAN_MONITOR, CanMonitorCommand.OPEN, request)
+        self.token = answer["tok"]
+        self._next_stats_s = time.monotonic() + CAN_MONITOR_STATS_INTERVAL_S
+        return answer
+
+    def call(self, command: CanMonitorCommand, body: dict | None = None, **options) -> dict:
+        op = Op.READ if command in (CanMonitorCommand.STATUS, CanMonitorCommand.STATS) else Op.WRITE
+        return self.client.request(op, Group.CAN_MONITOR, command, {"tok": self.token} | (body or {}), **options)
+
+    def pump(self, timeout_s: float) -> None:
+        """Reads what the stream brings within @p timeout_s (returning after the first batch), and asks for STATS
+        when a second has passed since the last."""
+        deadline_s = time.monotonic() + max(timeout_s, 0.0)
+        wait = True
+        while not self.link_lost:
+            try:
+                if wait:
+                    item = self.notifications.get(timeout=max(deadline_s - time.monotonic(), 0.0))
+                else:
+                    item = self.notifications.get_nowait()
+            except queue.Empty:
+                break
+            wait = False
+            if item is None:
+                self.link_lost = True
+                print("the Bluetooth link was lost: the unit ends the session", file=sys.stderr)
+                break
+            self._decode(item)
+
+        if not self.is_over and time.monotonic() >= self._next_stats_s:
+            self._next_stats_s = time.monotonic() + CAN_MONITOR_STATS_INTERVAL_S
+            try:
+                self.stats = self.call(CanMonitorCommand.STATS)
+            except TimeoutError:
+                print("warning: STATS got no answer; the unit ends the session 5 s after the last request with its "
+                      "token", file=sys.stderr)
+            except SmpError as error:
+                if error.group != Group.CAN_MONITOR or error.rc != CAN_MONITOR_NO_SESSION:
+                    raise
+                self.gone = True
+
+    def _decode(self, notification: bytes) -> None:
+        self.report.add_notification(len(notification))
+        try:
+            records = self.decoder.decode(notification)
+        except CanRecordError as error:
+            self.malformed += 1
+            print(f"warning: a notification the client cannot read: {error}", file=sys.stderr)
+            return
+        for record in records:
+            self.report.add(record)
+            self.ended = self.ended or record.kind == CanRecordKind.END
+
+    def close(self) -> None:
+        """CLOSE, then the rest of the stream up to the end record."""
+        if self.link_lost:
+            return
+        self._next_stats_s = math.inf
+        if not self.ended and not self.gone:
+            try:
+                self.call(CanMonitorCommand.CLOSE)
+            except SmpError as error:
+                if error.group != Group.CAN_MONITOR or error.rc != CAN_MONITOR_NO_SESSION:
+                    raise
+        deadline_s = time.monotonic() + CAN_MONITOR_END_WAIT_S
+        while not self.ended and not self.link_lost and (remaining_s := deadline_s - time.monotonic()) > 0:
+            self.pump(remaining_s)
+
+
+def stream_can_session(session: CanMonitorSession, duration_s: float | None,
+                       tick: Callable[[], bool] | None = None) -> None:
+    """Streams until @p duration_s has passed or the session ends; @p tick runs between two reads and says whether the
+    command is done."""
+    deadline_s = math.inf if duration_s is None else time.monotonic() + duration_s
+    while not session.is_over:
+        now_s = time.monotonic()
+        if now_s >= deadline_s or (tick is not None and tick()):
+            return
+        session.pump(min(deadline_s - now_s, CAN_MONITOR_TICK_S if tick is not None else CAN_MONITOR_STATS_INTERVAL_S))
+
+
+def generated_payload(number: int, length: int) -> bytes:
+    """The frame number little-endian in the first 8 bytes at most, then byte i = 0xA5 ^ i (the synthetic source's)."""
+    width = min(length, 8)
+    return (number % (1 << 8 * width)).to_bytes(width, "little") + bytes(
+        (0xA5 ^ index) & 0xFF for index in range(width, length))
+
+
+class CanGenerator:
+    """Loads a bus through a python-can adapter: frames of one ID at a steady rate, numbered as the unit's synthetic
+    source numbers its own (generated_payload), so that `can monitor --expect ID` tells lost frames from repeated
+    ones. It also reads what the adapter receives, so that the adapter's buffers do not fill."""
+
+    def __init__(self, bus, fps: int, can_id: int, *, length: int = 8, fd: bool = False) -> None:
+        self._can = require("can", "python-can")
+        self._bus = bus
+        self.fps, self.can_id, self.length, self.fd = fps, can_id, length, fd
+        self.sent = self.errors = 0
+        self.failure: str | None = None
+        self.elapsed_s = 0.0
+        self._start_s = 0.0
+        self._stopping = threading.Event()
+        self._thread = threading.Thread(target=self._run, name="can-generator", daemon=True)
+
+    @property
+    def is_running(self) -> bool:
+        return self._thread.is_alive()
+
+    def start(self) -> None:
+        self._start_s = time.monotonic()
+        self._thread.start()
+
+    def stop(self) -> str:
+        """Stops, and says what went out."""
+        self._stopping.set()
+        self._thread.join(5.0)
+        self.elapsed_s = time.monotonic() - self._start_s
+        rate = self.sent / self.elapsed_s if self.elapsed_s > 0 else 0.0
+        return (f"generator: {self.sent} frames of ID {format_can_id(self.can_id, self.can_id > CAN_STD_ID_MAX)} "
+                f"handed to the adapter in {self.elapsed_s:.1f} s ({rate:.0f}/s of {self.fps}), "
+                f"{self.errors} send errors"
+                + (f"; it stopped: {self.failure}" if self.failure else ""))
+
+    def _run(self) -> None:
+        errors_in_a_row = 0
+        burst = max(CAN_GENERATOR_BURST, int(self.fps * CAN_GENERATOR_BURST_S))
+        while not self._stopping.is_set():
+            due = int((time.monotonic() - self._start_s) * self.fps) + 1
+            for _ in range(min(due - self.sent, burst)):
+                message = self._can.Message(arbitration_id=self.can_id, is_extended_id=self.can_id > CAN_STD_ID_MAX,
+                                            data=generated_payload(self.sent, self.length), is_fd=self.fd,
+                                            bitrate_switch=self.fd)
+                try:
+                    self._bus.send(message, timeout=0.05)
+                except self._can.CanError as error:
+                    self.errors += 1
+                    errors_in_a_row += 1
+                    if errors_in_a_row >= CAN_GENERATOR_MAX_ERRORS:
+                        self.failure = str(error)
+                        return
+                    break
+                errors_in_a_row = 0
+                self.sent += 1
+            for _ in range(CAN_GENERATOR_BURST):
+                if self._bus.recv(0) is None:
+                    break
+            # Not Event.wait: on Windows that waits a whole 15.6 ms tick, which makes each pass a burst.
+            time.sleep(CAN_GENERATOR_PAUSE_S)
+
+
+def open_can_bus(args: argparse.Namespace):
+    can = require("can", "python-can")
+    options = {"interface": args.interface, "channel": args.channel, "bitrate": args.bitrate}
+    if args.fd:
+        options |= {"fd": True, "data_bitrate": args.data_bitrate}
+    try:
+        return can.Bus(**options)
+    except can.CanError as error:
+        raise RuntimeError(f"CAN adapter {args.interface} {args.channel}: {error}") from None
+
+
+def read_can_status(client: SmpClient) -> dict:
+    return client.read(Group.CAN_MONITOR, CanMonitorCommand.STATUS)
+
+
+def format_can_bitrates(bitrate: int, data_bitrate: int, fd: bool) -> str:
+    if not bitrate:
+        return "bitrate not known yet"
+    return f"{bitrate} bit/s" + (f", data {data_bitrate} bit/s" if fd and data_bitrate else "")
+
+
+def can_open_request(args: argparse.Namespace, status: dict, transmit: bool) -> dict:
+    """OPEN's request from the command's options; mode auto taps a configured port and runs another on a bus of the
+    session's own (listen-only, active to transmit)."""
+    if getattr(args, "synthetic", None):
+        request: dict = {"synthetic": args.synthetic}
+    else:
+        port = next((entry for entry in status["ports"] if entry["ch"] == args.port), None)
+        if port is None:
+            raise RuntimeError(f"the unit has no CAN port {args.port}; it has "
+                               + (", ".join(str(entry["ch"]) for entry in status["ports"]) or "none"))
+        mode = args.mode
+        if mode == "auto":
+            mode = "tap" if port["configured"] else "active" if transmit else "listen"
+        request = {"ch": args.port, "mode": CAN_MONITOR_MODES[mode]}
+        if args.port_type is not None:
+            request["type"] = CAN_MONITOR_TYPES[args.port_type]
+        if args.port_bitrate is not None:
+            request["bitrate"] = args.port_bitrate
+        if args.port_data_bitrate is not None:
+            request["data_bitrate"] = args.port_data_bitrate
+    if args.filter:
+        request["filters"] = args.filter
+    if args.delta:
+        request["delta"] = True
+    return request
+
+
+def print_can_open_answer(answer: dict) -> None:
+    if answer["ch"] == CAN_SYNTHETIC_PORT:
+        where = "the synthetic source"
+    else:
+        where = (f"port {answer['ch']} ({CAN_MONITOR_MODE_NAMES.get(answer['mode'], answer['mode'])}, "
+                 f"{CAN_MONITOR_TYPE_NAMES.get(answer['type'], answer['type'])}, "
+                 f"{format_can_bitrates(answer['bitrate'], answer['data_bitrate'], answer['type'] == 2)})")
+    print(f"session {answer['tok']:08x} on {where}, lease {answer['lease_ms']} ms")
+
+
+@contextlib.contextmanager
+def can_session(client: SmpClient, args: argparse.Namespace, *, transmit: bool = False,
+                print_tx: bool = False) -> Iterator[CanMonitorSession]:
+    """Opens a session as the command's options say, with the stream on, around the command's body, then closes it and
+    prints the summary. Ctrl-C ends the body; the session is closed all the same."""
+    notifications = client.link.start_bus()
+    status = read_can_status(client)
+    request = can_open_request(args, status, transmit)
+    if transmit and not status.get("tx"):
+        raise RuntimeError("the unit's firmware has no CAN monitor transmit (EERIE_LEAP_CAN_MONITOR_TX)")
+    if "synthetic" in request and not status.get("synthetic"):
+        raise RuntimeError("the unit's firmware has no synthetic source (EERIE_LEAP_CAN_MONITOR_SYNTHETIC: a bench "
+                           "build)")
+    if args.delta and not status.get("delta"):
+        print("note: the firmware has no changed-bytes records (EERIE_LEAP_CAN_MONITOR_DELTA): frames come whole",
+              file=sys.stderr)
+    if args.generate and "ch" in request:
+        port = next(entry for entry in status["ports"] if entry["ch"] == request["ch"])
+        bitrate = request.get("bitrate", port["bitrate"])
+        data_bitrate = request.get("data_bitrate", port["data_bitrate"]) if args.fd else 0
+        if (bitrate and bitrate != args.bitrate) or (data_bitrate and data_bitrate != args.data_bitrate):
+            raise RuntimeError(f"port {request['ch']} runs at {format_can_bitrates(bitrate, data_bitrate, args.fd)}, "
+                               f"the adapter at {format_can_bitrates(args.bitrate, args.data_bitrate, args.fd)}: "
+                               "its frames would only be errors on the bus (--bitrate"
+                               + (", --data-bitrate)" if args.fd else ")"))
+
+    expect = args.expect if args.expect is not None else args.generate_id if args.generate else None
+    check = CanCounterCheck(None) if "synthetic" in request else (
+        CanCounterCheck(expect) if expect is not None else None)
+    with contextlib.ExitStack() as stack:
+        log = stack.enter_context(args.out.open("w", encoding="ascii")) if args.out else None
+        port_name = "synthetic" if "synthetic" in request else f"can{request['ch']}"
+        report = CanStreamReport(log=log, port_name=port_name, print_frames=args.print_frames, print_tx=print_tx,
+                                 check=check)
+        session = CanMonitorSession(client, notifications, report)
+        print_can_open_answer(session.open(request))
+        generator = None
+        try:
+            if args.generate:
+                generator = CanGenerator(stack.enter_context(open_can_bus(args)), args.generate, args.generate_id,
+                                         fd=args.fd)
+                generator.start()
+                print(f"generating {args.generate} frames/s of ID "
+                      f"{format_can_id(args.generate_id, args.generate_id > CAN_STD_ID_MAX)} "
+                      f"through {args.interface} {args.channel}")
+            yield session
+        except KeyboardInterrupt:
+            print("interrupted: closing the session", file=sys.stderr)
+        finally:
+            if generator is not None:
+                report.generated = generator.stop()
+            try:
+                session.close()
+            except (SmpError, TimeoutError, ConnectionError) as error:
+                print(f"warning: the session did not close cleanly: {error}", file=sys.stderr)
+            report.print_summary(session)
+
+
+def arm_can_session(session: CanMonitorSession) -> None:
+    answer = session.call(CanMonitorCommand.ARM, {"on": True})
+    reserved = ", ".join(f"{format_can_id(start, ext)}-{format_can_id(end, ext)}"
+                         for start, end, ext in answer.get("reserved", []))
+    print(f"armed: up to {answer['share_pct']} % of the bus time" + (f"; reserved IDs {reserved}" if reserved else ""))
+
+
+def can_request_limit(client: SmpClient) -> int:
+    """The largest byte string a request may carry: the unit's SMP buffer, or the access point's packet limit, less the
+    request around it."""
+    limit = client.read(Group.OS, 6)["buf_size"]
+    if client.link.max_packet_size:
+        limit = min(limit, client.link.max_packet_size)
+    return limit - CONFIG_WRITE_OVERHEAD
+
+
+class CanReplayFeeder:
+    """Keeps the unit's replay buffer filled ahead: chunks of whole records, each no larger than a request carries, in
+    order of `seq`, and `op: 3` once every record went. A batch sends up to @p window chunks at once within the room
+    the last answer gave (the room only grows as the replay plays), and is answered whole before the tick ends, so
+    the session's own requests never wait behind one."""
+
+    def __init__(self, session: CanMonitorSession, records: list[bytes], chunk_limit: int, room: int,
+                 window: int = 1) -> None:
+        self.session, self.records, self.chunk_limit, self.room = session, records, chunk_limit, room
+        self.window = max(1, window)
+        self.index = self.seq = 0
+        self.finished = False
+        self._retry_at_s = 0.0
+
+    def feed(self) -> None:
+        for _ in range(CAN_REPLAY_BATCHES_PER_TICK):
+            if self.index == len(self.records) or not self._send_batch():
+                break
+        if self.index == len(self.records) and not self.finished:
+            self.session.call(CanMonitorCommand.REPLAY, {"op": 3})
+            self.finished = True
+
+    def _plan_batch(self) -> list[tuple[int, int]]:
+        """The record ranges of the next batch's chunks."""
+        chunks, start, room = [], self.index, self.room
+        while len(chunks) < self.window and start < len(self.records):
+            limit, end, size = min(room, self.chunk_limit), start, 0
+            while end < len(self.records) and size + len(self.records[end]) <= limit:
+                size += len(self.records[end])
+                end += 1
+            if end == start:
+                # The next record does not fit the room the unit last gave: ask with it alone, now and then.
+                if chunks or time.monotonic() < self._retry_at_s:
+                    break
+                end, size = start + 1, len(self.records[start])
+            chunks.append((start, end))
+            start, room = end, max(room - size, 0)
+        return chunks
+
+    def _send_batch(self) -> bool:
+        """Sends a batch and takes its answers in order of `seq`; False when nothing went or the unit had no room."""
+        chunks = self._plan_batch()
+        if not chunks:
+            return False
+        smp = self.session.client
+        pipeline = SmpPipeline(smp)
+        for number, (start, end) in enumerate(chunks):
+            # Not resent: a chunk the unit took would come back as BAD_SEQ.
+            pipeline.submit(Op.WRITE, Group.CAN_MONITOR, CanMonitorCommand.REPLAY,
+                            {"tok": self.session.token, "op": 1, "seq": (self.seq + number) & 0xFFFF,
+                             "data": b"".join(self.records[start:end])},
+                            number, retries=0, timeout_s=smp.timeout_s * len(chunks))
+        completions = {}
+        while pipeline.outstanding:
+            completion = pipeline.next_completion()
+            completions[completion.tag] = completion
+        for number, (_, end) in enumerate(chunks):
+            error = completions[number].error
+            if error is not None:
+                if not (isinstance(error, SmpError) and error.group == Group.CAN_MONITOR
+                        and error.rc == CAN_MONITOR_NO_ROOM):
+                    raise error
+                # The unit refuses the chunks behind it as out of order: the next batch starts from this one.
+                self.room = 0
+                self._retry_at_s = time.monotonic() + CAN_REPLAY_RETRY_S
+                return False
+            self.seq += 1
+            self.index = end
+            self.room = completions[number].response["room"]
+        return True
+
+
+def command_can_ports(client: SmpClient, args: argparse.Namespace) -> None:
+    if isinstance(client.link, SmpBleLink):
+        client.link.start_bus()     # So that notify_max is the link's.
+    status = read_can_status(client)
+    built = [name for name in ("tx", "synthetic", "delta") if status.get(name)]
+    print(f"monitor: records version {status['version']}, a ring of {format_size(status['ring_bytes'])} a session, "
+          f"up to {status['filters_max']} filters, notifications up to {status['notify_max']} B; firmware has "
+          + (", ".join(built) if built else "receive only"))
+    for port in status["ports"]:
+        types_ = " and ".join(CAN_MONITOR_TYPE_NAMES.get(value, str(value)) for value in port["types"])
+        state = CAN_BUS_STATES[port["state"]] if port["state"] < len(CAN_BUS_STATES) else str(port["state"])
+        print(f"port {port['ch']}: {types_}; {'configured' if port['configured'] else 'not configured'}; {state}; "
+              f"{format_can_bitrates(port['bitrate'], port['data_bitrate'], port['data_bitrate'] > 0)}; "
+              f"{'in a session' if port['session'] else 'free'}")
+    if not status["ports"]:
+        print("no CAN port")
+
+
+def command_can_monitor(client: SmpClient, args: argparse.Namespace) -> None:
+    with can_session(client, args) as session:
+        stream_can_session(session, args.duration)
+
+
+def command_can_send(client: SmpClient, args: argparse.Namespace) -> None:
+    with can_session(client, args, transmit=True, print_tx=True) as session:
+        arm_can_session(session)
+        sent = 0
+        for start in range(0, len(args.frames), CAN_SEND_MAX_FRAMES):
+            batch = args.frames[start:start + CAN_SEND_MAX_FRAMES]
+            try:
+                # Not resent: a lost answer would send the frames twice.
+                frames = [[frame.can_id, frame.flags, frame.data] for frame in batch]
+                answer = session.call(CanMonitorCommand.SEND, {"frames": frames}, retries=0)
+            except SmpError as error:
+                if error.group == Group.CAN_MONITOR and error.rc == CAN_MONITOR_RATE:     # None went.
+                    answer = {"sent": 0, "refused": len(batch)}
+                else:
+                    raise
+            sent += answer["sent"]
+            if answer["refused"]:
+                break
+        print(f"sent {sent} of {len(args.frames)} frames" + ("" if sent == len(args.frames) else "; the cap held back "
+                                                              "the rest"))
+        stream_can_session(session, 1.0 if args.duration is None else args.duration)
+
+
+def command_can_periodic(client: SmpClient, args: argparse.Namespace) -> None:
+    entries = [{"slot": slot, "id": frame.can_id, "flags": frame.flags, "data": frame.data, "period_ms": period}
+               | ({} if count is None else {"count": count}) for slot, (frame, period, count) in enumerate(args.frames)]
+    with can_session(client, args, transmit=True) as session:
+        arm_can_session(session)
+        session.call(CanMonitorCommand.PERIODIC, {"list": entries})
+        print(f"{len(entries)} periodic frames running" + ("; Ctrl-C stops them" if args.duration is None else ""))
+        stream_can_session(session, args.duration)
+        if not session.is_over:
+            session.call(CanMonitorCommand.PERIODIC, {"list": []})
+
+
+def command_can_replay(client: SmpClient, args: argparse.Namespace) -> None:
+    frames = read_candump_log(args.file, args.rx_only)
+    if not frames:
+        raise RuntimeError(f"{args.file} holds no frames")
+    records, previous_us = [], frames[0][0]
+    for time_us, frame in frames:
+        records.append(encode_can_frame_record(max(time_us - previous_us, 0), frame))
+        previous_us = time_us
+    chunk_limit = can_request_limit(client)
+    with can_session(client, args, transmit=True) as session:
+        arm_can_session(session)
+        answer = session.call(CanMonitorCommand.REPLAY, {"op": 0, "speed_pct": args.speed, "loop": args.loop})
+        # As many chunks in flight as the access point takes requests: one at a time, a 1000 frames/s capture
+        # outruns the link.
+        feeder = CanReplayFeeder(session, records, chunk_limit, answer["room"], client.link.image_window)
+        print(f"replaying {len(frames)} frames, {(frames[-1][0] - frames[0][0]) / 1e6:.1f} s of capture, at "
+              f"{args.speed} %" + ("; looping until Ctrl-C" if args.loop and args.duration is None else ""))
+
+        def tick() -> bool:
+            feeder.feed()
+            return session.report.replay_done
+
+        stream_can_session(session, args.duration, tick)
+        if not session.is_over and not session.report.replay_done:
+            session.call(CanMonitorCommand.REPLAY, {"op": 2})
+
+
+def command_can_generate(client: None, args: argparse.Namespace) -> None:
+    with open_can_bus(args) as bus:
+        generator = CanGenerator(bus, args.fps, args.id, length=args.length, fd=args.fd)
+        generator.start()
+        print(f"generating {args.fps} frames/s of ID {format_can_id(args.id, args.id > CAN_STD_ID_MAX)} through "
+              f"{args.interface} {args.channel}" + ("; Ctrl-C stops" if args.duration is None else ""))
+        deadline_s = math.inf if args.duration is None else time.monotonic() + args.duration
+        try:
+            while generator.is_running and time.monotonic() < deadline_s:
+                time.sleep(min(1.0, max(deadline_s - time.monotonic(), 0.0)))
+        except KeyboardInterrupt:
+            pass
+        finally:
+            print(generator.stop())
+
+
+CAN_HANDLERS = {
+    "ports": command_can_ports,
+    "monitor": command_can_monitor,
+    "send": command_can_send,
+    "periodic": command_can_periodic,
+    "replay": command_can_replay,
+    "generate": command_can_generate,
+}
+
+
+def command_can(client: SmpClient | None, args: argparse.Namespace) -> None:
+    CAN_HANDLERS[args.can_command](client, args)
+
+
+def can_id_argument(text: str) -> int:
+    try:
+        value = int(text, 16)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is no hex CAN identifier") from None
+    if not 0 <= value <= CAN_EXT_ID_MAX:
+        raise argparse.ArgumentTypeError(f"{text!r} is past 29 bits")
+    return value
+
+
+def can_filter_argument(text: str) -> list:
+    """ID/MASK[/ext|std] in hex: a frame passes when its ID & MASK equals ID & MASK and its format is the filter's
+    (29-bit for ext, and for an ID past 0x7FF)."""
+    parts = text.split("/")
+    if len(parts) not in (2, 3) or (len(parts) == 3 and parts[2].lower() not in ("ext", "std")):
+        raise argparse.ArgumentTypeError(f"{text!r}: a filter is ID/MASK, ID/MASK/ext or ID/MASK/std")
+    can_id, mask = can_id_argument(parts[0]), can_id_argument(parts[1])
+    extended = parts[2].lower() == "ext" if len(parts) == 3 else can_id > CAN_STD_ID_MAX
+    return [can_id, mask, extended]
+
+
+def can_frame_argument(text: str) -> CanFrameSpec:
+    try:
+        return parse_can_frame(text)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from None
+
+
+def can_periodic_argument(text: str) -> tuple[CanFrameSpec, int, int | None]:
+    """FRAME@MS or FRAME@MSxN: the frame every MS ms, N times."""
+    frame_text, separator, timing = text.rpartition("@")
+    period_text, times, count_text = timing.partition("x")
+    try:
+        period, count = int(period_text), int(count_text) if times else None
+    except ValueError:
+        period, count = 0, None
+    if not separator or period < 1 or (count is not None and count < 0):
+        raise argparse.ArgumentTypeError(f"{text!r}: a periodic frame is FRAME@MS or FRAME@MSxN, MS at least 1")
+    return can_frame_argument(frame_text), period, count
+
+
+def can_synthetic_argument(text: str) -> dict:
+    """FPS:IDS:DLC[:ext][:fd], as OPEN's synthetic takes it."""
+    parts = text.split(":")
+    flags = {part.lower() for part in parts[3:]}
+    try:
+        fps, ids, dlc = (int(part) for part in parts[:3])
+    except ValueError:
+        fps = ids = dlc = -1
+    if (len(parts) < 3 or flags - {"ext", "fd"} or not 1 <= fps <= 200000 or not 1 <= ids <= 2048
+            or not 0 <= dlc <= (15 if "fd" in flags else 8)):
+        raise argparse.ArgumentTypeError(f"{text!r}: the synthetic source is FPS:IDS:DLC[:ext][:fd], FPS 1-200000, IDS "
+                                         "1-2048, DLC 0-8 (0-15 with fd)")
+    synthetic = {"fps": fps, "ids": ids, "dlc": dlc}
+    synthetic |= {flag: True for flag in sorted(flags)}
+    return synthetic
+
+
 def command_ble_scan(client: None, args: argparse.Namespace) -> None:
     bleak = require("bleak", "bleak")
 
@@ -3659,6 +4818,97 @@ def command_bench(client: SmpClient, args: argparse.Namespace) -> None:
           f"{timeouts} timeouts")
 
 
+def add_can_parsers(commands) -> None:
+    can_ = commands.add_parser("can", help="the CAN monitor (canmon group): ports, a port's frames over Bluetooth, "
+                                            "sending, periodic frames, replay, and a bus load generator")
+    can_commands = can_.add_subparsers(dest="can_command", required=True)
+    can_commands.add_parser("ports", help="the unit's CAN ports and what its monitor has (STATUS)")
+
+    session = argparse.ArgumentParser(add_help=False)
+    session.add_argument("--mode", choices=("auto", *CAN_MONITOR_MODES), default="auto",
+                         help="tap: a channel the unit's configuration runs, as it runs; listen, active: a port it "
+                              "does not use, on a bus of the session's own; auto (default): tap for a configured "
+                              "port, listen otherwise (active to transmit)")
+    session.add_argument("--type", dest="port_type", choices=tuple(CAN_MONITOR_TYPES),
+                         help="listen, active: the port's bus (default: classic)")
+    session.add_argument("--port-bitrate", type=int, metavar="B",
+                         help="listen, active: the port's bitrate; 0 or none detects it")
+    session.add_argument("--port-data-bitrate", type=int, metavar="B",
+                         help="listen, active, CAN FD: the data bitrate (default: the nominal one)")
+    session.add_argument("--filter", action="append", type=can_filter_argument, metavar="ID/MASK[/ext|std]",
+                         help="the unit passes only the frames whose ID & MASK equals ID & MASK (hex); repeatable")
+    session.add_argument("--delta", action="store_true", help="changed-bytes records, where the firmware has them")
+    session.add_argument("--out", type=Path, metavar="FILE",
+                         help="write the frames to FILE as a candump log, R or T (the unit's own) after each")
+    session.add_argument("--print-frames", action="store_true", help="print every frame")
+    session.add_argument("--duration", type=float, metavar="S",
+                         help="end after S seconds (default: Ctrl-C, or the replay's end; send: 1)")
+    session.add_argument("--expect", type=can_id_argument, metavar="ID",
+                         help="check the frame numbers of ID's frames, as `can generate` sends them")
+    session.add_argument("--generate", type=int, metavar="FPS",
+                         help="meanwhile send FPS frames a second through this host's CAN adapter (--interface, "
+                              "--channel, --bitrate) and check that they arrive")
+    session.add_argument("--generate-id", type=can_id_argument, default=CAN_GENERATOR_DEFAULT_ID, metavar="ID",
+                         help=f"the ID of the generated frames (hex, default {CAN_GENERATOR_DEFAULT_ID:X})")
+
+    monitor = can_commands.add_parser("monitor", parents=[session],
+                                      help="stream a port's frames, or the synthetic source's, with a line a second")
+    monitor.add_argument("port", nargs="?", type=int, help="the CAN port (the devicetree's can<N>)")
+    monitor.add_argument("--synthetic", type=can_synthetic_argument, metavar="FPS:IDS:DLC[:ext][:fd]",
+                         help="frames the unit generates with no bus (a bench build), to measure the link")
+    send = can_commands.add_parser("send", parents=[session], help="arm a session on a port and send frames")
+    send.add_argument("port", type=int)
+    send.add_argument("frames", nargs="+", type=can_frame_argument, metavar="FRAME",
+                      help="candump's notation: 123#DEADBEEF, 18DA00F1#00, 123#R4 (remote), 123##1AABBCC (CAN FD; "
+                           "1: BRS)")
+    periodic = can_commands.add_parser("periodic", parents=[session],
+                                       help="arm a session on a port and send frames periodically")
+    periodic.add_argument("port", type=int)
+    periodic.add_argument("frames", nargs="+", type=can_periodic_argument, metavar="FRAME@MS[xN]",
+                          help="FRAME every MS ms, N times (default: until the end)")
+    replay = can_commands.add_parser("replay", parents=[session],
+                                     help="arm a session on a port and replay a candump log through the unit")
+    replay.add_argument("port", type=int)
+    replay.add_argument("file", type=Path, help="a candump log: (seconds) interface frame [R|T] a line")
+    replay.add_argument("--speed", type=int, default=100, metavar="PCT", help="100 plays at the capture's pace")
+    replay.add_argument("--loop", action="store_true", help="start over at the end, while the whole replay fits the "
+                                                            "unit's buffer")
+    replay.add_argument("--rx-only", action="store_true",
+                        help="leave out the frames marked T (the unit's own, in a log of `can monitor --out`)")
+    generate = can_commands.add_parser("generate", help="no unit: load the bus through this host's CAN adapter "
+                                                         "(--interface, --channel, --bitrate) with numbered frames")
+    generate.add_argument("fps", type=int, help="frames a second")
+    generate.add_argument("--id", type=can_id_argument, default=CAN_GENERATOR_DEFAULT_ID, metavar="ID",
+                          help=f"hex (default {CAN_GENERATOR_DEFAULT_ID:X}); past 7FF a 29-bit ID")
+    generate.add_argument("--length", type=int, default=8, metavar="N", help="payload bytes (default 8)")
+    generate.add_argument("--duration", type=float, metavar="S", help="stop after S seconds (default: Ctrl-C)")
+
+
+def check_can_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    if args.can_command == "generate":
+        if args.fps < 1:
+            parser.error("FPS must be at least 1")
+        try:
+            can_dlc_of(args.length, args.fd)
+        except ValueError as error:
+            parser.error(f"--length: {error}")
+        return
+    if args.can_command == "ports":
+        return
+    if args.ble is None:
+        parser.error(f"can {args.can_command} needs --ble: the frames come over the access point's Bluetooth")
+    if args.route:
+        parser.error("the CAN monitor is the access point's own: leave out --route")
+    if args.can_command == "monitor" and (args.port is None) == (args.synthetic is None):
+        parser.error("can monitor takes a PORT or --synthetic")
+    if args.port is not None and not 0 <= args.port <= 254:
+        parser.error("PORT must be 0-254")
+    if args.can_command == "replay" and not 1 <= args.speed <= 10000:
+        parser.error("--speed must be 1-10000")
+    if args.generate is not None and args.generate < 1:
+        parser.error("--generate must be at least 1")
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     serial = parser.add_argument_group("serial transport")
@@ -3801,6 +5051,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     dfu = commands.add_parser("dfu", help="firmware update confirmation state of the unit")
     dfu_commands = dfu.add_subparsers(dest="dfu_command", required=True)
     dfu_commands.add_parser("status", help="confirmed or not, the confirmation state and the last reset's cause")
+    add_can_parsers(commands)
     ble_scan = commands.add_parser("ble-scan", help="list the access points in range (needs bleak)")
     ble_scan.add_argument("--time", type=float, default=DEFAULT_BLE_SCAN_TIMEOUT_S, help="scan seconds")
     ble_scan.add_argument("--all", action="store_true", help="list every device, not only access points")
@@ -3812,6 +5063,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     bench.add_argument("--count", type=int, default=50)
 
     args = parser.parse_args(argv)
+    if args.command == "can":
+        check_can_args(parser, args)
     if is_offline(args):
         return args
 
@@ -3884,6 +5137,7 @@ HANDLERS = {
     "logging": command_logging,
     "image": command_image,
     "dfu": command_dfu,
+    "can": command_can,
     "ble-scan": command_ble_scan,
     "shell": command_shell,
     "bench": command_bench,
@@ -3893,7 +5147,8 @@ OFFLINE_COMMANDS = ("config-encode", "config-decode", "ble-scan")
 
 def is_offline(args: argparse.Namespace) -> bool:
     """Whether the command talks to no unit: it then needs no transport."""
-    return args.command in OFFLINE_COMMANDS or (args.command == "image" and args.image_command == "info")
+    return (args.command in OFFLINE_COMMANDS or (args.command == "image" and args.image_command == "info")
+            or (args.command == "can" and args.can_command == "generate"))
 
 
 @contextlib.contextmanager
@@ -3908,12 +5163,7 @@ def open_link(args: argparse.Namespace) -> Iterator[SmpCanLink | SmpSerialLink |
             yield link
         return
 
-    can = require("can", "python-can")
-    bus_options = {"interface": args.interface, "channel": args.channel, "bitrate": args.bitrate}
-    if args.fd:
-        bus_options |= {"fd": True, "data_bitrate": args.data_bitrate}
-
-    with can.Bus(**bus_options) as bus:
+    with open_can_bus(args) as bus:
         yield SmpCanLink(bus, target=args.target, source=args.source, base=args.base, is_can_fd=args.fd,
                          bitrate=args.bitrate, data_bitrate=args.data_bitrate, share_percent=args.share)
 

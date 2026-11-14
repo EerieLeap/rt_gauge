@@ -18,6 +18,7 @@ import hashlib
 import io
 import os
 import pty
+import queue
 import random
 import select
 import shutil
@@ -150,6 +151,7 @@ class FakeUnit:
         self.wall_offset_ms: int | None = None
         self.drop_set_time = 0                      # SET_TIME requests it never answers.
         self.set_times: list[int] = []
+        self.can: FakeCanMonitor | None = None      # The canmon group (74), when the unit has one.
 
     @staticmethod
     def _slot(version, content: bytes, **flags) -> dict:
@@ -223,6 +225,8 @@ class FakeUnit:
             return {}
         if group == 72 and command == 0 and self.has_dfu:
             return self._dfu_status()
+        if group == 74 and self.can is not None:
+            return self.can.handle(command, body)
         return {"rc": client.MGMT_ERR_ENOTSUP}
 
     def _time(self, command: int, body: dict) -> dict:
@@ -350,6 +354,147 @@ class FakeUnit:
             return {"confirmed": False, "state": 2, "confirm_in_ms": 1000 * (5 - self.dfu_polls),
                     "reset_cause": self.reset_cause}
         return {"confirmed": False, "state": 1, "reset_cause": self.reset_cause}
+
+
+CAN_LENGTHS = (0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 20, 24, 32, 48, 64)
+
+
+def leb(value: int) -> bytes:
+    """An unsigned LEB128, written here apart from the client's encoder."""
+    out = bytearray()
+    while True:
+        byte, value = value & 0x7F, value >> 7
+        out.append(byte | (0x80 if value else 0))
+        if not value:
+            return bytes(out)
+
+
+def frame_record(dt: int, can_id: int, data: bytes = b"", *, ide: bool = False, fdf: bool = False, brs: bool = False,
+                 rtr: bool = False, esi: bool = False, tx: bool = False, failed: bool = False,
+                 dlc: int | None = None) -> bytes:
+    """A kind 0 record as rt_core's EncodeFrame() writes it."""
+    dlc = CAN_LENGTHS.index(len(data)) if dlc is None else dlc
+    flags = (1 if rtr else 0) | (2 if esi else 0) | (4 if tx else 0) | (8 if failed else 0)
+    head = dlc | (0x10 if ide else 0) | (0x20 if fdf else 0) | (0x40 if brs else 0)
+    out = bytes([head | 0x80, flags]) if flags else bytes([head])
+    return out + leb(dt) + can_id.to_bytes(4 if ide else 2, "little") + (b"" if rtr else data)
+
+
+def changed_record(dt: int, can_id: int, data: bytes, previous: bytes, *, ide: bool = False) -> bytes:
+    """A kind 1 record: a mask byte for each 8 payload bytes, then the bytes that differ from @p previous."""
+    masks, changed = bytearray((len(data) + 7) // 8), bytearray()
+    for index, (now, before) in enumerate(zip(data, previous)):
+        if now != before:
+            masks[index // 8] |= 1 << index % 8
+            changed.append(now)
+    head = CAN_LENGTHS.index(len(data)) | (0x10 if ide else 0) | (0x20 if len(data) > 8 else 0) | 0x80
+    return bytes([head, 0x10]) + leb(dt) + can_id.to_bytes(4 if ide else 2, "little") + bytes(masks) + bytes(changed)
+
+
+def other_record(kind: int, body: bytes) -> bytes:
+    return bytes([0x80, kind << 4]) + leb(0) + body
+
+
+def stats_record(values: list[int]) -> bytes:
+    return other_record(3, b"".join(leb(value) for value in values))
+
+
+def notification(records: list[bytes], *, seq: int = 0, base_us: int = 1_000_000, port: int = 0) -> bytes:
+    return struct.pack("<BBHQB", 1, port, seq, base_us, len(records)) + b"".join(records)
+
+
+class FakeCanMonitor:
+    """The canmon group of an access point, as rt_core serves it, with one session. Each STATS lets out the next of
+    `batches` as a notification; SEND echoes its frames as the unit's own; the replay buffer plays 200 B a STATS."""
+
+    TOKEN = 0x1234ABCD
+
+    def __init__(self, *, tx: bool = True, synthetic: bool = True, capacity: int = 1024) -> None:
+        self.ports = [{"ch": 0, "types": [1, 2], "configured": True, "state": 0, "bitrate": 500000,
+                       "data_bitrate": 0, "session": False}]
+        self.tx, self.synthetic = tx, synthetic
+        self.listening = False
+        self.session: dict | None = None
+        self.requests: list[tuple[int, dict]] = []
+        self.outbox: list[bytes] = []
+        self.batches: list[list[bytes]] = []
+        self.seq = 0
+        self.port = 0
+        self.capacity = self.room = capacity
+        self.replay_seq = 0
+        self.no_room_once = False
+        self.refuse_open: int | None = None
+
+    @staticmethod
+    def error(rc: int) -> dict:
+        return {"err": {"group": 74, "rc": rc}}
+
+    def emit(self, records: list[bytes]) -> None:
+        self.outbox.append(notification(records, seq=self.seq, port=self.port))
+        self.seq = (self.seq + 1) & 0xFFFF
+
+    def handle(self, command: int, body: dict) -> dict:
+        self.requests.append((command, body))
+        if command == 0:
+            return {"version": 1, "ports": self.ports, "filters_max": 16, "ring_bytes": 262144,
+                    "notify_max": 495 if self.listening else 0, "tx": self.tx, "synthetic": self.synthetic,
+                    "delta": False}
+        if command == 1:
+            if self.refuse_open is not None:
+                return self.error(self.refuse_open)
+            if not self.listening:
+                return self.error(8)
+            synthetic = "synthetic" in body
+            self.session, self.port = {"armed": False, "replay": False}, 255 if synthetic else body["ch"]
+            return {"tok": self.TOKEN, "ch": self.port, "mode": 0 if synthetic else body["mode"],
+                    "type": 0 if synthetic else 1, "bitrate": 0 if synthetic else 500000, "data_bitrate": 0,
+                    "lease_ms": 5000}
+        if self.session is None or body.get("tok") != self.TOKEN:
+            return self.error(2)
+        if command == 4:
+            if self.batches:
+                self.emit(self.batches.pop(0))
+            if self.session["replay"]:
+                self.room = min(self.capacity, self.room + 200)
+            return {"state": 0, "tec": 0, "rec": 0, "rx": 7, "tx": 0, "busy_us": 900, "errors": [0] * 5,
+                    "lost": [0] * 4, "filtered": 0}
+        if command == 2:
+            self.emit([stats_record([0] * 13), other_record(5, bytes([1]))])
+            self.session = None
+            return {}
+        if not self.tx:
+            return self.error(15)
+        if command == 5:
+            self.session["armed"] = body["on"]
+            return {"armed": body["on"], "share_pct": 50, "reserved": [[0x700, 0x763, False]]}
+        if not self.session["armed"]:
+            return self.error(10)
+        if command == 6:
+            self.emit([frame_record(0, can_id, data, ide=bool(flags & 1), tx=True)
+                       for can_id, flags, data in body["frames"]])
+            return {"sent": len(body["frames"]), "refused": 0}
+        if command == 7:
+            return {}
+        return self._replay(body)
+
+    def _replay(self, body: dict) -> dict:
+        if body["op"] == 0:
+            self.session["replay"], self.room, self.replay_seq = True, self.capacity, 0
+        elif body["op"] == 1:
+            if self.no_room_once:
+                self.no_room_once = False
+                return self.error(14)
+            if body["seq"] != self.replay_seq:
+                return self.error(16)
+            if len(body["data"]) > self.room:
+                return self.error(14)
+            self.replay_seq += 1
+            self.room -= len(body["data"])
+        elif body["op"] == 3:
+            self.emit([other_record(6, bytes([4]) + leb(self.replay_seq))])
+        else:
+            self.session["replay"], self.room = False, self.capacity
+        return {"room": self.room}
 
 
 class FakeLink:
@@ -847,7 +992,8 @@ class UpdateTest(ClientCase):
 
 
 class FakeBle:
-    """A stand-in for bleak: devices, a client, and an access point behind the smp characteristic."""
+    """A stand-in for bleak: devices, a client, and an access point behind the smp characteristic, whose bus
+    characteristic carries the stream of the unit's FakeCanMonitor."""
 
     def __init__(self, unit: FakeUnit, *, write_size: int = 30, notify_size: int = 23, window: int = 2,
                  max_packet: int = 512) -> None:
@@ -858,6 +1004,8 @@ class FakeBle:
         self.paired = 0
         self.connects = 0
         self.callback = None
+        self.bus_callback = None
+        self.has_bus = True
         self.client = None
         self.scans: list[str] = []
         fake = self
@@ -868,9 +1016,14 @@ class FakeBle:
         class Characteristic:
             max_write_without_response_size = fake.write_size
 
+            def __init__(self, uuid: str) -> None:
+                self.uuid = uuid
+
         class Services:
             def get_characteristic(self, uuid):
-                return Characteristic() if uuid == client.BLE_SMP_UUID else None
+                if uuid == client.BLE_SMP_UUID or (uuid == client.BLE_BUS_UUID and fake.has_bus):
+                    return Characteristic(uuid)
+                return None
 
         class Client:
             mtu_size = 247
@@ -895,7 +1048,12 @@ class FakeBle:
                 return bytearray(fake.info)
 
             async def start_notify(self, characteristic, callback):
-                fake.callback = callback
+                if characteristic.uuid == client.BLE_BUS_UUID:
+                    fake.bus_callback = callback
+                    if fake.unit.can is not None:
+                        fake.unit.can.listening = True
+                else:
+                    fake.callback = callback
 
             async def write_gatt_char(self, characteristic, data, response=None):
                 assert response is False
@@ -941,6 +1099,11 @@ class FakeBle:
             del self.stream[:1 + size]
             for response in self.unit.handle(packet):
                 self.notify(route, response)
+            # What the request let out of the unit's stream follows its answer.
+            while self.unit.can is not None and self.unit.can.outbox:
+                notification = self.unit.can.outbox.pop(0)
+                if self.bus_callback is not None:
+                    self.bus_callback(None, bytearray(notification))
 
     def notify(self, route: int, packet: bytes) -> None:
         data = bytes([route]) + packet
@@ -1507,6 +1670,405 @@ class TimeTest(ClientCase):
                 run(client.command_time, self.smp, **options)
 
 
+class CanRecordsTest(unittest.TestCase):
+    """The stream's records against an encoder written here from rt_core's docs/can_monitor.md."""
+
+    def decode(self, *notifications: bytes) -> tuple[client.CanStreamDecoder, list[client.CanRecord]]:
+        decoder = client.CanStreamDecoder()
+        records = [record for data in notifications for record in decoder.decode(data)]
+        return decoder, records
+
+    def test_every_kind_and_its_time(self) -> None:
+        fd_payload = bytes(range(12))
+        _, records = self.decode(notification([
+            frame_record(5, 0x123, bytes(range(8))),
+            frame_record(200, 0x18DA00F1, fd_payload, ide=True, fdf=True, brs=True),
+            frame_record(0, 0x7FF, rtr=True, dlc=3),
+            frame_record(10, 0x100, b"\x01", tx=True, failed=True),
+            other_record(2, bytes([3, 255, 7]) + leb(500000)),
+            stats_record(list(range(1, 14))),
+            other_record(4, leb(300) + bytes([1])),
+            other_record(5, bytes([4])),
+            other_record(6, bytes([3]) + leb(2)),
+            other_record(7, bytes([2])),
+        ], base_us=1000))
+        kinds = [record.kind for record in records]
+        self.assertEqual(kinds, [0, 0, 0, 0, 2, 3, 4, 5, 6, 7])
+        self.assertEqual([record.time_us for record in records[:4]], [1005, 1205, 1205, 1215])
+        self.assertEqual(records[0].frame_text(), "123#0001020304050607")
+        self.assertEqual(records[1].frame_text(), "18DA00F1##1" + fd_payload.hex().upper())
+        self.assertEqual(records[2].frame_text(), "7FF#R3")
+        self.assertTrue(records[3].tx and records[3].tx_failed)
+        self.assertEqual((records[4].state, records[4].tec, records[4].rec, records[4].bitrate), (3, 255, 7, 500000))
+        self.assertEqual(records[5].values, tuple(range(1, 14)))
+        self.assertEqual((records[6].count, records[6].code), (300, 1))
+        self.assertEqual((records[7].code, records[8].code, records[8].count, records[9].code), (4, 3, 2, 2))
+        self.assertTrue(all(record.time_us == 1215 for record in records[4:]))
+
+    def test_leb128_at_its_limits(self) -> None:
+        for value in (0, 127, 128, 16383, 16384, 2**63, 2**64 - 1):
+            self.assertEqual(client.encode_leb128(value), leb(value))
+            self.assertEqual(client.decode_leb128(b"\xff" + leb(value), 1), (value, 1 + len(leb(value))))
+        for bad in (b"\x80" * 10 + b"\x00", b"\xff" * 9 + b"\x02", b"\x80\x80"):
+            with self.assertRaises(client.CanRecordError):
+                client.decode_leb128(bad, 0)
+
+    def test_changed_bytes_are_rebuilt_and_gap_and_tap_empty_the_table(self) -> None:
+        first, second, third = bytes(range(8)), bytes([0, 9, 2, 3, 4, 5, 6, 0xEE]), bytes([7] * 8)
+        decoder, records = self.decode(notification([
+            frame_record(1, 0x10, first),
+            changed_record(1, 0x10, second, first),
+            other_record(4, leb(1) + bytes([1])),
+            changed_record(1, 0x10, third, second),
+            frame_record(1, 0x10, third),
+            other_record(7, bytes([1])),
+            changed_record(1, 0x10, second, third),
+        ]))
+        self.assertEqual(records[1].data, second)
+        self.assertIsNone(records[3].data)
+        self.assertEqual(records[3].frame_text(), "010#??")
+        self.assertIsNone(records[6].data)
+        self.assertEqual(decoder.unknown_changes, 2)
+
+    def test_seq_holes(self) -> None:
+        decoder, _ = self.decode(*(notification([], seq=seq) for seq in (65534, 65535, 0, 4)))
+        self.assertEqual(decoder.seq_holes, 3)
+
+    def test_malformed_notifications(self) -> None:
+        for data in (b"\x01\x00", notification([frame_record(0, 1, b"\x01")])[:-1],
+                     notification([frame_record(0, 1, b"\x01")]) + b"\x00",
+                     notification([bytes([0x81, 0x20, 0, 0, 0, 0])]),
+                     notification([frame_record(0, 0xFFFF, b"\x01")]),
+                     bytes([2]) + notification([])[1:]):
+            with self.subTest(data=data.hex()), self.assertRaises(client.CanRecordError):
+                client.CanStreamDecoder().decode(data)
+
+    def test_frames_in_candumps_notation(self) -> None:
+        frame = client.parse_can_frame("123#DEADBEEF")
+        self.assertEqual((frame.can_id, frame.extended, frame.data, frame.flags),
+                         (0x123, False, bytes.fromhex("DEADBEEF"), 0))
+        self.assertEqual(client.parse_can_frame("18DA00F1#00").flags, 1)
+        remote = client.parse_can_frame("123#R4")
+        self.assertEqual((remote.data, remote.flags, str(remote)), (bytes(4), 8, "123#R4"))
+        fd = client.parse_can_frame("123##1" + "AB" * 12)
+        self.assertEqual((fd.flags, len(fd.data), str(fd)), (6, 12, "123##1" + "AB" * 12))
+        self.assertEqual(str(client.parse_can_frame("00000123#11.22")), "00000123#1122")
+        for bad in ("123#" + "00" * 9, "800#00", "123##1" + "00" * 10, "xyz#00", "123", "123#R9", "123#0"):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                client.parse_can_frame(bad)
+
+    def test_replay_records_byte_for_byte(self) -> None:
+        self.assertEqual(client.encode_can_frame_record(5, client.parse_can_frame("123#0001020304050607")),
+                         bytes([0x08, 0x05, 0x23, 0x01]) + bytes(range(8)))
+        self.assertEqual(client.encode_can_frame_record(200, client.parse_can_frame("18DA00F1##1" + "00" * 12)),
+                         bytes([0x79, 0xC8, 0x01, 0xF1, 0x00, 0xDA, 0x18]) + bytes(12))
+        self.assertEqual(client.encode_can_frame_record(0, client.parse_can_frame("7FF#R4")),
+                         bytes([0x84, 0x01, 0x00, 0xFF, 0x07]))
+
+    def test_candump_logs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "capture.log"
+            path.write_text("# a comment\n(1700000000.000100) can0 123#00 R\n(1700000000.5) can1 00000456#R T\n"
+                            "\n(1700000001.000000) vcan0 123##0" + "11" * 16 + "\n")
+            frames = client.read_candump_log(path)
+            self.assertEqual([time_us for time_us, _ in frames], [1700000000000100, 1700000000500000, 1700000001000000])
+            self.assertEqual([str(frame) for _, frame in frames], ["123#00", "00000456#R", "123##0" + "11" * 16])
+            self.assertEqual(len(client.read_candump_log(path, rx_only=True)), 2)
+            path.write_text("(1.0) can0 123#00\n123#00\n")
+            with self.assertRaisesRegex(RuntimeError, "capture.log:2: not a candump log line"):
+                client.read_candump_log(path)
+
+    def test_counter_check(self) -> None:
+        check = client.CanCounterCheck(0x123)
+        for number in (0, 1, 2, 5, 3, 6):
+            check.add(client.CanRecord(client.CanRecordKind.FRAME, 0, can_id=0x123,
+                                       data=client.generated_payload(number, 8)))
+        check.add(client.CanRecord(client.CanRecordKind.FRAME, 0, can_id=0x124, data=bytes(8)))
+        check.add(client.CanRecord(client.CanRecordKind.FRAME, 0, can_id=0x123, data=bytes(12)))
+        self.assertEqual((check.checked, check.missing, check.repeated, check.foreign), (6, 2, 1, 1))
+        self.assertEqual(client.generated_payload(0x0102, 12),
+                         bytes([2, 1, 0, 0, 0, 0, 0, 0]) + bytes(0xA5 ^ index for index in range(8, 12)))
+
+
+class CanMonitorTest(ClientCase):
+    """The can commands through the fake bleak against a FakeCanMonitor."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        patcher = mock.patch.multiple(client, CAN_MONITOR_STATS_INTERVAL_S=0.01, CAN_MONITOR_END_WAIT_S=0.5,
+                                      CAN_MONITOR_TICK_S=0.005, CAN_REPLAY_RETRY_S=0.001)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.can = self.unit.can = FakeCanMonitor()
+        self.fake = FakeBle(self.unit)
+
+    def command(self, handler, **options) -> tuple[str, str]:
+        defaults = dict(port=0, mode="auto", port_type=None, port_bitrate=None, port_data_bitrate=None, filter=None,
+                        delta=False, out=None, print_frames=False, duration=0.05, expect=None, generate=None,
+                        generate_id=0x123, synthetic=None)
+        with self.fake.installed():
+            link = client.SmpBleLink("EerieLeap Gauge", scan_timeout_s=1.0)
+            self.addCleanup(link.close)
+            return run(handler, client.SmpClient(link, 1.0, 1), **(defaults | options))
+
+    def commands(self, number: int | None = None) -> list:
+        return [command if number is None else body for command, body in self.can.requests
+                if number is None or command == number]
+
+    def test_monitor_keeps_the_lease_logs_and_closes(self) -> None:
+        self.can.batches = [[frame_record(100, 0x123, bytes(range(8))), stats_record([1, 0, 230] + [0] * 10)],
+                            [frame_record(50, 0x18DA00F1, b"\x01", ide=True), frame_record(1, 0x100, b"\x02", tx=True)]]
+        log = self.tmp / "can.log"
+        out, _ = self.command(client.command_can_monitor, out=log, duration=0.1)
+        self.assertEqual(self.commands()[:2], [0, 1])
+        self.assertEqual(self.commands(1), [{"ch": 0, "mode": 0}])
+        self.assertGreaterEqual(self.commands().count(4), 2)
+        self.assertEqual(self.commands()[-1], 2)
+        self.assertTrue(all(body["tok"] == FakeCanMonitor.TOKEN for body in self.commands(4) + self.commands(2)))
+        self.assertIn("session 1234abcd on port 0 (tap, classical CAN, 500000 bit/s), lease 5000 ms", out)
+        self.assertIn("ended: closed", out)
+        self.assertIn("3 frames", out)
+        self.assertEqual(log.read_text(), "(0000000001.000100) can0 123#0001020304050607 R\n"
+                                          "(0000000001.000050) can0 18DA00F1#01 R\n"
+                                          "(0000000001.000051) can0 100#02 T\n")
+
+    def test_synthetic_frames_are_counted_against_the_gaps(self) -> None:
+        frames = [frame_record(10, number % 4, number.to_bytes(8, "little")) for number in range(20)]
+        self.can.batches = [frames[:5] + [other_record(4, leb(3) + bytes([1]))] + frames[8:]]
+        synthetic = {"fps": 1000, "ids": 4, "dlc": 8}
+        out, _ = self.command(client.command_can_monitor, port=None, synthetic=synthetic)
+        self.assertEqual(self.commands(1), [{"synthetic": synthetic}])
+        self.assertIn("on the synthetic source", out)
+        self.assertIn("gap: 3 frames lost (ring)", out)
+        self.assertIn("counter check (every frame): 17 frames, 3 missing in 1 hole, 0 repeated, 0 not the generator's; "
+                      "the gap records count 3 frames lost (all of them)", out)
+
+    def test_frames_lost_after_the_last_one_received_are_told_apart(self) -> None:
+        frames = [frame_record(10, number % 4, number.to_bytes(8, "little")) for number in range(10)]
+        gap = [other_record(4, leb(2) + bytes([1]))]
+        self.can.batches = [frames[:5] + gap + frames[7:] + [other_record(4, leb(6) + bytes([1]))]]
+        out, _ = self.command(client.command_can_monitor, port=None, synthetic={"fps": 1000, "ids": 4, "dlc": 8})
+        self.assertIn("8 frames, 2 missing in 1 hole, 0 repeated, 0 not the generator's; the gap records count 8 frames "
+                      "lost, 6 of them after the last frame received", out)
+
+    def test_missing_frames_without_a_gap_record_never_reached_the_unit(self) -> None:
+        self.can.batches = [[frame_record(10, 0x123, number.to_bytes(8, "little")) for number in (0, 1, 2, 5, 6)]]
+        out, _ = self.command(client.command_can_monitor, expect=0x123)
+        self.assertIn("5 frames, 2 missing in 1 hole", out)
+        self.assertIn("2 of the missing frames have no gap record: the unit never received them", out)
+
+    def test_holes_are_counted_beside_the_controller_overruns(self) -> None:
+        def frames(numbers):
+            return [frame_record(10, number % 4, number.to_bytes(8, "little")) for number in numbers]
+
+        # The gap record comes before frames the controller still held: an overrun is counted after them.
+        overrun = [other_record(4, leb(1) + bytes([3]))]
+        self.can.batches = [frames(range(3)) + overrun + frames(range(3, 5)) + frames(range(10, 15))
+                            + frames(range(18, 20))]
+        out, _ = self.command(client.command_can_monitor, port=None, synthetic={"fps": 1000, "ids": 4, "dlc": 8})
+        self.assertIn("12 frames, 8 missing in 2 holes, 0 repeated", out)
+        self.assertIn("controller: 1 overrun, each counted once however many frames it dropped; the holes hold 4.0 "
+                      "frames on average", out)
+
+    def test_gaps_are_summed_until_the_next_statistics_line(self) -> None:
+        self.can.batches = [[other_record(4, leb(2) + bytes([1])), other_record(4, leb(3) + bytes([1])),
+                             stats_record([0] * 13)]]
+        out, _ = self.command(client.command_can_monitor)
+        self.assertIn("gap: 5 frames lost in 2 gaps (ring)\n", out)
+        self.assertLess(out.index("gap: 5"), out.index("rx/s"))
+        self.assertNotIn("gap: 2 frames", out)
+
+    def test_refusals_and_missing_parts_are_named(self) -> None:
+        self.can.refuse_open = 4
+        with self.assertRaisesRegex(client.SmpError, "BUSY"):
+            self.command(client.command_can_monitor)
+        self.can.refuse_open = None
+        self.can.tx = False
+        with self.assertRaisesRegex(RuntimeError, "no CAN monitor transmit"):
+            self.command(client.command_can_send, frames=[client.parse_can_frame("123#00")])
+        self.fake.has_bus = False
+        with self.assertRaisesRegex(RuntimeError, "no bus characteristic"):
+            self.command(client.command_can_monitor)
+
+    def test_a_port_the_unit_does_not_have(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "no CAN port 3; it has 0"):
+            self.command(client.command_can_monitor, port=3)
+
+    def test_a_generator_at_another_bitrate_is_refused_before_open(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "port 0 runs at 500000 bit/s, the adapter at 1000000 bit/s"):
+            self.command(client.command_can_monitor, generate=100, bitrate=1000000, fd=False, data_bitrate=0)
+        self.assertEqual(self.commands(1), [])
+
+    def test_generated_frames_before_the_first_one_received_are_told(self) -> None:
+        class Generator:
+            def __init__(self, *args, **kwargs) -> None:
+                pass
+
+            def start(self) -> None:
+                pass
+
+            @staticmethod
+            def stop() -> str:
+                return "generator: 9 frames"
+
+        self.can.batches = [[frame_record(10, 0x123, number.to_bytes(8, "little")) for number in range(3, 9)]]
+        with mock.patch.object(client, "open_can_bus", lambda args: contextlib.nullcontext()), \
+                mock.patch.object(client, "CanGenerator", Generator):
+            out, _ = self.command(client.command_can_monitor, generate=100, bitrate=500000, fd=False, data_bitrate=0,
+                                  interface="slcan", channel="COM6")
+        self.assertIn("counter check (ID 123): 6 frames, 0 missing, 0 repeated", out)
+        self.assertIn("the first frame received was number 3: the 3 sent before it are missing too", out)
+
+    def test_auto_mode_follows_the_configuration(self) -> None:
+        self.can.ports[0]["configured"] = False
+        self.command(client.command_can_monitor, port_bitrate=0)
+        self.command(client.command_can_periodic, frames=[client.can_periodic_argument("123#00@10")], duration=0.01)
+        self.assertEqual(self.commands(1), [{"ch": 0, "mode": 1, "bitrate": 0}, {"ch": 0, "mode": 2}])
+
+    def test_send_arms_first_and_sends_16_frames_a_request(self) -> None:
+        frames = [client.parse_can_frame(f"{0x100 + number:03X}#{number:02X}") for number in range(20)]
+        out, _ = self.command(client.command_can_send, frames=frames, duration=0.02)
+        self.assertLess(self.commands().index(5), self.commands().index(6))
+        self.assertEqual([len(body["frames"]) for body in self.commands(6)], [16, 4])
+        self.assertEqual(self.commands(6)[0]["frames"][0], [0x100, 0, b"\x00"])
+        self.assertIn("armed: up to 50 % of the bus time; reserved IDs 700-763", out)
+        self.assertIn("sent 20 of 20 frames", out)
+        self.assertIn("TX         113#13", out)
+
+    def test_periodic_frames_and_their_stop(self) -> None:
+        specs = [client.can_periodic_argument("123#11@100"), client.can_periodic_argument("18DA00F1#2233@10x5")]
+        self.command(client.command_can_periodic, frames=specs, duration=0.03)
+        lists = [body["list"] for body in self.commands(7)]
+        self.assertEqual(lists[0], [{"slot": 0, "id": 0x123, "flags": 0, "data": b"\x11", "period_ms": 100},
+                                    {"slot": 1, "id": 0x18DA00F1, "flags": 1, "data": b"\x22\x33", "period_ms": 10,
+                                     "count": 5}])
+        self.assertEqual(lists[-1], [])
+
+    def test_replay_keeps_the_buffer_filled_and_waits_for_the_end(self) -> None:
+        lines = [f"(1700000000.{number * 10000:06d}) can0 {0x200 + number % 3:03X}#{number:016X} "
+                 f"{'T' if number == 7 else 'R'}" for number in range(40)]
+        path = self.tmp / "capture.log"
+        path.write_text("\n".join(lines) + "\n")
+        self.can.capacity = 100
+        self.can.no_room_once = True
+        out, _ = self.command(client.command_can_replay, file=path, speed=200, loop=False, rx_only=True, duration=5.0)
+        replay = self.commands(8)
+        self.assertEqual((replay[0]["op"], replay[0]["speed_pct"], replay[0]["loop"]), (0, 200, False))
+        self.assertTrue(all(len(body["data"]) <= 100 for body in replay if body["op"] == 1))
+        # The last chunk of a seq is the one the unit took (the first was refused for room).
+        accepted = {body["seq"]: body["data"] for body in replay if body["op"] == 1}
+        self.assertEqual(sorted(accepted), list(range(len(accepted))))
+        self.assertEqual(replay[-1]["op"], 3)
+        data = b"".join(accepted[seq] for seq in sorted(accepted))
+        records = client.CanStreamDecoder().decode(struct.pack("<BBHQB", 1, 0, 0, 0, 39) + data)
+        numbers = [number for number in range(40) if number != 7]
+        self.assertEqual([record.can_id for record in records], [0x200 + number % 3 for number in numbers])
+        self.assertEqual([int.from_bytes(record.data, "big") for record in records], numbers)
+        self.assertEqual(records[7].time_us - records[6].time_us, 20000)
+        self.assertIn("replaying 39 frames, 0.4 s of capture, at 200 %", out)
+        self.assertIn("tx: replay done", out)
+
+    def test_replay_chunks_go_a_window_at_a_time(self) -> None:
+        class DeferredLink(FakeLink):
+            """Answers only when the client reads, so the requests sent before a read were in flight together."""
+
+            def __init__(self, unit: FakeUnit, window: int) -> None:
+                super().__init__(unit, window)
+                self.waiting: collections.deque[bytes] = collections.deque()
+                self.most_in_flight = 0
+
+            def send(self, packet: bytes) -> None:
+                self.waiting.append(packet)
+                self.most_in_flight = max(self.most_in_flight, len(self.waiting))
+
+            def receive(self, timeout_s: float) -> bytes | None:
+                while self.waiting:
+                    self.inbox.extend(self.unit.handle(self.waiting.popleft()))
+                return super().receive(timeout_s)
+
+        link = DeferredLink(self.unit, 3)
+        session = client.CanMonitorSession(client.SmpClient(link, 1.0, 0), queue.Queue(), client.CanStreamReport())
+        self.can.listening, self.can.capacity = True, 10_000
+        session.open({"ch": 0, "mode": 2})
+        session.call(client.CanMonitorCommand.ARM, {"on": True})
+        room = session.call(client.CanMonitorCommand.REPLAY, {"op": 0, "speed_pct": 100, "loop": False})["room"]
+        # The first chunk finds no room, and the two behind it are out of order: the feeder starts again from it.
+        self.can.no_room_once = True
+        records = [client.encode_can_frame_record(10, client.parse_can_frame(f"123#{number:016X}"))
+                   for number in range(60)]
+        feeder = client.CanReplayFeeder(session, records, 100, room, window=3)
+        while not feeder.finished:
+            feeder.feed()
+        self.assertEqual(link.most_in_flight, 3)
+        chunks = [body for body in self.commands(8) if body["op"] == 1]
+        self.assertEqual([body["seq"] for body in chunks[:3]], [0, 1, 2])
+        self.assertTrue(all(len(body["data"]) <= 100 for body in chunks))
+        accepted = {body["seq"]: body["data"] for body in chunks}
+        self.assertEqual(sorted(accepted), list(range(len(accepted))))
+        self.assertEqual(b"".join(accepted[seq] for seq in sorted(accepted)), b"".join(records))
+        self.assertEqual(self.commands(8)[-1]["op"], 3)
+
+    def test_ports(self) -> None:
+        out, _ = run(client.command_can_ports, client.SmpClient(FakeLink(self.unit), 0.1, 0))
+        self.assertIn("notifications up to 0 B; firmware has tx, synthetic", out)
+        self.assertIn("port 0: classical CAN and CAN FD; configured; error-active; 500000 bit/s; free", out)
+        out, _ = self.command(client.command_can_ports)
+        self.assertIn("notifications up to 495 B", out)
+        self.unit.can = None
+        with self.assertRaisesRegex(client.SmpError, "no CAN monitor"):
+            run(client.command_can_ports, client.SmpClient(FakeLink(self.unit), 0.1, 0))
+
+
+class CanGeneratorTest(unittest.TestCase):
+    def test_numbered_frames_at_the_rate(self) -> None:
+        sent = []
+
+        class Bus:
+            @staticmethod
+            def send(message, timeout=None) -> None:
+                sent.append(message)
+
+            @staticmethod
+            def recv(timeout=None):
+                return None
+
+        can = types.ModuleType("can")
+        can.Message = lambda **fields: types.SimpleNamespace(**fields)
+        can.CanError = type("CanError", (Exception,), {})
+        with mock.patch.dict(sys.modules, {"can": can}):
+            generator = client.CanGenerator(Bus(), 1000, 0x18DA00F1)
+            generator.start()
+            time.sleep(0.2)
+            summary = generator.stop()
+        self.assertTrue(100 <= len(sent) <= 400, len(sent))
+        self.assertEqual([message.data for message in sent[:3]], [client.generated_payload(n, 8) for n in range(3)])
+        self.assertEqual((sent[0].arbitration_id, sent[0].is_extended_id, sent[0].is_fd), (0x18DA00F1, True, False))
+        self.assertIn(f"{len(sent)} frames of ID 18DA00F1 handed to the adapter", summary)
+
+    def test_a_coarse_sleep_keeps_the_rate(self) -> None:
+        sent = []
+
+        class Bus:
+            @staticmethod
+            def send(message, timeout=None) -> None:
+                sent.append(message)
+
+            @staticmethod
+            def recv(timeout=None):
+                return None
+
+        can = types.ModuleType("can")
+        can.Message = lambda **fields: types.SimpleNamespace(**fields)
+        can.CanError = type("CanError", (Exception,), {})
+        # 64 frames a 30 ms pass would be about 2,100 a second.
+        with mock.patch.dict(sys.modules, {"can": can}), mock.patch.object(client, "CAN_GENERATOR_PAUSE_S", 0.03):
+            generator = client.CanGenerator(Bus(), 4000, 0x123)
+            generator.start()
+            time.sleep(0.3)
+            generator.stop()
+        self.assertGreater(len(sent) / generator.elapsed_s, 3000)
+
+
 class ArgumentTest(unittest.TestCase):
     def parse(self, *argv: str) -> argparse.Namespace:
         with contextlib.redirect_stderr(io.StringIO()) as err:
@@ -1572,6 +2134,24 @@ class ArgumentTest(unittest.TestCase):
                       self.rejected("--serial", "/dev/null", "image", "upload", "f", "--in-flight", "0"))
         args = self.parse("--serial", "/dev/null", "image", "test", "ab" * 32)
         self.assertEqual(args.hash, bytes.fromhex("ab" * 32))
+
+    def test_can_commands(self) -> None:
+        args = self.parse("--ble", "x", "can", "monitor", "0", "--filter", "123/7FF", "--filter", "18DA0000/1FFF0000",
+                          "--filter", "10/7F0/ext")
+        self.assertEqual(args.filter, [[0x123, 0x7FF, False], [0x18DA0000, 0x1FFF0000, True], [0x10, 0x7F0, True]])
+        self.assertEqual(self.parse("--ble", "x", "can", "monitor", "--synthetic", "5000:4:15:fd").synthetic,
+                         {"fps": 5000, "ids": 4, "dlc": 15, "fd": True})
+        self.assertIn("needs --ble", self.rejected("--serial", "/dev/null", "can", "monitor", "0"))
+        self.assertIn("leave out --route", self.rejected("--ble", "x", "--route", "3", "can", "send", "0", "123#00"))
+        self.assertIn("a PORT or --synthetic",
+                      self.rejected("--ble", "x", "can", "monitor", "0", "--synthetic", "1:1:1"))
+        self.assertIn("--speed must be", self.rejected("--ble", "x", "can", "replay", "0", "f.log", "--speed", "0"))
+        self.assertIn("ID/MASK", self.rejected("--ble", "x", "can", "monitor", "0", "--filter", "123"))
+        generate = self.parse("--interface", "slcan", "--channel", "/dev/ttyACM1", "can", "generate", "4000")
+        self.assertTrue(client.is_offline(generate))
+        self.assertEqual((generate.fps, generate.id, generate.length), (4000, 0x123, 8))
+        self.assertIn("--length", self.rejected("can", "generate", "100", "--length", "9"))
+        self.assertEqual(self.parse("--serial", "/dev/null", "can", "ports").can_command, "ports")
 
 
 if __name__ == "__main__":
