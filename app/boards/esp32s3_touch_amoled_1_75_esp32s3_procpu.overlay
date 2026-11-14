@@ -60,9 +60,8 @@
 		reg = <0>;
 		status = "okay";
 
-		// MCP2518FD maximum SPI frequency is 20 MHz
-		// But current temp setup is not stable at frequencies above 8 MHz
-		// TODO: Investigate
+		// The MCP2518FD's SPI clock is at most 0.85 * SYSCLK / 2: 8.5 MHz with the 20 MHz
+		// oscillator, and 8 MHz is the fastest 80 MHz / n below it.
 		spi-max-frequency = <8000000>;
 		int-gpios = <&gpio1 14 GPIO_ACTIVE_LOW>;
 		osc-freq = <20000000>;
