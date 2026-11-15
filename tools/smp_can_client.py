@@ -4252,6 +4252,7 @@ def command_can_send(client: SmpClient, args: argparse.Namespace) -> None:
     with can_session(client, args, transmit=True, print_tx=True) as session:
         arm_can_session(session)
         sent = 0
+        why = ""
         for start in range(0, len(args.frames), CAN_SEND_MAX_FRAMES):
             batch = args.frames[start:start + CAN_SEND_MAX_FRAMES]
             try:
@@ -4261,13 +4262,15 @@ def command_can_send(client: SmpClient, args: argparse.Namespace) -> None:
             except SmpError as error:
                 if error.group == Group.CAN_MONITOR and error.rc == CAN_MONITOR_RATE:     # None went.
                     answer = {"sent": 0, "refused": len(batch)}
+                    why = "the cap held back the rest"
                 else:
                     raise
             sent += answer["sent"]
             if answer["refused"]:
+                # A partial answer does not say which stopped it.
+                why = why or "the unit refused the rest (the cap, or its transmit queue was full)"
                 break
-        print(f"sent {sent} of {len(args.frames)} frames" + ("" if sent == len(args.frames) else "; the cap held back "
-                                                              "the rest"))
+        print(f"sent {sent} of {len(args.frames)} frames" + (f"; {why}" if why else ""))
         stream_can_session(session, 1.0 if args.duration is None else args.duration)
 
 
