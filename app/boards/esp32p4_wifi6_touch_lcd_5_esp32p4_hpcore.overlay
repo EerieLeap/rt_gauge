@@ -59,7 +59,7 @@
 		reg = <0>;
 		status = "okay";
 
-		/* Same rate as the S3; the MCP2518FD's maximum is 20 MHz. */
+		/* The MCP2518FD's SPI clock is at most 0.85 * SYSCLK / 2: 8.5 MHz with the 20 MHz oscillator. */
 		spi-max-frequency = <8000000>;
 		int-gpios = <&gpio0 3 GPIO_ACTIVE_LOW>;
 		osc-freq = <20000000>;
