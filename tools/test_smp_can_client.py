@@ -424,6 +424,7 @@ class FakeCanMonitor:
         self.replay_seq = 0
         self.no_room_once = False
         self.refuse_open: int | None = None
+        self.refuse_send: int | None = None
 
     @staticmethod
     def error(rc: int) -> dict:
@@ -470,6 +471,8 @@ class FakeCanMonitor:
         if not self.session["armed"]:
             return self.error(10)
         if command == 6:
+            if self.refuse_send is not None:
+                return self.error(self.refuse_send)
             self.emit([frame_record(0, can_id, data, ide=bool(flags & 1), tx=True)
                        for can_id, flags, data in body["frames"]])
             return {"sent": len(body["frames"]), "refused": 0}
@@ -1934,6 +1937,13 @@ class CanMonitorTest(ClientCase):
         self.assertIn("armed: up to 50 % of the bus time; reserved IDs 700-763", out)
         self.assertIn("sent 20 of 20 frames", out)
         self.assertIn("TX         113#13", out)
+
+    def test_a_send_that_none_went_out_of_says_why(self) -> None:
+        for rc, why in ((12, "the cap held back the rest"), (1, "its transmit queue stayed full")):
+            self.can.refuse_send = rc
+            out, _ = self.command(client.command_can_send, frames=[client.parse_can_frame("123#01")], duration=0.01)
+            self.assertIn("sent 0 of 1 frames; ", out)
+            self.assertIn(why, out)
 
     def test_periodic_frames_and_their_stop(self) -> None:
         specs = [client.can_periodic_argument("123#11@100"), client.can_periodic_argument("18DA00F1#2233@10x5")]

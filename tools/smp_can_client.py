@@ -369,6 +369,7 @@ CAN_MONITOR_ERRORS = {
     15: "TX_UNSUPPORTED: the firmware is built without transmit",
     16: "BAD_SEQ: a replay chunk out of order, or no replay running",
 }
+CAN_MONITOR_UNKNOWN = 1
 CAN_MONITOR_NO_SESSION = 2
 CAN_MONITOR_RATE = 12
 CAN_MONITOR_NO_ROOM = 14
@@ -4260,11 +4261,13 @@ def command_can_send(client: SmpClient, args: argparse.Namespace) -> None:
                 frames = [[frame.can_id, frame.flags, frame.data] for frame in batch]
                 answer = session.call(CanMonitorCommand.SEND, {"frames": frames}, retries=0)
             except SmpError as error:
-                if error.group == Group.CAN_MONITOR and error.rc == CAN_MONITOR_RATE:     # None went.
-                    answer = {"sent": 0, "refused": len(batch)}
-                    why = "the cap held back the rest"
-                else:
+                if error.group != Group.CAN_MONITOR or error.rc not in (CAN_MONITOR_RATE, CAN_MONITOR_UNKNOWN):
                     raise
+                # None went.
+                answer = {"sent": 0, "refused": len(batch)}
+                why = ("the cap held back the rest" if error.rc == CAN_MONITOR_RATE else
+                       "the controller took no more: its transmit queue stayed full (does any node acknowledge?) "
+                       "or the bus is not running")
             sent += answer["sent"]
             if answer["refused"]:
                 # A partial answer does not say which stopped it.
