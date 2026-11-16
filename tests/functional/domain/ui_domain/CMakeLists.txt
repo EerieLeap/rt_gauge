@@ -21,6 +21,8 @@ file(GLOB_RECURSE APP_SRC_UI_DOMAIN
   ${APP_SRC_UI_DOMAIN_DIR}/*.c
   ${APP_SRC_UI_DOMAIN_DIR}/*.cpp
 )
+# Needs rt_core's asset store, which this suite does not build.
+list(FILTER APP_SRC_UI_DOMAIN EXCLUDE REGEX "/images/image_asset_provider\\.cpp$")
 
 file(GLOB_RECURSE TEST_SOURCES src/*.c src/*.cpp)
 
