@@ -1230,6 +1230,7 @@ std::vector<uint8_t> ImageFile() {
 }
 
 // Whether an image object that shows a picture of the file's size is at or below @p object.
+// NOLINTNEXTLINE(misc-no-recursion): it walks a tree of objects.
 bool ShowsImageFile(lv_obj_t* object) {
     if(lv_obj_check_type(object, &lv_image_class)) {
         const void* source = lv_image_get_src(object);

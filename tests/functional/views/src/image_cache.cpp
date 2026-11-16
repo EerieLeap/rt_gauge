@@ -25,8 +25,6 @@ using eerie_leap::views::utilities::LoadedImage;
 namespace {
 
 constexpr size_t IMAGE_HEADER_SIZE = 12;
-// The two headers a compressed file starts with: the image header, then the compressed-data header.
-constexpr size_t COMPRESSED_HEAD_SIZE = 24;
 constexpr uint32_t SMALL_WIDTH = 8;
 constexpr uint32_t SMALL_HEIGHT = 6;
 
@@ -206,6 +204,9 @@ ZTEST(image_cache, test_a_compressed_file_is_refused_by_a_build_that_decompresse
 }
 #else
 namespace {
+
+// The two headers a compressed file starts with: the image header, then the compressed-data header.
+constexpr size_t COMPRESSED_HEAD_SIZE = 24;
 
 // Blocks python-lz4 wrote (lz4.block.compress with store_size=False) that expand to a repeating pattern and to zeros
 // by copying their own output: the matches an image of flat colour is made of.
