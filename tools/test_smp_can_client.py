@@ -152,6 +152,8 @@ class FakeUnit:
         self.drop_set_time = 0                      # SET_TIME requests it never answers.
         self.set_times: list[int] = []
         self.can: FakeCanMonitor | None = None      # The canmon group (74), when the unit has one.
+        self.refuse_writes: dict | None = None      # The answer (an assets error body) to every assets WRITE.
+        self.write_requests: list[dict] = []
 
     @staticmethod
     def _slot(version, content: bytes, **flags) -> dict:
@@ -214,6 +216,9 @@ class FakeUnit:
         if group == 70 and command == 2 and self.log is not None and body["name"] == self.log.name:
             reply = self.log.read(body)
             return self._error(70, reply["err"]) if "err" in reply else reply
+        if (group, command) == (70, 3):
+            self.write_requests.append(body)
+            return self.refuse_writes if self.refuse_writes is not None else {"off": len(body["data"])}
         if (group, command) == (71, 0):
             return {"active": 1, "since_ms": self.clock_ms - 125000, "file": "log_0001.mf4", "bytes": 2048}
         if group == 1 and command == 0:
@@ -1611,6 +1616,62 @@ class FollowTest(ClientCase):
     def test_a_listed_growing_file_is_marked(self) -> None:
         self.assertIn("growing", client.format_asset_entry({"name": "a.mf4", "size": 5, "growing": True}))
         self.assertNotIn("growing", client.format_asset_entry({"name": "a.mf4", "size": 5}))
+
+
+class ImageFilesTest(ClientCase):
+    KIND = {"kind": 0, "name": "images", "dir": "ui_assets/images", "access": 7, "max": 4194304,
+            "ext": [".bin", ".lvimg", ".svg"], "avail": True, "fmt": 0x14}
+
+    def test_kinds_print_the_formats_and_compressions_by_name(self) -> None:
+        line = client.format_kind(self.KIND | {"fmts": [0x12, 0x14], "cmps": [2]})
+        self.assertIn("fmt RGB565A8 (0x14)  fmts RGB565 RGB565A8  cmps lz4", line)
+        line = client.format_kind(self.KIND | {"fmts": [0x06, 0x15], "cmps": [1, 2]})
+        self.assertIn("fmts L8 AL88  cmps rle lz4", line)
+        self.assertIn("fmts RGB565 0x2a  cmps 0x07", client.format_kind(self.KIND | {"fmts": [0x12, 0x2A], "cmps": [7]}))
+
+    def test_kinds_without_the_keys_print_neither(self) -> None:
+        line = client.format_kind(self.KIND)
+        self.assertNotIn("fmts", line)
+        self.assertNotIn("cmps", line)
+        self.assertNotIn("cmps", client.format_kind(self.KIND | {"fmts": [0x12]}))
+
+    def test_kinds_command_prints_what_the_unit_answers(self) -> None:
+        with mock.patch.object(self.smp, "read", return_value={"kinds": [self.KIND | {"fmts": [0x12], "cmps": [2]}]}):
+            out, _ = run(client.command_assets_kinds, self.smp)
+        self.assertIn("ext .bin .lvimg .svg", out)
+        self.assertIn("fmts RGB565  cmps lz4", out)
+
+    def test_listing_prints_the_size_and_format_of_an_image(self) -> None:
+        entry = {"name": "bg.lvimg", "size": 434324, "img": {"w": 466, "h": 466, "cf": 0x12}}
+        self.assertEqual(client.format_asset_entry(entry), "    434324  bg.lvimg  466x466 RGB565")
+        line = client.format_asset_entry(entry | {"img": {"w": 15, "h": 220, "cf": 0x14, "cmp": 2}})
+        self.assertTrue(line.endswith("bg.lvimg  15x220 RGB565A8 lz4"), line)
+        self.assertTrue(client.format_asset_entry(entry | {"img": {"w": 1, "h": 2, "cf": 0x42}}).endswith("1x2 0x42"))
+
+    def test_listing_of_a_file_without_facts_has_none(self) -> None:
+        self.assertEqual(client.format_asset_entry({"name": "a.bin", "size": 9}), "         9  a.bin")
+
+    def test_error_18_is_named(self) -> None:
+        self.assertIn("bad content", client.ASSETS_ERRORS[18])
+
+    def put(self) -> None:
+        path = self.tmp / "bg.lvimg"
+        path.write_bytes(b"\x00" * 40)
+        run(client.command_assets_put, self.smp, kind=0, name="bg.lvimg", file=path)
+
+    def test_a_refused_upload_prints_the_units_message(self) -> None:
+        message = "Not an LVGL image file: it starts with 0x00, not 0x19."
+        self.unit.refuse_writes = {"err": {"group": 70, "rc": 18}, "msg": message}
+        with self.assertRaises(client.SmpError) as raised:
+            self.put()
+        self.assertIn("bad content", str(raised.exception))
+        self.assertIn(message, str(raised.exception))
+        self.assertEqual(len(self.unit.write_requests), 1)      # Refused at the first chunk, not retried.
+
+    def test_any_other_refusal_with_a_message_prints_it_too(self) -> None:
+        self.unit.refuse_writes = {"err": {"group": 70, "rc": 5}, "msg": "The name is taken."}
+        with self.assertRaisesRegex(client.SmpError, "bad name.*The name is taken\\."):
+            self.put()
 
 
 class TimeTest(ClientCase):

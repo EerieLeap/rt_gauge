@@ -309,6 +309,7 @@ ASSETS_ERRORS = {
     15: "no memory",
     16: "built in: the file is part of the firmware and cannot be replaced, renamed or deleted",
     17: "changed: the file was closed after the copy began, so the bytes the copy holds are not the file's",
+    18: "bad content: the file is not what the kind takes",
 }
 ASSETS_BAD_OFFSET = 10
 ASSETS_BAD_TOKEN = 11
@@ -1510,7 +1511,9 @@ def format_access(access: int) -> str:
     return "".join(letter if access & bit else "-" for letter, bit in (("R", 1), ("W", 2), ("D", 4)))
 
 
-LVGL_COLOR_FORMATS = {0x14: "RGB565A8", 0x15: "AL88"}
+LVGL_COLOR_FORMATS = {0x06: "L8", 0x12: "RGB565", 0x14: "RGB565A8", 0x15: "AL88"}
+# LVGL's lv_image_compress_t, as an image file's `cmp` and a kind's `cmps` number them.
+LVGL_IMAGE_COMPRESSIONS = {1: "rle", 2: "lz4"}
 
 
 def format_pixel_format(number: int) -> str:
@@ -1518,14 +1521,28 @@ def format_pixel_format(number: int) -> str:
     return f"{name} ({number:#04x})" if name else f"{number:#04x}"
 
 
+def format_color_format(number: int) -> str:
+    """A colour format by name, or in hex when the table lacks it."""
+    return LVGL_COLOR_FORMATS.get(number, f"{number:#04x}")
+
+
+def format_compression(number: int) -> str:
+    """A compression method by name, or in hex when the table lacks it."""
+    return LVGL_IMAGE_COMPRESSIONS.get(number, f"{number:#04x}")
+
+
 def format_kind(entry: dict) -> str:
     maximum = f"{entry['max']} B" if entry["max"] else "none"
     # free and used are sent only while the volume is mounted; free is a hint, WRITE stays the authority.
     pixels = f"  fmt {format_pixel_format(entry['fmt'])}" if entry.get("fmt") else ""
+    # fmts and cmps are sent for a kind of image files that describe themselves (.lvimg): what they may be in.
+    formats = f"  fmts {' '.join(format_color_format(number) for number in entry['fmts'])}" if entry.get("fmts") else ""
+    compressions = (f"  cmps {' '.join(format_compression(number) for number in entry['cmps'])}"
+                    if entry.get("cmps") else "")
     space = f"  free {entry['free']} B  used {entry['used']} B" if "free" in entry else ""
     return (f"kind {entry['kind']}  {entry['name']}  dir {entry['dir']}  access {format_access(entry['access'])}  "
             f"max {maximum}  ext {' '.join(entry['ext']) or '-'}  avail {'yes' if entry['avail'] else 'no'}"
-            f"{pixels}{space}")
+            f"{pixels}{formats}{compressions}{space}")
 
 
 def asset_write_overhead(name: str) -> int:
@@ -3057,8 +3074,19 @@ def log_start_ms(name: str) -> int | None:
     return int(moment.timestamp() * 1000)
 
 
+def format_image_facts(image: dict) -> str:
+    """An image file's `img` facts: `466x466 RGB565`, with ` lz4` after it when the file is compressed."""
+    text = f"{image['w']}x{image['h']} {format_color_format(image['cf'])}"
+    if image.get("cmp"):
+        text += f" {format_compression(image['cmp'])}"
+    return text
+
+
 def format_asset_entry(entry: dict) -> str:
     line = f"{entry['size']:>10}  {entry['name']}"
+    # img (images kind, .lvimg): the size and colour format the file's header gives.
+    if entry.get("img"):
+        line += f"  {format_image_facts(entry['img'])}"
     # builtin (fonts kind): a file in the firmware's flash, read-only.
     if entry.get("builtin"):
         line += "  built in"

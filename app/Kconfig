@@ -57,6 +57,16 @@ source "Kconfig.zephyr"
 		help
 		  Largest image a client may upload, in bytes.
 
+	config EERIE_LEAP_UI_IMAGE_LZ4
+		bool "LZ4 image files"
+		default y if BOARD_ESP32S3_TOUCH_AMOLED_1_75 || BOARD_ESP32P4_WIFI6_TOUCH_LCD_5
+		select LV_USE_LZ4
+		select LV_USE_LZ4_INTERNAL
+		help
+		  Decompress image files (.lvimg) that LVGLImage.py compressed with --compress LZ4: the unit lists
+		  the method in the images kind's cmps and expands such a file into RAM as it loads it. Uses LVGL's
+		  own copy of LZ4, so the build has one. Off: the unit takes uncompressed image files only.
+
 	config EERIE_LEAP_UI_ANIMATION_MAX_SIZE
 		int "Largest animation upload"
 		default 524288

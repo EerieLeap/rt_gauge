@@ -19,7 +19,7 @@ bottom left. An oval with equal width and height is a circle.
 | `DIRECTION` | `WidgetDirection` as integer | `LeftToRight` (1) | Line | Orientation and endpoint order |
 
 These dimensions are independent of the owning widget's grid size and the
-`IMG_WIDTH` / `IMG_HEIGHT` properties used by image icons. Shape properties are
+`IMG_WIDTH` / `IMG_HEIGHT` properties used by raw `.bin` image icons. Shape properties are
 declared by each icon and registered through `IconFactory` for the selected
 `ICON_TYPE`. `IconWidget` adds the shared position and active-state properties.
 Ovals do not expose corner radius or direction; lines do not expose fill mode

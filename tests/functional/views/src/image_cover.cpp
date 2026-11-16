@@ -2,6 +2,7 @@
 // are all 0xFF covers what lies beneath it and draws through its RGB565 view; every other image does not cover.
 #include <cstdint>
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include <zephyr/ztest.h>
@@ -12,6 +13,8 @@ extern "C" {
 }
 
 #include "domain/ui_domain/lvgl_lock.h"
+#include "subsys/assets/asset_kind.h"
+#include "views/utilities/image_cache.h"
 #include "views_test_support.h"
 
 namespace {
@@ -225,4 +228,80 @@ ZTEST(image_cover, test_transparent_pixels_show_the_parent) {
     const auto scene = MakeScene(holed.Dsc());
     CheckPixel(scene.parent, IMAGE_X + 1, IMAGE_Y + 4, { 0, 0, 255 }); // Alpha 0: the blue parent.
     CheckPixel(scene.parent, IMAGE_X + 6, IMAGE_Y + 4, { 0, 255, 0 });
+}
+
+// ======== Image files (.lvimg) ========
+
+namespace {
+
+constexpr bool HAS_RGB565 = LV_COLOR_DEPTH == 16;
+
+// An image file of an RGB565 picture, the left half red and the right half green, or of the same picture as
+// RGB565A8 with the alpha of each column chosen.
+std::vector<uint8_t>
+PictureFile(lv_color_format_t color_format, uint8_t left_alpha = 0xFF, uint8_t right_alpha = 0xFF) {
+    const uint32_t stride = IMAGE_SIZE * 2;
+    std::vector<uint8_t> pixels(views_test::ImagePixelBytes(color_format, IMAGE_SIZE, IMAGE_SIZE), 0);
+    for(int32_t y = 0; y < IMAGE_SIZE; ++y) {
+        for(int32_t x = 0; x < IMAGE_SIZE; ++x) {
+            const uint16_t color = x < IMAGE_SIZE / 2 ? RED_565 : GREEN_565;
+            pixels[stride * y + x * 2] = color & 0xFF;
+            pixels[stride * y + x * 2 + 1] = color >> 8;
+            if(color_format == LV_COLOR_FORMAT_RGB565A8)
+                pixels[stride * IMAGE_SIZE + (stride / 2) * y + x] = x < IMAGE_SIZE / 2 ? left_alpha : right_alpha;
+        }
+    }
+    return views_test::ImageFileAround(color_format, IMAGE_SIZE, IMAGE_SIZE, stride, pixels);
+}
+
+// An image file as the cache loads it.
+struct LoadedFile {
+    std::shared_ptr<eerie_leap::views::utilities::ImageCache> cache;
+    std::shared_ptr<const eerie_leap::views::utilities::LoadedImage> image;
+};
+
+LoadedFile Load(const std::vector<uint8_t>& file) {
+    auto store = views_test::MakeAssetStore("image-cover");
+    zassert_true(store->Save("picture.lvimg", file));
+    auto cache = std::make_shared<eerie_leap::views::utilities::ImageCache>(
+        views_test::MakeAssetsManager(eerie_leap::subsys::assets::AssetKind::IMAGES, store)
+    );
+    auto image = cache->Acquire("picture.lvimg");
+    zassert_not_null(image.get());
+    return { std::move(cache), std::move(image) };
+}
+
+} // namespace
+
+// An opaque RGB565 file is an RGB565 source: nothing to scan for alpha, and it covers what lies beneath it.
+ZTEST(image_cover, test_an_rgb565_image_file_covers_and_draws_its_own_colors) {
+    if(!HAS_RGB565)
+        ztest_test_skip();
+    eerie_leap::domain::ui_domain::ScopedLvglLock lock;
+    const auto loaded = Load(PictureFile(LV_COLOR_FORMAT_RGB565));
+    zassert_equal(loaded.image->GetDescriptor()->header.cf, LV_COLOR_FORMAT_RGB565);
+
+    const auto scene = MakeScene(loaded.image->GetDescriptor());
+
+    zassert_equal(CoverCheckInside(scene.image), LV_COVER_RES_COVER);
+    CheckPixel(scene.parent, IMAGE_X + 1, IMAGE_Y + 4, { 255, 0, 0 });
+    CheckPixel(scene.parent, IMAGE_X + 6, IMAGE_Y + 4, { 0, 255, 0 });
+    CheckPixel(scene.parent, 1, 1, { 0, 0, 255 });
+}
+
+// An opaque RGB565A8 file still covers, by the scan of its alpha plane, as the same picture in memory does.
+ZTEST(image_cover, test_an_opaque_rgb565a8_image_file_covers_and_a_holed_one_does_not) {
+    if(!HAS_RGB565)
+        ztest_test_skip();
+    eerie_leap::domain::ui_domain::ScopedLvglLock lock;
+
+    const auto opaque = Load(PictureFile(LV_COLOR_FORMAT_RGB565A8));
+    const auto opaque_scene = MakeScene(opaque.image->GetDescriptor());
+    zassert_equal(CoverCheckInside(opaque_scene.image), LV_COVER_RES_COVER);
+
+    const auto holed = Load(PictureFile(LV_COLOR_FORMAT_RGB565A8, 0x00, 0xFF));
+    const auto holed_scene = MakeScene(holed.image->GetDescriptor());
+    zassert_not_equal(CoverCheckInside(holed_scene.image), LV_COVER_RES_COVER);
+    CheckPixel(holed_scene.parent, IMAGE_X + 1, IMAGE_Y + 4, { 0, 0, 255 });
+    CheckPixel(holed_scene.parent, IMAGE_X + 6, IMAGE_Y + 4, { 0, 255, 0 });
 }

@@ -23,6 +23,8 @@
 
 #include <lvgl.h>
 
+#include "subsys/assets/asset_kind.h"
+#include "views/utilities/image_cache.h"
 #include "views_test_support.h"
 
 namespace {
@@ -198,6 +200,11 @@ public:
 
     const lv_image_dsc_t* Dsc() const {
         return &dsc_;
+    }
+
+    // The pixels as a file holds them after its header.
+    const std::vector<uint8_t>& Pixels() const {
+        return data_;
     }
 
 private:
@@ -459,7 +466,7 @@ uint32_t Digest(const lv_draw_buf_t* buf) {
 uint32_t DrawGroup(
     const Format& format,
     const Group& group,
-    const Source& source,
+    const lv_image_dsc_t& source,
     lv_draw_buf_t* buf,
     const lv_draw_buf_t* background,
     lv_obj_t* canvas,
@@ -471,8 +478,8 @@ uint32_t DrawGroup(
     } else if(group.kind == Kind::Needle) {
         angles = Angles(30);
     }
-    const int32_t w = static_cast<int32_t>(source.Dsc()->header.w);
-    const int32_t h = static_cast<int32_t>(source.Dsc()->header.h);
+    const int32_t w = static_cast<int32_t>(source.header.w);
+    const int32_t h = static_cast<int32_t>(source.header.h);
     const int32_t anchor = size / 2;
     uint32_t crc = 0;
     // Scale-only draws: one run per scale, so the group covers growing and shrinking.
@@ -487,7 +494,7 @@ uint32_t DrawGroup(
             lv_canvas_init_layer(canvas, &layer);
             lv_draw_image_dsc_t dsc;
             lv_draw_image_dsc_init(&dsc);
-            dsc.src = source.Dsc();
+            dsc.src = &source;
             dsc.rotation = angle;
             dsc.scale_x = scale;
             dsc.scale_y = group.kind == Kind::ScaleOnly ? scale : group.scale_y;
@@ -553,7 +560,7 @@ void RunFormat(size_t index, const Target& target) {
             if(is_needle != (size == NEEDLE_CANVAS_SIZE)) {
                 continue;
             }
-            crcs[g] = DrawGroup(format, groups[g], is_needle ? needle : image, buf, background, canvas, size);
+            crcs[g] = DrawGroup(format, groups[g], *(is_needle ? needle : image).Dsc(), buf, background, canvas, size);
         }
         lv_obj_delete(canvas);
     }
@@ -582,6 +589,83 @@ void RunFormat(size_t index, const Target& target) {
     zassert_true(all_match, "image transform output of %s differs from the table %s", format.name, target.table);
 }
 
+// The needle of a dial as an image icon gets it from a raw .bin, which makes its descriptor up from the size, and from
+// the same pixels in a .lvimg, which the image cache loads: the draws are bit for bit the same, and the table's.
+void RunNeedleFromFiles(const Target& target) {
+    views_test::EnsureTestDisplay();
+    constexpr lv_color_format_t NATIVE_ALPHA = LV_COLOR_FORMAT_NATIVE_WITH_ALPHA;
+    const Format* format = nullptr;
+    for(const Format& candidate : FORMATS) {
+        if(candidate.cf == NATIVE_ALPHA)
+            format = &candidate;
+    }
+    zassert_not_null(format, "the build draws no format with alpha");
+
+    const Source needle(NATIVE_ALPHA, NEEDLE_W, NEEDLE_H);
+    lv_image_dsc_t raw{};
+    raw.header.magic = LV_IMAGE_HEADER_MAGIC;
+    raw.header.cf = NATIVE_ALPHA;
+    raw.header.w = NEEDLE_W;
+    raw.header.h = NEEDLE_H;
+    raw.header.stride = 0;
+    raw.data_size = needle.Pixels().size();
+    raw.data = needle.Pixels().data();
+
+    auto store = views_test::MakeAssetStore("image-golden");
+    zassert_true(
+        store->Save("needle.lvimg", views_test::ImageFileAround(NATIVE_ALPHA, NEEDLE_W, NEEDLE_H, 0, needle.Pixels()))
+    );
+    eerie_leap::views::utilities::ImageCache cache(
+        views_test::MakeAssetsManager(eerie_leap::subsys::assets::AssetKind::IMAGES, store)
+    );
+    const auto file = cache.Acquire("needle.lvimg");
+    zassert_not_null(file.get());
+
+    const std::vector<Group> groups = Groups();
+    const GoldenRow* row = FindRow(target, format->name);
+    zassert_not_null(row, "no %s row for format %s", target.table, format->name);
+
+    const uint32_t stride = static_cast<uint32_t>(NEEDLE_CANVAS_SIZE) * target.px_size;
+    lv_draw_buf_t* buf = &canvas_buf;
+    lv_draw_buf_t* background = &background_buf;
+    zassert_equal(
+        lv_draw_buf_init(
+            buf, NEEDLE_CANVAS_SIZE, NEEDLE_CANVAS_SIZE, target.cf, stride, canvas_pixels, sizeof(canvas_pixels)
+        ),
+        LV_RESULT_OK
+    );
+    zassert_equal(
+        lv_draw_buf_init(
+            background, NEEDLE_CANVAS_SIZE, NEEDLE_CANVAS_SIZE, target.cf, stride, background_pixels,
+            sizeof(background_pixels)
+        ),
+        LV_RESULT_OK
+    );
+    lv_obj_t* canvas = lv_canvas_create(lv_screen_active());
+    lv_canvas_set_draw_buf(canvas, background);
+    lv_canvas_fill_bg(canvas, lv_color_hex(BACKGROUND & 0xFFFFFF), LV_OPA_COVER);
+    lv_canvas_set_draw_buf(canvas, buf);
+
+    int needle_groups = 0;
+    for(size_t g = 0; g < groups.size(); ++g) {
+        if(groups[g].kind != Kind::Needle)
+            continue;
+
+        const uint32_t from_bin = DrawGroup(*format, groups[g], raw, buf, background, canvas, NEEDLE_CANVAS_SIZE);
+        const uint32_t from_file = DrawGroup(
+            *format, groups[g], *file->GetDescriptor(), buf, background, canvas, NEEDLE_CANVAS_SIZE
+        );
+        zassert_equal(
+            from_file, from_bin, "%s, %s: the .lvimg draws other pixels than the .bin", target.table, groups[g].name
+        );
+        zassert_equal(from_file, row->crc[g], "%s, %s: not the table's", target.table, groups[g].name);
+        ++needle_groups;
+    }
+    lv_obj_delete(canvas);
+
+    zassert_equal(needle_groups, 2, "the aliased and the antialiased needle");
+}
+
 } // namespace
 
 #define FORMAT_TEST(INDEX, NAME) \
@@ -605,5 +689,11 @@ FORMAT_TEST(8, format_8)
 FORMAT_TEST(9, format_9)
 
 static_assert(FORMAT_COUNT <= 10, "add a FORMAT_TEST per format");
+
+ZTEST(image_transform_golden, test_the_needle_as_an_image_file_draws_as_the_raw_one) {
+    for(const Target& target : TARGETS) {
+        RunNeedleFromFiles(target);
+    }
+}
 
 ZTEST_SUITE(image_transform_golden, nullptr, nullptr, nullptr, views_test::CleanTestDisplay, nullptr);

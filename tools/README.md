@@ -163,19 +163,65 @@ name, never by a path. `KIND` is a name or a number, as in the table; what a uni
 access, size cap and extensions) is what `assets kinds` prints, one line per kind:
 
 ```
-kind 0  images  dir ui_assets/images  access RWD  max 4194304 B  ext .bin .svg  avail yes  fmt RGB565A8 (0x14)
+kind 0  images  dir ui_assets/images  access RWD  max 4194304 B  ext .bin .lvimg .svg  avail yes  fmt RGB565A8 (0x14)  fmts RGB565 RGB565A8  cmps lz4
 kind 4  logs  dir logs  access R-D  max none  ext .mf4  avail yes
 ```
 
 `access` shows R (download), W (upload) and D (delete) for what the kind allows and `-` for what it does
 not (`R-D`: logs can be downloaded and deleted, not uploaded), `max` is the largest upload (`none` for a
-kind that takes none) and `avail` says whether the volume is mounted now. `fmt` appears for a kind of raw pixel
-files, the LVGL colour format they must be in (`RGB565A8` 0x14 on a 16-bit build, `AL88` 0x15 on an 8-bit one; unknown
-numbers are printed in hex).
+kind that takes none) and `avail` says whether the volume is mounted now. The image keys:
 
-A raw `.bin` image of a unit has no header, so its pixels follow the firmware's colour depth. To make one,
-convert the picture with `LVGLImage.py` (`pip install pypng lz4`) in the format `assets kinds` reports, then strip
-the 12-byte LVGL image header it writes first:
+- `fmt` appears for a kind of raw pixel files (`.bin`), the LVGL colour format they must be in (`RGB565A8` 0x14 on a
+  16-bit build, `AL88` 0x15 on an 8-bit one; unknown numbers are printed in hex).
+- `fmts` appears for a kind that takes `.lvimg` files: the colour formats such a file may be in, by name (`L8` 0x06,
+  `RGB565` 0x12, `RGB565A8` 0x14, `AL88` 0x15; an unknown number is printed in hex). A 16-bit build lists
+  `RGB565 RGB565A8`, an 8-bit one `L8 AL88`.
+- `cmps` appears where the unit decompresses image files: the compression methods a `.lvimg` may use (`lz4`, `rle`;
+  an unknown number is printed in hex).
+
+A unit whose `ext` list lacks `.lvimg` takes only the raw `.bin` form.
+
+#### Image files
+
+An image file that describes itself is LVGL 9's binary image file: a 12-byte header (the colour format, the width,
+the height and the stride), then the pixels. It is named `*.lvimg`, and the unit takes its size and format from the
+file, so no `_<w>x<h>` is needed in the name and `IMG_WIDTH` / `IMG_HEIGHT` are not set for it. Make one with
+`LVGLImage.py` (`pip install pypng lz4`), in a colour format that `assets kinds` lists under `fmts`:
+
+| Picture | 16-bit unit (`fmts` `RGB565 RGB565A8`) | 8-bit unit (`fmts` `L8 AL88`) |
+| --- | --- | --- |
+| Opaque (a background, a photograph) | `--cf RGB565`: 2 bytes a pixel, a third less than `RGB565A8` | `--cf L8` |
+| With transparency (a needle, a logo) | `--cf RGB565A8` | `--cf AL88` |
+
+```shell
+python3 tools/LVGLImage.py --ofmt BIN --cf RGB565 -o ./out background.png        # opaque, 16-bit unit
+python3 tools/LVGLImage.py --ofmt BIN --cf RGB565A8 -o ./out needle.png          # with transparency
+python3 tools/LVGLImage.py --ofmt BIN --cf RGB565 --compress LZ4 -o ./out background.png   # if `cmps` lists lz4
+mv ./out/background.bin ./out/background.lvimg
+python3 tools/smp_can_client.py --serial /dev/ttyACM0 assets put images background.lvimg ./out/background.lvimg
+```
+
+The tool names its output after the picture, with `.bin`; rename it to `.lvimg` and upload it as it is, with no
+header cut off. Leave a `.lvimg` uncompressed unless `assets kinds` lists `cmps`. An opaque colour format has no
+alpha: for a picture with transparent pixels the tool blends them onto `--background` (black by default), so give
+a transparent picture an alpha format. `--align N` pads each row to a multiple of N bytes, which the unit takes as
+written.
+
+The unit looks at an upload's header as soon as the first chunk arrives. A file it cannot draw is refused with
+error 18 (`bad content`), and the client prints the unit's sentence, so a wrong colour format costs one request:
+
+```
+$ python3 tools/smp_can_client.py --serial /dev/ttyACM0 assets put images logo.lvimg ./out/logo.bin
+error: group 70 error 18 (bad content: the file is not what the kind takes): Not an LVGL image file: it starts with 0x00, not 0x19.
+```
+
+`assets ls` prints the size, the colour format and, for a compressed file, the method after the name of an image
+whose header the unit could read: `466x466 RGB565`, `15x220 RGB565A8 lz4`. A `rename` keeps a name's extension
+(`a.lvimg` cannot become `a.bin`).
+
+The older form is the raw `.bin`: the pixels alone, at the size `IMG_WIDTH` and `IMG_HEIGHT` of the widget say, in the
+`fmt` the kind reports. To make one, convert the picture to that format and cut off the 12-byte header the tool
+writes:
 
 ```shell
 python3 tools/LVGLImage.py --ofmt BIN --cf RGB565A8 -o ./out logo.png   # 16-bit unit; --cf AL88 for an 8-bit one
@@ -183,8 +229,9 @@ tail -c +13 ./out/logo.bin > logo_unit.bin
 python3 tools/smp_can_client.py --serial /dev/ttyACM0 assets put images logo.bin ./logo_unit.bin
 ```
 
-When a unit's firmware changes its colour depth, the images it holds are in the old format: encode them again and
-upload them again.
+When a unit's firmware changes its colour depth, the files it holds are in the old format: encode them again and
+upload them again. See [IMAGE_FILES.md](../app/docs/ui/IMAGE_FILES.md) for what the unit checks and how an
+icon draws a file.
 
 | Number | Name | Served by |
 | --- | --- | --- |
@@ -196,7 +243,7 @@ upload them again.
 | 5 | `fonts` | the gauge, from `ui_assets/fonts`, and three built-in fonts |
 
 A unit serves the kinds it has the services for, so the gauge lists `images`, `animations` and `fonts`. `assets ls` prints the
-size and name of each file, `built in` after a file that is part of the firmware (the gauge's three fonts,
+size and name of each file, the size and colour format of an image file (see [Image files](#image-files)), `built in` after a file that is part of the firmware (the gauge's three fonts,
 `Rubik-Medium.ttf`, `Montserrat-Medium.ttf` and `Inconsolata-Bold.ttf`, listed first: they can be read, with `get` and
 `stat`, but `put`, `rm` and `rename` of their names fail with `built in`), and for a log the end time the unit reports (`end_ms`) and, when the name is
 `<prefix>_YYYYMMDDTHHMMSSZ_NNNN.mf4`, the duration from the time in the name. A name is 1 to 64 characters of `A-Z a-z 0-9 . _ -`, does not start with `.`,
@@ -208,8 +255,8 @@ python3 tools/smp_can_client.py --channel can0 --target 1 assets kinds
 python3 tools/smp_can_client.py --channel can0 --target 1 assets ls logs
 python3 tools/smp_can_client.py --channel can0 --target 1 assets get logs log_data_0001.mf4 --resume
 python3 tools/smp_can_client.py --ble EerieLeap assets get logs log_data_0002.mf4 --follow --interval 2
-python3 tools/smp_can_client.py --serial /dev/ttyACM0 assets put images logo.bin ./logo.bin
-python3 tools/smp_can_client.py --serial /dev/ttyACM0 assets rm images logo.bin
+python3 tools/smp_can_client.py --serial /dev/ttyACM0 assets put images logo.lvimg ./logo.lvimg
+python3 tools/smp_can_client.py --serial /dev/ttyACM0 assets rm images logo.lvimg
 ```
 
 #### Downloading

@@ -3,13 +3,16 @@
 
 #include <zephyr/logging/log.h>
 
+#include "domain/ui_domain/images/image_file.h"
 #include "domain/ui_domain/lvgl_lock.h"
 #include "domain/ui_domain/models/widget_property.h"
 #include "subsys/assets/asset_kind.h"
 #include "subsys/assets/asset_provider.h"
 #include "subsys/assets/asset_store.h"
 #include "utilities/memory/memory_resource_manager.h"
+#include "utilities/string/ascii_case.h"
 #include "views/themes/theme_manager.h"
+#include "views/utilities/image_cache.h"
 
 #include <misc/cache/instance/lv_image_cache.h>
 
@@ -25,10 +28,18 @@ using namespace eerie_leap::views::themes;
 using eerie_leap::domain::ui_domain::ScopedLvglLock;
 // Inside eerie_leap::views a bare `assets::` is eerie_leap::views::assets, hence the declaration.
 using eerie_leap::subsys::assets::AssetKind;
+using eerie_leap::utilities::string::EqualsIgnoreAsciiCase;
 
 LOG_MODULE_REGISTER(image_icon_logger);
 
 namespace {
+
+constexpr std::string_view RAW_PIXELS_EXTENSION = ".bin";
+
+bool HasExtension(std::string_view path, std::string_view extension) {
+    return path.size() >= extension.size()
+        && EqualsIgnoreAsciiCase(path.substr(path.size() - extension.size()), extension);
+}
 
 // The bytes LVGL reads for a width x height image in the native format with alpha. RGB565A8 keeps its
 // alpha in a plane of its own, which lv_color_format_get_size() leaves out.
@@ -51,7 +62,11 @@ ImageIcon::~ImageIcon() {
     // reads, so the object lets go of them first.
     if(lv_image_ != nullptr) {
         lv_image_set_src(lv_image_, nullptr);
-        lv_image_cache_drop(&lv_image_descriptor_);
+
+        // An image file's descriptor belongs to its LoadedImage, which drops it from LVGL's cache when the last
+        // icon lets go of it; the cache is not ours to touch while other icons still show the file.
+        if(image_ == nullptr)
+            lv_image_cache_drop(&lv_image_descriptor_);
     }
 }
 
@@ -78,9 +93,37 @@ int ImageIcon::DoRender() {
 }
 
 lv_obj_t* ImageIcon::Create(lv_obj_t* parent) {
-    if(file_path_.empty())
+    switch(file_kind_) {
+        case FileKind::RawPixels:
+            return CreateFromRawPixels(parent);
+        case FileKind::ImageFile:
+            return CreateFromImageFile(parent);
+        case FileKind::None:
+        case FileKind::Unsupported:
+            break;
+    }
+
+    return nullptr;
+}
+
+lv_obj_t* ImageIcon::CreateFromImageFile(lv_obj_t* parent) {
+    // The file says how big it is and what format its pixels are in: IMG_WIDTH and IMG_HEIGHT are not read.
+    image_ = context_.image_cache != nullptr ? context_.image_cache->Acquire(file_path_) : nullptr;
+    if(image_ == nullptr)
         return nullptr;
 
+    auto* lv_image = lv_image_create(parent);
+    lv_image_set_src(lv_image, image_->GetDescriptor());
+    lv_image_set_antialias(lv_image, true);
+
+    lv_obj_set_width(lv_image, LV_SIZE_CONTENT);
+    lv_obj_set_height(lv_image, LV_SIZE_CONTENT);
+    lv_obj_set_align(lv_image, LV_ALIGN_CENTER);
+
+    return lv_image;
+}
+
+lv_obj_t* ImageIcon::CreateFromRawPixels(lv_obj_t* parent) {
     if(image_width_ <= 0 || image_height_ <= 0)
         return nullptr;
 
@@ -137,11 +180,31 @@ lv_obj_t* ImageIcon::Create(lv_obj_t* parent) {
 void ImageIcon::Configure(std::shared_ptr<WidgetPropertyStore> properties) {
     IconBase::Configure(std::move(properties));
 
-    file_path_ = properties_->GetAs<std::pmr::string>(WidgetPropertyType::FILE_PATH, "");
+    auto file_path = properties_->GetAs<std::pmr::string>(WidgetPropertyType::FILE_PATH, "");
+    FileKind file_kind = FileKind::None;
+    if(!file_path.empty()) {
+        // The parser names image files, so the icon and the images kind take the same ones.
+        if(eerie_leap::domain::ui_domain::images::IsImageFileName(file_path))
+            file_kind = FileKind::ImageFile;
+        else if(HasExtension(file_path, RAW_PIXELS_EXTENSION))
+            file_kind = FileKind::RawPixels;
+        else
+            file_kind = FileKind::Unsupported;
+    }
+
+    // Configure runs for every property change: say once, not on each, that this icon cannot draw its file.
+    if(file_kind == FileKind::Unsupported && (file_kind_ != FileKind::Unsupported || file_path != file_path_)) {
+        LOG_ERR("Image icon file '%s' is neither a .lvimg nor a .bin, so the icon draws nothing.", file_path.c_str());
+    }
+
+    file_path_ = std::move(file_path);
+    file_kind_ = file_kind;
     image_width_ = properties_->GetAs<int>(WidgetPropertyType::IMG_WIDTH, 0);
     image_height_ = properties_->GetAs<int>(WidgetPropertyType::IMG_HEIGHT, 0);
 
-    if(!IsReady()
+    // An image file is its own size, and a change of the file rebuilds the icon.
+    if(file_kind_ != FileKind::RawPixels
+        || !IsReady()
         || image_width_ <= 0
         || image_height_ <= 0
         || image_width_ > UINT16_MAX

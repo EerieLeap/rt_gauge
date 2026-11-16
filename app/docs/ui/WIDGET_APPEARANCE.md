@@ -36,6 +36,9 @@ ancestor opacity and mask coverage. Colors replace theme RGBA, including alpha;
 they do not multiply by theme alpha. Whole-widget opacity uses LVGL layered
 composition, so overlapping parts fade together. Images and dial needles keep
 their original colors and pixel alpha and inherit exactly one widget fade.
+An image icon's size is its file's: a `.lvimg` file carries its width and height
+in its header, and `IMG_WIDTH` / `IMG_HEIGHT` apply to a raw `.bin` file only (see
+[Image files](IMAGE_FILES.md)).
 
 `OPACITY` defaults to 255 and accepts integers 0-255. Runtime bindings also
 accept in-range unsigned integers, but not floats, booleans, or strings.

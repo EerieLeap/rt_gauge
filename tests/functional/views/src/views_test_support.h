@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <initializer_list>
 #include <memory>
@@ -56,6 +57,52 @@ std::shared_ptr<eerie_leap::subsys::assets::AssetsManager> MakeAssetsManager(
     std::shared_ptr<eerie_leap::subsys::assets::AssetStore> store,
     std::span<const eerie_leap::subsys::assets::BuiltInAsset> built_ins = {}
 );
+
+// The colour formats of the image files this build draws: an opaque one and one with alpha.
+inline constexpr lv_color_format_t OPAQUE_IMAGE_FORMAT = LV_COLOR_DEPTH == 16 ? LV_COLOR_FORMAT_RGB565
+                                                                              : LV_COLOR_FORMAT_L8;
+inline constexpr lv_color_format_t ALPHA_IMAGE_FORMAT = LV_COLOR_DEPTH == 16 ? LV_COLOR_FORMAT_RGB565A8
+                                                                             : LV_COLOR_FORMAT_AL88;
+
+// The bytes of a width x height picture in an image file's pixel data: stride x height, and RGB565A8's alpha plane
+// of half the stride a row besides. A stride of 0 is the tightest.
+size_t ImagePixelBytes(lv_color_format_t color_format, uint32_t width, uint32_t height, uint32_t stride = 0);
+
+// An image file (.lvimg): the 12-byte header, then @p pixels, which hold ImagePixelBytes() bytes.
+std::vector<uint8_t> ImageFileAround(
+    lv_color_format_t color_format,
+    uint32_t width,
+    uint32_t height,
+    uint32_t stride,
+    std::span<const uint8_t> pixels
+);
+
+// An image file whose every pixel byte is @p fill: white and opaque for 0xFF.
+std::vector<uint8_t> ImageFileBytes(
+    lv_color_format_t color_format,
+    uint32_t width,
+    uint32_t height,
+    uint8_t fill = 0xFF,
+    uint32_t stride = 0
+);
+
+// An LZ4 block that is literals alone, which any LZ4 decoder takes: it expands to @p bytes.
+std::vector<uint8_t> Lz4LiteralBlock(std::span<const uint8_t> bytes);
+
+// A compressed image file (.lvimg): the 12-byte header with the compressed flag, LVGL's compressed-data header, then
+// @p block. The header says the block expands to @p decompressed_bytes, whatever it really does.
+std::vector<uint8_t> CompressedImageFileAround(
+    lv_color_format_t color_format,
+    uint32_t width,
+    uint32_t height,
+    uint32_t stride,
+    std::span<const uint8_t> block,
+    uint32_t decompressed_bytes
+);
+
+// The uncompressed twin of a compressed image fixture ("opaque_rgb565_lz4" for "opaque_rgb565"): the whole file's
+// bytes, empty for a name that has none.
+std::span<const uint8_t> UncompressedTwinOf(std::string_view fixture_name);
 
 // A fill-slot BasicIcon needle for a dial. Labels get text so they can render.
 std::shared_ptr<eerie_leap::domain::ui_domain::models::WidgetConfiguration> NeedleConfiguration(

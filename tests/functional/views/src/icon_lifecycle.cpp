@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <zephyr/ztest.h>
 
@@ -19,11 +20,13 @@
 #include "subsys/event_bus/event_channel_id.h"
 #include "views/screens/screen.h"
 #include "views/themes/default_theme.h"
+#include "views/utilities/image_cache.h"
 #include "views/widgets/basic/icon_widget/icon_widget.h"
 #include "views/widgets/basic/icons/shape_icon/oval_icon/oval_icon.h"
 #include "views/widgets/indicators/dial_indicator/dial_indicator.h"
 #include "views/widgets/widget_factory.h"
 
+#include "image_file_fixtures.h"
 #include "lottie_spinner_json.h"
 #include "views_test_support.h"
 
@@ -36,8 +39,10 @@ using namespace eerie_leap::domain::logging_domain::event_bus;
 using eerie_leap::domain::ui_domain::configuration::parsers::UiConfigurationValidator;
 using eerie_leap::event_bus::InitializeEventChannels;
 using eerie_leap::subsys::assets::AssetKind;
+using eerie_leap::subsys::assets::AssetStore;
 using eerie_leap::subsys::event_bus::EventChannelId;
 using eerie_leap::subsys::event_bus::EventData;
+using eerie_leap::views::utilities::ImageCache;
 using eerie_leap::views::utilitites::Frame;
 
 namespace {
@@ -217,6 +222,43 @@ WidgetContext SvgContext(WidgetConfiguration& configuration) {
     ));
     configuration.properties[WidgetPropertyType::FILE_PATH] = std::pmr::string("needle.svg");
     return WidgetContext{ .assets_manager = views_test::MakeAssetsManager(AssetKind::IMAGES, std::move(store)) };
+}
+
+constexpr lv_color_format_t OPAQUE_FORMAT = views_test::OPAQUE_IMAGE_FORMAT;
+constexpr lv_color_format_t ALPHA_FORMAT = views_test::ALPHA_IMAGE_FORMAT;
+// The opaque format of the other colour depth: this build draws no file in it.
+constexpr lv_color_format_t FOREIGN_FORMAT = LV_COLOR_DEPTH == 16 ? LV_COLOR_FORMAT_L8 : LV_COLOR_FORMAT_RGB565;
+
+// Serves an image file as the only image, with the cache the icons built on its context share. The store is the one
+// the cache's registry reads: a file saved through it changes the generation the cache looks at.
+struct FileBench {
+    std::shared_ptr<AssetStore> store = views_test::MakeAssetStore("icon-image-files");
+    std::shared_ptr<ImageCache> cache;
+    WidgetContext context;
+
+    FileBench(WidgetConfiguration& configuration, const char* name, const std::vector<uint8_t>& file) {
+        zassert_true(store->Save(name, file));
+        configuration.properties[WidgetPropertyType::FILE_PATH] = std::pmr::string(name);
+        auto assets = views_test::MakeAssetsManager(AssetKind::IMAGES, store);
+        cache = std::make_shared<ImageCache>(assets);
+        context = WidgetContext{ .assets_manager = std::move(assets), .image_cache = cache };
+    }
+};
+
+// The descriptor an image icon shows.
+const lv_image_dsc_t* ShownImage(const IconWidget& widget) {
+    return static_cast<const lv_image_dsc_t*>(lv_image_get_src(Inner(widget)));
+}
+
+// The icon shows an image of this size, and its object has it once the layout ran.
+void CheckDrawnSize(const IconWidget& widget, int width, int height) {
+    const auto* source = ShownImage(widget);
+    zassert_not_null(source);
+    zassert_equal(static_cast<int>(source->header.w), width);
+    zassert_equal(static_cast<int>(source->header.h), height);
+    lv_obj_update_layout(Inner(widget));
+    zassert_equal(lv_obj_get_width(Inner(widget)), width);
+    zassert_equal(lv_obj_get_height(Inner(widget)), height);
 }
 
 constexpr std::array NATIVE_ROTATION_ICONS{ IconType::Image, IconType::Svg, IconType::Rectangle,
@@ -472,6 +514,277 @@ ZTEST(icon_lifecycle, test_an_image_is_served_by_the_images_kind_only) {
         zassert_not_equal(widget.Render(), 0);
         zassert_is_null(widget.GetIconContainer().get());
     }
+}
+
+// An image file carries its size and its format, so the icon asks the properties of a raw file nothing.
+ZTEST(icon_lifecycle, test_an_image_file_draws_at_its_own_size_whatever_the_size_properties_say) {
+    ScopedLvglLock lock;
+
+    for(const auto format : { OPAQUE_FORMAT, ALPHA_FORMAT }) {
+        for(const bool has_size : { false, true }) {
+            auto configuration = RotationConfiguration(IconType::Image);
+            const FileBench bench(*configuration, "own.lvimg", views_test::ImageFileBytes(format, 8, 6));
+            if(has_size) {
+                configuration->properties[WidgetPropertyType::IMG_WIDTH] = 20;
+                configuration->properties[WidgetPropertyType::IMG_HEIGHT] = 60;
+            }
+
+            TestIcon widget(1, MakeRoot(), bench.context);
+            widget.Configure(configuration);
+            zassert_equal(widget.Render(), 0, "format 0x%02X, sizes %d", static_cast<unsigned>(format), has_size);
+            CheckDrawnSize(widget, 8, 6);
+            zassert_equal(ShownImage(widget)->header.cf, format);
+        }
+    }
+}
+
+#ifdef CONFIG_EERIE_LEAP_UI_IMAGE_LZ4
+// LVGL is handed the expanded pixels, so a compressed file is painted as the same picture written without compression.
+ZTEST(icon_lifecycle, test_a_compressed_image_file_draws_as_its_uncompressed_twin_does) {
+    ScopedLvglLock lock;
+    int drawn = 0;
+
+    for(const auto& fixture : views_test::IMAGE_FILE_FIXTURES) {
+        if(!fixture.is_compressed || (fixture.color_format != OPAQUE_FORMAT && fixture.color_format != ALPHA_FORMAT))
+            continue;
+
+        const auto twin = views_test::UncompressedTwinOf(fixture.name);
+        zassert_false(twin.empty(), "%s has no twin", fixture.name);
+
+        auto packed_configuration = RotationConfiguration(IconType::Image);
+        const FileBench packed(*packed_configuration, "packed.lvimg", { fixture.bytes.begin(), fixture.bytes.end() });
+        auto plain_configuration = RotationConfiguration(IconType::Image);
+        const FileBench plain(*plain_configuration, "plain.lvimg", { twin.begin(), twin.end() });
+
+        TestIcon packed_icon(1, MakeRoot(), packed.context);
+        packed_icon.Configure(packed_configuration);
+        zassert_equal(packed_icon.Render(), 0, "%s", fixture.name);
+        TestIcon plain_icon(2, MakeRoot(), plain.context);
+        plain_icon.Configure(plain_configuration);
+        zassert_equal(plain_icon.Render(), 0, "%s", fixture.name);
+
+        CheckDrawnSize(packed_icon, 8, 6);
+        CheckDrawnSize(plain_icon, 8, 6);
+        const auto* shown = ShownImage(packed_icon);
+        const auto* expected = ShownImage(plain_icon);
+        zassert_equal(shown->header.cf, expected->header.cf, "%s", fixture.name);
+        zassert_equal(shown->header.flags, 0, "%s", fixture.name);
+        zassert_equal(shown->header.stride, expected->header.stride, "%s", fixture.name);
+        zassert_equal(shown->data_size, expected->data_size, "%s", fixture.name);
+        zassert_mem_equal(shown->data, expected->data, expected->data_size);
+
+        std::unique_ptr<lv_draw_buf_t, decltype(&lv_draw_buf_destroy)> packed_pixels(
+            lv_snapshot_take(Inner(packed_icon), LV_COLOR_FORMAT_ARGB8888), lv_draw_buf_destroy
+        );
+        std::unique_ptr<lv_draw_buf_t, decltype(&lv_draw_buf_destroy)> plain_pixels(
+            lv_snapshot_take(Inner(plain_icon), LV_COLOR_FORMAT_ARGB8888), lv_draw_buf_destroy
+        );
+        zassert_not_null(packed_pixels, "%s", fixture.name);
+        zassert_not_null(plain_pixels, "%s", fixture.name);
+        zassert_equal(packed_pixels->data_size, plain_pixels->data_size, "%s", fixture.name);
+        zassert_mem_equal(packed_pixels->data, plain_pixels->data, plain_pixels->data_size);
+        ++drawn;
+    }
+
+    zassert_equal(drawn, 2, "The build's two compressed files");
+}
+
+// Damaged data in a sound head: the file is refused as the loader reads it, and the icon draws nothing.
+ZTEST(icon_lifecycle, test_a_compressed_image_file_with_damaged_data_draws_nothing) {
+    ScopedLvglLock lock;
+    constexpr size_t HEADS_SIZE = 24;
+    int checked = 0;
+
+    for(const auto& fixture : views_test::IMAGE_FILE_FIXTURES) {
+        if(!fixture.is_compressed || (fixture.color_format != OPAQUE_FORMAT && fixture.color_format != ALPHA_FORMAT))
+            continue;
+
+        std::vector<uint8_t> file(fixture.bytes.begin(), fixture.bytes.end());
+        std::fill(file.begin() + HEADS_SIZE, file.end(), 0xFF);
+        auto configuration = RotationConfiguration(IconType::Image);
+        const FileBench bench(*configuration, "damaged.lvimg", file);
+        TestIcon widget(1, MakeRoot(), bench.context);
+        widget.Configure(configuration);
+
+        zassert_not_equal(widget.Render(), 0, "%s rendered", fixture.name);
+        zassert_is_null(widget.GetIconContainer().get());
+        zassert_equal(CountImages(views_test::WidgetContent(widget)), 0);
+        zassert_equal(bench.cache->GetLoadedBytes(), 0U);
+        ++checked;
+    }
+
+    zassert_equal(checked, 2);
+}
+#endif
+
+ZTEST(icon_lifecycle, test_the_extension_of_an_image_file_may_be_in_any_case) {
+    ScopedLvglLock lock;
+    auto configuration = RotationConfiguration(IconType::Image);
+    const FileBench bench(*configuration, "Own.LVIMG", views_test::ImageFileBytes(ALPHA_FORMAT, 8, 6));
+
+    TestIcon widget(1, MakeRoot(), bench.context);
+    widget.Configure(configuration);
+
+    zassert_equal(widget.Render(), 0);
+    CheckDrawnSize(widget, 8, 6);
+}
+
+// A size bound to the properties of a raw file is no size of an image file, live or not.
+ZTEST(icon_lifecycle, test_a_live_size_does_not_resize_an_image_file) {
+    ScopedLvglLock lock;
+    auto configuration = RotationConfiguration(IconType::Image);
+    const FileBench bench(*configuration, "own.lvimg", views_test::ImageFileBytes(ALPHA_FORMAT, 8, 6));
+    for(auto target : { WidgetPropertyType::IMG_WIDTH, WidgetPropertyType::IMG_HEIGHT }) {
+        auto binding = configuration->bindings.front();
+        binding.target = target;
+        binding.event.selector_value = static_cast<int>(target);
+        configuration->bindings.push_back(binding);
+    }
+    TestIcon widget(1, MakeRoot(), bench.context);
+    widget.Configure(configuration);
+    zassert_equal(widget.Render(), 0);
+    widget.OnActivated();
+    const auto* source = ShownImage(widget);
+
+    Publish(WidgetPropertyType::IMG_WIDTH, 4);
+    Publish(WidgetPropertyType::IMG_HEIGHT, 3);
+
+    zassert_equal(ShownImage(widget), source);
+    CheckDrawnSize(widget, 8, 6);
+}
+
+ZTEST(icon_lifecycle, test_icons_that_show_one_file_share_one_loaded_image) {
+    ScopedLvglLock lock;
+    auto configuration = RotationConfiguration(IconType::Image);
+    const FileBench bench(*configuration, "shared.lvimg", views_test::ImageFileBytes(ALPHA_FORMAT, 8, 6));
+
+    {
+        TestIcon first(1, MakeRoot(), bench.context);
+        first.Configure(configuration);
+        zassert_equal(first.Render(), 0);
+        TestIcon second(2, MakeRoot(), bench.context);
+        second.Configure(configuration);
+        zassert_equal(second.Render(), 0);
+
+        zassert_equal(ShownImage(first), ShownImage(second), "One descriptor");
+        zassert_equal(
+            bench.cache->GetLoadedBytes(), views_test::ImagePixelBytes(ALPHA_FORMAT, 8, 6), "The file is counted once"
+        );
+    }
+
+    zassert_equal(bench.cache->GetLoadedBytes(), 0U, "The last icon returned the memory");
+}
+
+// An icon that goes first leaves the file to the one that stays, which still draws.
+ZTEST(icon_lifecycle, test_an_icon_that_goes_leaves_the_file_to_the_icons_that_stay) {
+    ScopedLvglLock lock;
+    auto configuration = RotationConfiguration(IconType::Image);
+    const FileBench bench(*configuration, "shared.lvimg", views_test::ImageFileBytes(ALPHA_FORMAT, 8, 6));
+    auto leaving = std::make_unique<TestIcon>(1, MakeRoot(), bench.context);
+    leaving->Configure(configuration);
+    zassert_equal(leaving->Render(), 0);
+    TestIcon staying(2, MakeRoot(), bench.context);
+    staying.Configure(configuration);
+    zassert_equal(staying.Render(), 0);
+
+    leaving.reset();
+    lv_refr_now(nullptr);
+
+    zassert_equal(bench.cache->GetLoadedBytes(), views_test::ImagePixelBytes(ALPHA_FORMAT, 8, 6));
+    CheckDrawnSize(staying, 8, 6);
+}
+
+ZTEST(icon_lifecycle, test_a_refused_image_file_and_a_missing_one_draw_nothing_and_a_valid_one_uploaded_later_renders) {
+    ScopedLvglLock lock;
+    auto configuration = RotationConfiguration(IconType::Image);
+    const auto valid = views_test::ImageFileBytes(ALPHA_FORMAT, 8, 6);
+    auto truncated = valid;
+    truncated.pop_back();
+    const FileBench bench(*configuration, "later.lvimg", truncated);
+    TestIcon widget(1, MakeRoot(), bench.context);
+    widget.Configure(configuration);
+
+    zassert_not_equal(widget.Render(), 0, "A short file rendered");
+    zassert_is_null(widget.GetIconContainer().get());
+    zassert_equal(CountImages(views_test::WidgetContent(widget)), 0);
+
+    zassert_true(bench.store->Delete("later.lvimg"));
+    zassert_not_equal(widget.Render(), 0, "A missing file rendered");
+    zassert_is_null(widget.GetIconContainer().get());
+
+    // A format of the other colour depth is one this build does not draw.
+    zassert_true(bench.store->Save("later.lvimg", views_test::ImageFileBytes(FOREIGN_FORMAT, 8, 6)));
+    zassert_not_equal(widget.Render(), 0, "A file in another depth's format rendered");
+
+    zassert_true(bench.store->Save("later.lvimg", valid));
+    zassert_equal(widget.Render(), 0);
+    CheckDrawnSize(widget, 8, 6);
+}
+
+ZTEST(icon_lifecycle, test_an_upload_that_changes_the_generation_is_picked_up_by_the_next_build) {
+    ScopedLvglLock lock;
+    auto configuration = RotationConfiguration(IconType::Image);
+    const FileBench bench(*configuration, "bg.lvimg", views_test::ImageFileBytes(ALPHA_FORMAT, 8, 6));
+    TestIcon first(1, MakeRoot(), bench.context);
+    first.Configure(configuration);
+    zassert_equal(first.Render(), 0);
+    CheckDrawnSize(first, 8, 6);
+
+    zassert_true(bench.store->Save("bg.lvimg", views_test::ImageFileBytes(ALPHA_FORMAT, 12, 5)));
+    TestIcon second(2, MakeRoot(), bench.context);
+    second.Configure(configuration);
+    zassert_equal(second.Render(), 0);
+
+    CheckDrawnSize(second, 12, 5);
+    // The icon built before keeps the file it was built with.
+    CheckDrawnSize(first, 8, 6);
+    zassert_not_equal(ShownImage(first), ShownImage(second));
+}
+
+ZTEST(icon_lifecycle, test_an_image_file_with_no_cache_to_load_it_draws_nothing) {
+    ScopedLvglLock lock;
+    auto configuration = RotationConfiguration(IconType::Image);
+    FileBench bench(*configuration, "bg.lvimg", views_test::ImageFileBytes(ALPHA_FORMAT, 8, 6));
+    bench.context.image_cache = nullptr;
+
+    TestIcon widget(1, MakeRoot(), bench.context);
+    widget.Configure(configuration);
+
+    zassert_not_equal(widget.Render(), 0);
+    zassert_is_null(widget.GetIconContainer().get());
+}
+
+// An SVG document named on an image icon used to be read as pixels. It draws nothing now, whatever sizes are set.
+ZTEST(icon_lifecycle, test_an_svg_on_an_image_icon_draws_nothing) {
+    ScopedLvglLock lock;
+    auto configuration = RotationConfiguration(IconType::Image);
+    auto context = SvgContext(*configuration);
+    configuration->properties[WidgetPropertyType::IMG_WIDTH] = 8;
+    configuration->properties[WidgetPropertyType::IMG_HEIGHT] = 8;
+    context.image_cache = std::make_shared<ImageCache>(context.assets_manager);
+
+    for(const int build : { 1, 2 }) {
+        TestIcon widget(1, MakeRoot(), context);
+        widget.Configure(configuration);
+        zassert_not_equal(widget.Render(), 0, "Build %d", build);
+        zassert_is_null(widget.GetIconContainer().get());
+        zassert_equal(CountImages(views_test::WidgetContent(widget)), 0);
+    }
+}
+
+// A raw file is the older form and keeps a copy of its own: the cache loads nothing for it.
+ZTEST(icon_lifecycle, test_a_raw_file_beside_an_image_cache_is_not_cached) {
+    ScopedLvglLock lock;
+    auto configuration = RotationConfiguration(IconType::Image);
+    auto context = ImageContext(*configuration, 20, 60);
+    context.image_cache = std::make_shared<ImageCache>(context.assets_manager);
+
+    TestIcon widget(1, MakeRoot(), context);
+    widget.Configure(configuration);
+
+    zassert_equal(widget.Render(), 0);
+    CheckDrawnSize(widget, 20, 60);
+    zassert_equal(context.image_cache->GetLoadedBytes(), 0U);
 }
 
 ZTEST(icon_lifecycle, test_rotation_rejects_conflicting_animation) {

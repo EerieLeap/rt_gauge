@@ -13,3 +13,7 @@ tests:
   functional.controllers.no_builtin_fonts:
     extra_configs:
       - CONFIG_EERIE_LEAP_UI_BUILTIN_FONTS=n
+  # A build that decompresses LZ4 image files: the images kind lists the method.
+  functional.controllers.lz4:
+    extra_configs:
+      - CONFIG_EERIE_LEAP_UI_IMAGE_LZ4=y

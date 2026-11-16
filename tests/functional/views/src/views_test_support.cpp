@@ -14,6 +14,7 @@
 #include "views/widgets/indicators/indicator_base.h"
 #include "views/widgets/widget_factory.h"
 
+#include "image_file_fixtures.h"
 #include "views_test_support.h"
 
 namespace views_test {
@@ -97,6 +98,135 @@ std::span<const uint8_t> TextBytes(std::string_view text) {
 const lv_color32_t* PixelRow(const lv_draw_buf_t& buffer, uint32_t row) {
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): an LVGL draw buffer is a byte array of pixels.
     return reinterpret_cast<const lv_color32_t*>(buffer.data + (row * buffer.header.stride));
+}
+
+namespace {
+
+constexpr size_t IMAGE_HEADER_SIZE = 12;
+/// LVGL's compressed-data header after it: the method, the compressed size and the decompressed size.
+constexpr size_t COMPRESSED_HEADER_SIZE = 12;
+
+uint32_t BytesPerPixel(lv_color_format_t color_format) {
+    return color_format == LV_COLOR_FORMAT_L8 ? 1U : 2U;
+}
+
+void PutU16(std::vector<uint8_t>& bytes, uint32_t value) {
+    bytes.push_back(static_cast<uint8_t>(value & 0xFF));
+    bytes.push_back(static_cast<uint8_t>((value >> 8) & 0xFF));
+}
+
+void PutU32(std::vector<uint8_t>& bytes, uint32_t value) {
+    PutU16(bytes, value & 0xFFFF);
+    PutU16(bytes, value >> 16);
+}
+
+/// The most a token's four-bit literal length holds before the length continues in extra bytes.
+constexpr size_t LZ4_TOKEN_LENGTH_MAX = 15;
+/// An extra length byte adds this much and, being the largest, says the length goes on.
+constexpr size_t LZ4_LENGTH_BYTE_MAX = 255;
+
+} // namespace
+
+size_t ImagePixelBytes(lv_color_format_t color_format, uint32_t width, uint32_t height, uint32_t stride) {
+    if(stride == 0)
+        stride = width * BytesPerPixel(color_format);
+
+    size_t bytes = static_cast<size_t>(stride) * height;
+    if(color_format == LV_COLOR_FORMAT_RGB565A8)
+        bytes += static_cast<size_t>(stride / 2) * height;
+
+    return bytes;
+}
+
+std::vector<uint8_t> ImageFileAround(
+    lv_color_format_t color_format,
+    uint32_t width,
+    uint32_t height,
+    uint32_t stride,
+    std::span<const uint8_t> pixels
+) {
+    if(stride == 0)
+        stride = width * BytesPerPixel(color_format);
+
+    std::vector<uint8_t> file;
+    file.reserve(IMAGE_HEADER_SIZE + pixels.size());
+    file.push_back(LV_IMAGE_HEADER_MAGIC);
+    file.push_back(static_cast<uint8_t>(color_format));
+    PutU16(file, 0);
+    PutU16(file, width);
+    PutU16(file, height);
+    PutU16(file, stride);
+    PutU16(file, 0);
+    file.insert(file.end(), pixels.begin(), pixels.end());
+
+    return file;
+}
+
+std::vector<uint8_t> Lz4LiteralBlock(std::span<const uint8_t> bytes) {
+    std::vector<uint8_t> block;
+    if(bytes.size() < LZ4_TOKEN_LENGTH_MAX) {
+        block.push_back(static_cast<uint8_t>(bytes.size() << 4));
+    } else {
+        block.push_back(static_cast<uint8_t>(LZ4_TOKEN_LENGTH_MAX << 4));
+        size_t rest = bytes.size() - LZ4_TOKEN_LENGTH_MAX;
+        while(rest >= LZ4_LENGTH_BYTE_MAX) {
+            block.push_back(static_cast<uint8_t>(LZ4_LENGTH_BYTE_MAX));
+            rest -= LZ4_LENGTH_BYTE_MAX;
+        }
+        block.push_back(static_cast<uint8_t>(rest));
+    }
+    block.insert(block.end(), bytes.begin(), bytes.end());
+
+    return block;
+}
+
+std::vector<uint8_t> CompressedImageFileAround(
+    lv_color_format_t color_format,
+    uint32_t width,
+    uint32_t height,
+    uint32_t stride,
+    std::span<const uint8_t> block,
+    uint32_t decompressed_bytes
+) {
+    if(stride == 0)
+        stride = width * BytesPerPixel(color_format);
+
+    std::vector<uint8_t> file;
+    file.reserve(IMAGE_HEADER_SIZE + COMPRESSED_HEADER_SIZE + block.size());
+    file.push_back(LV_IMAGE_HEADER_MAGIC);
+    file.push_back(static_cast<uint8_t>(color_format));
+    PutU16(file, LV_IMAGE_FLAGS_COMPRESSED);
+    PutU16(file, width);
+    PutU16(file, height);
+    PutU16(file, stride);
+    PutU16(file, 0);
+    PutU32(file, LV_IMAGE_COMPRESS_LZ4);
+    PutU32(file, static_cast<uint32_t>(block.size()));
+    PutU32(file, decompressed_bytes);
+    file.insert(file.end(), block.begin(), block.end());
+
+    return file;
+}
+
+std::span<const uint8_t> UncompressedTwinOf(std::string_view fixture_name) {
+    constexpr std::string_view SUFFIX = "_lz4";
+    if(!fixture_name.ends_with(SUFFIX))
+        return {};
+
+    const auto twin_name = fixture_name.substr(0, fixture_name.size() - SUFFIX.size());
+    for(const auto& fixture : IMAGE_FILE_FIXTURES) {
+        if(twin_name == fixture.name)
+            return fixture.bytes;
+    }
+
+    return {};
+}
+
+std::vector<uint8_t>
+ImageFileBytes(lv_color_format_t color_format, uint32_t width, uint32_t height, uint8_t fill, uint32_t stride) {
+    const std::vector<uint8_t> pixels(ImagePixelBytes(color_format, width, height, stride), fill);
+
+    return ImageFileAround(color_format, width, height, stride, pixels);
 }
 
 std::shared_ptr<AssetStore> MakeAssetStore(std::string_view directory) {
